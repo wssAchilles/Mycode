@@ -22,6 +22,7 @@ type Config struct {
 	UpdateLogCollection          string
 	OutboxCollection             string
 	WakePubSubChannel            string
+	WakeRepairStreamKey          string
 	SyncWakeExecutionMode        string
 	PresenceExecutionMode        string
 	NotificationExecutionMode    string
@@ -35,6 +36,7 @@ type Config struct {
 	PrimaryMaxRecipients         int
 	PrimaryGroupMaxRecipients    int
 	PrimaryMaxAttempts           int
+	PrimaryPoisonThreshold       int
 	PrimaryPrivateEnabled        bool
 	PrimaryGroupEnabled          bool
 	PrimaryPrivateRolloutPercent int

@@ -46,6 +46,9 @@ impl RecommendationPipelineBuilder {
             GraphKernelClient::from_config(&self.config),
             self.config.graph_materializer_limit_per_author,
             self.config.graph_materializer_lookback_days,
+            self.config
+                .graph_kernel_timeout_ms
+                .min(self.config.timeout_ms),
         );
         let source_cache = SourceCache::new(
             &self.config.redis_url,

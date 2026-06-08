@@ -42,6 +42,16 @@ impl RuntimeControlPlane {
             retries: input
                 .retries
                 .unwrap_or_else(|| previous.as_ref().map(|unit| unit.retries).unwrap_or(0)),
+            runtime_owner: input.runtime_owner.map(ToString::to_string).or_else(|| {
+                previous
+                    .as_ref()
+                    .and_then(|unit| unit.runtime_owner.clone())
+            }),
+            contract_version: input.contract_version.map(ToString::to_string).or_else(|| {
+                previous
+                    .as_ref()
+                    .and_then(|unit| unit.contract_version.clone())
+            }),
             recovery_action: input
                 .recovery_action
                 .or_else(|| previous.as_ref().and_then(|unit| unit.recovery_action)),
@@ -77,6 +87,12 @@ impl RuntimeControlPlane {
                 previous.as_ref().map(|unit| unit.retries).unwrap_or(0)
                     + u32::from(input.increment_retry),
             ),
+            runtime_owner: previous
+                .as_ref()
+                .and_then(|unit| unit.runtime_owner.as_deref()),
+            contract_version: previous
+                .as_ref()
+                .and_then(|unit| unit.contract_version.as_deref()),
             recovery_action: input
                 .recovery_action
                 .or(previous.as_ref().and_then(|unit| unit.recovery_action))
@@ -107,6 +123,12 @@ impl RuntimeControlPlane {
             critical: previous.as_ref().map(|state| state.critical),
             compat_mode: compat_mode.or_else(|| previous.as_ref().map(|state| state.compat_mode)),
             retries: previous.as_ref().map(|state| state.retries),
+            runtime_owner: previous
+                .as_ref()
+                .and_then(|state| state.runtime_owner.as_deref()),
+            contract_version: previous
+                .as_ref()
+                .and_then(|state| state.contract_version.as_deref()),
             recovery_action: previous.as_ref().and_then(|state| state.recovery_action),
             failure_class: previous.as_ref().and_then(|state| state.failure_class),
             message: Some(detail.into()),
@@ -171,6 +193,8 @@ mod tests {
             critical: true,
             compat_mode: false,
             retries: 1,
+            runtime_owner: Some("rust".to_string()),
+            contract_version: Some("realtime.event.v1".to_string()),
             recovery_action: Some(RecoveryAction::RetryOnce),
             failure_class: Some(FailureClass::DependencyRuntime),
             message: Some("upstream down".to_string()),

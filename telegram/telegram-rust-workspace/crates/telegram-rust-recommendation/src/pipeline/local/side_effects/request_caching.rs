@@ -214,6 +214,8 @@ fn build_cached_summary(
             max_size: 0,
             final_limit: 0,
             truncated: false,
+            selector_report: None,
+            selector_report_unavailable_reason: Some("request_cache_fixture".to_string()),
         },
         serving: RecommendationServingSummaryPayload {
             serving_version: String::new(),
@@ -394,6 +396,8 @@ mod tests {
                 max_size: 0,
                 final_limit: 0,
                 truncated: false,
+                selector_report: None,
+                selector_report_unavailable_reason: Some("request_cache_fixture".to_string()),
             },
             serving: RecommendationServingSummaryPayload {
                 serving_version: String::new(),

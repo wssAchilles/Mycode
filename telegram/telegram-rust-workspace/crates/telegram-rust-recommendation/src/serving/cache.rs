@@ -245,6 +245,8 @@ pub(crate) mod tests {
                     max_size: 1,
                     final_limit: 1,
                     truncated: false,
+                    selector_report: None,
+                    selector_report_unavailable_reason: Some("serve_cache_fixture".to_string()),
                 },
                 serving: RecommendationServingSummaryPayload {
                     serving_version: "rust_serving_v1".to_string(),

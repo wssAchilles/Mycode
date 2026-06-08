@@ -15,7 +15,9 @@ use crate::{
     control_plane::{FailureClass, LifecyclePhase, LifecycleStatus, MarkUnitInput, RecoveryAction},
     realtime::transport::compat_dispatch::publish_compat_dispatch,
     realtime::transport::socket_io::emit_direct_delivery,
-    realtime_contracts::{RealtimeDeliveryEnvelopeV1, RealtimeDropReason},
+    realtime_contracts::{
+        REALTIME_DELIVERY_SPEC_VERSION, RealtimeDeliveryEnvelopeV1, RealtimeDropReason,
+    },
     state::AppState,
 };
 
@@ -374,6 +376,8 @@ fn record_stream_ready(state: &AppState, message: String) {
         critical: Some(false),
         compat_mode: Some(compat_mode),
         retries: None,
+        runtime_owner: Some(state.config.realtime_fanout_owner()),
+        contract_version: Some(REALTIME_DELIVERY_SPEC_VERSION),
         recovery_action: Some(RecoveryAction::DegradeToCompat),
         failure_class: None,
         message: Some(message),

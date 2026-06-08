@@ -115,6 +115,43 @@ func (e *MongoExecutor) markChunkCompleted(
 	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
 }
 
+func (e *MongoExecutor) markChunkFailed(
+	ctx context.Context,
+	outboxID bson.ObjectID,
+	chunkIndex int,
+	jobID string,
+	attemptCount int,
+	reason string,
+) error {
+	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	_, err = e.outboxes.UpdateOne(ctx, bson.M{
+		"_id":               outboxID,
+		"chunks.chunkIndex": chunkIndex,
+	}, bson.M{
+		"$set": bson.M{
+			"status":                            "failed",
+			"lastErrorMessage":                  reason,
+			"updatedAt":                         now,
+			"chunks.$.status":                   "failed",
+			"chunks.$.jobId":                    jobID,
+			"chunks.$.attemptCount":             attemptCount,
+			"chunks.$.lastAttemptAt":            now,
+			"chunks.$.lastErrorMessage":         reason,
+			"chunks.$.failureMetadata.jobId":    jobID,
+			"chunks.$.failureMetadata.poisoned": true,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("mark outbox chunk failed: %w", err)
+	}
+	applyChunkFailed(&doc, chunkIndex, jobID)
+	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
+}
+
 func (e *MongoExecutor) markOutboxCompleted(
 	ctx context.Context,
 	outboxID bson.ObjectID,
@@ -125,7 +162,7 @@ func (e *MongoExecutor) markOutboxCompleted(
 	now := time.Now().UTC()
 	jobIDs := make([]string, 0, len(plan.Chunks))
 	for _, chunk := range plan.Chunks {
-		jobIDs = append(jobIDs, fmt.Sprintf("%s:%s:%d", resolveJobPrefix(dispatchMode), plan.OutboxID, chunk.ChunkIndex))
+		jobIDs = append(jobIDs, chunkIdempotencyKey(plan.OutboxID, chunk.ChunkIndex, dispatchMode))
 	}
 	_, err := e.outboxes.UpdateByID(ctx, outboxID, bson.M{
 		"$set": bson.M{
@@ -146,13 +183,6 @@ func (e *MongoExecutor) markOutboxCompleted(
 		return fmt.Errorf("mark outbox completed: %w", err)
 	}
 	return nil
-}
-
-func resolveJobPrefix(dispatchMode string) string {
-	if dispatchMode == "go_group_canary" {
-		return "go-group-canary"
-	}
-	return "go-primary"
 }
 
 func (e *MongoExecutor) reconcileOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {

@@ -61,6 +61,10 @@ pub struct RuntimeUnitState {
     pub critical: bool,
     pub compat_mode: bool,
     pub retries: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_version: Option<String>,
     pub recovery_action: Option<RecoveryAction>,
     pub failure_class: Option<FailureClass>,
     pub message: Option<String>,
@@ -117,6 +121,8 @@ pub struct MarkUnitInput<'a> {
     pub critical: Option<bool>,
     pub compat_mode: Option<bool>,
     pub retries: Option<u32>,
+    pub runtime_owner: Option<&'a str>,
+    pub contract_version: Option<&'a str>,
     pub recovery_action: Option<RecoveryAction>,
     pub failure_class: Option<FailureClass>,
     pub message: Option<String>,

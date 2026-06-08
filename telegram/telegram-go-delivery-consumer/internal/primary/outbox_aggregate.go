@@ -67,3 +67,14 @@ func applyChunkCompleted(doc *outboxDocument, chunkIndex int, jobID string, reci
 		return
 	}
 }
+
+func applyChunkFailed(doc *outboxDocument, chunkIndex int, jobID string) {
+	for index := range doc.Chunks {
+		if doc.Chunks[index].ChunkIndex != chunkIndex {
+			continue
+		}
+		doc.Chunks[index].Status = "failed"
+		doc.Chunks[index].JobID = jobID
+		return
+	}
+}

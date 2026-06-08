@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_pipeline_primitives::{
     RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
     RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
@@ -14,7 +15,7 @@ use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationGraphRetrievalPayload,
     RecommendationQueryPayload, RecommendationRankingSummaryPayload,
-    RecommendationRetrievalSummaryPayload,
+    RecommendationRetrievalSummaryPayload, RecommendationStagePayload,
 };
 
 use super::super::ranking_stage::RankingStageOutput;
@@ -57,6 +58,20 @@ fn builds_live_result_and_records_selection_degradation() {
         subscribed_user_ids: Vec::new(),
     };
     let candidate = candidate("post-1");
+
+    let mut telemetry = RunTelemetry::default();
+    telemetry.add_stage(RecommendationStagePayload {
+        name: RUST_TOP_K_SELECTOR.to_string(),
+        enabled: true,
+        duration_ms: 3,
+        input_count: 1,
+        output_count: 1,
+        removed_count: Some(0),
+        detail: Some(HashMap::from([(
+            "selectorSelectionMode".to_string(),
+            serde_json::Value::String("policy_state_machine".to_string()),
+        )])),
+    });
 
     let result = build_live_recommendation_result(LiveRecommendationResultInput {
         config: &config,
@@ -112,7 +127,7 @@ fn builds_live_result_and_records_selection_degradation() {
             next_cursor: None,
             stable_order_key: "stable-key".to_string(),
         },
-        telemetry: RunTelemetry::default(),
+        telemetry,
         page_build_duration_ms: 17,
     });
 
@@ -134,6 +149,25 @@ fn builds_live_result_and_records_selection_degradation() {
         SERVE_CACHE_POLICY_REASON_PENDING_EVALUATION
     );
     assert!(result.summary.trace.is_some());
+    assert!(result.summary.selector.selector_report.is_some());
+    assert!(
+        result
+            .summary
+            .selector
+            .selector_report_unavailable_reason
+            .is_none()
+    );
+}
+
+#[test]
+fn selector_report_contract_returns_unavailable_reason_when_stage_missing() {
+    let contract = super::selector_report_contract(&[]);
+
+    assert!(contract.report.is_none());
+    assert_eq!(
+        contract.unavailable_reason.as_deref(),
+        Some("selector_stage_missing")
+    );
 }
 
 fn test_config() -> RecommendationConfig {

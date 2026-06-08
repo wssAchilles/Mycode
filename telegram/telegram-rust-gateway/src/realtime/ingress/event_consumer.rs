@@ -15,7 +15,9 @@ use crate::{
     control_plane::{FailureClass, LifecyclePhase, LifecycleStatus, MarkUnitInput, RecoveryAction},
     ingress_commands::normalize_ingress_command,
     realtime::ingress::auth::detect_auth_failure_class,
-    realtime_contracts::{RealtimeDropReason, RealtimeEventEnvelopeV1, RealtimeTopic},
+    realtime_contracts::{
+        REALTIME_EVENT_SPEC_VERSION, RealtimeDropReason, RealtimeEventEnvelopeV1, RealtimeTopic,
+    },
     state::AppState,
 };
 
@@ -325,6 +327,8 @@ fn record_stream_ready(state: &AppState, message: String) {
         critical: Some(false),
         compat_mode: Some(compat_mode),
         retries: None,
+        runtime_owner: Some(state.config.realtime_fanout_owner()),
+        contract_version: Some(REALTIME_EVENT_SPEC_VERSION),
         recovery_action: Some(RecoveryAction::DegradeToCompat),
         failure_class: None,
         message: Some(message),

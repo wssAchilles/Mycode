@@ -251,6 +251,10 @@ pub struct GatewayRealtimeOpsResponse {
     pub subscription_count: usize,
     pub session_index_size: usize,
     pub session_registry_v2_enabled: bool,
+    pub outbound_queue_size: usize,
+    pub max_outbound_queue_size: usize,
+    pub dropped_event_count: u64,
+    pub resume_gap_count: u64,
     pub presence_state_counts: BTreeMap<String, usize>,
     pub ingress_stream_lag: Option<u64>,
     pub delivery_stream_lag: Option<u64>,
@@ -284,5 +288,71 @@ pub struct GatewayRealtimeSummaryResponse {
     pub recommended_action: String,
     pub session_index_size: usize,
     pub session_registry_v2_enabled: bool,
+    pub outbound_queue_size: usize,
+    pub max_outbound_queue_size: usize,
+    pub dropped_event_count: u64,
+    pub resume_gap_count: u64,
     pub summary: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{
+        GatewayRealtimeRuntime, GatewayRealtimeSocketIoCompatTransport,
+        GatewayRealtimeSummaryResponse, GatewayRealtimeSyncLongPollTransport,
+        GatewayRealtimeTransportCatalog, RealtimeCatalogTransportName, RealtimeFanoutOwner,
+        RealtimeRolloutStage, RealtimeSocketTerminator,
+    };
+
+    #[test]
+    fn realtime_summary_serializes_backpressure_fields() {
+        let response = GatewayRealtimeSummaryResponse {
+            status: "running".to_string(),
+            current_stage: RealtimeRolloutStage::RustEdgePrimary,
+            runtime: GatewayRealtimeRuntime {
+                rollout_stage: RealtimeRolloutStage::RustEdgePrimary,
+                fanout_owner: RealtimeFanoutOwner::Rust,
+                socket_terminator: RealtimeSocketTerminator::Rust,
+                delivery_primary_enabled: true,
+            },
+            transport: GatewayRealtimeTransportCatalog {
+                preferred: RealtimeCatalogTransportName::RustSocketIoCompat,
+                fallback: RealtimeCatalogTransportName::NodeSocketIoCompat,
+                available: vec![
+                    RealtimeCatalogTransportName::RustSocketIoCompat,
+                    RealtimeCatalogTransportName::NodeSocketIoCompat,
+                ],
+                socket_io_compat: GatewayRealtimeSocketIoCompatTransport {
+                    enabled: true,
+                    path: "/socket.io/".to_string(),
+                    owner: RealtimeSocketTerminator::Rust,
+                    fallback_owner: RealtimeSocketTerminator::Node,
+                },
+                sync_v2_long_poll: GatewayRealtimeSyncLongPollTransport {
+                    enabled: true,
+                    path: "/api/sync/updates".to_string(),
+                    protocol_version: 2,
+                    watermark_field: "watermark".to_string(),
+                },
+            },
+            current_blocker: None,
+            recommended_action: "continue monitoring".to_string(),
+            session_index_size: 7,
+            session_registry_v2_enabled: true,
+            outbound_queue_size: 2,
+            max_outbound_queue_size: 5,
+            dropped_event_count: 3,
+            resume_gap_count: 1,
+            summary: "Summary:\n- ok".to_string(),
+        };
+
+        let serialized = serde_json::to_value(response).expect("serialize realtime summary");
+
+        assert_eq!(serialized["outboundQueueSize"], json!(2));
+        assert_eq!(serialized["maxOutboundQueueSize"], json!(5));
+        assert_eq!(serialized["droppedEventCount"], json!(3));
+        assert_eq!(serialized["resumeGapCount"], json!(1));
+    }
 }

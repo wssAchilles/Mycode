@@ -333,7 +333,7 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
     let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
     let orchestrator = RecommendationSourceOrchestrator::new(
         backend_client.clone(),
-        GraphSourceRuntime::new(backend_client, None, 2, 7),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
         config.source_order.clone(),
         false,
         4,
@@ -515,7 +515,7 @@ async fn classifies_empty_source_success_without_failure_or_disabled_counts() {
     let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
     let orchestrator = RecommendationSourceOrchestrator::new(
         backend_client.clone(),
-        GraphSourceRuntime::new(backend_client, None, 2, 7),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
         config.source_order.clone(),
         false,
         4,
@@ -554,7 +554,7 @@ async fn classifies_disabled_source_without_failure_or_lane_input() {
     let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
     let orchestrator = RecommendationSourceOrchestrator::new(
         backend_client.clone(),
-        GraphSourceRuntime::new(backend_client, None, 2, 7),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
         config.source_order.clone(),
         false,
         4,

@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
+use serde::Serialize;
+
 use super::contracts::{normalize_group_room, session_room, user_room};
 
 #[derive(Debug, Clone)]
@@ -11,9 +13,19 @@ pub struct RustSocketSessionRecord {
     pub joined_rooms: BTreeSet<String>,
 }
 
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RustSocketBackpressureSnapshot {
+    pub outbound_queue_size: usize,
+    pub max_outbound_queue_size: usize,
+    pub dropped_event_count: u64,
+    pub resume_gap_count: u64,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct RustSocketSessionStore {
     sessions: HashMap<String, RustSocketSessionRecord>,
+    backpressure: RustSocketBackpressureSnapshot,
 }
 
 impl RustSocketSessionStore {
@@ -103,6 +115,24 @@ impl RustSocketSessionStore {
         self.sessions.remove(session_id)
     }
 
+    pub fn record_outbound_queue_size(&mut self, queue_size: usize) {
+        self.backpressure.outbound_queue_size = queue_size;
+        self.backpressure.max_outbound_queue_size =
+            self.backpressure.max_outbound_queue_size.max(queue_size);
+    }
+
+    pub fn record_dropped_event(&mut self) {
+        self.backpressure.dropped_event_count += 1;
+    }
+
+    pub fn record_resume_gap(&mut self) {
+        self.backpressure.resume_gap_count += 1;
+    }
+
+    pub fn backpressure_snapshot(&self) -> RustSocketBackpressureSnapshot {
+        self.backpressure.clone()
+    }
+
     pub fn local_authenticated_sessions_for_user(&self, user_id: &str) -> usize {
         self.sessions
             .values()
@@ -131,5 +161,21 @@ mod tests {
         assert!(rooms.contains(&"user:user-1".to_string()));
         assert!(rooms.contains(&"room:group-1".to_string()));
         assert!(rooms.contains(&"room:group-2".to_string()));
+    }
+
+    #[test]
+    fn backpressure_snapshot_tracks_queue_drops_and_resume_gaps() {
+        let mut store = RustSocketSessionStore::default();
+
+        store.record_outbound_queue_size(3);
+        store.record_outbound_queue_size(1);
+        store.record_dropped_event();
+        store.record_resume_gap();
+
+        let snapshot = store.backpressure_snapshot();
+        assert_eq!(snapshot.outbound_queue_size, 1);
+        assert_eq!(snapshot.max_outbound_queue_size, 3);
+        assert_eq!(snapshot.dropped_event_count, 1);
+        assert_eq!(snapshot.resume_gap_count, 1);
     }
 }

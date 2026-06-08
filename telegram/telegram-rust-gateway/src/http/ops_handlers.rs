@@ -121,6 +121,11 @@ pub async fn realtime_ops_handler(
         .lock()
         .expect("realtime fanout bridge mutex poisoned")
         .snapshot();
+    let socket_backpressure = state
+        .realtime_socket_state
+        .lock()
+        .expect("rust socket session mutex poisoned")
+        .backpressure_snapshot();
     let runtime = realtime_runtime_contract(&state.config);
     let transport = realtime_transport_catalog_contract(&state.config);
 
@@ -134,6 +139,10 @@ pub async fn realtime_ops_handler(
         subscription_count: registry_snapshot.totals.room_subscriptions,
         session_index_size: registry_snapshot.totals.session_index_size,
         session_registry_v2_enabled: ops_snapshot.session_registry_v2_enabled,
+        outbound_queue_size: socket_backpressure.outbound_queue_size,
+        max_outbound_queue_size: socket_backpressure.max_outbound_queue_size,
+        dropped_event_count: socket_backpressure.dropped_event_count,
+        resume_gap_count: socket_backpressure.resume_gap_count,
         presence_state_counts: presence_snapshot.state_counts,
         ingress_stream_lag: ops_snapshot.ingress_stream_lag,
         delivery_stream_lag: ops_snapshot.delivery_stream_lag,
@@ -180,6 +189,11 @@ pub async fn realtime_summary_handler(
         .lock()
         .expect("realtime ops mutex poisoned")
         .snapshot();
+    let socket_backpressure = state
+        .realtime_socket_state
+        .lock()
+        .expect("rust socket session mutex poisoned")
+        .backpressure_snapshot();
 
     Ok(Json(GatewayRealtimeSummaryResponse {
         status: format!("{:?}", snapshot.overall_status).to_lowercase(),
@@ -190,6 +204,10 @@ pub async fn realtime_summary_handler(
         recommended_action,
         session_index_size: registry_snapshot.totals.session_index_size,
         session_registry_v2_enabled: ops_snapshot.session_registry_v2_enabled,
+        outbound_queue_size: socket_backpressure.outbound_queue_size,
+        max_outbound_queue_size: socket_backpressure.max_outbound_queue_size,
+        dropped_event_count: socket_backpressure.dropped_event_count,
+        resume_gap_count: socket_backpressure.resume_gap_count,
         summary: snapshot.summary,
     }))
 }

@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
+use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_serving_primitives::PAGE_BUILD_LATENCY_KEY;
 
 use crate::config::RecommendationConfig;
@@ -94,6 +98,7 @@ pub(super) fn build_live_recommendation_result(
         page_underfilled,
         page_underfill_reason,
     });
+    let selector_report_contract = selector_report_contract(&telemetry.stages);
 
     let summary = RecommendationSummaryPayload {
         request_id: input.hydrated_query.request_id.clone(),
@@ -118,6 +123,8 @@ pub(super) fn build_live_recommendation_result(
             max_size: input.config.selector_max_size,
             final_limit: input.hydrated_query.limit,
             truncated,
+            selector_report: selector_report_contract.report,
+            selector_report_unavailable_reason: selector_report_contract.unavailable_reason,
         },
         serving: serving_summary,
         retrieval: retrieval_summary,
@@ -136,6 +143,37 @@ pub(super) fn build_live_recommendation_result(
         stable_order_key,
         candidates: final_candidates,
         summary,
+    }
+}
+
+struct SelectorReportContract {
+    report: Option<HashMap<String, Value>>,
+    unavailable_reason: Option<String>,
+}
+
+fn selector_report_contract(
+    stages: &[crate::contracts::RecommendationStagePayload],
+) -> SelectorReportContract {
+    let Some(selector_stage) = stages
+        .iter()
+        .find(|stage| stage.name == RUST_TOP_K_SELECTOR && stage.enabled)
+    else {
+        return SelectorReportContract {
+            report: None,
+            unavailable_reason: Some("selector_stage_missing".to_string()),
+        };
+    };
+
+    let Some(detail) = selector_stage.detail.as_ref() else {
+        return SelectorReportContract {
+            report: None,
+            unavailable_reason: Some("selector_stage_detail_missing".to_string()),
+        };
+    };
+
+    SelectorReportContract {
+        report: Some(detail.clone()),
+        unavailable_reason: None,
     }
 }
 
