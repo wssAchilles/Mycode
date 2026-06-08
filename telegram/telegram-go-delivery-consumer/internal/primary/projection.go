@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -18,9 +19,14 @@ type updateCounterDocument struct {
 	UpdateID int64 `bson:"updateId"`
 }
 
-func (e *MongoExecutor) projectRecipients(ctx context.Context, payload FanoutPayload, recipients []string) (int, error) {
+type chunkProjectionResult struct {
+	ProjectionCount int
+	Reservations    []syncUpdateReservation
+}
+
+func (e *MongoExecutor) projectRecipients(ctx context.Context, payload FanoutPayload, recipients []string) (chunkProjectionResult, error) {
 	projectionChunkSize := positiveOrDefault(e.cfg.ProjectionChunkSize, len(recipients))
-	projectionCount := 0
+	result := chunkProjectionResult{}
 	for offset := 0; offset < len(recipients); offset += projectionChunkSize {
 		end := offset + projectionChunkSize
 		if end > len(recipients) {
@@ -28,14 +34,16 @@ func (e *MongoExecutor) projectRecipients(ctx context.Context, payload FanoutPay
 		}
 		chunk := recipients[offset:end]
 		if err := e.updateMemberStates(ctx, payload, chunk); err != nil {
-			return projectionCount, err
+			return result, err
 		}
-		if err := e.appendSyncUpdates(ctx, payload, chunk); err != nil {
-			return projectionCount, err
+		reservations, err := e.appendSyncUpdates(ctx, payload, chunk)
+		if err != nil {
+			return result, err
 		}
-		projectionCount++
+		result.Reservations = append(result.Reservations, reservations...)
+		result.ProjectionCount++
 	}
-	return projectionCount, nil
+	return result, nil
 }
 
 func (e *MongoExecutor) updateMemberStates(ctx context.Context, payload FanoutPayload, recipients []string) error {
@@ -58,25 +66,25 @@ func (e *MongoExecutor) updateMemberStates(ctx context.Context, payload FanoutPa
 
 type syncUpdateReservation = mongoops.SyncUpdateReservation
 
-func (e *MongoExecutor) appendSyncUpdates(ctx context.Context, payload FanoutPayload, recipients []string) error {
+func (e *MongoExecutor) appendSyncUpdates(ctx context.Context, payload FanoutPayload, recipients []string) ([]syncUpdateReservation, error) {
 	pendingRecipients, err := e.findRecipientsMissingSyncUpdate(ctx, payload, recipients)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(pendingRecipients) == 0 {
-		return nil
+		return nil, nil
 	}
 	now := time.Now().UTC()
 	reservations, reserveErr := e.reserveSyncUpdates(ctx, pendingRecipients, now)
 	if reserveErr != nil {
 		if len(reservations) == 0 {
-			return reserveErr
+			return nil, reserveErr
 		}
-		flushErr := e.flushReservedSyncUpdates(ctx, payload, reservations, now)
+		inserted, flushErr := e.flushReservedSyncUpdates(ctx, payload, reservations, now)
 		if flushErr != nil {
-			return fmt.Errorf("%w: %v", reserveErr, flushErr)
+			return inserted, fmt.Errorf("%w: %v", reserveErr, flushErr)
 		}
-		return reserveErr
+		return inserted, reserveErr
 	}
 	return e.flushReservedSyncUpdates(ctx, payload, reservations, now)
 }
@@ -153,10 +161,9 @@ func (e *MongoExecutor) flushReservedSyncUpdates(
 	payload FanoutPayload,
 	reservations []syncUpdateReservation,
 	now time.Time,
-) error {
+) ([]syncUpdateReservation, error) {
 	insertedReservations, err := e.insertSyncUpdates(ctx, payload, reservations, now)
-	e.publishWakeBatch(ctx, insertedReservations)
-	return err
+	return insertedReservations, err
 }
 
 func resolveInsertedSyncUpdates(
@@ -198,10 +205,11 @@ func resolveInsertedSyncUpdates(
 	return inserted, failures.Wrap("insert_update_logs", err)
 }
 
-func (e *MongoExecutor) publishWakeBatch(ctx context.Context, reservations []syncUpdateReservation) {
+func (e *MongoExecutor) publishWakeBatch(ctx context.Context, reservations []syncUpdateReservation) error {
 	if e.wakePublisher == nil || e.cfg.WakePubSubChannel == "" || len(reservations) == 0 {
-		return
+		return nil
 	}
+	var failures []string
 	if e.cfg.WakePublishMode == "batch" {
 		batchSize := positiveOrDefault(e.cfg.WakeBatchSize, len(reservations))
 		for start := 0; start < len(reservations); start += batchSize {
@@ -209,16 +217,21 @@ func (e *MongoExecutor) publishWakeBatch(ctx context.Context, reservations []syn
 			if end > len(reservations) {
 				end = len(reservations)
 			}
-			e.publishWakeReservationBatch(ctx, reservations[start:end])
+			if err := e.publishWakeReservationBatch(ctx, reservations[start:end]); err != nil {
+				failures = append(failures, err.Error())
+			}
 		}
-		return
+		return joinWakeFailures(failures)
 	}
 	for _, reservation := range reservations {
-		e.publishSingleWake(ctx, reservation.UserID, reservation.UpdateID)
+		if err := e.publishSingleWake(ctx, reservation.UserID, reservation.UpdateID); err != nil {
+			failures = append(failures, err.Error())
+		}
 	}
+	return joinWakeFailures(failures)
 }
 
-func (e *MongoExecutor) publishWakeReservationBatch(ctx context.Context, reservations []syncUpdateReservation) {
+func (e *MongoExecutor) publishWakeReservationBatch(ctx context.Context, reservations []syncUpdateReservation) error {
 	updates := make([]wake.Payload, 0, len(reservations))
 	for _, reservation := range reservations {
 		updates = append(updates, wake.Payload{
@@ -231,21 +244,34 @@ func (e *MongoExecutor) publishWakeReservationBatch(ctx context.Context, reserva
 		if e.logger != nil {
 			e.logger.Printf("warn: encode wake batch failed: %v", err)
 		}
-		return
+		return err
 	}
-	if err := e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, payload).Err(); err != nil && e.logger != nil {
-		e.logger.Printf("warn: publish wake batch failed: %v", err)
+	if err := e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, payload).Err(); err != nil {
+		if e.logger != nil {
+			e.logger.Printf("warn: publish wake batch failed: %v", err)
+		}
+		return err
 	}
+	return nil
 }
 
-func (e *MongoExecutor) publishSingleWake(ctx context.Context, userID string, updateID int64) {
+func (e *MongoExecutor) publishSingleWake(ctx context.Context, userID string, updateID int64) error {
 	payload, err := wake.Encode(userID, updateID)
 	if err != nil {
-		return
+		return err
 	}
 	if err := e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, payload).Err(); err != nil {
 		if e.logger != nil {
 			e.logger.Printf("warn: publish wake for user %s failed: %v", userID, err)
 		}
+		return err
 	}
+	return nil
+}
+
+func joinWakeFailures(failures []string) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("wake publish failed: %s", strings.Join(failures, "; "))
 }

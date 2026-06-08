@@ -43,6 +43,7 @@ class Frontier {
 
   void push(FrontierNode<InternerId> node) {
     nodes_.push_back(node);
+    max_size_ = std::max(max_size_, size());
     if (best_first_) {
       std::push_heap(nodes_.begin(), nodes_.end(), FrontierNodeGreater<InternerId>{});
     }
@@ -64,10 +65,19 @@ class Frontier {
     return head_ >= nodes_.size();
   }
 
+  [[nodiscard]] std::size_t max_size() const {
+    return max_size_;
+  }
+
  private:
+  [[nodiscard]] std::size_t size() const {
+    return nodes_.size() - head_;
+  }
+
   bool best_first_{false};
   std::pmr::vector<FrontierNode<InternerId>> nodes_;
   std::size_t head_{0};
+  std::size_t max_size_{0};
 };
 
 /// Seed frontier with arena-backed heap for score-prioritized expansion.

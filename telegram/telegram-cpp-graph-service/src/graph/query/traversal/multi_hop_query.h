@@ -48,6 +48,7 @@ MultiHopBuildResult build_multi_hop_candidates(
       .max_visited_nodes = options.max_visited_nodes,
       .max_candidates = options.max_candidates,
   });
+  std::size_t pruned_count = 0;
 
   while (!frontier.empty()) {
     const auto node = frontier.pop();
@@ -84,6 +85,7 @@ MultiHopBuildResult build_multi_hop_candidates(
       const auto path_score = node.accumulated_score * weight_fn(candidate);
       const auto existing_entry = aggregate.find(ref.target_id);
       if (existing_entry == aggregate.end() && !budget_tracker.can_add_new_candidate(aggregate.size())) {
+        pruned_count += 1;
         continue;
       }
       record_aggregate_candidate(aggregate, ref.target_id, node.first_hop_user_id, path_score, next_depth);
@@ -102,6 +104,8 @@ MultiHopBuildResult build_multi_hop_candidates(
   return MultiHopBuildResult{
       .candidates = materialize_multi_hop_candidates(aggregate, resolve_user_id),
       .visited_count = budget_tracker.visited_count(),
+      .pruned_count = pruned_count,
+      .frontier_max_size = frontier.max_size(),
       .budget_exhausted = budget_tracker.exhausted(),
   };
 }

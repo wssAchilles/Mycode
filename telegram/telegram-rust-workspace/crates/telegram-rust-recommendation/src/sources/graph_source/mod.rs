@@ -40,6 +40,7 @@ pub struct GraphSourceRuntime {
     pub(super) graph_kernel_client: Option<GraphKernelClient>,
     pub(super) materializer_limit_per_author: usize,
     pub(super) materializer_lookback_days: usize,
+    pub(super) graph_provider_budget_ms: u64,
     materializer_cache: GraphMaterializerCache,
 }
 
@@ -58,12 +59,14 @@ impl GraphSourceRuntime {
         graph_kernel_client: Option<GraphKernelClient>,
         materializer_limit_per_author: usize,
         materializer_lookback_days: usize,
+        graph_provider_budget_ms: u64,
     ) -> Self {
         Self {
             backend_client,
             graph_kernel_client,
             materializer_limit_per_author,
             materializer_lookback_days,
+            graph_provider_budget_ms,
             materializer_cache: GraphMaterializerCache::new(),
         }
     }

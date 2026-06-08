@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::clients::graph_kernel_client::GraphKernelClient;
+use crate::clients::graph_kernel_client::{GraphKernelClient, GraphKernelError};
 use crate::contracts::{
     GraphKernelQueryResult, RecommendationCandidatePayload, RecommendationQueryPayload,
 };
@@ -33,7 +34,7 @@ pub(super) struct DirectGraphCandidatesResult {
 struct GraphKernelQueryOutcome<T> {
     label: &'static str,
     result: Option<GraphKernelQueryResult<T>>,
-    error: Option<String>,
+    error: Option<GraphKernelError>,
 }
 
 struct GraphAuthorQueryResult {
@@ -49,7 +50,12 @@ impl GraphSourceRuntime {
         graph_kernel_client: GraphKernelClient,
         query: &RecommendationQueryPayload,
     ) -> Result<DirectGraphCandidatesResult> {
-        let mut graph_queries = query_graph_kernel_authors(graph_kernel_client, query).await;
+        let mut graph_queries = query_graph_kernel_authors_with_budget(
+            graph_kernel_client,
+            query,
+            self.graph_provider_budget_ms,
+        )
+        .await;
         if graph_queries.author_aggregates.is_empty() {
             return Ok(DirectGraphCandidatesResult {
                 candidates: Vec::new(),
@@ -134,7 +140,23 @@ impl GraphSourceRuntime {
     }
 }
 
-async fn query_graph_kernel_authors(
+async fn query_graph_kernel_authors_with_budget(
+    graph_kernel_client: GraphKernelClient,
+    query: &RecommendationQueryPayload,
+    graph_provider_budget_ms: u64,
+) -> GraphAuthorQueryResult {
+    match tokio::time::timeout(
+        Duration::from_millis(graph_provider_budget_ms),
+        query_graph_kernel_authors_unbounded(graph_kernel_client, query),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => graph_kernel_budget_timeout_result(),
+    }
+}
+
+async fn query_graph_kernel_authors_unbounded(
     graph_kernel_client: GraphKernelClient,
     query: &RecommendationQueryPayload,
 ) -> GraphAuthorQueryResult {
@@ -216,6 +238,38 @@ async fn query_graph_kernel_authors(
     }
 }
 
+fn graph_kernel_budget_timeout_result() -> GraphAuthorQueryResult {
+    let mut provider_calls = HashMap::new();
+    let mut query_errors = Vec::new();
+    let mut telemetry = GraphKernelTelemetry::default();
+    for kernel_key in [
+        "social_neighbors",
+        "recent_engagers",
+        "bridge_users",
+        "co_engagers",
+        "content_affinity_neighbors",
+    ] {
+        *provider_calls
+            .entry(format!("graph_kernel/{kernel_key}"))
+            .or_insert(0) += 1;
+        let error = "graph_kernel_error class=timeout reason=request_budget_exhausted".to_string();
+        query_errors.push(format!("{kernel_key}:{error}"));
+        telemetry
+            .per_kernel_errors
+            .insert(kernel_key.to_string(), error);
+        telemetry
+            .budget_exhausted_kernels
+            .push(kernel_key.to_string());
+    }
+
+    GraphAuthorQueryResult {
+        author_aggregates: Vec::new(),
+        provider_calls,
+        query_errors,
+        telemetry,
+    }
+}
+
 fn merge_provider_maps(target: &mut HashMap<String, usize>, source: HashMap<String, usize>) {
     for (provider, count) in source {
         *target.entry(provider).or_insert(0) += count;
@@ -246,7 +300,7 @@ fn sort_graph_candidates(candidates: &mut [RecommendationCandidatePayload]) {
 
 async fn capture_query<T>(
     label: &'static str,
-    future: impl Future<Output = Result<GraphKernelQueryResult<T>>>,
+    future: impl Future<Output = std::result::Result<GraphKernelQueryResult<T>, GraphKernelError>>,
 ) -> GraphKernelQueryOutcome<T> {
     match future.await {
         Ok(result) => GraphKernelQueryOutcome {
@@ -257,7 +311,7 @@ async fn capture_query<T>(
         Err(error) => GraphKernelQueryOutcome {
             label,
             result: None,
-            error: Some(error.to_string()),
+            error: Some(error),
         },
     }
 }
@@ -273,10 +327,12 @@ fn record_graph_query<T>(
         .entry(format!("graph_kernel/{kernel_key}"))
         .or_insert(0) += 1;
     if let Some(error) = outcome.error {
+        let error_class = error.class();
+        let error = error.to_string();
         query_errors.push(format!("{kernel_key}:{error}"));
         telemetry
             .per_kernel_errors
-            .insert(kernel_key.to_string(), error);
+            .insert(kernel_key.to_string(), format!("{error_class}:{error}"));
         return Vec::new();
     }
 
@@ -373,4 +429,79 @@ fn collect_excluded_user_ids(query: &RecommendationQueryPayload) -> Vec<String> 
     }
 
     excluded.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+
+    use crate::clients::graph_kernel_client::GraphKernelClient;
+    use crate::contracts::RecommendationQueryPayload;
+
+    use super::query_graph_kernel_authors_with_budget;
+
+    async fn spawn_hanging_graph_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind graph test server");
+        let address = listener.local_addr().expect("graph test server address");
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                tokio::spawn(async move {
+                    let mut buffer = [0_u8; 1024];
+                    let _ = stream.read(&mut buffer).await;
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                });
+            }
+        });
+        format!("http://{address}")
+    }
+
+    fn graph_client(base_url: String) -> GraphKernelClient {
+        GraphKernelClient::new(base_url, 1_000)
+    }
+
+    fn query() -> RecommendationQueryPayload {
+        RecommendationQueryPayload {
+            request_id: "req-budget".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 20,
+            feature_switches: HashMap::new(),
+            ..RecommendationQueryPayload::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn graph_provider_budget_timeout_records_degraded_kernel_telemetry() {
+        let result = query_graph_kernel_authors_with_budget(
+            graph_client(spawn_hanging_graph_server().await),
+            &query(),
+            5,
+        )
+        .await;
+
+        assert!(result.author_aggregates.is_empty());
+        assert_eq!(result.telemetry.per_kernel_errors.len(), 5);
+        assert_eq!(result.telemetry.budget_exhausted_kernels.len(), 5);
+        assert!(
+            result
+                .query_errors
+                .iter()
+                .all(|error| error.contains("class=timeout"))
+        );
+        assert!(
+            result
+                .telemetry
+                .per_kernel_errors
+                .values()
+                .all(|error| error.contains("request_budget_exhausted"))
+        );
+    }
 }

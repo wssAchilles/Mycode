@@ -107,6 +107,10 @@ HttpResponse candidate_response(
       .requested_limit = requested_limit,
       .available_count = query_result.available_count,
       .truncated_count = truncated_count,
+      .snapshot_version = query_result.snapshot_version,
+      .snapshot_loaded_at = query_result.snapshot_loaded_at,
+      .pruned_count = query_result.pruned_count,
+      .frontier_max_size = query_result.frontier_max_size,
       .budget_exhausted = query_result.budget_exhausted || truncated_count > 0,
       .empty = query_result.candidates.empty(),
       .empty_reason = empty_reason,
@@ -127,7 +131,56 @@ HttpResponse candidate_response(
   return json_response(200, tg_contracts::success_response(payload));
 }
 
-using NeighborStoreMethod = decltype(&tg_core::GraphStore::direct_neighbors);
+tg_core::NeighborQuery parse_neighbor_query(
+    const nlohmann::json& body,
+    const std::size_t default_limit,
+    const std::size_t max_query_limit) {
+  auto query = tg_core::NeighborQuery{
+      .user_id = read_required_string(body, "userId"),
+      .limit = read_optional_size(body, "limit", default_limit, max_query_limit),
+      .excluded_user_ids = read_optional_string_set(body, "excludeUserIds"),
+  };
+  query.excluded_user_ids.insert(query.user_id);
+  return query;
+}
+
+tg_core::TraversalQuery parse_traversal_query(
+    const nlohmann::json& body,
+    const tg_config::ServiceConfig& config,
+    const bool force_exclude_direct) {
+  auto query = tg_core::TraversalQuery{
+      .user_id = read_required_string(body, "userId"),
+      .limit = read_optional_size(body, "limit", config.default_author_limit, config.max_query_limit),
+      .max_depth = read_optional_size(body, "maxDepth", config.default_max_depth, config.max_query_depth),
+      .max_branching_factor = config.max_branching_factor,
+      .max_visited_nodes = config.max_multi_hop_visited,
+      .max_candidates = config.max_multi_hop_candidates,
+      .excluded_user_ids = read_optional_string_set(body, "excludeUserIds"),
+      .exclude_direct_neighbors =
+          force_exclude_direct || read_optional_bool(body, "excludeDirectNeighbors", true),
+  };
+  if (query.max_depth == 0) {
+    throw RequestValidationError("maxDepth must be at least 1");
+  }
+  query.excluded_user_ids.insert(query.user_id);
+  return query;
+}
+
+tg_core::OverlapQuery parse_overlap_query(
+    const nlohmann::json& body,
+    const tg_config::ServiceConfig& config) {
+  return tg_core::OverlapQuery{
+      .user_a_id = read_required_string(body, "userAId"),
+      .user_b_id = read_required_string(body, "userBId"),
+      .limit = read_optional_size(body, "limit", config.default_overlap_limit, config.max_query_limit),
+  };
+}
+
+using NeighborStoreMethod = tg_core::GraphStore::QueryCandidates<tg_contracts::NeighborCandidate> (
+    tg_core::GraphStore::*)(const tg_core::NeighborQuery&) const;
+template <typename Candidate>
+using TraversalStoreMethod = tg_core::GraphStore::QueryCandidates<Candidate> (
+    tg_core::GraphStore::*)(const tg_core::TraversalQuery&) const;
 
 HttpResponse handle_neighbor_query(
     const nlohmann::json& body,
@@ -137,55 +190,35 @@ HttpResponse handle_neighbor_query(
     const std::size_t default_limit,
     const std::size_t max_query_limit,
     tg_ops::GraphServiceMetrics& metrics) {
-  const auto user_id = read_required_string(body, "userId");
-  auto excluded_ids = read_optional_string_set(body, "excludeUserIds");
-  excluded_ids.insert(user_id);
-  const auto limit = read_optional_size(body, "limit", default_limit, max_query_limit);
+  const auto query = parse_neighbor_query(body, default_limit, max_query_limit);
   const auto started_at = std::chrono::steady_clock::now();
-  const auto candidates = (store.*store_method)(user_id, limit, excluded_ids);
+  const auto candidates = (store.*store_method)(query);
   return candidate_response(
       kernel,
-      nlohmann::json{{"userId", user_id}},
+      nlohmann::json{{"userId", query.user_id}},
       candidates,
-      limit,
+      query.limit,
       metrics,
       started_at);
 }
 
-template <typename StoreMethod>
+template <typename Candidate>
 HttpResponse handle_multi_hop_query(
     const nlohmann::json& body,
     const std::string& kernel,
-    StoreMethod store_method,
+    TraversalStoreMethod<Candidate> store_method,
     tg_core::GraphStore& store,
     const tg_config::ServiceConfig& config,
     tg_ops::GraphServiceMetrics& metrics,
     bool force_exclude_direct = false) {
-  const auto user_id = read_required_string(body, "userId");
-  auto excluded_ids = read_optional_string_set(body, "excludeUserIds");
-  excluded_ids.insert(user_id);
-  const auto limit = read_optional_size(body, "limit", config.default_author_limit, config.max_query_limit);
-  const auto max_depth = read_optional_size(body, "maxDepth", config.default_max_depth, config.max_query_depth);
-  if (max_depth == 0) {
-    throw RequestValidationError("maxDepth must be at least 1");
-  }
-  const auto exclude_direct =
-      force_exclude_direct || read_optional_bool(body, "excludeDirectNeighbors", true);
+  const auto query = parse_traversal_query(body, config, force_exclude_direct);
   const auto started_at = std::chrono::steady_clock::now();
-  const auto candidates = (store.*store_method)(
-      user_id,
-      limit,
-      max_depth,
-      config.max_branching_factor,
-      config.max_multi_hop_visited,
-      config.max_multi_hop_candidates,
-      excluded_ids,
-      exclude_direct);
+  const auto candidates = (store.*store_method)(query);
   return candidate_response(
       kernel,
-      nlohmann::json{{"userId", user_id}},
+      nlohmann::json{{"userId", query.user_id}},
       candidates,
-      limit,
+      query.limit,
       metrics,
       started_at);
 }
@@ -242,16 +275,14 @@ HttpResponse handle_graph_post(
           store, config, metrics, /*force_exclude_direct=*/true);
     }
     if (request.path == "/graph/overlap") {
-      const auto user_a_id = read_required_string(body, "userAId");
-      const auto user_b_id = read_required_string(body, "userBId");
-      const auto limit = read_optional_size(body, "limit", config.default_overlap_limit, config.max_query_limit);
+      const auto query = parse_overlap_query(body, config);
       const auto started_at = std::chrono::steady_clock::now();
-      const auto candidates = store.overlap_candidates(user_a_id, user_b_id, limit);
+      const auto candidates = store.overlap_candidates(query);
       return candidate_response(
           "overlap",
-          nlohmann::json{{"userAId", user_a_id}, {"userBId", user_b_id}},
+          nlohmann::json{{"userAId", query.user_a_id}, {"userBId", query.user_b_id}},
           candidates,
-          limit,
+          query.limit,
           metrics,
           started_at);
     }

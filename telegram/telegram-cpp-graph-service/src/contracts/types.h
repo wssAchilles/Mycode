@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -91,6 +92,10 @@ struct GraphQueryDiagnostics {
   std::size_t requested_limit;
   std::size_t available_count;
   std::size_t truncated_count;
+  std::string snapshot_version;
+  std::chrono::system_clock::time_point snapshot_loaded_at;
+  std::size_t pruned_count;
+  std::size_t frontier_max_size;
   bool budget_exhausted;
   bool empty;
   std::optional<std::string> empty_reason;
@@ -201,6 +206,12 @@ inline void to_json(nlohmann::json& json, const GraphQueryDiagnostics& diagnosti
       {"requestedLimit", diagnostics.requested_limit},
       {"availableCount", diagnostics.available_count},
       {"truncatedCount", diagnostics.truncated_count},
+      {"snapshotVersion", diagnostics.snapshot_version},
+      {"snapshotLoadedAtMs", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 diagnostics.snapshot_loaded_at.time_since_epoch())
+                                 .count()},
+      {"prunedCount", diagnostics.pruned_count},
+      {"frontierMaxSize", diagnostics.frontier_max_size},
       {"budgetExhausted", diagnostics.budget_exhausted},
       {"empty", diagnostics.empty},
       {"relationKinds", diagnostics.relation_kinds},

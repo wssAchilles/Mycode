@@ -49,6 +49,7 @@ func Load() Config {
 		UpdateLogCollection:     firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_UPDATE_LOG_COLLECTION"), defaultUpdateLogCollection),
 		OutboxCollection:        firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_OUTBOX_COLLECTION"), defaultOutboxCollection),
 		WakePubSubChannel:       firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_WAKE_PUBSUB_CHANNEL"), defaultWakePubSubChannel),
+		WakeRepairStreamKey:     firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_WAKE_REPAIR_STREAM_KEY"), defaultWakeRepairStreamKey),
 		SyncWakeExecutionMode:   readPlatformExecutionMode("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish"),
 		PresenceExecutionMode: readPlatformExecutionMode(
 			"DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE",
@@ -114,6 +115,12 @@ func Load() Config {
 		PrimaryMaxAttempts: readInt(
 			"DELIVERY_CONSUMER_PRIMARY_MAX_ATTEMPTS",
 			defaultPrimaryMaxAttempts,
+			1,
+			10,
+		),
+		PrimaryPoisonThreshold: readInt(
+			"DELIVERY_CONSUMER_PRIMARY_POISON_THRESHOLD",
+			defaultPrimaryPoisonThreshold,
 			1,
 			10,
 		),

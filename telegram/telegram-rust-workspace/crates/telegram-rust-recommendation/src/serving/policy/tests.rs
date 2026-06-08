@@ -137,6 +137,8 @@ fn result() -> RecommendationResultPayload {
                 max_size: 200,
                 final_limit: 10,
                 truncated: false,
+                selector_report: None,
+                selector_report_unavailable_reason: Some("serving_policy_fixture".to_string()),
             },
             serving: RecommendationServingSummaryPayload {
                 serving_version: "rust_serving_v1".to_string(),

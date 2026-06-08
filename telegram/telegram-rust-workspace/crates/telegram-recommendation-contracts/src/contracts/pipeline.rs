@@ -119,6 +119,10 @@ pub struct RecommendationSelectorPayload {
     pub max_size: usize,
     pub final_limit: usize,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_report: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_report_unavailable_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

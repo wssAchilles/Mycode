@@ -16,6 +16,29 @@
 
 namespace telegram::graph::core {
 
+struct NeighborQuery {
+  std::string user_id;
+  std::size_t limit{0};
+  std::unordered_set<std::string> excluded_user_ids;
+};
+
+struct TraversalQuery {
+  std::string user_id;
+  std::size_t limit{0};
+  std::size_t max_depth{0};
+  std::size_t max_branching_factor{0};
+  std::size_t max_visited_nodes{0};
+  std::size_t max_candidates{0};
+  std::unordered_set<std::string> excluded_user_ids;
+  bool exclude_direct_neighbors{true};
+};
+
+struct OverlapQuery {
+  std::string user_a_id;
+  std::string user_b_id;
+  std::size_t limit{0};
+};
+
 class GraphStore {
  public:
   template <typename T>
@@ -24,6 +47,10 @@ class GraphStore {
     std::size_t available_count{0};
     std::size_t scanned_count{0};
     std::size_t visited_count{0};
+    std::string snapshot_version;
+    std::chrono::system_clock::time_point snapshot_loaded_at{};
+    std::size_t pruned_count{0};
+    std::size_t frontier_max_size{0};
     bool budget_exhausted{false};
   };
 
@@ -36,9 +63,13 @@ class GraphStore {
       std::chrono::system_clock::time_point loaded_at);
 
   void publish_snapshot(std::shared_ptr<const store::SnapshotData> snapshot);
+  bool rollback_snapshot();
 
   void set_traversal_best_first_enabled(bool enabled);
   void set_overlap_streaming_topk_enabled(bool enabled);
+
+  QueryCandidates<contracts::NeighborCandidate> direct_neighbors(
+      const NeighborQuery& query) const;
 
   QueryCandidates<contracts::NeighborCandidate> direct_neighbors(
       const std::string& user_id,
@@ -46,9 +77,15 @@ class GraphStore {
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
   QueryCandidates<contracts::NeighborCandidate> social_neighbors(
+      const NeighborQuery& query) const;
+
+  QueryCandidates<contracts::NeighborCandidate> social_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
+
+  QueryCandidates<contracts::NeighborCandidate> recent_engagers(
+      const NeighborQuery& query) const;
 
   QueryCandidates<contracts::NeighborCandidate> recent_engagers(
       const std::string& user_id,
@@ -56,14 +93,23 @@ class GraphStore {
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
   QueryCandidates<contracts::NeighborCandidate> co_engagers(
+      const NeighborQuery& query) const;
+
+  QueryCandidates<contracts::NeighborCandidate> co_engagers(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
   QueryCandidates<contracts::NeighborCandidate> content_affinity_neighbors(
+      const NeighborQuery& query) const;
+
+  QueryCandidates<contracts::NeighborCandidate> content_affinity_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
+
+  QueryCandidates<contracts::MultiHopCandidate> multi_hop_candidates(
+      const TraversalQuery& query) const;
 
   QueryCandidates<contracts::MultiHopCandidate> multi_hop_candidates(
       const std::string& user_id,
@@ -76,6 +122,9 @@ class GraphStore {
       bool exclude_direct_neighbors) const;
 
   QueryCandidates<contracts::BridgeCandidate> bridge_users(
+      const TraversalQuery& query) const;
+
+  QueryCandidates<contracts::BridgeCandidate> bridge_users(
       const std::string& user_id,
       std::size_t limit,
       std::size_t max_depth,
@@ -84,6 +133,9 @@ class GraphStore {
       std::size_t max_candidates,
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
+
+  QueryCandidates<contracts::OverlapCandidate> overlap_candidates(
+      const OverlapQuery& query) const;
 
   QueryCandidates<contracts::OverlapCandidate> overlap_candidates(
       const std::string& user_a_id,

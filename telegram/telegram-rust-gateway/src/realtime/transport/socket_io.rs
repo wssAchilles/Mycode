@@ -20,7 +20,7 @@ pub async fn emit_direct_delivery(
     envelope: &RealtimeDeliveryEnvelopeV1,
     resolved_count: usize,
 ) -> Result<RealtimeCompatDispatchEnvelopeV1> {
-    let io = state
+    state
         .realtime_socket_io
         .as_ref()
         .ok_or_else(|| anyhow!("rust socket terminator unavailable"))?;
@@ -44,14 +44,14 @@ pub async fn emit_direct_delivery(
                     .unwrap_or_else(|| "Unknown".to_string()),
                 group_id: read_string(&envelope.payload, "groupId"),
             };
-            emit_named_event(io, envelope, event_name, &payload).await?;
+            emit_named_event(state, envelope, event_name, &payload).await?;
         }
         _ => {
             let batch_payload = vec![json!({
                 "type": batch_event_name(envelope.topic),
                 "payload": translate_delivery_payload(&envelope.payload, envelope.topic),
             })];
-            emit_named_event(io, envelope, "realtimeBatch", &batch_payload).await?;
+            emit_named_event(state, envelope, "realtimeBatch", &batch_payload).await?;
         }
     }
 
@@ -73,26 +73,34 @@ pub async fn emit_direct_delivery(
 }
 
 async fn emit_named_event<T: serde::Serialize>(
-    io: &socketioxide::SocketIo,
+    state: &AppState,
     envelope: &RealtimeDeliveryEnvelopeV1,
     event_name: &str,
     payload: &T,
 ) -> Result<()> {
+    let io = state
+        .realtime_socket_io
+        .as_ref()
+        .ok_or_else(|| anyhow!("rust socket terminator unavailable"))?;
     match envelope.target.kind {
         crate::realtime_contracts::RealtimeDeliveryTargetKind::Socket => {
             if let Some(target_id) = envelope.target.id.as_deref() {
-                io.within(session_room(target_id))
-                    .emit(event_name, payload)
-                    .await
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                record_emit_result(
+                    state,
+                    io.within(session_room(target_id))
+                        .emit(event_name, payload)
+                        .await,
+                )?;
             }
         }
         crate::realtime_contracts::RealtimeDeliveryTargetKind::User => {
             if let Some(target_id) = envelope.target.id.as_deref() {
-                io.within(user_room(target_id))
-                    .emit(event_name, payload)
-                    .await
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                record_emit_result(
+                    state,
+                    io.within(user_room(target_id))
+                        .emit(event_name, payload)
+                        .await,
+                )?;
             }
         }
         crate::realtime_contracts::RealtimeDeliveryTargetKind::Room => {
@@ -101,17 +109,12 @@ async fn emit_named_event<T: serde::Serialize>(
                 for socket_id in &envelope.target.exclude_socket_ids {
                     operator = operator.except(session_room(socket_id));
                 }
-                operator
-                    .emit(event_name, payload)
-                    .await
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                record_emit_result(state, operator.emit(event_name, payload).await)?;
             }
         }
         crate::realtime_contracts::RealtimeDeliveryTargetKind::Broadcast => {
             if envelope.target.exclude_socket_ids.is_empty() {
-                io.emit(event_name, payload)
-                    .await
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                record_emit_result(state, io.emit(event_name, payload).await)?;
             } else {
                 let rooms = envelope
                     .target
@@ -119,15 +122,29 @@ async fn emit_named_event<T: serde::Serialize>(
                     .iter()
                     .map(|socket_id| session_room(socket_id))
                     .collect::<Vec<_>>();
-                io.except(rooms)
-                    .emit(event_name, payload)
-                    .await
-                    .map_err(|err| anyhow!(err.to_string()))?;
+                record_emit_result(state, io.except(rooms).emit(event_name, payload).await)?;
             }
         }
     }
 
     Ok(())
+}
+
+fn record_emit_result<T, E: ToString>(
+    state: &AppState,
+    result: std::result::Result<T, E>,
+) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            state
+                .realtime_socket_state
+                .lock()
+                .expect("rust socket session mutex poisoned")
+                .record_dropped_event();
+            Err(anyhow!(err.to_string()))
+        }
+    }
 }
 
 fn batch_event_name(topic: RealtimeDeliveryTopic) -> &'static str {

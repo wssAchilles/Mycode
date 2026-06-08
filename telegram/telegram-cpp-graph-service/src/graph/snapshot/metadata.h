@@ -21,6 +21,7 @@ struct SnapshotMetadata {
   std::size_t ranked_csr_neighbor_count{0};
   std::size_t ranked_csr_memory_estimate_bytes{0};
   std::size_t memory_estimate_bytes{0};
+  std::size_t max_neighbors_per_user{0};
   bool compact_snapshot_enabled{false};
   std::string layout_version;
   std::string snapshot_representation;

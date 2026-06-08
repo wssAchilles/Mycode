@@ -56,6 +56,8 @@ fn summary(
             max_size: 200,
             final_limit: 20,
             truncated: false,
+            selector_report: None,
+            selector_report_unavailable_reason: Some("metrics_fixture".to_string()),
         },
         serving: crate::contracts::RecommendationServingSummaryPayload {
             serving_version: "rust_serving_v1".to_string(),

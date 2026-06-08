@@ -30,8 +30,10 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_RESERVATION_BATCH_SIZE", "25")
 	t.Setenv("DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE", "1500")
 	t.Setenv("DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES", "true")
+	t.Setenv("DELIVERY_CONSUMER_WAKE_REPAIR_STREAM_KEY", "sync:update:wake:repair:test")
 	t.Setenv("DELIVERY_CONSUMER_WAKE_PUBLISH_MODE", "batch")
 	t.Setenv("DELIVERY_CONSUMER_WAKE_BATCH_SIZE", "40")
+	t.Setenv("DELIVERY_CONSUMER_PRIMARY_POISON_THRESHOLD", "4")
 	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", "6000")
 	t.Setenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR", "127.0.0.1:6060")
 	t.Setenv("DELIVERY_CONSUMER_WORKER_COUNT", "4")
@@ -68,6 +70,12 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.WakePublishMode != "batch" || cfg.WakeBatchSize != 40 {
 		t.Fatalf("unexpected wake publish config: %#v", cfg)
+	}
+	if cfg.WakeRepairStreamKey != "sync:update:wake:repair:test" {
+		t.Fatalf("unexpected wake repair stream key: %s", cfg.WakeRepairStreamKey)
+	}
+	if cfg.PrimaryPoisonThreshold != 4 {
+		t.Fatalf("unexpected primary poison threshold: %d", cfg.PrimaryPoisonThreshold)
 	}
 	if cfg.ReclaimCursorMode != "restart" {
 		t.Fatalf("unexpected reclaim cursor mode: %s", cfg.ReclaimCursorMode)
@@ -191,8 +199,10 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_RESERVATION_BATCH_SIZE",
 		"DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE",
 		"DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES",
+		"DELIVERY_CONSUMER_WAKE_REPAIR_STREAM_KEY",
 		"DELIVERY_CONSUMER_WAKE_PUBLISH_MODE",
 		"DELIVERY_CONSUMER_WAKE_BATCH_SIZE",
+		"DELIVERY_CONSUMER_PRIMARY_POISON_THRESHOLD",
 		"DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT",
 		"DELIVERY_CONSUMER_PPROF_BIND_ADDR",
 		"DELIVERY_CONSUMER_DRY_RUN",
@@ -260,6 +270,12 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.WakePublishMode != defaultWakePublishMode || cfg.WakeBatchSize != defaultWakeBatchSize {
 		t.Fatalf("unexpected wake publish defaults: %#v", cfg)
+	}
+	if cfg.WakeRepairStreamKey != defaultWakeRepairStreamKey {
+		t.Fatalf("unexpected wake repair stream default: %s", cfg.WakeRepairStreamKey)
+	}
+	if cfg.PrimaryPoisonThreshold != defaultPrimaryPoisonThreshold {
+		t.Fatalf("unexpected primary poison threshold default: %d", cfg.PrimaryPoisonThreshold)
 	}
 	if cfg.MongoEnsureIndexes {
 		t.Fatalf("expected mongo index ensure to default false")

@@ -9,6 +9,7 @@ const (
 	defaultPlatformStreamKey        = "platform:events:v1"
 	defaultPlatformDLQStreamKey     = "platform:events:dlq:v1"
 	defaultPlatformReplayStreamKey  = "platform:events:replay:v1"
+	defaultWakeRepairStreamKey      = "sync:update:wake:repair:v1"
 	defaultConsumerGroup            = "go-delivery-dryrun"
 	defaultExecutionMode            = "shadow"
 	defaultBlockMS                  = 2000
@@ -22,6 +23,7 @@ const (
 	defaultCanaryDLQThreshold       = 3
 	defaultPrimaryMaxRecipients     = 2
 	defaultPrimaryMaxAttempts       = 3
+	defaultPrimaryPoisonThreshold   = 3
 	defaultProjectionChunkSize      = 1000
 	defaultReservationConcurrency   = 8
 	defaultReservationMode          = ReservationModeLegacyPerUser

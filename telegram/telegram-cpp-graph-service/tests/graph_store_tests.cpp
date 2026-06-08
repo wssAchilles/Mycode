@@ -168,6 +168,60 @@ TEST(GraphStoreTest, DirectNeighborsReportsFullAvailableCount) {
   EXPECT_EQ(result.available_count, 3u);
 }
 
+TEST(GraphStoreTest, TypedNeighborQueryMatchesCompatibilityWrapper) {
+  auto store = build_store();
+
+  const auto typed = store.direct_neighbors(telegram::graph::core::NeighborQuery{
+      .user_id = "u1",
+      .limit = 2,
+      .excluded_user_ids = {"u4"},
+  });
+  const auto wrapper = store.direct_neighbors("u1", 2, {"u4"});
+
+  EXPECT_EQ(neighbor_ids(typed), neighbor_ids(wrapper));
+  EXPECT_EQ(typed.available_count, wrapper.available_count);
+}
+
+TEST(GraphStoreTest, TypedTraversalAndOverlapQueriesMatchCompatibilityWrappers) {
+  auto store = build_store();
+
+  const auto typed_multi_hop = store.multi_hop_candidates(telegram::graph::core::TraversalQuery{
+      .user_id = "u1",
+      .limit = 5,
+      .max_depth = 3,
+      .max_branching_factor = 10,
+      .max_visited_nodes = 100,
+      .max_candidates = 100,
+      .excluded_user_ids = {},
+      .exclude_direct_neighbors = true,
+  });
+  const auto wrapper_multi_hop = store.multi_hop_candidates("u1", 5, 3, 10, 100, 100, {}, true);
+  const auto typed_overlap = store.overlap_candidates(telegram::graph::core::OverlapQuery{
+      .user_a_id = "u1",
+      .user_b_id = "u2",
+      .limit = 10,
+  });
+  const auto wrapper_overlap = store.overlap_candidates("u1", "u2", 10);
+
+  EXPECT_EQ(multi_hop_ids(typed_multi_hop), multi_hop_ids(wrapper_multi_hop));
+  EXPECT_EQ(overlap_ids(typed_overlap), overlap_ids(wrapper_overlap));
+}
+
+TEST(GraphStoreTest, QueryDiagnosticsIncludeSnapshotAndExecutionFields) {
+  auto store = build_store();
+
+  const auto neighbors = store.direct_neighbors("u1", 2, {});
+  const auto traversal = store.multi_hop_candidates("u1", 5, 3, 10, 100, 100, {}, true);
+
+  EXPECT_EQ(neighbors.snapshot_version, "test-snapshot");
+  EXPECT_NE(neighbors.snapshot_loaded_at, std::chrono::system_clock::time_point{});
+  EXPECT_EQ(neighbors.pruned_count, 0u);
+  EXPECT_EQ(neighbors.frontier_max_size, 0u);
+  EXPECT_EQ(traversal.snapshot_version, "test-snapshot");
+  EXPECT_NE(traversal.snapshot_loaded_at, std::chrono::system_clock::time_point{});
+  EXPECT_GE(traversal.frontier_max_size, 1u);
+}
+
 TEST(GraphStoreTest, NeighborLimitZeroKeepsAvailableCount) {
   auto store = build_store();
   const auto result = store.direct_neighbors("u1", 0, {});
@@ -204,6 +258,54 @@ TEST(GraphStoreTest, SnapshotAggregatesDuplicateEdges) {
   EXPECT_EQ(result.candidates.size(), 2u);
   EXPECT_EQ(result.candidates[0].user_id, "u2");
   EXPECT_NEAR(result.candidates[0].score, 0.5, 1e-9);
+}
+
+TEST(GraphStoreTest, RejectsInvalidSnapshotsBeforePublish) {
+  GraphStore store;
+  EXPECT_THROW(
+      store.replace_snapshot({}, 10, "v1", std::chrono::system_clock::now()),
+      std::invalid_argument);
+  EXPECT_THROW(
+      store.replace_snapshot({edge("u1", "u2", 0.2)}, 0, "v1", std::chrono::system_clock::now()),
+      std::invalid_argument);
+  EXPECT_THROW(
+      store.replace_snapshot(
+          {edge("u1", "u2", -0.1)},
+          10,
+          "v1",
+          std::chrono::system_clock::now()),
+      std::invalid_argument);
+  EXPECT_THROW(
+      store.replace_snapshot(
+          {edge("u1", "u2", std::numeric_limits<double>::infinity())},
+          10,
+          "v1",
+          std::chrono::system_clock::now()),
+      std::invalid_argument);
+}
+
+TEST(GraphStoreTest, RejectsSnapshotVersionRegression) {
+  GraphStore store;
+  store.replace_snapshot({edge("u1", "u2", 0.2)}, 10, "v2", std::chrono::system_clock::now());
+
+  EXPECT_THROW(
+      store.replace_snapshot({edge("u1", "u3", 0.3)}, 10, "v1", std::chrono::system_clock::now()),
+      std::invalid_argument);
+  EXPECT_EQ(neighbor_ids(store.direct_neighbors("u1", 10, {})), (std::vector<std::string>{"u2"}));
+}
+
+TEST(GraphStoreTest, RollbackRestoresPreviousSnapshot) {
+  GraphStore store;
+  EXPECT_FALSE(store.rollback_snapshot());
+  store.replace_snapshot({edge("u1", "u2", 0.2)}, 10, "v1", std::chrono::system_clock::now());
+  EXPECT_FALSE(store.rollback_snapshot());
+  store.replace_snapshot({edge("u1", "u3", 0.3)}, 10, "v2", std::chrono::system_clock::now());
+
+  EXPECT_EQ(neighbor_ids(store.direct_neighbors("u1", 10, {})), (std::vector<std::string>{"u3"}));
+  EXPECT_TRUE(store.rollback_snapshot());
+  EXPECT_EQ(neighbor_ids(store.direct_neighbors("u1", 10, {})), (std::vector<std::string>{"u2"}));
+  EXPECT_TRUE(store.rollback_snapshot());
+  EXPECT_EQ(neighbor_ids(store.direct_neighbors("u1", 10, {})), (std::vector<std::string>{"u3"}));
 }
 
 TEST(GraphStoreTest, SnapshotMergesDuplicateEdgeKindsOnce) {
@@ -642,6 +744,27 @@ TEST(GraphHandlerTest, RequiresSnapshotForPostQueries) {
 
   EXPECT_EQ(response.status_code, 503);
   EXPECT_EQ(body.at("error").at("code"), "SNAPSHOT_UNAVAILABLE");
+}
+
+TEST(GraphHandlerTest, GraphDiagnosticsExposeSnapshotAndExecutionFields) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+
+  const auto response = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/neighbors",
+      .body = R"({"userId":"u1","limit":2})",
+  });
+  const auto body = nlohmann::json::parse(response.body);
+  const auto diagnostics = body.at("data").at("diagnostics");
+
+  EXPECT_EQ(response.status_code, 200);
+  EXPECT_EQ(diagnostics.at("snapshotVersion"), "test-snapshot");
+  EXPECT_TRUE(diagnostics.contains("snapshotLoadedAtMs"));
+  EXPECT_EQ(diagnostics.at("prunedCount"), 0);
+  EXPECT_EQ(diagnostics.at("frontierMaxSize"), 0);
 }
 
 TEST(OpsPayloadTest, ReportsHttpRuntimeMetrics) {
