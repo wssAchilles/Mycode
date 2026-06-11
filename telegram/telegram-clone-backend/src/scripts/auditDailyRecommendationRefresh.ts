@@ -3,14 +3,7 @@ import dotenv from 'dotenv';
 
 import { connectMongoDB } from '../config/db';
 import { sequelize } from '../config/sequelize';
-import User from '../models/User';
-import UserFeatureVector from '../models/UserFeatureVector';
-import UserAction from '../models/UserAction';
-import UserSignal from '../models/UserSignal';
-import RealGraphEdge from '../models/RealGraphEdge';
-import PostFeatureSnapshot from '../models/PostFeatureSnapshot';
-import RecommendationJobRun from '../models/RecommendationJobRun';
-import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../services/recommendation/contracts/embeddingContract';
+import { buildDailyRecommendationRefreshAudit } from '../services/ops/recommendation/dailyRefreshOps';
 
 dotenv.config({ quiet: true });
 
@@ -40,115 +33,8 @@ async function main() {
         sequelize.authenticate(),
     ]);
 
-    const [
-        registeredUsers,
-        userVectors,
-        userVectorsFresh,
-        userVectorsWithContract,
-        userVectorsCompatible,
-        actionsTotal,
-        actionsFresh,
-        signalsTotal,
-        signalsFresh,
-        realGraphEdges,
-        realGraphDecayedFresh,
-        realGraphPredictedFresh,
-        realGraphPredictionCovered,
-        postSnapshots,
-        postSnapshotsFresh,
-        latestJobRun,
-        recentJobRuns,
-    ] = await Promise.all([
-        User.count(),
-        UserFeatureVector.countDocuments(),
-        UserFeatureVector.countDocuments({ computedAt: { $gte: since } }),
-        UserFeatureVector.countDocuments({ 'embeddingContract.artifactVersion': { $exists: true, $ne: '' } }),
-        UserFeatureVector.countDocuments({
-            'embeddingContract.embeddingSpace': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.embeddingSpace,
-            'embeddingContract.retrievalEmbeddingDim': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
-            twoTowerEmbedding: { $size: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim },
-        }),
-        UserAction.countDocuments(),
-        UserAction.countDocuments({ createdAt: { $gte: since } }),
-        UserSignal.countDocuments(),
-        UserSignal.countDocuments({ createdAt: { $gte: since } }),
-        RealGraphEdge.countDocuments(),
-        RealGraphEdge.countDocuments({ lastDecayAppliedAt: { $gte: since } }),
-        RealGraphEdge.countDocuments({ lastPredictionAt: { $gte: since } }),
-        RealGraphEdge.countDocuments({
-            modelVersion: { $exists: true, $ne: '' },
-            predictionMode: { $exists: true, $ne: '' },
-            featureVersion: { $exists: true, $ne: '' },
-            lastPredictionAt: { $exists: true },
-        }),
-        PostFeatureSnapshot.countDocuments(),
-        PostFeatureSnapshot.countDocuments({ computedAt: { $gte: since } }),
-        RecommendationJobRun.findOne({ jobName: 'daily_recommendation_refresh' })
-            .sort({ startedAt: -1 })
-            .lean(),
-        RecommendationJobRun.find({ jobName: 'daily_recommendation_refresh', startedAt: { $gte: since } })
-            .sort({ startedAt: -1 })
-            .limit(5)
-            .lean(),
-    ]);
-
-    const output = {
-        auditedAt: new Date().toISOString(),
-        freshnessWindow: {
-            hours,
-            since: since.toISOString(),
-        },
-        dailyJobEvidence: {
-            latest: latestJobRun ? {
-                status: latestJobRun.status,
-                startedAt: latestJobRun.startedAt,
-                finishedAt: latestJobRun.finishedAt,
-                durationMs: latestJobRun.durationMs,
-                trigger: latestJobRun.trigger,
-                summary: latestJobRun.summary,
-                error: latestJobRun.error,
-            } : null,
-            runsInWindow: recentJobRuns.length,
-            recentStatuses: recentJobRuns.map((run) => ({
-                status: run.status,
-                startedAt: run.startedAt,
-                finishedAt: run.finishedAt,
-                trigger: run.trigger,
-            })),
-        },
-        registeredUserFeatureCoverage: {
-            registeredUsers,
-            userFeatureVectors: userVectors,
-            coverageRatio: ratio(userVectors, registeredUsers),
-            refreshedInWindow: userVectorsFresh,
-            refreshedRatio: ratio(userVectorsFresh, registeredUsers),
-            embeddingContractCoverageRatio: ratio(userVectorsWithContract, userVectors),
-            compatibleDenseVectorRatio: ratio(userVectorsCompatible, registeredUsers),
-        },
-        eventFactsAreRealtimeNotDailySynthetic: {
-            userActionsTotal: actionsTotal,
-            userActionsInWindow: actionsFresh,
-            userSignalsTotal: signalsTotal,
-            userSignalsInWindow: signalsFresh,
-        },
-        realGraphRefreshCoverage: {
-            edges: realGraphEdges,
-            decayedInWindow: realGraphDecayedFresh,
-            predictedInWindow: realGraphPredictedFresh,
-            predictionMetadataCoverageRatio: ratio(realGraphPredictionCovered, realGraphEdges),
-        },
-        postFeatureRefreshCoverage: {
-            snapshots: postSnapshots,
-            refreshedInWindow: postSnapshotsFresh,
-            refreshedRatio: ratio(postSnapshotsFresh, postSnapshots),
-        },
-    };
-
+    const output = await buildDailyRecommendationRefreshAudit({ hours, since });
     console.log(JSON.stringify(output, null, 2));
-}
-
-function ratio(count: number, total: number): number {
-    return total > 0 ? Number((count / total).toFixed(4)) : 0;
 }
 
 main()

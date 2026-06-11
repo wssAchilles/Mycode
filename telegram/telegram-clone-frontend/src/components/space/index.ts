@@ -21,6 +21,7 @@ export { SpaceCommentDrawer } from './SpaceCommentDrawer';
 export type { SpaceCommentDrawerProps } from './SpaceCommentDrawer';
 
 export { SpaceAsideWidgets } from './SpaceAsideWidgets';
+export { RecommendationRefreshStatusCard } from './RecommendationRefreshStatusCard';
 
 export { RecommendationReason, MultiReason } from './RecommendationReason';
 export type { RecallSource, RecommendationReasonProps, MultiReasonProps } from './RecommendationReason';

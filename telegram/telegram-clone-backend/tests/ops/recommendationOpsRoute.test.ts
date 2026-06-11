@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     rustRecommendationSummary: vi.fn(),
     graphKernelSummary: vi.fn(),
     traceSummary: vi.fn(),
+    dailyRefreshOps: vi.fn(),
 }));
 
 vi.mock('../../src/services/chatRuntimeMetrics', () => ({
@@ -141,6 +142,10 @@ vi.mock('../../src/services/recommendation/ops', () => ({
     buildRecommendationTraceSummary: mocks.traceSummary,
 }));
 
+vi.mock('../../src/services/ops/recommendation/dailyRefreshOps', () => ({
+    buildDailyRecommendationRefreshOps: mocks.dailyRefreshOps,
+}));
+
 describe('recommendation ops route', () => {
     const originalOpsToken = process.env.OPS_METRICS_TOKEN;
     let server: Server;
@@ -196,6 +201,44 @@ describe('recommendation ops route', () => {
             degradedReasons: [],
             updatedAt: '2026-04-23T00:30:00.000Z',
         });
+        mocks.dailyRefreshOps.mockResolvedValue({
+            status: 'success',
+            lastRefreshAt: '2026-06-11T07:04:46.553Z',
+            latestRun: {
+                startedAt: '2026-06-11T06:47:45.406Z',
+                finishedAt: '2026-06-11T07:04:46.553Z',
+                durationMs: 1021147,
+                trigger: 'manual',
+                error: null,
+            },
+            users: {
+                registered: 642,
+                vectors: 642,
+                refreshed: 642,
+                compatibleDenseVectorRatio: 1,
+            },
+            realGraph: {
+                edges: 954,
+                predicted: 954,
+            },
+            posts: {
+                snapshots: 1161,
+                refreshed: 1161,
+            },
+            artifacts: {
+                usersExported: 642,
+                postsExported: 1338,
+                clustersExported: 0,
+            },
+            schedule: {
+                label: '每天 02:00',
+                cron: '0 2 * * *',
+            },
+            freshnessWindow: {
+                hours: 24,
+                since: '2026-06-10T08:00:00.000Z',
+            },
+        });
 
         const { default: opsRoutes } = await import('../../src/routes/ops');
         const app = express();
@@ -247,5 +290,32 @@ describe('recommendation ops route', () => {
             surface: 'space_feed',
             shadowLowOverlapThreshold: 0.5,
         });
+    });
+
+    it('returns the daily recommendation refresh card evidence behind the ops token', async () => {
+        const response = await fetch(
+            `${baseUrl}/api/ops/recommendation/daily-refresh?hours=24`,
+            {
+                headers: {
+                    'x-ops-token': 'phase5-test-token',
+                },
+            },
+        );
+
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        expect(payload.success).toBe(true);
+        expect(payload.data.status).toBe('success');
+        expect(payload.data.users).toMatchObject({
+            registered: 642,
+            refreshed: 642,
+            compatibleDenseVectorRatio: 1,
+        });
+        expect(payload.data.realGraph).toEqual({
+            edges: 954,
+            predicted: 954,
+        });
+        expect(payload.data.artifacts.postsExported).toBe(1338);
+        expect(mocks.dailyRefreshOps).toHaveBeenCalledWith({ hours: 24 });
     });
 });

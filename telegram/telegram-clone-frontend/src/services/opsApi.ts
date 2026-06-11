@@ -34,6 +34,47 @@ export type ChatRuntimeOpsSnapshot = {
   requestTrail: ChatRuntimeOpsRequestTrace[];
 };
 
+export type RecommendationDailyRefreshStatus = 'success' | 'running' | 'failed' | 'unknown';
+
+export type RecommendationDailyRefreshOps = {
+  status: RecommendationDailyRefreshStatus;
+  lastRefreshAt: string | null;
+  latestRun: {
+    startedAt: string | null;
+    finishedAt: string | null;
+    durationMs: number | null;
+    trigger: string | null;
+    error?: string | null;
+  };
+  users: {
+    registered: number;
+    vectors: number;
+    refreshed: number;
+    compatibleDenseVectorRatio: number;
+  };
+  realGraph: {
+    edges: number;
+    predicted: number;
+  };
+  posts: {
+    snapshots: number;
+    refreshed: number;
+  };
+  artifacts: {
+    usersExported: number;
+    postsExported: number;
+    clustersExported: number;
+  };
+  schedule: {
+    label: string;
+    cron: string;
+  };
+  freshnessWindow: {
+    hours: number;
+    since: string;
+  };
+};
+
 const OPS_TOKEN = String(import.meta.env.VITE_OPS_TOKEN || '').trim();
 
 function wrapOpsHeaders(headers?: Record<string, string>): Record<string, string> {
@@ -68,7 +109,18 @@ export const opsAPI = {
     }
     return body as { reset: boolean; at: string };
   },
+
+  async getRecommendationDailyRefresh(hours = 24): Promise<RecommendationDailyRefreshOps> {
+    const response = await apiClient.get('/api/ops/recommendation/daily-refresh', {
+      headers: wrapOpsHeaders(),
+      params: { hours },
+    });
+    const body = response.data;
+    if (body?.success === true && body?.data) {
+      return body.data as RecommendationDailyRefreshOps;
+    }
+    return body as RecommendationDailyRefreshOps;
+  },
 };
 
 export default opsAPI;
-

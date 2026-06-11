@@ -22,6 +22,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon } from '../components/icons/SpaceIcons';
 import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
+import { opsAPI, type RecommendationDailyRefreshOps } from '../services/opsApi';
 import { SHARE_BASE_URL } from '../config/share';
 import { useAnalytics } from '../hooks/useAnalytics';
 import './SpacePage.css';
@@ -47,6 +48,9 @@ export const SpacePage: React.FC = () => {
     const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
     const [loadingAside, setLoadingAside] = useState(false);
     const [asideError, setAsideError] = useState<string | null>(null);
+    const [recommendationRefreshStatus, setRecommendationRefreshStatus] = useState<RecommendationDailyRefreshOps | null>(null);
+    const [loadingRecommendationRefresh, setLoadingRecommendationRefresh] = useState(false);
+    const [recommendationRefreshError, setRecommendationRefreshError] = useState<string | null>(null);
     const [sharePostId, setSharePostId] = useState<string | null>(null);
     const [isShareOpen, setIsShareOpen] = useState(false);
     const contentScrollRef = useRef<HTMLDivElement>(null);
@@ -133,9 +137,25 @@ export const SpacePage: React.FC = () => {
         }
     }, []);
 
+    const loadRecommendationRefreshStatus = useCallback(async () => {
+        setLoadingRecommendationRefresh(true);
+        setRecommendationRefreshError(null);
+        try {
+            const status = await opsAPI.getRecommendationDailyRefresh();
+            if (!asideMountedRef.current) return;
+            setRecommendationRefreshStatus(status);
+        } catch {
+            if (!asideMountedRef.current) return;
+            setRecommendationRefreshError('无法获取每日推荐闭环统计。');
+        } finally {
+            if (asideMountedRef.current) setLoadingRecommendationRefresh(false);
+        }
+    }, []);
+
     useEffect(() => {
         loadAside();
-    }, [loadAside]);
+        loadRecommendationRefreshStatus();
+    }, [loadAside, loadRecommendationRefreshStatus]);
 
     useEffect(() => {
         if (!asideError) return;
@@ -480,7 +500,11 @@ export const SpacePage: React.FC = () => {
                 recommendedUsers={recommendedUsers}
                 loadingAside={loadingAside}
                 asideError={asideError}
+                recommendationRefreshStatus={recommendationRefreshStatus}
+                loadingRecommendationRefresh={loadingRecommendationRefresh}
+                recommendationRefreshError={recommendationRefreshError}
                 onRetry={loadAside}
+                onRecommendationRefreshRetry={loadRecommendationRefreshStatus}
                 onTrendClick={handleTrendClick}
                 onFollowToggle={handleFollowToggle}
             />

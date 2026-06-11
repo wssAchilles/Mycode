@@ -397,6 +397,111 @@
     color: var(--tg-blue);
 }
 
+.space-page__recommendation-status {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.space-page__recommendation-status-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.space-page__recommendation-status-header .space-page__widget-title {
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.space-page__status-pill {
+    flex-shrink: 0;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(132, 149, 173, 0.22);
+    color: var(--tg-text-secondary);
+    background: rgba(132, 149, 173, 0.10);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.space-page__status-pill.is-success {
+    color: #7DDC8B;
+    border-color: rgba(125, 220, 139, 0.30);
+    background: rgba(23, 141, 68, 0.15);
+}
+
+.space-page__status-pill.is-running {
+    color: #7CC7FF;
+    border-color: rgba(124, 199, 255, 0.32);
+    background: rgba(42, 171, 238, 0.14);
+}
+
+.space-page__status-pill.is-failed {
+    color: #FF8E8E;
+    border-color: rgba(255, 142, 142, 0.32);
+    background: rgba(255, 93, 93, 0.14);
+}
+
+.space-page__recommendation-status-body,
+.space-page__recommendation-status-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.space-page__recommendation-status-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.space-page__recommendation-status-copy {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.space-page__recommendation-status-label {
+    min-width: 0;
+    color: var(--tg-text-secondary);
+    font-size: 12px;
+    line-height: 1.25;
+}
+
+.space-page__recommendation-status-value {
+    flex-shrink: 0;
+    max-width: 58%;
+    color: var(--tg-text-primary);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.space-page__recommendation-status-bar {
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(132, 149, 173, 0.14);
+    overflow: hidden;
+}
+
+.space-page__recommendation-status-bar-fill {
+    width: 100%;
+    height: 100%;
+    border-radius: 2px;
+    background: #7CC7FF;
+    transform: scaleX(var(--refresh-scale, 0));
+    transform-origin: left center;
+}
+
 /* 趋势列表项 */
 .space-page__trend-item {
     display: flex;

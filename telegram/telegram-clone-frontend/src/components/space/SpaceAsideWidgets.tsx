@@ -3,6 +3,8 @@ import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { TrendIcon, UserPlusIcon } from '../icons/SpaceIcons';
 import type { RecommendedUser, TrendItem } from '../../services/spaceApi';
+import type { RecommendationDailyRefreshOps } from '../../services/opsApi';
+import { RecommendationRefreshStatusCard } from './RecommendationRefreshStatusCard';
 import {
     limitedMotionItems,
     motionDurations,
@@ -17,7 +19,11 @@ interface SpaceAsideWidgetsProps {
     recommendedUsers: RecommendedUser[];
     loadingAside: boolean;
     asideError: string | null;
+    recommendationRefreshStatus: RecommendationDailyRefreshOps | null;
+    loadingRecommendationRefresh: boolean;
+    recommendationRefreshError: string | null;
     onRetry: () => void;
+    onRecommendationRefreshRetry: () => void;
     onTrendClick: (tag: string) => void;
     onFollowToggle: (user: RecommendedUser) => void;
 }
@@ -27,7 +33,11 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
     recommendedUsers,
     loadingAside,
     asideError,
+    recommendationRefreshStatus,
+    loadingRecommendationRefresh,
+    recommendationRefreshError,
     onRetry,
+    onRecommendationRefreshRetry,
     onTrendClick,
     onFollowToggle,
 }) => {
@@ -39,7 +49,7 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
             reveal: () => {
                 if (reducedMotion || !root) return;
                 const items = limitedMotionItems(
-                    root.querySelectorAll('.space-page__trend-item, .space-page__suggest-user-item'),
+                    root.querySelectorAll('.space-page__recommendation-status-row, .space-page__trend-item, .space-page__suggest-user-item'),
                 );
                 if (items.length === 0) return;
                 waapi.animate(items, {
@@ -62,16 +72,23 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
                 });
             },
         }),
-        [trends.length, recommendedUsers.length],
+        [recommendationRefreshStatus, trends.length, recommendedUsers.length],
     );
 
     useEffect(() => {
         widgetsMotion.run('reveal');
         widgetsMotion.run('heatbars');
-    }, [recommendedUsers.length, trends.length, widgetsMotion]);
+    }, [recommendedUsers.length, recommendationRefreshStatus, trends.length, widgetsMotion]);
 
     return (
         <aside ref={widgetsMotion.rootRef} className="space-page__aside">
+            <RecommendationRefreshStatusCard
+                status={recommendationRefreshStatus}
+                loading={loadingRecommendationRefresh}
+                error={recommendationRefreshError}
+                onRetry={onRecommendationRefreshRetry}
+            />
+
             <div className="space-page__widget glass-card">
                 <h2 className="space-page__widget-title">
                     <TrendIcon />
