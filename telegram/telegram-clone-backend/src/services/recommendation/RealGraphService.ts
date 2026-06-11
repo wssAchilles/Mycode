@@ -297,6 +297,7 @@ export class RealGraphService {
         since?: Date;
         batchSize?: number;
         dryRun?: boolean;
+        force?: boolean;
     }): Promise<{
         matched: number;
         updated: number;
@@ -305,26 +306,29 @@ export class RealGraphService {
         const limit = Math.max(1, Math.min(options?.limit ?? 1000, 10000));
         const batchSize = Math.max(1, Math.min(options?.batchSize ?? 200, 1000));
         const dryRun = options?.dryRun === true;
-        const query: Record<string, unknown> = {
-            $or: [
-                { modelVersion: { $ne: REALGRAPH_MODEL_VERSION } },
-                { predictionMode: { $ne: REALGRAPH_PREDICTION_MODE } },
-                { featureVersion: { $ne: REALGRAPH_FEATURE_VERSION } },
-                { lastPredictionAt: { $exists: false } },
-            ],
-        };
-        if (options?.since) {
-            query.updatedAt = { $gte: options.since };
-        }
-
+        const force = options?.force === true;
+        const query: Record<string, unknown> = force
+            ? {}
+            : {
+                $or: [
+                    { modelVersion: { $ne: REALGRAPH_MODEL_VERSION } },
+                    { predictionMode: { $ne: REALGRAPH_PREDICTION_MODE } },
+                    { featureVersion: { $ne: REALGRAPH_FEATURE_VERSION } },
+                    { lastPredictionAt: { $exists: false } },
+                ],
+            };
         let matched = 0;
         let updated = 0;
         let cursor: Date | undefined;
 
         while (matched < limit) {
+            const updatedAtQuery = {
+                ...(options?.since ? { $gte: options.since } : {}),
+                ...(cursor ? { $lt: cursor } : {}),
+            };
             const pageQuery = {
                 ...query,
-                ...(cursor ? { updatedAt: { $lt: cursor } } : {}),
+                ...(Object.keys(updatedAtQuery).length > 0 ? { updatedAt: updatedAtQuery } : {}),
             };
             const edges = await RealGraphEdge.find(pageQuery)
                 .sort({ updatedAt: -1, _id: -1 })

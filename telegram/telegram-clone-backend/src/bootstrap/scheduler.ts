@@ -3,6 +3,7 @@ import { spaceService } from '../services/spaceService';
 import { newsService } from '../services/newsService';
 import { simClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { realGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
+import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
 import { createChildLogger } from '../utils/logger';
 import {
   runtimeControlPlane,
@@ -48,6 +49,23 @@ export function registerCronJobs(): void {
     }
   });
   log.info('News 用户向量任务已启动 (每日 01:00)');
+
+  // Unified recommendation closure (02:00)
+  cron.schedule('0 2 * * *', async () => {
+    log.info('Starting daily recommendation refresh closure...');
+    try {
+      const result = await dailyRecommendationRefreshJob.run({ trigger: 'cron' });
+      log.info({
+        users: result.users,
+        realGraph: result.realGraph,
+        posts: result.posts,
+        featureExport: result.featureExport,
+      }, 'Daily recommendation refresh closure completed');
+    } catch (error) {
+      log.error({ err: error }, 'Daily recommendation refresh closure failed');
+    }
+  });
+  log.info('推荐特征闭环刷新任务已启动 (每日 02:00)');
 
   // SimClusters 离线嵌入计算 (03:00)
   cron.schedule('0 3 * * *', async () => {

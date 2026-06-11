@@ -3,6 +3,7 @@
  * 运行: 
  *   npx ts-node src/scripts/triggerJobs.ts --job simclusters
  *   npx ts-node src/scripts/triggerJobs.ts --job realgraph
+ *   npx ts-node src/scripts/triggerJobs.ts --job daily-recommendation-refresh
  */
 
 import mongoose from 'mongoose';
@@ -11,6 +12,8 @@ import path from 'path';
 import { SimClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { RealGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
 import { featureExportJob } from '../services/jobs/FeatureExportJob';
+import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
+import { sequelize } from '../config/sequelize';
 
 // 加载环境变量
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -38,7 +41,8 @@ jobName = jobName ? jobName.replace('--job=', '') : '';
 console.log('🛠️  Received args:', args);
 console.log('🛠️  Parsed jobName:', jobName);
 
-const validJobs = ['simclusters', 'realgraph', 'feature-export'];
+const validJobs = ['simclusters', 'realgraph', 'feature-export', 'daily-recommendation-refresh'];
+const skipFeatureExport = args.includes('--skip-feature-export');
 
 async function runJob() {
     if (!jobName || !validJobs.includes(jobName)) {
@@ -58,6 +62,10 @@ async function runJob() {
     try {
         await mongoose.connect(mongoUri);
         console.log('✅ MongoDB 已连接');
+        if (jobName === 'daily-recommendation-refresh') {
+            await sequelize.authenticate();
+            console.log('✅ PostgreSQL 已连接');
+        }
 
         if (jobName === 'simclusters') {
             console.log('🔄 开始 SimClustersBatchJob...');
@@ -73,9 +81,20 @@ async function runJob() {
             console.log('🔄 开始 FeatureExportJob...');
             await featureExportJob.run();
             console.log('✅ FeatureExportJob 完成');
+        } else if (jobName === 'daily-recommendation-refresh') {
+            console.log('🔄 开始 DailyRecommendationRefreshJob...');
+            const result = await dailyRecommendationRefreshJob.run({
+                trigger: 'manual',
+                skipFeatureExport,
+            });
+            console.log('✅ DailyRecommendationRefreshJob 完成');
+            console.log(JSON.stringify(result, null, 2));
         }
 
         await mongoose.disconnect();
+        if (jobName === 'daily-recommendation-refresh') {
+            await sequelize.close();
+        }
         console.log('\n✅ 数据库连接已关闭');
         console.log('🎉 任务执行成功！');
         process.exit(0);
