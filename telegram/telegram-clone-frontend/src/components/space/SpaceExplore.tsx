@@ -16,6 +16,8 @@ export interface SpaceExploreProps {
     onUnlike: SpacePostProps['onUnlike'];
     onComment: SpacePostProps['onComment'];
     onRepost: SpacePostProps['onRepost'];
+    onUnrepost: SpacePostProps['onUnrepost'];
+    onQuote?: SpacePostProps['onQuote'];
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
     onAuthorClick?: SpacePostProps['onAuthorClick'];
@@ -43,6 +45,8 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onUnlike,
     onComment,
     onRepost,
+    onUnrepost,
+    onQuote,
     onShare,
     onPostClick,
     onAuthorClick,
@@ -260,6 +264,8 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                             onUnlike={onUnlike}
                                             onComment={onComment}
                                             onRepost={onRepost}
+                                            onUnrepost={onUnrepost}
+                                            onQuote={onQuote}
                                             onShare={onShare}
                                             onClick={onPostClick}
                                             onAuthorClick={onAuthorClick}

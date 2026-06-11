@@ -20,6 +20,7 @@ export interface UserBehaviorEvent {
         | 'reply'
         | 'repost'
         | 'unrepost'
+        | 'quote'
         | 'share'
         | 'scroll'
         | 'dwell'

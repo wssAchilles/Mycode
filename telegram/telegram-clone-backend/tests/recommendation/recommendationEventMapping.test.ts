@@ -8,8 +8,15 @@ describe('recommendation event mapping', () => {
     it('maps engagement events to durable actions and realtime signals', () => {
         expect(mapEventToActionType('like')).toBe(ActionType.LIKE);
         expect(mapEventToSignalType('like')).toBe(SignalType.FAVORITE);
+        expect(mapEventToSignalType('unlike')).toBe(SignalType.UNFAVORITE);
         expect(mapEventToActionType('reply')).toBe(ActionType.REPLY);
         expect(mapEventToSignalType('reply')).toBe(SignalType.REPLY);
+        expect(mapEventToActionType('repost')).toBe(ActionType.REPOST);
+        expect(mapEventToSignalType('repost')).toBe(SignalType.RETWEET);
+        expect(mapEventToActionType('unrepost')).toBeNull();
+        expect(mapEventToSignalType('unrepost')).toBe(SignalType.UNRETWEET);
+        expect(mapEventToActionType('quote')).toBe(ActionType.QUOTE);
+        expect(mapEventToSignalType('quote')).toBe(SignalType.QUOTE);
         expect(mapEventToActionType('dwell')).toBe(ActionType.DWELL);
         expect(mapEventToSignalType('dwell')).toBe(SignalType.DWELL);
         expect(mapEventToActionType('profile_click')).toBe(ActionType.PROFILE_CLICK);

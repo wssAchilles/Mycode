@@ -134,7 +134,7 @@ export interface ExperimentConfig {
 // ===== 用户行为事件 =====
 export type UserBehaviorEventType =
     | 'impression' | 'click' | 'like' | 'unlike' | 'reply' | 'repost' | 'unrepost'
-    | 'share' | 'scroll' | 'dwell' | 'dismiss' | 'hide' | 'report'
+    | 'quote' | 'share' | 'scroll' | 'dwell' | 'dismiss' | 'hide' | 'report'
     | 'block' | 'mute' | 'follow' | 'unfollow' | 'bookmark' | 'search'
     | 'profile_click' | 'search_query' | 'hashtag_click' | 'open_link';
 

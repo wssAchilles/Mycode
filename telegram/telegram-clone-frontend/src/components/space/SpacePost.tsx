@@ -91,6 +91,8 @@ export interface SpacePostProps {
     onUnlike?: (postId: string) => void;
     onComment?: (postId: string) => void;
     onRepost?: (postId: string) => void;
+    onUnrepost?: (postId: string) => void;
+    onQuote?: (postId: string, content: string) => Promise<void> | void;
     onShare?: (postId: string) => void;
     onPinToggle?: (postId: string, nextPinned: boolean) => void;
     onClick?: (postId: string) => void;
@@ -177,6 +179,8 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onUnlike,
     onComment,
     onRepost,
+    onUnrepost,
+    onQuote,
     onShare,
     onPinToggle,
     onClick,
@@ -198,6 +202,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [isExpanded, setIsExpanded] = useState(false);
     const [showMoreMenu, setShowMoreMenu] = useState(false);
     const [showReportMenu, setShowReportMenu] = useState(false);
+    const [showQuoteComposer, setShowQuoteComposer] = useState(false);
+    const [quoteText, setQuoteText] = useState('');
+    const [quoteError, setQuoteError] = useState<string | null>(null);
+    const [quoteSubmitting, setQuoteSubmitting] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
     const [isRemoved, setIsRemoved] = useState(false);
     const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -377,6 +385,51 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         onMute?.(post.author.id);
     }, [analytics, post.author.id, onMute, recommendationEventContext]);
 
+    const handleOpenQuoteComposer = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        setShowReportMenu(false);
+        setShowQuoteComposer(true);
+        setQuoteError(null);
+        onLayoutChanged?.();
+    }, [onLayoutChanged]);
+
+    const handleCancelQuote = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowQuoteComposer(false);
+        setQuoteText('');
+        setQuoteError(null);
+        onLayoutChanged?.();
+    }, [onLayoutChanged]);
+
+    const handleSubmitQuote = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const nextQuote = quoteText.trim();
+        if (!nextQuote) {
+            setQuoteError('请输入引用内容');
+            return;
+        }
+        if (!onQuote) {
+            setQuoteError('引用功能暂不可用');
+            return;
+        }
+
+        setQuoteSubmitting(true);
+        setQuoteError(null);
+        try {
+            await onQuote(post.id, nextQuote);
+            analytics.trackQuote(post.id, recommendationEventContext);
+            setQuoteText('');
+            setShowQuoteComposer(false);
+            setRepostCount((prev) => prev + 1);
+            onLayoutChanged?.();
+        } catch {
+            setQuoteError('引用失败，请稍后再试');
+        } finally {
+            setQuoteSubmitting(false);
+        }
+    }, [analytics, onLayoutChanged, onQuote, post.id, quoteText, recommendationEventContext]);
+
     const markSeen = useSpaceStore((state) => state.markSeen);
     const handleImpression = useCallback(
         (postId: string) => {
@@ -453,15 +506,21 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const handleRepost = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
-            if (!isReposted) {
-                setIsReposted(true);
-                setRepostCount((prev) => prev + 1);
-                postMotion.run('repost');
-                analytics.trackRepost(post.id, recommendationEventContext);
-                onRepost?.(post.id);
+            if (isReposted) {
+                setIsReposted(false);
+                setRepostCount((prev) => Math.max(0, prev - 1));
+                analytics.trackUnrepost(post.id, recommendationEventContext);
+                onUnrepost?.(post.id);
+                return;
             }
+
+            setIsReposted(true);
+            setRepostCount((prev) => prev + 1);
+            postMotion.run('repost');
+            analytics.trackRepost(post.id, recommendationEventContext);
+            onRepost?.(post.id);
         },
-        [analytics, isReposted, onRepost, post.id, postMotion, recommendationEventContext]
+        [analytics, isReposted, onRepost, onUnrepost, post.id, postMotion, recommendationEventContext]
     );
 
     // 处理分享
@@ -647,6 +706,13 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                             </svg>
                                             举报
                                         </button>
+                                        <button className="space-post__menu-item" onClick={handleOpenQuoteComposer}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <path d="M6 3h12a2 2 0 0 1 2 2v13l-4-3H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+                                                <path d="M8 8h8M8 12h5" />
+                                            </svg>
+                                            引用动态
+                                        </button>
                                         <div className="space-post__menu-divider" />
                                         <button className="space-post__menu-item space-post__menu-item--danger" onClick={handleBlock}>
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
@@ -718,6 +784,41 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         </ReactMarkdown>
                     </div>
 
+                    {showQuoteComposer && (
+                        <div className="space-post__quote-composer" onClick={(e) => e.stopPropagation()}>
+                            <label className="space-post__quote-label" htmlFor={`space-quote-${post.id}`}>
+                                引用 @{post.author.username}
+                            </label>
+                            <textarea
+                                id={`space-quote-${post.id}`}
+                                className="space-post__quote-textarea"
+                                value={quoteText}
+                                onChange={(e) => {
+                                    setQuoteText(e.target.value);
+                                    setQuoteError(null);
+                                }}
+                                placeholder="添加你的看法"
+                                rows={3}
+                                maxLength={280}
+                            />
+                            {quoteError && <div className="space-post__quote-error">{quoteError}</div>}
+                            <div className="space-post__quote-actions">
+                                <span className="space-post__quote-count">{quoteText.length}/280</span>
+                                <button type="button" className="space-post__quote-cancel" onClick={handleCancelQuote}>
+                                    取消
+                                </button>
+                                <button
+                                    type="button"
+                                    className="space-post__quote-submit"
+                                    onClick={handleSubmitQuote}
+                                    disabled={quoteSubmitting || quoteText.trim().length === 0}
+                                >
+                                    {quoteSubmitting ? '发布中...' : '发布引用'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {isLongContent && (
                         <button
                             className="space-post__read-more"
@@ -751,7 +852,8 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                     <button
                         className={`space-post__action space-post__action--repost ${isReposted ? 'is-active' : ''}`}
                         onClick={handleRepost}
-                        aria-label="转发"
+                        aria-label={isReposted ? '取消转发' : '转发'}
+                        title={isReposted ? '取消转发' : '转发'}
                     >
                         <span className="space-post__action-icon">
                             <RepostIcon />

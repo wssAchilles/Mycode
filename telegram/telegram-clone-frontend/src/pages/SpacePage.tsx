@@ -104,6 +104,7 @@ export const SpacePage: React.FC = () => {
     const likePost = useSpaceStore((state) => state.likePost);
     const unlikePost = useSpaceStore((state) => state.unlikePost);
     const repostPost = useSpaceStore((state) => state.repostPost);
+    const unrepostPost = useSpaceStore((state) => state.unrepostPost);
     const loadContacts = useChatStore((state) => state.loadContacts);
     const contacts = useChatStore((state) => state.contacts);
 
@@ -167,6 +168,21 @@ export const SpacePage: React.FC = () => {
             setActiveSection('home');
             await createPost(content, media);
             showToast('动态发布成功！', 'success');
+            setTimeout(() => {
+                scrollContentToTop('smooth');
+            }, 120);
+        },
+        [createPost, scrollContentToTop]
+    );
+
+    const handleQuotePost = useCallback(
+        async (postId: string, quoteContent: string) => {
+            setActiveSection('home');
+            await createPost(quoteContent, undefined, {
+                quotePostId: postId,
+                quoteContent,
+            });
+            showToast('引用发布成功', 'success');
             setTimeout(() => {
                 scrollContentToTop('smooth');
             }, 120);
@@ -459,6 +475,8 @@ export const SpacePage: React.FC = () => {
                             onUnlike={unlikePost}
                             onComment={handleComment}
                             onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
+                            onUnrepost={(id) => { unrepostPost(id); showToast('已取消转发', 'info'); }}
+                            onQuote={handleQuotePost}
                             onShare={handleShare}
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}
@@ -471,6 +489,8 @@ export const SpacePage: React.FC = () => {
                             onUnlike={unlikePost}
                             onComment={handleComment}
                             onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
+                            onUnrepost={(id) => { unrepostPost(id); showToast('已取消转发', 'info'); }}
+                            onQuote={handleQuotePost}
                             onShare={handleShare}
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}

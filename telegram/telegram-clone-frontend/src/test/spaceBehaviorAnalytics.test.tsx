@@ -18,6 +18,7 @@ const analyticsMocks = vi.hoisted(() => ({
   trackReply: vi.fn(),
   trackRepost: vi.fn(),
   trackUnrepost: vi.fn(),
+  trackQuote: vi.fn(),
   trackShare: vi.fn(),
   trackDismiss: vi.fn(),
   trackHide: vi.fn(),
@@ -98,8 +99,22 @@ function makePost(overrides: Partial<PostData> = {}): PostData {
   };
 }
 
+function mockReducedMotion(matches: boolean) {
+  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 describe('Space behavior analytics entrypoints', () => {
   beforeEach(() => {
+    mockReducedMotion(false);
     for (const value of Object.values(analyticsMocks)) {
       if (typeof value === 'function') value.mockClear();
     }
@@ -115,6 +130,8 @@ describe('Space behavior analytics entrypoints', () => {
         onUnlike={vi.fn()}
         onComment={vi.fn()}
         onRepost={vi.fn()}
+        onUnrepost={vi.fn()}
+        onQuote={vi.fn()}
         onShare={vi.fn()}
         onPostClick={vi.fn()}
       />
@@ -148,6 +165,49 @@ describe('Space behavior analytics entrypoints', () => {
       expect.objectContaining({
         authorId: 'author-1',
         requestId: 'req-1',
+      }),
+    );
+  });
+
+  it('tracks unrepost from the active repost button', () => {
+    const onUnrepost = vi.fn();
+    render(<SpacePost post={makePost({ isReposted: true, repostCount: 1 })} onUnrepost={onUnrepost} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '取消转发' }));
+
+    expect(analyticsMocks.trackUnrepost).toHaveBeenCalledWith(
+      '65f000000000000000000001',
+      expect.objectContaining({
+        requestId: 'req-1',
+        position: 1,
+      }),
+    );
+    expect(onUnrepost).toHaveBeenCalledWith('65f000000000000000000001');
+  });
+
+  it('tracks quote submissions from the SpacePost menu', async () => {
+    mockReducedMotion(true);
+    const onQuote = vi.fn().mockResolvedValue(undefined);
+    render(<SpacePost post={makePost()} onQuote={onQuote} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '更多选项' }));
+    fireEvent.click(screen.getByRole('button', { name: '引用动态' }));
+    fireEvent.change(screen.getByLabelText('引用 @demo_author'), {
+      target: { value: '引用这条推荐动态' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发布引用' }));
+
+    await waitFor(() => {
+      expect(onQuote).toHaveBeenCalledWith(
+        '65f000000000000000000001',
+        '引用这条推荐动态',
+      );
+    });
+    expect(analyticsMocks.trackQuote).toHaveBeenCalledWith(
+      '65f000000000000000000001',
+      expect.objectContaining({
+        requestId: 'req-1',
+        position: 1,
       }),
     );
   });

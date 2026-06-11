@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { PostData } from '../components/space';
-import { spaceAPI } from '../services/spaceApi';
+import { spaceAPI, type CreatePostOptions } from '../services/spaceApi';
 import { authStorage } from '../utils/authStorage';
 
 const FEED_STATE_WINDOW = 200;
@@ -103,10 +103,11 @@ interface SpaceState {
     clearSearch: () => void;
 
     // 帖子操作
-    createPost: (content: string, media?: File[]) => Promise<PostData>;
+    createPost: (content: string, media?: File[], options?: CreatePostOptions) => Promise<PostData>;
     likePost: (postId: string) => Promise<void>;
     unlikePost: (postId: string) => Promise<void>;
     repostPost: (postId: string) => Promise<void>;
+    unrepostPost: (postId: string) => Promise<void>;
 
     // 本地状态更新
     addPostToTop: (post: PostData) => void;
@@ -397,14 +398,14 @@ export const useSpaceStore = create<SpaceState>()(
         },
 
         // === 帖子操作 ===
-        createPost: async (content, media) => {
+        createPost: async (content, media, options) => {
             set((s) => {
                 s.isCreatingPost = true;
                 s.error = null;
             });
 
             try {
-                const newPost = await spaceAPI.createPost(content, media);
+                const newPost = await spaceAPI.createPost(content, media, options);
 
                 set((s) => {
                     s.posts.unshift(newPost);
@@ -503,6 +504,41 @@ export const useSpaceStore = create<SpaceState>()(
                         if (post) {
                             post.isReposted = false;
                             post.repostCount = Math.max(0, post.repostCount - 1);
+                        }
+                    };
+                    rollback(s.posts.find((p) => p.id === postId));
+                    rollback(s.searchResults.find((p) => p.id === postId));
+                });
+            }
+        },
+
+        unrepostPost: async (postId) => {
+            const current = get().posts.find((p) => p.id === postId)
+                || get().searchResults.find((p) => p.id === postId);
+            const wasReposted = Boolean(current?.isReposted);
+            if (!wasReposted) return;
+
+            // 乐观更新
+            set((s) => {
+                const update = (post: PostData | undefined) => {
+                    if (post) {
+                        post.isReposted = false;
+                        post.repostCount = Math.max(0, post.repostCount - 1);
+                    }
+                };
+                update(s.posts.find((p) => p.id === postId));
+                update(s.searchResults.find((p) => p.id === postId));
+            });
+
+            try {
+                await spaceAPI.unrepostPost(postId);
+            } catch {
+                // 回滚
+                set((s) => {
+                    const rollback = (post: PostData | undefined) => {
+                        if (post) {
+                            post.isReposted = true;
+                            post.repostCount += 1;
                         }
                     };
                     rollback(s.posts.find((p) => p.id === postId));

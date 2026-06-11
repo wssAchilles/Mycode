@@ -30,6 +30,8 @@ export interface SpaceTimelineProps {
     onUnlike: SpacePostProps['onUnlike'];
     onComment: SpacePostProps['onComment'];
     onRepost: SpacePostProps['onRepost'];
+    onUnrepost: SpacePostProps['onUnrepost'];
+    onQuote?: SpacePostProps['onQuote'];
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
     onAuthorClick?: SpacePostProps['onAuthorClick'];
@@ -54,6 +56,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onUnlike,
     onComment,
     onRepost,
+    onUnrepost,
+    onQuote,
     onShare,
     onPostClick,
     onAuthorClick,
@@ -316,6 +320,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                     onUnlike={onUnlike}
                                     onComment={onComment}
                                     onRepost={onRepost}
+                                    onUnrepost={onUnrepost}
+                                    onQuote={onQuote}
                                     onShare={onShare}
                                     onClick={onPostClick}
                                     onAuthorClick={onAuthorClick}
@@ -356,6 +362,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                         onUnlike={onUnlike}
                                         onComment={onComment}
                                         onRepost={onRepost}
+                                        onUnrepost={onUnrepost}
+                                        onQuote={onQuote}
                                         onShare={onShare}
                                         onClick={onPostClick}
                                         onAuthorClick={onAuthorClick}

@@ -14,6 +14,8 @@ import {
     saveSpaceUpload,
     transformPostToResponse,
     buildFeedResponseAdapterOptions,
+    logPostAction,
+    ActionType,
 } from './shared';
 
 const router = Router();
@@ -51,6 +53,9 @@ router.post('/posts', spaceUpload.array('media'), async (req: Request, res: Resp
             quotePostId,
             quoteContent,
         });
+        if (quotePostId) {
+            logPostAction(userId, quotePostId, ActionType.QUOTE);
+        }
 
         const transformed = await transformPostToResponse(post);
         return res.status(201).json(transformed);

@@ -96,6 +96,9 @@ router.delete('/posts/:id/repost', async (req: Request, res: Response) => {
         if (!userId) return res.status(401).json({ error: '未授权' });
 
         const success = await spaceService.unrepostPost(id, userId);
+        if (success) {
+            logSignal({ userId, signalType: SignalType.UNRETWEET, targetId: id, targetType: TargetType.POST });
+        }
         return res.json({ success, reposted: false });
     } catch (error) {
         log.error({ err: error }, '取消转发失败');

@@ -120,6 +120,11 @@ const SpacePostDetailPage: React.FC = () => {
                         onLike={(postId) => spaceAPI.likePost(postId)}
                         onUnlike={(postId) => spaceAPI.unlikePost(postId)}
                         onRepost={(postId) => spaceAPI.repostPost(postId)}
+                        onUnrepost={(postId) => spaceAPI.unrepostPost(postId)}
+                        onQuote={(postId, quoteContent) => spaceAPI.createPost(quoteContent, undefined, {
+                            quotePostId: postId,
+                            quoteContent,
+                        })}
                         onShare={(postId) => {
                             navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
                             showToast('链接已复制到剪贴板', 'success');

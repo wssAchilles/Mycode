@@ -76,6 +76,7 @@ export interface AnalyticsTracker {
     trackReply: (postId: string, metadata?: AnalyticsMetadata) => void;
     trackRepost: (postId: string, metadata?: AnalyticsMetadata) => void;
     trackUnrepost: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackQuote: (postId: string, metadata?: AnalyticsMetadata) => void;
     trackShare: (postId: string, metadata?: AnalyticsMetadata) => void;
     trackDismiss: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
     trackHide: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
@@ -154,6 +155,12 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
     // 追踪取消转发
     const trackUnrepost = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
         const event = createEvent('unrepost', postId, metadata);
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪引用转发
+    const trackQuote = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('quote', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
@@ -278,6 +285,7 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
         trackReply,
         trackRepost,
         trackUnrepost,
+        trackQuote,
         trackShare,
         trackDismiss,
         trackHide,

@@ -170,6 +170,11 @@ export interface NotificationItem {
     createdAt: string;
 }
 
+export interface CreatePostOptions {
+    quotePostId?: string;
+    quoteContent?: string;
+}
+
 export type RecommendationDailyRefreshStatus = 'success' | 'running' | 'failed' | 'unknown';
 
 export interface RecommendationDailyRefreshOps {
@@ -416,14 +421,18 @@ export const spaceAPI = {
     /**
      * 创建帖子
      */
-    createPost: async (content: string, media?: File[]): Promise<PostData> => {
+    createPost: async (content: string, media?: File[], options: CreatePostOptions = {}): Promise<PostData> => {
         try {
             let response;
+            const quotePostId = options.quotePostId?.trim();
+            const quoteContent = options.quoteContent?.trim();
 
             if (media && media.length > 0) {
                 // 有文件时使用 FormData
                 const formData = new FormData();
                 formData.append('content', content);
+                if (quotePostId) formData.append('quotePostId', quotePostId);
+                if (quoteContent) formData.append('quoteContent', quoteContent);
                 media.forEach((file) => {
                     formData.append('media', file);
                 });
@@ -432,7 +441,11 @@ export const spaceAPI = {
                 response = await apiClient.post<PostResponse>('/api/space/posts', formData);
             } else {
                 // 无文件时使用 JSON
-                response = await apiClient.post<PostResponse>('/api/space/posts', { content });
+                response = await apiClient.post<PostResponse>('/api/space/posts', {
+                    content,
+                    ...(quotePostId ? { quotePostId } : {}),
+                    ...(quoteContent ? { quoteContent } : {}),
+                });
             }
 
             // 后端可能不返回 authorUsername，从 localStorage 补充
@@ -496,6 +509,17 @@ export const spaceAPI = {
             return transformPost(response.data);
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '转发失败'));
+        }
+    },
+
+    /**
+     * 取消转发帖子
+     */
+    unrepostPost: async (postId: string): Promise<void> => {
+        try {
+            await apiClient.delete(`/api/space/posts/${postId}/repost`);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '取消转发失败'));
         }
     },
 
