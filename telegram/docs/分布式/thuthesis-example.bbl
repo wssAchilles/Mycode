@@ -13,41 +13,31 @@
 
 \bibitem[Hu et~al.(2008)Hu, Koren, and Volinsky]{hu2008collaborative}
 Hu Y, Koren Y, Volinsky C.
-\newblock Collaborative filtering for implicit feedback
-  datasets\allowbreak[C]//\allowbreak
+\newblock Collaborative filtering for implicit feedback datasets\allowbreak[C]//\allowbreak
 Proceedings of the 8th IEEE International Conference on Data Mining.
 \newblock 2008: 263-272.
 
-\bibitem[Rendle et~al.(2009)Rendle, Freudenthaler, Gantner, and
-  Schmidt-Thieme]{rendle2009bpr}
+\bibitem[Rendle et~al.(2009)Rendle, Freudenthaler, Gantner, and Schmidt-Thieme]{rendle2009bpr}
 Rendle S, Freudenthaler C, Gantner Z, et~al.
-\newblock Bpr: Bayesian personalized ranking from implicit
-  feedback\allowbreak[C]//\allowbreak
-Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
-  Intelligence.
+\newblock Bpr: Bayesian personalized ranking from implicit feedback\allowbreak[C]//\allowbreak
+Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial Intelligence.
 \newblock 2009: 452-461.
 
 \bibitem[Carbonell et~al.(1998)Carbonell and Goldstein]{carbonell1998mmr}
 Carbonell J, Goldstein J.
-\newblock The use of mmr, diversity-based reranking for reordering documents
-  and producing summaries\allowbreak[C]//\allowbreak
-Proceedings of the 21st Annual International ACM SIGIR Conference on Research
-  and Development in Information Retrieval.
+\newblock The use of mmr, diversity-based reranking for reordering documents and producing summaries\allowbreak[C]//\allowbreak
+Proceedings of the 21st Annual International ACM SIGIR Conference on Research and Development in Information Retrieval.
 \newblock 1998: 335-336.
 
 \bibitem[Covington et~al.(2016)Covington, Adams, and Sargin]{covington}
 Covington P, Adams J, Sargin E.
-\newblock Deep neural networks for youtube
-  recommendations\allowbreak[C]//\allowbreak
+\newblock Deep neural networks for youtube recommendations\allowbreak[C]//\allowbreak
 Proceedings of the 10th ACM Conference on Recommender Systems.
 \newblock 2016: 191-198.
 
-\bibitem[Cheng et~al.(2016)Cheng, Koc, Harmsen, Shaked, Chandra, Aradhye,
-  Anderson, Corrado, Chai, Ispir, Anil, Haque, Hong, Jain, Liu, and
-  Shah]{cheng}
+\bibitem[Cheng et~al.(2016)Cheng, Koc, Harmsen, Shaked, Chandra, Aradhye, Anderson, Corrado, Chai, Ispir, Anil, Haque, Hong, Jain, Liu, and Shah]{cheng}
 Cheng H~T, Koc L, Harmsen J, et~al.
-\newblock Wide \& deep learning for recommender
-  systems\allowbreak[C]//\allowbreak
+\newblock Wide \& deep learning for recommender systems\allowbreak[C]//\allowbreak
 Proceedings of the 1st Workshop on Deep Learning for Recommender Systems.
 \newblock 2016: 7-10.
 

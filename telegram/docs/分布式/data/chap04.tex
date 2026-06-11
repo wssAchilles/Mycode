@@ -6,7 +6,7 @@
 
 本项目测试围绕接口联调、数据库结构检查和推荐算法流程检查展开。测试环境如下：
 
-\begin{longtable}{p{0.28\textwidth}p{0.62\textwidth}}
+\begin{longtable}{L{0.28\textwidth}L{0.62\textwidth}}
 \caption{测试环境说明}\\
 \toprule
 项目 & 说明 \\
@@ -17,9 +17,11 @@
 \midrule
 \endhead
 后端框架 & Spring Boot后端设计，接口按RESTful风格组织。\\
+Go服务 & 消息投递消费者，负责Redis Stream消费、批量ACK、outbox状态更新和同步唤醒。\\
+C++服务 & 图计算内核，负责社交图谱快照、邻居查询、共同关系查询和多跳遍历。\\
 接口工具 & Apifox桌面端，用于构造请求、解析参数和保存联调截图。\\
 数据库 & Supabase PostgreSQL，项目名\texttt{telegram}，区域\texttt{us-west-2}。\\
-缓存设计 & Redis，用于时间线缓存、热点Feed缓存和临时特征缓存。\\
+缓存与消息流 & Redis，用于时间线缓存、热点Feed缓存、临时特征缓存和Stream消息消费。\\
 测试接口 & 推荐Feed接口、趋势接口、用户推荐接口、行为事件接口。\\
 \bottomrule
 \end{longtable}
@@ -69,7 +71,7 @@ Apifox会自动将URL中的查询参数解析到Params区域，其中\texttt{lim
 
 \section{核心接口测试用例}
 
-\begin{longtable}{p{0.2\textwidth}p{0.3\textwidth}p{0.36\textwidth}}
+\begin{longtable}{L{0.20\textwidth}L{0.30\textwidth}L{0.36\textwidth}}
 \caption{核心接口测试用例}\\
 \toprule
 测试项 & 输入 & 预期结果 \\
@@ -90,7 +92,7 @@ Apifox会自动将URL中的查询参数解析到Params区域，其中\texttt{lim
 
 \section{数据库检查}
 
-通过Supabase MCP读取数据库结构，确认项目\texttt{telegram}处于\texttt{ACTIVE\_HEALTHY}状态，数据库主机为Supabase托管PostgreSQL。核心业务表均已存在，且具备推荐系统所需数据基础。
+通过Supabase MCP读取数据库结构，确认项目\texttt{telegram}处于健康可用状态，数据库主机为Supabase托管PostgreSQL。核心业务表均已存在，且具备推荐系统所需数据基础。
 
 数据库检查结果如下：
 
@@ -114,8 +116,76 @@ Apifox会自动将URL中的查询参数解析到Params区域，其中\texttt{lim
   \item 多样性测试：当多个候选来自同一作者或同一主题时，TopK选择阶段应控制重复度。
 \end{enumerate}
 
+\section{Go投递链路测试}
+
+Go侧测试重点是验证消息投递链路在并发优化后仍保持业务顺序、失败语义和可观测字段。测试设计如下：
+
+\begin{enumerate}
+  \item keyed ordering测试：构造多个\texttt{chat\_id}和\texttt{message\_id}的Redis Stream消息，验证同一业务键进入同一worker lane并保持处理顺序，不同业务键可以并行执行。
+  \item 批量ACK测试：模拟一批成功消息，验证ACK请求按stream聚合，并按照\texttt{ack\_batch\_size}批量确认，避免逐条\texttt{XACK}。
+  \item PEL恢复测试：模拟待处理消息列表中存在旧消息，验证reclaim worker可以独立执行，并且不会阻塞新消息主消费循环。
+  \item 分块预留测试：构造大群接收者列表，验证update id按block连续预留，本地再分配给接收者，从而减少远程MongoDB写入次数。
+  \item outbox聚合测试：验证chunk状态变化后，queued、completed、failed和job id等聚合字段能够增量更新，并可通过reconcile路径修复。
+\end{enumerate}
+
+对应的工程验证命令为：
+
+\begin{lstlisting}[language=bash,caption={Go投递服务测试命令}]
+cd telegram-go-delivery-consumer
+go test ./...
+staticcheck ./...
+\end{lstlisting}
+
+性能门禁中还提供本地fixture，用于输出\texttt{keyed\_dispatch\_batch\_ack}的请求数、batch size、worker lane数量、p50、p95、p99和batch ack count。该fixture不依赖外部Redis或MongoDB，适合在CI中作为回归检查；真实基础设施压测则通过可选infra gate连接Redis、MongoDB和WebSocket环境后执行。
+
+\section{C++图计算内核测试}
+
+C++侧测试重点是验证图快照构建、查询正确性和高出度场景下的性能稳定性。测试设计如下：
+
+\begin{enumerate}
+  \item 快照构建测试：构造包含多种边类型和权重的图数据，验证字符串id可以正确intern为整数编号，CSR offset和邻居数组边界正确。
+  \item 直接邻居测试：查询某个用户的一阶邻居，验证返回结果、排序和limit限制符合预期。
+  \item overlap共同关系测试：构造两个高出度用户，验证共同邻居结果正确，同时检查streaming top-K不会全量物化无关候选。
+  \item ranked high-degree测试：对高出度节点进行ranked top-K查询，验证得分排序、时间衰减和预算控制生效。
+  \item 多跳遍历测试：构造多层关系图，验证遍历不会超过预算，并能返回更高价值的候选路径。
+  \item 快照发布测试：验证新快照发布后查询读取新版本，刷新过程中旧快照仍可服务读请求。
+\end{enumerate}
+
+对应的工程验证命令为：
+
+\begin{lstlisting}[language=bash,caption={C++图计算服务测试和基准命令}]
+cmake -S telegram-cpp-graph-service \
+  -B /tmp/telegram-cpp-graph-build \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build /tmp/telegram-cpp-graph-build -j4 \
+  --target graph-store-tests graph-store-bench
+ctest --test-dir /tmp/telegram-cpp-graph-build \
+  --output-on-failure
+cd /tmp/telegram-cpp-graph-build
+./graph-store-bench --json
+\end{lstlisting}
+
+C++基准输出采用JSON格式，主要包含快照发布、直接高出度查询、ranked top-K、多跳预算遍历、桥接遍历和overlap查询等测试项。报告字段包括吞吐量、p50、p95、p99、scanned、visited、candidates、budget exhausted和memory estimate bytes。这些字段可以帮助判断图服务是否因为快照过大、高出度节点或overlap查询而出现尾延迟风险。
+
+\section{统一性能与发布验证}
+
+除单服务测试外，项目还提供统一性能门禁脚本。该脚本汇总Go投递服务、Rust网关与推荐服务、C++图计算服务的本地fixture和基准结果，统一输出\texttt{summary.json}和\texttt{report.md}。报告字段包括request count、batch size、queue depth、p50、p95、p99、timeouts、fallback、budget exhausted、cache hit和cache miss。对于课程报告而言，该门禁体现了分布式系统中“代码正确性”和“性能回归可观察性”并重的思想。
+
+部署后验证则以服务健康检查为主。VPS上各服务通过Docker Compose运行，关键健康检查包括：
+
+\begin{lstlisting}[language=bash,caption={生产服务健康检查命令}]
+curl https://api.xuziqi.tech/health
+ssh root@159.203.142.13 '
+for port in 5000 4000 4100 4200 4300; do
+  curl --silent --show-error --max-time 10 \
+    "http://127.0.0.1:${port}/health"
+done'
+\end{lstlisting}
+
+其中\texttt{5000}对应业务后端，\texttt{4000}对应网关，\texttt{4100}对应Go投递服务，\texttt{4200}对应推荐服务，\texttt{4300}对应C++图计算内核。通过这些端口可以确认多语言服务在同一部署环境下是否均已启动。
+
 \section{测试结论}
 
-根据Apifox联调界面、Supabase数据库结构和推荐算法流程检查，可以认为本项目具备课程设计要求的主要测试证据：接口路径明确、请求参数可解析、云端数据库真实存在、推荐算法流程完整、核心数据表能够支撑用户关系和内容行为分析。
+根据Apifox联调界面、Supabase数据库结构、推荐算法流程检查、Go投递链路测试和C++图计算基准，可以认为本项目具备课程设计要求的主要测试证据：接口路径明确、请求参数可解析、云端数据库真实存在、推荐算法流程完整、核心数据表能够支撑用户关系和内容行为分析，异步投递链路和图查询内核也具备可验证的正确性与性能观测能力。
 
 同时，测试中发现Supabase公开模式下多张表尚未启用RLS，其中\texttt{users}表还包含\texttt{password}字段。该问题不影响课程报告的结构撰写，但属于真实上线前必须处理的安全风险。建议在正式部署前启用RLS，并将密码字段改为不可逆哈希存储，禁止前端直接访问敏感表。

@@ -30,6 +30,7 @@
 
 % 表格中支持跨行
 \usepackage{multirow}
+\usepackage{ragged2e}
 
 % 固定宽度的表格。
 % \usepackage{tabularx}
@@ -38,10 +39,17 @@
 \usepackage{longtable}
 \usepackage{tabularx}
 \usepackage{booktabs}  % 提供了 \toprule, \midrule, \bottomrule
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
 % 算法
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{listings}
+\lstset{
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true
+}
 %代码字体
 \DeclareFixedFont{\ttb}{T1}{txtt}{bx}{n}{10} % for bold
 \DeclareFixedFont{\ttm}{T1}{txtt}{m}{n}{10}  % for normal
