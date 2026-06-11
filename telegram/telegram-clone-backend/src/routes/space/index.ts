@@ -14,6 +14,7 @@ import socialRouter from './social';
 import newsRouter from './news';
 import searchRouter from './search';
 import recommendationStatusRouter from './recommendationStatus';
+import negativeFeedbackRouter from './negativeFeedback';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use('/', postsRouter);       // /posts, /posts/batch, /posts/:id, /posts/
 router.use('/', interactionsRouter); // /posts/:id/like, /repost, /comments, /not-interested, /hide, /report
 router.use('/', feedRouter);        // /feed
 router.use('/', profilesRouter);    // /users/:id/profile, /posts, /likes, /cover, /avatar
+router.use('/', negativeFeedbackRouter); // /users/:id/negative-feedback
 router.use('/', socialRouter);      // /users/:id/follow, /block, /mute
 router.use('/', recommendationStatusRouter); // /recommendation/daily-refresh
 router.use('/', searchRouter);      // /search, /topics/:tag/posts, /trends, /recommend/users, /notifications

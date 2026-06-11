@@ -34,7 +34,7 @@ router.post('/posts/:id/like', async (req: Request, res: Response) => {
         const success = await spaceService.likePost(id, userId);
         if (success) {
             logPostAction(userId, id, ActionType.LIKE);
-            logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST });
+        logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST });
         }
         return res.json({ success, liked: success });
     } catch (error) {
@@ -54,6 +54,15 @@ router.delete('/posts/:id/like', async (req: Request, res: Response) => {
         if (!userId) return res.status(401).json({ error: '未授权' });
 
         const success = await spaceService.unlikePost(id, userId);
+        if (success) {
+            logSignal({
+                userId,
+                signalType: SignalType.UNFAVORITE,
+                targetId: id,
+                targetType: TargetType.POST,
+                metadata: { negativeWeight: -0.5 },
+            });
+        }
         return res.json({ success, liked: false });
     } catch (error) {
         log.error({ err: error }, '取消点赞失败');
@@ -97,7 +106,13 @@ router.delete('/posts/:id/repost', async (req: Request, res: Response) => {
 
         const success = await spaceService.unrepostPost(id, userId);
         if (success) {
-            logSignal({ userId, signalType: SignalType.UNRETWEET, targetId: id, targetType: TargetType.POST });
+            logSignal({
+                userId,
+                signalType: SignalType.UNRETWEET,
+                targetId: id,
+                targetType: TargetType.POST,
+                metadata: { negativeWeight: -1 },
+            });
         }
         return res.json({ success, reposted: false });
     } catch (error) {
@@ -126,7 +141,18 @@ router.post('/posts/:postId/not-interested', async (req: Request, res: Response)
             productSurface: 'home_feed',
             timestamp: new Date(),
         });
-        logSignal({ userId, signalType: SignalType.DISMISS_POST, targetId: postId, targetType: TargetType.POST });
+        logSignal({
+            userId,
+            signalType: SignalType.DISMISS_POST,
+            targetId: postId,
+            targetType: TargetType.POST,
+            targetAuthorId: post?.authorId,
+            metadata: {
+                reason: 'not_interested',
+                targetKeywords: extractPostKeywords(post),
+                negativeWeight: -2,
+            },
+        });
 
         return res.status(201).json({ success: true });
     } catch (error) {
@@ -155,7 +181,18 @@ router.post('/posts/:postId/hide', async (req: Request, res: Response) => {
             productSurface: 'home_feed',
             timestamp: new Date(),
         });
-        logSignal({ userId, signalType: SignalType.HIDE_POST, targetId: postId, targetType: TargetType.POST });
+        logSignal({
+            userId,
+            signalType: SignalType.HIDE_POST,
+            targetId: postId,
+            targetType: TargetType.POST,
+            targetAuthorId: post?.authorId,
+            metadata: {
+                reason: 'hide_post',
+                targetKeywords: extractPostKeywords(post),
+                negativeWeight: -4,
+            },
+        });
 
         return res.status(201).json({ success: true });
     } catch (error) {
@@ -190,7 +227,18 @@ router.post('/posts/:postId/report', async (req: Request, res: Response) => {
             productSurface: 'home_feed',
             timestamp: new Date(),
         });
-        logSignal({ userId, signalType: SignalType.REPORT, targetId: postId, targetType: TargetType.POST });
+        logSignal({
+            userId,
+            signalType: SignalType.REPORT,
+            targetId: postId,
+            targetType: TargetType.POST,
+            targetAuthorId: post?.authorId,
+            metadata: {
+                reason,
+                targetKeywords: extractPostKeywords(post),
+                negativeWeight: -8,
+            },
+        });
 
         return res.status(201).json({ success: true });
     } catch (error) {

@@ -56,7 +56,13 @@ router.delete('/users/:id/follow', async (req: Request, res: Response) => {
         if (!userId) return res.status(401).json({ error: '未授权' });
 
         await Contact.destroy({ where: { userId, contactId: targetId } });
-        logSignal({ userId, signalType: SignalType.UNFOLLOW, targetId, targetType: TargetType.USER });
+        logSignal({
+            userId,
+            signalType: SignalType.UNFOLLOW,
+            targetId,
+            targetType: TargetType.USER,
+            metadata: { negativeWeight: -3 },
+        });
         return res.json({ success: true, followed: false });
     } catch (error) {
         log.error({ err: error }, '取消关注失败');
@@ -84,7 +90,13 @@ router.post('/users/:id/block', async (req: Request, res: Response) => {
             await contact.save();
         }
 
-        logSignal({ userId, signalType: SignalType.BLOCK, targetId, targetType: TargetType.USER });
+        logSignal({
+            userId,
+            signalType: SignalType.BLOCK,
+            targetId,
+            targetType: TargetType.USER,
+            metadata: { negativeWeight: -10 },
+        });
         return res.json({ success: true, blocked: true });
     } catch (error) {
         log.error({ err: error }, '拉黑失败');
@@ -124,7 +136,13 @@ router.post('/users/:id/mute', async (req: Request, res: Response) => {
 
         const UserSettings = (await import('../../models/UserSettings')).default;
         await UserSettings.addMutedUser(userId, targetId);
-        logSignal({ userId, signalType: SignalType.MUTE, targetId, targetType: TargetType.USER });
+        logSignal({
+            userId,
+            signalType: SignalType.MUTE,
+            targetId,
+            targetType: TargetType.USER,
+            metadata: { negativeWeight: -5 },
+        });
         return res.json({ success: true, muted: true });
     } catch (error) {
         log.error({ err: error }, '静音失败');

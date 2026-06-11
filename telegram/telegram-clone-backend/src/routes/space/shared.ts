@@ -304,6 +304,9 @@ export function logSignal(params: {
     targetId: string;
     targetType: TargetType;
     productSurface?: ProductSurface;
+    targetAuthorId?: string;
+    requestId?: string;
+    metadata?: Record<string, unknown>;
 }) {
     UserSignal.logSignal({
         ...params,

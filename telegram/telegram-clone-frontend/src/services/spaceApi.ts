@@ -253,6 +253,59 @@ export interface UserProfile {
     pinnedPost?: PostData | null;
 }
 
+export type NegativeFeedbackSignalType =
+    | 'unfavorite'
+    | 'unretweet'
+    | 'unfollow'
+    | 'block'
+    | 'mute'
+    | 'report'
+    | 'dismiss_post'
+    | 'hide_post'
+    | 'unbookmark'
+    | 'notification_dismiss';
+
+export interface NegativeFeedbackItem {
+    id: string;
+    signalType: NegativeFeedbackSignalType;
+    label: string;
+    targetType: 'post' | 'user' | 'topic' | 'list' | 'notification' | 'search_query';
+    targetId: string;
+    targetAuthorId?: string;
+    productSurface?: string;
+    requestId?: string;
+    reason?: string | null;
+    reasonLabel?: string | null;
+    negativeWeight?: number | null;
+    generatedBy?: string | null;
+    createdAt: string;
+    targetPost?: {
+        id: string;
+        authorId?: string;
+        authorUsername?: string;
+        content: string;
+        createdAt?: string | null;
+    } | null;
+    targetUser?: {
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+    } | null;
+}
+
+export interface NegativeFeedbackSummary {
+    total: number;
+    byType: Record<string, number>;
+    negativeWeightTotal: number;
+}
+
+export interface NegativeFeedbackResponse {
+    items: NegativeFeedbackItem[];
+    hasMore: boolean;
+    nextCursor?: string;
+    summary: NegativeFeedbackSummary;
+}
+
 interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
     pinnedPost?: PostResponse | null;
 }
@@ -613,6 +666,49 @@ export const spaceAPI = {
             };
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '获取点赞列表失败'));
+        }
+    },
+
+    /**
+     * 获取用户负反馈记录（仅本人）
+     */
+    getUserNegativeFeedback: async (
+        userId: string,
+        limit: number = 50,
+        cursor?: string
+    ): Promise<NegativeFeedbackResponse> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            if (cursor) params.append('cursor', cursor);
+
+            const response = await apiClient.get<NegativeFeedbackResponse>(
+                `/api/space/users/${userId}/negative-feedback?${params.toString()}`
+            );
+            return {
+                ...response.data,
+                items: (response.data.items || []).map((item) => ({
+                    ...item,
+                    targetUser: item.targetUser
+                        ? {
+                            ...item.targetUser,
+                            avatarUrl: resolveSpaceMediaUrl(item.targetUser.avatarUrl) ?? item.targetUser.avatarUrl,
+                        }
+                        : null,
+                })),
+            };
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取负反馈记录失败'));
+        }
+    },
+
+    /**
+     * 撤销一条负反馈推荐特征
+     */
+    undoNegativeFeedback: async (userId: string, feedbackId: string): Promise<void> => {
+        try {
+            await apiClient.post(`/api/space/users/${userId}/negative-feedback/${feedbackId}/undo`);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '撤销负反馈失败'));
         }
     },
 

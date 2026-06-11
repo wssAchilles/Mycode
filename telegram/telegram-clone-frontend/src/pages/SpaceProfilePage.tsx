@@ -3,9 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { authUtils } from '../services/apiClient';
 import apiClient from '../services/apiClient';
 import { authStorage } from '../utils/authStorage';
-import { spaceAPI, type UserProfile } from '../services/spaceApi';
+import { spaceAPI, type NegativeFeedbackItem, type NegativeFeedbackSummary, type UserProfile } from '../services/spaceApi';
 import { COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
+import NegativeFeedbackPanel from '../components/space/NegativeFeedbackPanel';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
 import { SHARE_BASE_URL } from '../config/share';
@@ -28,12 +29,19 @@ const SpaceProfilePage: React.FC = () => {
     const [likesCursor, setLikesCursor] = useState<string | undefined>(undefined);
     const [likesHasMore, setLikesHasMore] = useState(true);
     const [likesLoading, setLikesLoading] = useState(false);
+    const [negativeFeedback, setNegativeFeedback] = useState<NegativeFeedbackItem[]>([]);
+    const [negativeFeedbackSummary, setNegativeFeedbackSummary] = useState<NegativeFeedbackSummary | null>(null);
+    const [negativeFeedbackCursor, setNegativeFeedbackCursor] = useState<string | undefined>(undefined);
+    const [negativeFeedbackHasMore, setNegativeFeedbackHasMore] = useState(false);
+    const [negativeFeedbackLoading, setNegativeFeedbackLoading] = useState(false);
+    const [negativeFeedbackError, setNegativeFeedbackError] = useState<string | null>(null);
+    const [undoingNegativeFeedbackId, setUndoingNegativeFeedbackId] = useState<string | null>(null);
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
     const [pinnedPost, setPinnedPost] = useState<PostData | null>(null);
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes'>('posts');
+    const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes' | 'dislikes'>('posts');
 
     // 资料编辑（工业级：displayName/bio 等个性化，不直接改登录用户名）
     const [editOpen, setEditOpen] = useState(false);
@@ -85,6 +93,33 @@ const SpaceProfilePage: React.FC = () => {
         }
     };
 
+    const loadNegativeFeedback = async (reset: boolean = false) => {
+        if (!id || !isSelf) return;
+        if (!reset && (negativeFeedbackLoading || !negativeFeedbackHasMore)) return;
+        setNegativeFeedbackLoading(true);
+        setNegativeFeedbackError(null);
+        try {
+            const result = await spaceAPI.getUserNegativeFeedback(
+                id,
+                50,
+                reset ? undefined : negativeFeedbackCursor
+            );
+            setNegativeFeedback((prev) => (reset ? result.items : [...prev, ...result.items]));
+            setNegativeFeedbackSummary(result.summary);
+            setNegativeFeedbackHasMore(result.hasMore);
+            setNegativeFeedbackCursor(result.nextCursor);
+        } catch (err: unknown) {
+            console.error('加载负反馈记录失败:', err);
+            setNegativeFeedbackError(err instanceof Error ? err.message : '加载负反馈记录失败');
+            if (reset) {
+                setNegativeFeedback([]);
+                setNegativeFeedbackSummary(null);
+            }
+        } finally {
+            setNegativeFeedbackLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (!id) return;
         let mounted = true;
@@ -95,6 +130,11 @@ const SpaceProfilePage: React.FC = () => {
             setLikes([]);
             setLikesCursor(undefined);
             setLikesHasMore(true);
+            setNegativeFeedback([]);
+            setNegativeFeedbackSummary(null);
+            setNegativeFeedbackCursor(undefined);
+            setNegativeFeedbackHasMore(false);
+            setNegativeFeedbackError(null);
             setCoverPreviewUrl(null);
             try {
                 const profileData = await spaceAPI.getUserProfile(id);
@@ -310,11 +350,38 @@ const SpaceProfilePage: React.FC = () => {
         setLikes((prev) => prev.map((post) => post.id === postId ? { ...post, commentCount: post.commentCount + 1 } : post));
     };
 
+    const handleUndoNegativeFeedback = async (item: NegativeFeedbackItem) => {
+        if (!id) return;
+        setUndoingNegativeFeedbackId(item.id);
+        try {
+            await spaceAPI.undoNegativeFeedback(id, item.id);
+            setNegativeFeedback((prev) => prev.filter((entry) => entry.id !== item.id));
+            setNegativeFeedbackSummary((prev) => {
+                if (!prev) return prev;
+                const nextByType = { ...prev.byType };
+                nextByType[item.signalType] = Math.max(0, (nextByType[item.signalType] || 0) - 1);
+                return {
+                    ...prev,
+                    total: Math.max(0, prev.total - 1),
+                    byType: nextByType,
+                    negativeWeightTotal: prev.negativeWeightTotal - (item.negativeWeight || 0),
+                };
+            });
+            showToast(`已撤销${item.label}`, 'success');
+        } catch (err) {
+            console.error('撤销负反馈失败:', err);
+            showToast(err instanceof Error ? err.message : '撤销失败，请稍后再试', 'error');
+        } finally {
+            setUndoingNegativeFeedbackId(null);
+        }
+    };
+
     const mediaPosts = posts.filter((post) => post.media && post.media.length > 0);
     const isMediaTab = activeTab === 'media';
     const isLikesTab = activeTab === 'likes';
+    const isDislikesTab = activeTab === 'dislikes';
     const visiblePosts = isMediaTab ? mediaPosts : posts;
-    const showPinned = !isLikesTab && (activeTab === 'posts' || (isMediaTab && pinnedPost?.media?.length));
+    const showPinned = !isLikesTab && !isDislikesTab && (activeTab === 'posts' || (isMediaTab && pinnedPost?.media?.length));
 
     useEffect(() => {
         if (activeTab !== 'likes') return;
@@ -322,6 +389,13 @@ const SpaceProfilePage: React.FC = () => {
         loadLikes(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab, id]);
+
+    useEffect(() => {
+        if (activeTab !== 'dislikes' || !isSelf) return;
+        if (negativeFeedbackLoading || negativeFeedback.length > 0 || negativeFeedbackError) return;
+        loadNegativeFeedback(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab, id, isSelf]);
 
     if (loading) {
         return (
@@ -545,6 +619,15 @@ const SpaceProfilePage: React.FC = () => {
                     >
                         喜欢
                     </button>
+                    {isSelf && (
+                        <button
+                            type="button"
+                            className={`space-profile__tab ${activeTab === 'dislikes' ? 'is-active' : ''}`}
+                            onClick={() => setActiveTab('dislikes')}
+                        >
+                            不喜欢
+                        </button>
+                    )}
                 </nav>
 
                 {showPinned && (
@@ -591,7 +674,7 @@ const SpaceProfilePage: React.FC = () => {
                 )}
 
                 <section className="space-profile__posts">
-                    <h2>{activeTab === 'posts' ? '动态' : activeTab === 'media' ? '媒体' : '喜欢'}</h2>
+                    <h2>{activeTab === 'posts' ? '动态' : activeTab === 'media' ? '媒体' : activeTab === 'likes' ? '喜欢' : '不喜欢'}</h2>
                     <div className="space-profile__tab-panel" key={activeTab}>
                         {isLikesTab && likes.length === 0 && !likesLoading && (
                             <div className="space-profile__empty space-profile__empty--likes">
@@ -604,7 +687,23 @@ const SpaceProfilePage: React.FC = () => {
                                 <div className="space-profile__empty-desc">点赞后会在这里集中展示，方便回看。</div>
                             </div>
                         )}
-                        {!isLikesTab && visiblePosts.length === 0 && !loadingPosts && (
+                        {isDislikesTab && (
+                            <NegativeFeedbackPanel
+                                items={negativeFeedback}
+                                summary={negativeFeedbackSummary}
+                                loading={negativeFeedbackLoading}
+                                error={negativeFeedbackError}
+                                hasMore={negativeFeedbackHasMore}
+                                loadingMore={negativeFeedbackLoading && negativeFeedback.length > 0}
+                                undoingId={undoingNegativeFeedbackId}
+                                onRetry={() => loadNegativeFeedback(true)}
+                                onLoadMore={() => loadNegativeFeedback(false)}
+                                onUndo={handleUndoNegativeFeedback}
+                                onOpenPost={(postId) => navigate(`/space/post/${postId}`)}
+                                onOpenUser={(userId) => navigate(`/space/user/${userId}`)}
+                            />
+                        )}
+                        {!isLikesTab && !isDislikesTab && visiblePosts.length === 0 && !loadingPosts && (
                             <div className="space-profile__empty">
                                 {isMediaTab ? '暂无媒体内容' : '还没有发布动态'}
                             </div>
@@ -651,7 +750,7 @@ const SpaceProfilePage: React.FC = () => {
                                 ))}
                             </div>
                         )}
-                        {!isLikesTab && (
+                        {!isLikesTab && !isDislikesTab && (
                             <div className="space-profile__post-list">
                                 {visiblePosts.map((post) => (
                                     <SpacePost
@@ -683,7 +782,7 @@ const SpaceProfilePage: React.FC = () => {
                             </div>
                         )}
                     </div>
-                    {!isLikesTab && hasMore && (
+                    {!isLikesTab && !isDislikesTab && hasMore && (
                         <button
                             className="space-profile__more"
                             onClick={() => loadPosts(false, pinnedPost?.id || null)}

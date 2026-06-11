@@ -243,6 +243,8 @@ const SIGNAL_CONFIG = {
         [SignalType.MUTE]: -5.0,
         [SignalType.UNMUTE]: 0,
         [SignalType.REPORT]: -8.0,
+        [SignalType.DISMISS_POST]: -2.0,
+        [SignalType.HIDE_POST]: -4.0,
         [SignalType.SHARE]: 1.5,
         [SignalType.BOOKMARK]: 1.0,
         [SignalType.UNBOOKMARK]: -0.5,
