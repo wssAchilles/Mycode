@@ -150,7 +150,7 @@ export class DailyRecommendationRefreshJob {
 
         while (success + failed < limit) {
             const users = await User.findAll({
-                attributes: ['id'],
+                attributes: ['id', 'createdAt'],
                 where: cursor
                     ? {
                         [Op.or]: [
