@@ -2,16 +2,24 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewsHomeSection } from '../components/space/NewsHomeSection';
-import newsApi from '../services/newsApi';
+import { spaceAPI, type NewsBriefItem } from '../services/spaceApi';
 
-vi.mock('../services/newsApi', () => ({
-  default: {
-    getFeed: vi.fn(),
-    trackEvent: vi.fn(),
+vi.mock('../hooks/useAnalytics', () => ({
+  useAnalytics: () => ({
+    trackImpression: vi.fn(),
+    trackDwell: vi.fn(),
+    trackClick: vi.fn(),
+  }),
+}));
+
+vi.mock('../services/spaceApi', () => ({
+  spaceAPI: {
+    getNewsBrief: vi.fn(),
+    getPost: vi.fn(),
   },
 }));
 
-const mockedGetFeed = vi.mocked(newsApi.getFeed);
+const mockedGetNewsBrief = vi.mocked(spaceAPI.getNewsBrief);
 
 const renderSection = () => render(
   <MemoryRouter>
@@ -19,37 +27,24 @@ const renderSection = () => render(
   </MemoryRouter>
 );
 
-type FeedResponse = Awaited<ReturnType<typeof newsApi.getFeed>>;
-type LoadedNewsFeedItem = FeedResponse['items'][number];
-
-const feedItem: LoadedNewsFeedItem = {
-  id: 'n-1',
+const feedItem: NewsBriefItem = {
+  postId: 'p-1',
   title: 'A compact news card',
   summary: 'News summary',
   source: 'npr_world',
-  publishedAt: '2026-05-01T08:00:00.000Z',
-  coverImageUrl: null,
+  createdAt: '2026-05-01T08:00:00.000Z',
+  coverUrl: undefined,
 };
-
-const feedResponse = (items: LoadedNewsFeedItem[]): FeedResponse => ({
-  items,
-  nextCursor: undefined,
-  hasMore: false,
-  window: undefined,
-  windowStart: undefined,
-  windowEnd: undefined,
-  windowKey: undefined,
-});
 
 describe('NewsHomeSection states', () => {
   beforeEach(() => {
-    mockedGetFeed.mockReset();
+    mockedGetNewsBrief.mockReset();
   });
 
   it('keeps a visible retry state when the daily news request fails', async () => {
-    mockedGetFeed
+    mockedGetNewsBrief
       .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce(feedResponse([feedItem]));
+      .mockResolvedValueOnce([feedItem]);
 
     renderSection();
 
@@ -58,16 +53,14 @@ describe('NewsHomeSection states', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
 
     expect(await screen.findByRole('button', { name: /打开新闻：A compact news card/ })).toBeInTheDocument();
-    expect(mockedGetFeed).toHaveBeenCalledTimes(2);
+    expect(mockedGetNewsBrief).toHaveBeenCalledTimes(2);
   });
 
   it('renders loaded news as keyboard-focusable buttons', async () => {
-    mockedGetFeed.mockResolvedValue(
-      feedResponse([
-        feedItem,
-        { ...feedItem, id: 'n-2', title: 'Second compact card' },
-      ])
-    );
+    mockedGetNewsBrief.mockResolvedValue([
+      feedItem,
+      { ...feedItem, postId: 'p-2', title: 'Second compact card' },
+    ]);
 
     renderSection();
 

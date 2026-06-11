@@ -16,6 +16,7 @@
     "demo:repair-recommendation-features": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/repairInterviewDemoRecommendationFeatures.ts",
     "demo:expand-interviewer-social-graph": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/expandDemoInterviewerSocialGraph.ts",
     "demo:negative-recommendation-signals": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/generateDemoNegativeRecommendationSignals.ts",
+    "demo:news-recommendation-contrast": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/generateDemoNewsRecommendationContrast.ts",
     "demo:live": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/runInterviewDemoLive.ts",
     "demo:reset": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/resetInterviewDemo.ts",
     "clear:data": "ts-node src/scripts/clearRecommendationData.ts",

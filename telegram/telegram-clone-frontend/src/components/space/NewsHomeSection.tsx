@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { StateBlock } from '@/components/design-system';
-import newsApi, { type NewsFeedItem } from '../../services/newsApi';
+import { useAnalytics } from '../../hooks/useAnalytics';
+import { spaceAPI, type NewsBriefItem } from '../../services/spaceApi';
 import './NewsHomeSection.css';
 
 const HERO_COUNT = 4;
@@ -19,7 +19,7 @@ const clampText = (text: string, max = 160) => {
   return `${cleaned.slice(0, max)}...`;
 };
 
-const useNewsImpression = (newsId: string) => {
+const useNewsImpression = (postId: string, trackImpression: (postId: string) => void) => {
   const ref = useRef<HTMLButtonElement | null>(null);
   const impressed = useRef(false);
 
@@ -31,19 +31,19 @@ const useNewsImpression = (newsId: string) => {
         const entry = entries[0];
         if (entry.isIntersecting && !impressed.current) {
           impressed.current = true;
-          newsApi.trackEvent(newsId, 'impression');
+          trackImpression(postId);
         }
       },
       { threshold: 0.6 }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [newsId]);
+  }, [postId, trackImpression]);
 
   return ref;
 };
 
-const useNewsDwell = (newsId: string) => {
+const useNewsDwell = (postId: string, trackDwell: (postId: string, dwellMs: number) => void) => {
   const ref = useRef<HTMLButtonElement | null>(null);
   const start = useRef<number | null>(null);
 
@@ -57,7 +57,7 @@ const useNewsDwell = (newsId: string) => {
           start.current = Date.now();
         } else if (start.current) {
           const dwell = Date.now() - start.current;
-          newsApi.trackEvent(newsId, 'dwell', dwell);
+          trackDwell(postId, dwell);
           start.current = null;
         }
       },
@@ -68,30 +68,32 @@ const useNewsDwell = (newsId: string) => {
       observer.disconnect();
       if (start.current) {
         const dwell = Date.now() - start.current;
-        newsApi.trackEvent(newsId, 'dwell', dwell);
+        trackDwell(postId, dwell);
         start.current = null;
       }
     };
-  }, [newsId]);
+  }, [postId, trackDwell]);
 
   return ref;
 };
 
 interface HeroProps {
-  item: NewsFeedItem;
-  onOpen: (id: string) => void;
+  item: NewsBriefItem;
+  onOpen: (item: NewsBriefItem) => void;
+  trackImpression: (postId: string) => void;
+  trackDwell: (postId: string, dwellMs: number) => void;
 }
 
-const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
-  const impressionRef = useNewsImpression(item.id);
-  const dwellRef = useNewsDwell(item.id);
-  const timeValue = item.publishedAt || item.fetchedAt;
+const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen, trackImpression, trackDwell }) => {
+  const impressionRef = useNewsImpression(item.postId, trackImpression);
+  const dwellRef = useNewsDwell(item.postId, trackDwell);
+  const timeValue = item.createdAt;
 
   return (
     <button
       type="button"
       className="news-home__hero"
-      onClick={() => onOpen(item.id)}
+      onClick={() => onOpen(item)}
       ref={(el) => {
         impressionRef.current = el;
         dwellRef.current = el;
@@ -100,7 +102,7 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
     >
       <div
         className="news-home__hero-media"
-        style={{ backgroundImage: item.coverImageUrl ? `url(${item.coverImageUrl})` : undefined }}
+        style={{ backgroundImage: item.coverUrl ? `url(${item.coverUrl})` : undefined }}
       >
         <span className="news-home__badge">Breaking</span>
       </div>
@@ -117,20 +119,22 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
 };
 
 interface CardProps {
-  item: NewsFeedItem;
-  onOpen: (id: string) => void;
+  item: NewsBriefItem;
+  onOpen: (item: NewsBriefItem) => void;
+  trackImpression: (postId: string) => void;
+  trackDwell: (postId: string, dwellMs: number) => void;
 }
 
-const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
-  const impressionRef = useNewsImpression(item.id);
-  const dwellRef = useNewsDwell(item.id);
-  const timeValue = item.publishedAt || item.fetchedAt;
+const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen, trackImpression, trackDwell }) => {
+  const impressionRef = useNewsImpression(item.postId, trackImpression);
+  const dwellRef = useNewsDwell(item.postId, trackDwell);
+  const timeValue = item.createdAt;
 
   return (
     <button
       type="button"
       className="news-home__card"
-      onClick={() => onOpen(item.id)}
+      onClick={() => onOpen(item)}
       ref={(el) => {
         impressionRef.current = el;
         dwellRef.current = el;
@@ -139,7 +143,7 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
     >
       <div
         className="news-home__card-media"
-        style={{ backgroundImage: item.coverImageUrl ? `url(${item.coverImageUrl})` : undefined }}
+        style={{ backgroundImage: item.coverUrl ? `url(${item.coverUrl})` : undefined }}
       />
       <div className="news-home__card-body">
         <div className="news-home__card-meta">
@@ -154,17 +158,25 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
 };
 
 export const NewsHomeSection: React.FC = () => {
-  const [items, setItems] = useState<NewsFeedItem[]>([]);
+  const [items, setItems] = useState<NewsBriefItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const analytics = useAnalytics({ source: 'news_home' });
+
+  const trackImpression = useCallback((postId: string) => {
+    analytics.trackImpression(postId, undefined, { recommendationSource: 'news_home', productSurface: 'space_feed' });
+  }, [analytics]);
+
+  const trackDwell = useCallback((postId: string, dwellMs: number) => {
+    analytics.trackDwell(postId, dwellMs, { recommendationSource: 'news_home', productSurface: 'space_feed' });
+  }, [analytics]);
 
   const fetchFeed = useCallback(async (silent: boolean = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const data = await newsApi.getFeed(HERO_COUNT);
-      setItems(data.items || []);
+      const data = await spaceAPI.getNewsBrief(HERO_COUNT, 24);
+      setItems(data || []);
     } catch {
       setError('今日时事速递加载失败，请稍后重试');
     } finally {
@@ -191,9 +203,13 @@ export const NewsHomeSection: React.FC = () => {
   const hero = items[0];
   const cards = useMemo(() => items.slice(1, HERO_COUNT), [items]);
 
-  const openDetail = (id: string) => {
-    newsApi.trackEvent(id, 'click');
-    navigate(`/news/${id}`);
+  const openDetail = (item: NewsBriefItem) => {
+    analytics.trackClick(item.postId, 0, { recommendationSource: 'news_home', productSurface: 'space_feed' });
+    if (item.url) {
+      window.open(item.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    spaceAPI.getPost(item.postId).catch(() => undefined);
   };
 
   return (
@@ -235,7 +251,14 @@ export const NewsHomeSection: React.FC = () => {
             </div>
           </div>
         )}
-        {hero && !loading && <NewsHeroCard item={hero} onOpen={openDetail} />}
+        {hero && !loading && (
+          <NewsHeroCard
+            item={hero}
+            onOpen={openDetail}
+            trackImpression={trackImpression}
+            trackDwell={trackDwell}
+          />
+        )}
 
         <div className="news-home__cards">
           {loading &&
@@ -248,7 +271,15 @@ export const NewsHomeSection: React.FC = () => {
                 </div>
               </div>
             ))}
-          {!loading && cards.map((card) => <NewsMiniCard key={card.id} item={card} onOpen={openDetail} />)}
+          {!loading && cards.map((card) => (
+            <NewsMiniCard
+              key={card.postId}
+              item={card}
+              onOpen={openDetail}
+              trackImpression={trackImpression}
+              trackDwell={trackDwell}
+            />
+          ))}
         </div>
       </div>
       )}
