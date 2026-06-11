@@ -21,8 +21,7 @@ import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon } from '../components/icons/SpaceIcons';
-import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
-import { opsAPI, type RecommendationDailyRefreshOps } from '../services/opsApi';
+import { spaceAPI, type RecommendedUser, type RecommendationDailyRefreshOps, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
 import { useAnalytics } from '../hooks/useAnalytics';
 import './SpacePage.css';
@@ -141,7 +140,7 @@ export const SpacePage: React.FC = () => {
         setLoadingRecommendationRefresh(true);
         setRecommendationRefreshError(null);
         try {
-            const status = await opsAPI.getRecommendationDailyRefresh();
+            const status = await spaceAPI.getRecommendationDailyRefresh();
             if (!asideMountedRef.current) return;
             setRecommendationRefreshStatus(status);
         } catch {

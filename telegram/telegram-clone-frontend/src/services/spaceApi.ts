@@ -170,6 +170,47 @@ export interface NotificationItem {
     createdAt: string;
 }
 
+export type RecommendationDailyRefreshStatus = 'success' | 'running' | 'failed' | 'unknown';
+
+export interface RecommendationDailyRefreshOps {
+    status: RecommendationDailyRefreshStatus;
+    lastRefreshAt: string | null;
+    latestRun: {
+        startedAt: string | null;
+        finishedAt: string | null;
+        durationMs: number | null;
+        trigger: string | null;
+        error?: string | null;
+    };
+    users: {
+        registered: number;
+        vectors: number;
+        refreshed: number;
+        compatibleDenseVectorRatio: number;
+    };
+    realGraph: {
+        edges: number;
+        predicted: number;
+    };
+    posts: {
+        snapshots: number;
+        refreshed: number;
+    };
+    artifacts: {
+        usersExported: number;
+        postsExported: number;
+        clustersExported: number;
+    };
+    schedule: {
+        label: string;
+        cron: string;
+    };
+    freshnessWindow: {
+        hours: number;
+        since: string;
+    };
+}
+
 export interface CommentData {
     id: string;
     postId: string;
@@ -342,6 +383,20 @@ export const spaceAPI = {
             };
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '获取动态失败'));
+        }
+    },
+
+    /**
+     * 获取推荐闭环状态，用普通登录态读取脱敏演示指标。
+     */
+    getRecommendationDailyRefresh: async (): Promise<RecommendationDailyRefreshOps> => {
+        try {
+            const response = await apiClient.get<{ success: boolean; data: RecommendationDailyRefreshOps }>(
+                '/api/space/recommendation/daily-refresh',
+            );
+            return response.data.data;
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取推荐闭环状态失败'));
         }
     },
 

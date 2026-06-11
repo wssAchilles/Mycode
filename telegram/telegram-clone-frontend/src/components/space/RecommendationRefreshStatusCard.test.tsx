@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { RecommendationRefreshStatusCard } from './RecommendationRefreshStatusCard';
-import type { RecommendationDailyRefreshOps } from '../../services/opsApi';
+import type { RecommendationDailyRefreshOps } from '../../services/spaceApi';
 
 describe('RecommendationRefreshStatusCard', () => {
     it('renders daily recommendation closure evidence in the Space aside card', () => {

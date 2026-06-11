@@ -2,8 +2,7 @@ import React, { useEffect } from 'react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { TrendIcon, UserPlusIcon } from '../icons/SpaceIcons';
-import type { RecommendedUser, TrendItem } from '../../services/spaceApi';
-import type { RecommendationDailyRefreshOps } from '../../services/opsApi';
+import type { RecommendedUser, RecommendationDailyRefreshOps, TrendItem } from '../../services/spaceApi';
 import { RecommendationRefreshStatusCard } from './RecommendationRefreshStatusCard';
 import {
     limitedMotionItems,

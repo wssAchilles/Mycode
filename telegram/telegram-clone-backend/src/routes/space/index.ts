@@ -13,6 +13,7 @@ import profilesRouter from './profiles';
 import socialRouter from './social';
 import newsRouter from './news';
 import searchRouter from './search';
+import recommendationStatusRouter from './recommendationStatus';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use('/', interactionsRouter); // /posts/:id/like, /repost, /comments, /no
 router.use('/', feedRouter);        // /feed
 router.use('/', profilesRouter);    // /users/:id/profile, /posts, /likes, /cover, /avatar
 router.use('/', socialRouter);      // /users/:id/follow, /block, /mute
+router.use('/', recommendationStatusRouter); // /recommendation/daily-refresh
 router.use('/', searchRouter);      // /search, /topics/:tag/posts, /trends, /recommend/users, /notifications
 
 export default router;

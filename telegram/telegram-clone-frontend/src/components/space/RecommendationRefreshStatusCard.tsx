@@ -2,7 +2,7 @@ import React from 'react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { SparkIcon } from '../icons/SpaceIcons';
-import type { RecommendationDailyRefreshOps, RecommendationDailyRefreshStatus } from '../../services/opsApi';
+import type { RecommendationDailyRefreshOps, RecommendationDailyRefreshStatus } from '../../services/spaceApi';
 
 interface RecommendationRefreshStatusCardProps {
     status: RecommendationDailyRefreshOps | null;
