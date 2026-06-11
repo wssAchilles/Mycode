@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     applyDailyDecay: vi.fn(),
     backfillPredictionMetadata: vi.fn(),
     bootstrapBackfill: vi.fn(),
+    repairDenseVectors: vi.fn(),
     refreshSnapshotsByPostIds: vi.fn(),
     featureExportRun: vi.fn(),
 }));
@@ -55,6 +56,7 @@ vi.mock('../../src/services/recommendation/RealGraphService', () => ({
 vi.mock('../../src/services/recommendation/users', () => ({
     registeredUserFeatureBootstrapService: {
         backfill: mocks.bootstrapBackfill,
+        repairDenseVectors: mocks.repairDenseVectors,
     },
 }));
 
@@ -89,6 +91,7 @@ describe('DailyRecommendationRefreshJob', () => {
             ])
             .mockResolvedValueOnce([]);
         mocks.batchUpdateEmbeddings.mockResolvedValue({ success: 3, failed: 0 });
+        mocks.repairDenseVectors.mockResolvedValue({ scanned: 3, repaired: 2 });
         mocks.applyDailyDecay.mockResolvedValue({ totalProcessed: 2 });
         mocks.backfillPredictionMetadata.mockResolvedValue({ matched: 5, updated: 5, dryRun: false });
         mocks.postFind.mockReturnValueOnce(findPostsResult([
@@ -118,6 +121,11 @@ describe('DailyRecommendationRefreshJob', () => {
         }));
         expect(mocks.bootstrapBackfill).toHaveBeenCalledWith({ limit: 10, batchSize: 500 });
         expect(mocks.batchUpdateEmbeddings).toHaveBeenCalledWith(['user-3', 'user-2', 'user-1']);
+        expect(mocks.repairDenseVectors).toHaveBeenCalledWith([
+            { id: 'user-3', createdAt },
+            { id: 'user-2', createdAt },
+            { id: 'user-1', createdAt },
+        ]);
         expect(mocks.backfillPredictionMetadata).toHaveBeenCalledWith(expect.objectContaining({
             force: true,
             limit: 10000,
@@ -135,6 +143,7 @@ describe('DailyRecommendationRefreshJob', () => {
                             bootstrapped: 1,
                             embeddingsUpdated: 3,
                             embeddingFailures: 0,
+                            denseVectorsRepaired: 2,
                         },
                     }),
                 }),
@@ -146,6 +155,7 @@ describe('DailyRecommendationRefreshJob', () => {
                 bootstrapped: 1,
                 embeddingsUpdated: 3,
                 embeddingFailures: 0,
+                denseVectorsRepaired: 2,
             },
             realGraph: {
                 decayedEdges: 2,

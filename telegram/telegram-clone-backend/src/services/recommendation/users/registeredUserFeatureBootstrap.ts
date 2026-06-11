@@ -2,8 +2,13 @@ import crypto from 'crypto';
 
 import User from '../../../models/User';
 import UserFeatureVector from '../../../models/UserFeatureVector';
+import {
+    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+    isEmbeddingContractCompatible,
+    isVectorCompatibleWithContract,
+} from '../contracts/embeddingContract';
 
-const COLD_START_DIM = 24;
+const COLD_START_DIM = DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim;
 const MODEL_VERSION = 'registered_user_cold_start_v1';
 const ARTIFACT_VERSION = 'registered_user_profile_features_v1';
 
@@ -12,6 +17,11 @@ export interface RegisteredUserFeatureBootstrapResult {
     existing: number;
     created: number;
     dryRun: boolean;
+}
+
+export interface RegisteredUserDenseRepairResult {
+    scanned: number;
+    repaired: number;
 }
 
 export class RegisteredUserFeatureBootstrapService {
@@ -70,6 +80,63 @@ export class RegisteredUserFeatureBootstrapService {
         return { scanned, existing, created, dryRun };
     }
 
+    async repairDenseVectors(
+        users: Array<Pick<User, 'id' | 'username' | 'region' | 'language' | 'createdAt'>>
+    ): Promise<RegisteredUserDenseRepairResult> {
+        if (users.length === 0) {
+            return { scanned: 0, repaired: 0 };
+        }
+
+        const userIds = users.map((user) => user.id);
+        const docs = await UserFeatureVector.find({ userId: { $in: userIds } })
+            .select('userId twoTowerEmbedding phoenixEmbedding embeddingContract')
+            .lean();
+        const docsByUserId = new Map(docs.map((doc) => [doc.userId, doc]));
+        const operations = [];
+
+        for (const user of users) {
+            const doc = docsByUserId.get(user.id);
+            const twoTowerCompatible = doc
+                && isEmbeddingContractCompatible(doc.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
+                && isVectorCompatibleWithContract(doc.twoTowerEmbedding, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT);
+            const phoenixCompatible = doc
+                && isVectorCompatibleWithContract(doc.phoenixEmbedding, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT);
+
+            if (twoTowerCompatible && phoenixCompatible) {
+                continue;
+            }
+
+            const vector = deterministicDenseVector([
+                user.id,
+                user.username,
+                user.region || '',
+                user.language || '',
+            ]);
+            operations.push({
+                updateOne: {
+                    filter: { userId: user.id },
+                    update: {
+                        $set: {
+                            twoTowerEmbedding: vector,
+                            phoenixEmbedding: vector,
+                            embeddingDim: COLD_START_DIM,
+                            modelVersion: MODEL_VERSION,
+                            artifactVersion: ARTIFACT_VERSION,
+                            modelProfile: 'cold_start_registered_user',
+                            embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+                        },
+                    },
+                },
+            });
+        }
+
+        if (operations.length > 0) {
+            await UserFeatureVector.bulkWrite(operations, { ordered: false });
+        }
+
+        return { scanned: users.length, repaired: operations.length };
+    }
+
     private buildVector(user: Pick<User, 'id' | 'username' | 'region' | 'language' | 'createdAt'>) {
         const vector = deterministicDenseVector([
             user.id,
@@ -95,14 +162,7 @@ export class RegisteredUserFeatureBootstrapService {
             artifactVersion: ARTIFACT_VERSION,
             modelProfile: 'cold_start_registered_user',
             embeddingDim: COLD_START_DIM,
-            embeddingContract: {
-                embeddingSpace: `user_dense_dim_${COLD_START_DIM}`,
-                retrievalEmbeddingDim: COLD_START_DIM,
-                rankingEmbeddingDim: COLD_START_DIM,
-                modelVersion: MODEL_VERSION,
-                artifactVersion: ARTIFACT_VERSION,
-                producer: 'RegisteredUserFeatureBootstrapService',
-            },
+            embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
             computedAt: now,
             expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
             qualityScore: 0.05,

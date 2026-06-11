@@ -26,6 +26,7 @@ export interface DailyRecommendationRefreshResult {
         bootstrapped: number;
         embeddingsUpdated: number;
         embeddingFailures: number;
+        denseVectorsRepaired: number;
     };
     realGraph: {
         decayedEdges: number;
@@ -132,6 +133,7 @@ export class DailyRecommendationRefreshJob {
                 bootstrapped: bootstrap.created,
                 embeddingsUpdated: userEmbeddingResult.success,
                 embeddingFailures: userEmbeddingResult.failed,
+                denseVectorsRepaired: userEmbeddingResult.denseVectorsRepaired,
             },
             realGraph: {
                 decayedEdges: realGraphDecay.totalProcessed,
@@ -143,14 +145,19 @@ export class DailyRecommendationRefreshJob {
         };
     }
 
-    private async refreshAllRegisteredUserEmbeddings(limit: number): Promise<{ success: number; failed: number }> {
+    private async refreshAllRegisteredUserEmbeddings(limit: number): Promise<{
+        success: number;
+        failed: number;
+        denseVectorsRepaired: number;
+    }> {
         let success = 0;
         let failed = 0;
+        let denseVectorsRepaired = 0;
         let cursor: { createdAt: Date; id: string } | undefined;
 
         while (success + failed < limit) {
             const users = await User.findAll({
-                attributes: ['id', 'createdAt'],
+                attributes: ['id', 'username', 'region', 'language', 'createdAt'],
                 where: cursor
                     ? {
                         [Op.or]: [
@@ -173,8 +180,10 @@ export class DailyRecommendationRefreshJob {
             const result = await simClustersService.batchUpdateEmbeddings(
                 users.map((user) => user.id),
             );
+            const denseRepair = await registeredUserFeatureBootstrapService.repairDenseVectors(users);
             success += result.success;
             failed += result.failed;
+            denseVectorsRepaired += denseRepair.repaired;
 
             const lastUser = users[users.length - 1];
             cursor = {
@@ -183,7 +192,7 @@ export class DailyRecommendationRefreshJob {
             };
         }
 
-        return { success, failed };
+        return { success, failed, denseVectorsRepaired };
     }
 
     private async refreshRecentPostSnapshots(days: number, batchSize: number): Promise<{ scanned: number; refreshed: number }> {

@@ -10,6 +10,7 @@ import UserSignal from '../models/UserSignal';
 import RealGraphEdge from '../models/RealGraphEdge';
 import PostFeatureSnapshot from '../models/PostFeatureSnapshot';
 import RecommendationJobRun from '../models/RecommendationJobRun';
+import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../services/recommendation/contracts/embeddingContract';
 
 dotenv.config({ quiet: true });
 
@@ -44,6 +45,7 @@ async function main() {
         userVectors,
         userVectorsFresh,
         userVectorsWithContract,
+        userVectorsCompatible,
         actionsTotal,
         actionsFresh,
         signalsTotal,
@@ -61,6 +63,11 @@ async function main() {
         UserFeatureVector.countDocuments(),
         UserFeatureVector.countDocuments({ computedAt: { $gte: since } }),
         UserFeatureVector.countDocuments({ 'embeddingContract.artifactVersion': { $exists: true, $ne: '' } }),
+        UserFeatureVector.countDocuments({
+            'embeddingContract.embeddingSpace': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.embeddingSpace,
+            'embeddingContract.retrievalEmbeddingDim': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
+            twoTowerEmbedding: { $size: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim },
+        }),
         UserAction.countDocuments(),
         UserAction.countDocuments({ createdAt: { $gte: since } }),
         UserSignal.countDocuments(),
@@ -116,6 +123,7 @@ async function main() {
             refreshedInWindow: userVectorsFresh,
             refreshedRatio: ratio(userVectorsFresh, registeredUsers),
             embeddingContractCoverageRatio: ratio(userVectorsWithContract, userVectors),
+            compatibleDenseVectorRatio: ratio(userVectorsCompatible, registeredUsers),
         },
         eventFactsAreRealtimeNotDailySynthetic: {
             userActionsTotal: actionsTotal,
