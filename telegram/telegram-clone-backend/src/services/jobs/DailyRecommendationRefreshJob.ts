@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { Op } from 'sequelize';
 import User from '../../models/User';
 import Post from '../../models/Post';
 import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
@@ -145,14 +146,27 @@ export class DailyRecommendationRefreshJob {
     private async refreshAllRegisteredUserEmbeddings(limit: number): Promise<{ success: number; failed: number }> {
         let success = 0;
         let failed = 0;
-        let offset = 0;
+        let cursor: { createdAt: Date; id: string } | undefined;
 
-        while (offset < limit) {
+        while (success + failed < limit) {
             const users = await User.findAll({
                 attributes: ['id'],
-                order: [['createdAt', 'DESC']],
-                offset,
-                limit: Math.min(CONFIG.userBatchSize, limit - offset),
+                where: cursor
+                    ? {
+                        [Op.or]: [
+                            { createdAt: { [Op.lt]: cursor.createdAt } },
+                            {
+                                createdAt: cursor.createdAt,
+                                id: { [Op.lt]: cursor.id },
+                            },
+                        ],
+                    }
+                    : undefined,
+                order: [
+                    ['createdAt', 'DESC'],
+                    ['id', 'DESC'],
+                ],
+                limit: Math.min(CONFIG.userBatchSize, limit - success - failed),
             });
             if (users.length === 0) break;
 
@@ -161,7 +175,12 @@ export class DailyRecommendationRefreshJob {
             );
             success += result.success;
             failed += result.failed;
-            offset += users.length;
+
+            const lastUser = users[users.length - 1];
+            cursor = {
+                createdAt: lastUser.createdAt,
+                id: lastUser.id,
+            };
         }
 
         return { success, failed };

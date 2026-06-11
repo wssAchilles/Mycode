@@ -80,8 +80,13 @@ describe('DailyRecommendationRefreshJob', () => {
     it('refreshes registered-user features and writes persistent run evidence', async () => {
         mocks.jobRunCreate.mockResolvedValue({ _id: 'job-run-1' });
         mocks.bootstrapBackfill.mockResolvedValue({ scanned: 3, created: 1 });
+        const createdAt = new Date('2026-06-10T00:00:00.000Z');
         mocks.userFindAll
-            .mockResolvedValueOnce([{ id: 'user-1' }, { id: 'user-2' }, { id: 'user-3' }])
+            .mockResolvedValueOnce([
+                { id: 'user-3', createdAt },
+                { id: 'user-2', createdAt },
+                { id: 'user-1', createdAt },
+            ])
             .mockResolvedValueOnce([]);
         mocks.batchUpdateEmbeddings.mockResolvedValue({ success: 3, failed: 0 });
         mocks.applyDailyDecay.mockResolvedValue({ totalProcessed: 2 });
@@ -112,7 +117,7 @@ describe('DailyRecommendationRefreshJob', () => {
             trigger: 'manual',
         }));
         expect(mocks.bootstrapBackfill).toHaveBeenCalledWith({ limit: 10, batchSize: 500 });
-        expect(mocks.batchUpdateEmbeddings).toHaveBeenCalledWith(['user-1', 'user-2', 'user-3']);
+        expect(mocks.batchUpdateEmbeddings).toHaveBeenCalledWith(['user-3', 'user-2', 'user-1']);
         expect(mocks.backfillPredictionMetadata).toHaveBeenCalledWith(expect.objectContaining({
             force: true,
             limit: 10000,

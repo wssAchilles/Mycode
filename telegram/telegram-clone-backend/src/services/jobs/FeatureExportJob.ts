@@ -33,7 +33,8 @@ const CONFIG = {
     maxExportSize: 100000,
 
     // 嵌入维度
-    embeddingDim: 64,                  // Two-Tower 维度
+    userEmbeddingDim: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
+    clusterEmbeddingDim: 64,
 
     // 文件名
     files: {
@@ -153,7 +154,7 @@ export class FeatureExportJob {
             for (const user of batch) {
                 if (
                     user.twoTowerEmbedding
-                    && user.twoTowerEmbedding.length === CONFIG.embeddingDim
+                    && user.twoTowerEmbedding.length === CONFIG.userEmbeddingDim
                     && (
                         !user.embeddingContract
                         || (
@@ -197,7 +198,7 @@ export class FeatureExportJob {
             .limit(CONFIG.maxExportSize);
 
         for (const cluster of clusters) {
-            if (cluster.centroidEmbedding && cluster.centroidEmbedding.length === CONFIG.embeddingDim) {
+            if (cluster.centroidEmbedding && cluster.centroidEmbedding.length === CONFIG.clusterEmbeddingDim) {
                 centroids.push({
                     id: cluster.clusterId.toString(),
                     vector: cluster.centroidEmbedding,
@@ -285,8 +286,8 @@ export class FeatureExportJob {
             userCount,
             clusterCount,
             postCount,
-            userEmbeddingDim: CONFIG.embeddingDim,
-            clusterEmbeddingDim: CONFIG.embeddingDim,
+            userEmbeddingDim: CONFIG.userEmbeddingDim,
+            clusterEmbeddingDim: CONFIG.clusterEmbeddingDim,
             postEmbeddingDim: parseInt(String(process.env.RECOMMENDATION_CONTENT_DENSE_EMBEDDING_DIMENSIONS || '48'), 10) || 48,
         };
 
