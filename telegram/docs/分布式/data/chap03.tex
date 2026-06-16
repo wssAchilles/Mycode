@@ -47,32 +47,32 @@ Spring Boot提供成熟的Web开发、依赖注入、数据访问和安全控制
 
 系统总体架构如图\ref{fig:system_architecture_springboot}所示。整体分为客户端层、业务服务层、异步投递层、图计算层、数据与缓存层、推荐算法层六部分。客户端层包括React前端和Apifox接口联调工具；业务服务层以Spring Boot为核心，负责REST接口、认证与权限、推荐Feed服务、用户与群组服务、新闻内容服务；异步投递层由Go服务负责Redis Stream消费、消息扇出、outbox状态维护和同步唤醒；图计算层由C++服务负责社交图谱快照、邻居查询、共同关系查询和多跳遍历；数据与缓存层包括Redis、Supabase PostgreSQL、MongoDB和对象存储；推荐算法层负责多路召回、过滤规则、加权评分、TopK排序和埋点实验。
 
-\begin{figure}[htbp]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=0.95\textwidth]{system-architecture-springboot.png}
+  \includegraphics[width=0.8\textwidth]{system-architecture-springboot.png}
   \caption{系统总体架构图}
   \label{fig:system_architecture_springboot}
 \end{figure}
 
 后端入口采用REST API。推荐Feed接口可以设计为：
 
-\begin{lstlisting}[language=Java,caption={推荐Feed接口设计示例}]
-@RestController
-@RequestMapping("/api/space")
-public class SpaceFeedController {
-    private final RecommendationService recommendationService;
+\begin{codeblock}[Java]{推荐Feed接口设计示例}
+  @RestController
+  @RequestMapping("/api/space")
+  public class SpaceFeedController {
+      private final RecommendationService recommendationService;
 
-    @GetMapping("/feed")
-    public FeedResponse feed(
-            @AuthenticationPrincipal LoginUser user,
-            @RequestParam(defaultValue = "20") int limit,
-            @RequestParam(required = false) String cursor,
-            @RequestParam(defaultValue = "false") boolean inNetworkOnly) {
-        FeedRequest request = FeedRequest.of(user.getId(), limit, cursor, inNetworkOnly);
-        return recommendationService.recommend(request);
+      @GetMapping("/feed")
+      public FeedResponse feed(
+      @AuthenticationPrincipal LoginUser user,
+      @RequestParam(defaultValue = "20") int limit,
+      @RequestParam(required = false) String cursor,
+      @RequestParam(defaultValue = "false") boolean inNetworkOnly) {
+          FeedRequest request = FeedRequest.of(user.getId(), limit, cursor, inNetworkOnly);
+          return recommendationService.recommend(request);
+        }
     }
-}
-\end{lstlisting}
+\end{codeblock}
 
 该接口将参数解析与业务处理分离。Controller只负责接收请求和校验参数，具体推荐流程交给\texttt{RecommendationService}完成。
 
@@ -83,24 +83,24 @@ public class SpaceFeedController {
 系统按照职责划分为以下模块：
 
 \begin{longtable}{p{0.22\textwidth}p{0.7\textwidth}}
-\caption{系统功能模块设计}\\
-\toprule
-模块 & 主要职责 \\
-\midrule
-\endfirsthead
-\toprule
-模块 & 主要职责 \\
-\midrule
-\endhead
-用户模块 & 管理用户资料、登录态、地区、语言、在线状态，为推荐服务提供用户基础画像。\\
-关系模块 & 管理联系人、关注关系、群组成员关系，为社交召回和作者亲和度计算提供依据。\\
-内容模块 & 管理新闻内容、分类、关键词、向量、发布时间、来源和互动计数。\\
-推荐模块 & 编排特征补全、多路召回、候选补全、过滤、评分、TopK选择和曝光记录。\\
-Go投递模块 & 消费Redis Stream中的平台事件和消息事件，按业务键并行投递，维护outbox聚合状态，批量ACK并处理失败恢复。\\
-C++图计算模块 & 加载社交图谱快照，提供直接邻居、共同关系、ranked邻居和多跳遍历查询，为推荐召回提供低延迟图特征。\\
-实验模块 & 维护实验配置、流量比例、实验分桶和评价指标，支持推荐策略灰度发布。\\
-测试模块 & 通过Apifox维护接口请求、参数、返回结构和联调截图。\\
-\bottomrule
+  \caption{系统功能模块设计}                                                       \\
+  \toprule
+  模块       & 主要职责                                                          \\
+  \midrule
+  \endfirsthead
+  \toprule
+  模块       & 主要职责                                                          \\
+  \midrule
+  \endhead
+  用户模块     & 管理用户资料、登录态、地区、语言、在线状态，为推荐服务提供用户基础画像。                          \\
+  关系模块     & 管理联系人、关注关系、群组成员关系，为社交召回和作者亲和度计算提供依据。                          \\
+  内容模块     & 管理新闻内容、分类、关键词、向量、发布时间、来源和互动计数。                                \\
+  推荐模块     & 编排特征补全、多路召回、候选补全、过滤、评分、TopK选择和曝光记录。                           \\
+  Go投递模块   & 消费Redis Stream中的平台事件和消息事件，按业务键并行投递，维护outbox聚合状态，批量ACK并处理失败恢复。 \\
+  C++图计算模块 & 加载社交图谱快照，提供直接邻居、共同关系、ranked邻居和多跳遍历查询，为推荐召回提供低延迟图特征。           \\
+  实验模块     & 维护实验配置、流量比例、实验分桶和评价指标，支持推荐策略灰度发布。                             \\
+  测试模块     & 通过Apifox维护接口请求、参数、返回结构和联调截图。                                  \\
+  \bottomrule
 \end{longtable}
 
 \subsection{Go消息投递链路设计}
@@ -120,7 +120,7 @@ Go投递链路的数据流如下：
 该设计的关键是“局部有序、全局并行”。设消息集合为$\mathcal{M}$，业务分区函数为$k(m)$，worker lane数量为$W$，则消息$m$被映射到：
 
 \[
-lane(m)=hash(k(m)) \bmod W
+  lane(m)=hash(k(m)) \bmod W
 \]
 
 对于任意两条消息$m_i,m_j$，若$k(m_i)=k(m_j)$，则二者进入同一lane并按读取顺序处理；若$k(m_i)\ne k(m_j)$，则可以进入不同lane并行处理。这样既不会破坏同一聊天或同一outbox内部的顺序，也避免所有消息被单线程消费限制吞吐。
@@ -136,7 +136,7 @@ lane(m)=hash(k(m)) \bmod W
 图快照构建分为三个阶段。第一阶段从后端快照接口按页读取边数据，避免一次性加载全部边造成内存峰值。第二阶段将字符串形式的\texttt{source\_user\_id}、\texttt{target\_user\_id}和边类型intern为\texttt{uint32}编号。第三阶段按源点聚合并构建CSR索引：
 
 \[
-neighbors(src)=N[offset[src]\,..\,offset[src+1])
+  neighbors(src)=N[offset[src]\,..\,offset[src+1])
 \]
 
 其中$offset$数组记录每个源点邻居区间的起止位置，$N$数组连续保存邻居编号、边权和时间信息。该结构适合直接邻居读取和ranked top-K读取，也便于在overlap查询中顺序扫描两个邻居列表。
@@ -144,7 +144,7 @@ neighbors(src)=N[offset[src]\,..\,offset[src+1])
 共同关系查询可表示为两个邻居集合的交集：
 
 \[
-overlap(u,v)=N(u)\cap N(v)
+  overlap(u,v)=N(u)\cap N(v)
 \]
 
 如果先物化全部交集再排序，在高出度节点上会消耗大量内存。C++服务采用streaming top-K overlap：扫描邻居列表时只维护得分最高的$K$个共同节点，并记录scanned、visited和budget exhausted等指标。多跳遍历同样采用预算控制，避免在社交图高度连接时无限扩展。对于排序中需要的新鲜度和时间衰减，服务在请求入口只采样一次\texttt{now\_ms}，并在ranking、traversal和weight计算中复用，减少热循环系统调用。
@@ -167,13 +167,13 @@ overlap(u,v)=N(u)\cap N(v)
 推荐系统的本质是对用户$u \in \mathcal{U}$与内容$c \in \mathcal{C}$之间的潜在偏好进行估计。设用户在时刻$t$对内容$c$产生的行为为$y_{u,c,t}$，行为类型集合为
 
 \[
-\mathcal{A}=\{\text{impression}, \text{click}, \text{dwell}, \text{share}, \text{negative}\}
+  \mathcal{A}=\{\text{impression}, \text{click}, \text{dwell}, \text{share}, \text{negative}\}
 \]
 
 其中曝光代表系统曾把内容展示给用户，点击、停留、分享属于正向反馈，不感兴趣、屏蔽、举报属于负向反馈。由于真实系统中绝大多数内容不会被用户显式评分，本项目采用隐式反馈建模思想，将行为强度映射为偏好置信度。对用户$u$和内容$c$，定义隐式偏好值：
 
 \[
-r_{u,c}=\sum_{a \in \mathcal{A}} \alpha_a \cdot n_{u,c}^{(a)}
+  r_{u,c}=\sum_{a \in \mathcal{A}} \alpha_a \cdot n_{u,c}^{(a)}
 \]
 
 其中$n_{u,c}^{(a)}$表示行为$a$出现的次数，$\alpha_a$表示该行为的权重。点击权重较低，表示“有兴趣查看”；长停留、分享、回复权重较高，表示“深度兴趣”；负反馈权重为负，表示系统应该降低相似内容的排序。该思想与隐式反馈推荐和排序学习中的偏好强度建模一致\cite{hu2008collaborative,rendle2009bpr}。
@@ -181,14 +181,14 @@ r_{u,c}=\sum_{a \in \mathcal{A}} \alpha_a \cdot n_{u,c}^{(a)}
 为了同时表达用户的短期兴趣和长期兴趣，系统为每个用户维护两个向量：
 
 \[
-\mathbf{p}_u = \lambda \mathbf{p}_u^{short} + (1-\lambda)\mathbf{p}_u^{long}
+  \mathbf{p}_u = \lambda \mathbf{p}_u^{short} + (1-\lambda)\mathbf{p}_u^{long}
 \]
 
 其中$\mathbf{p}_u^{short}$由最近点击、停留、分享的内容向量加权得到，更强调当前会话和近期兴趣；$\mathbf{p}_u^{long}$由较长时间窗口内的稳定行为得到，更强调长期偏好。$\lambda$是时间敏感系数，当用户近期行为密集时增大，当近期行为稀疏时减小。内容$c$的表示向量记为$\mathbf{q}_c$，可以由标题、摘要、关键词、分类和已有embedding字段综合得到。用户与内容的语义匹配分数定义为：
 
 \[
-s_{match}(u,c)=\cos(\mathbf{p}_u,\mathbf{q}_c)=
-\frac{\mathbf{p}_u^\top \mathbf{q}_c}{\|\mathbf{p}_u\|_2\|\mathbf{q}_c\|_2}
+  s_{match}(u,c)=\cos(\mathbf{p}_u,\mathbf{q}_c)=
+  \frac{\mathbf{p}_u^\top \mathbf{q}_c}{\|\mathbf{p}_u\|_2\|\mathbf{q}_c\|_2}
 \]
 
 该得分用于向量召回和排序特征，能够弥补单纯社交关系召回无法发现新兴趣内容的问题。
@@ -201,19 +201,19 @@ s_{match}(u,c)=\cos(\mathbf{p}_u,\mathbf{q}_c)=
 \hbadness=10000
 \small
 \begin{longtable}{L{0.17\textwidth}L{0.33\textwidth}L{0.39\textwidth}}
-\toprule
-特征层 & 主要字段 & 用途说明\\
-\midrule
-\endhead
-持久化用户向量 & \texttt{interestedInClusters}、\texttt{knownForCluster}、\texttt{knownForScore}、\texttt{producerEmbedding} & 表示用户消费兴趣、生产者社区归属和作者侧稀疏向量，用于SimClusters式兴趣召回和作者匹配。\\
-稠密Embedding & \texttt{twoTowerEmbedding}、\texttt{phoenixEmbedding}、\texttt{twhinEmbedding}、\texttt{embeddingDim} & 表示双塔、Phoenix和图嵌入空间中的用户向量，用于ANN召回、语义匹配和排序特征。\\
-向量契约元数据 & \texttt{version}、\texttt{modelVersion}、\texttt{artifactVersion}、\texttt{modelProfile}、\texttt{embeddingContract}、\texttt{computedAt}、\texttt{expiresAt}、\texttt{qualityScore} & 记录向量由哪个模型和artifact生成、维度是否兼容、何时计算和是否过期，避免不同维度或不同版本向量混算。\\
-实时用户信号 & \texttt{signalType}、\texttt{targetType}、\texttt{targetId}、\texttt{targetAuthorId}、\texttt{productSurface}、\texttt{metadata}、\texttt{timestamp}、\texttt{expiresAt} & 保存短期兴趣与负反馈，例如点击、停留、点赞、转发、引用、关注、不感兴趣、屏蔽、静音和举报，供实时特征聚合使用。\\
-长期行为日志 & \texttt{action}、\texttt{targetPostId}、\texttt{targetAuthorId}、\texttt{requestId}、\texttt{rank}、\texttt{score}、\texttt{weightedScore}、\texttt{recallSource}、\texttt{selectionPool}、\texttt{targetKeywords}、\texttt{targetUrl} & 保存可回放、可审计的行为事实，用于训练样本、行为序列、推荐解释和线上问题追踪。\\
-RealGraph社交边 & \texttt{followCount}、\texttt{likeCount}、\texttt{replyCount}、\texttt{retweetCount}、\texttt{quoteCount}、\texttt{tweetClickCount}、\texttt{dwellTimeMs}、\texttt{muteCount}、\texttt{blockCount}、\texttt{reportCount}、\texttt{decayedSum}、\texttt{interactionProbability} & 将用户与作者之间的互动累积为图边特征，正向互动增强作者亲和，静音、屏蔽、举报和取关降低或阻断关系分数。\\
-请求级用户上下文 & \texttt{followedUserIds}、\texttt{blockedUserIds}、\texttt{mutedUserIds}、\texttt{mutedKeywords}、\texttt{seenPostIds}、\texttt{followerIds}、\texttt{userStateContext}、\texttt{userSignalFeatures}、\texttt{interestedTopics} & 在每次Feed请求开始时由Hydrator补齐，用于关注召回、屏蔽过滤、静音过滤、已看过滤、冷启动/稀疏/重度用户分层和兴趣话题匹配。\\
-候选评分特征 & \texttt{likeScore}、\texttt{replyScore}、\texttt{repostScore}、\texttt{quoteScore}、\texttt{clickScore}、\texttt{profileClickScore}、\texttt{dwellScore}、\texttt{followAuthorScore}、\texttt{notInterestedScore}、\texttt{blockAuthorScore}、\texttt{muteAuthorScore}、\texttt{reportScore} & 对每条候选内容生成动作概率和负反馈概率。加权评分器对正向行为加分，对不感兴趣、屏蔽作者、静音作者和举报进行扣分。\\
-\bottomrule
+  \toprule
+  特征层          & 主要字段                                                                                                                                                                                                                                                                              & 用途说明                                                                \\
+  \midrule
+  \endhead
+  持久化用户向量      & \texttt{interestedInClusters}、\texttt{knownForCluster}、\texttt{knownForScore}、\texttt{producerEmbedding}                                                                                                                                                                          & 表示用户消费兴趣、生产者社区归属和作者侧稀疏向量，用于SimClusters式兴趣召回和作者匹配。                   \\
+  稠密Embedding  & \texttt{twoTowerEmbedding}、\texttt{phoenixEmbedding}、\texttt{twhinEmbedding}、\texttt{embeddingDim}                                                                                                                                                                                & 表示双塔、Phoenix和图嵌入空间中的用户向量，用于ANN召回、语义匹配和排序特征。                         \\
+  向量契约元数据      & \texttt{version}、\texttt{modelVersion}、\texttt{artifactVersion}、\texttt{modelProfile}、\texttt{embeddingContract}、\texttt{computedAt}、\texttt{expiresAt}、\texttt{qualityScore}                                                                                                     & 记录向量由哪个模型和artifact生成、维度是否兼容、何时计算和是否过期，避免不同维度或不同版本向量混算。              \\
+  实时用户信号       & \texttt{signalType}、\texttt{targetType}、\texttt{targetId}、\texttt{targetAuthorId}、\texttt{productSurface}、\texttt{metadata}、\texttt{timestamp}、\texttt{expiresAt}                                                                                                                 & 保存短期兴趣与负反馈，例如点击、停留、点赞、转发、引用、关注、不感兴趣、屏蔽、静音和举报，供实时特征聚合使用。             \\
+  长期行为日志       & \texttt{action}、\texttt{targetPostId}、\texttt{targetAuthorId}、\texttt{requestId}、\texttt{rank}、\texttt{score}、\texttt{weightedScore}、\texttt{recallSource}、\texttt{selectionPool}、\texttt{targetKeywords}、\texttt{targetUrl}                                                      & 保存可回放、可审计的行为事实，用于训练样本、行为序列、推荐解释和线上问题追踪。                             \\
+  RealGraph社交边 & \texttt{followCount}、\texttt{likeCount}、\texttt{replyCount}、\texttt{retweetCount}、\texttt{quoteCount}、\texttt{tweetClickCount}、\texttt{dwellTimeMs}、\texttt{muteCount}、\texttt{blockCount}、\texttt{reportCount}、\texttt{decayedSum}、\texttt{interactionProbability}               & 将用户与作者之间的互动累积为图边特征，正向互动增强作者亲和，静音、屏蔽、举报和取关降低或阻断关系分数。                 \\
+  请求级用户上下文     & \texttt{followedUserIds}、\texttt{blockedUserIds}、\texttt{mutedUserIds}、\texttt{mutedKeywords}、\texttt{seenPostIds}、\texttt{followerIds}、\texttt{userStateContext}、\texttt{userSignalFeatures}、\texttt{interestedTopics}                                                           & 在每次Feed请求开始时由Hydrator补齐，用于关注召回、屏蔽过滤、静音过滤、已看过滤、冷启动/稀疏/重度用户分层和兴趣话题匹配。 \\
+  候选评分特征       & \texttt{likeScore}、\texttt{replyScore}、\texttt{repostScore}、\texttt{quoteScore}、\texttt{clickScore}、\texttt{profileClickScore}、\texttt{dwellScore}、\texttt{followAuthorScore}、\texttt{notInterestedScore}、\texttt{blockAuthorScore}、\texttt{muteAuthorScore}、\texttt{reportScore} & 对每条候选内容生成动作概率和负反馈概率。加权评分器对正向行为加分，对不感兴趣、屏蔽作者、静音作者和举报进行扣分。            \\
+  \bottomrule
 \end{longtable}
 \endgroup
 
@@ -222,40 +222,42 @@ RealGraph社交边 & \texttt{followCount}、\texttt{likeCount}、\texttt{replyCo
 \begingroup
 \hbadness=10000
 \scriptsize
-\begin{longtable}{L{0.13\textwidth}L{0.20\textwidth}L{0.27\textwidth}L{0.26\textwidth}}
-\toprule
-正向/兴趣特征 & 前端入口 & 落库/接口 & 推荐侧影响\\
-\midrule
-\endhead
-曝光与停留 & 帖子进入视口和可见停留计时 & \texttt{impression/dwell}埋点桥接到\path{user_actions}和\path{user_signals} & 形成served-history、行为序列和隐式兴趣强度。\\
-帖子点击与主页点击 & 点击帖子卡片、头像或用户名 & \texttt{click/profile_click}埋点写入\texttt{ActionType.CLICK/PROFILE_CLICK}和对应\texttt{SignalType} & 增强内容兴趣和作者亲和，供Hydrator读取近期行为。\\
-点赞、回复、转发 & 帖子操作栏按钮和评论抽屉 & \path{/like}、\path{/comments}、\path{/repost}写入推荐事件 & 增强显式兴趣、训练标签和RealGraph作者边。\\
-引用动态 & 帖子更多菜单中的“引用动态”按钮，输入引用内容后发布 & \path{POST /api/space/posts}携带\texttt{quotePostId/quoteContent}，写入\texttt{ActionType.QUOTE}和\texttt{SignalType.QUOTE} & 进入\texttt{quoteCount}、\texttt{quoteScore}、Phoenix训练标签和RealGraph社交边。\\
-分享与外链点击 & 分享按钮、Markdown外链 & 分享入口和\texttt{open_link}埋点写入\texttt{SignalType.SHARE/OPEN_LINK}，外链保留\texttt{targetUrl} & 作为轻量兴趣和内容传播信号。\\
-搜索与话题点击 & 探索页搜索框、热门趋势和话题chip & \texttt{search_query/hashtag_click}桥接为\texttt{TargetType.SEARCH_QUERY/TOPIC} & 更新兴趣关键词和探索面意图。\\
-关注 & 推荐关注卡片或个人主页关注按钮 & \path{POST /api/space/users/:id/follow}和analytics对账写入\texttt{SignalType.FOLLOW} & 进入关注召回、作者亲和和RealGraph。\\
-\bottomrule
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{L{0.11\textwidth}L{0.19\textwidth}L{0.25\textwidth}L{0.27\textwidth}}
+  \toprule
+  正向/兴趣特征   & 前端入口                       & 落库/接口                                                                                                                   & 推荐侧影响                                                               \\
+  \midrule
+  \endhead
+  曝光与停留     & 帖子进入视口和可见停留计时              & \texttt{impression/dwell}埋点桥接到\texttt{user\_actions}和\texttt{user\_signals}                                             & 形成served-history、行为序列和隐式兴趣强度。                                       \\
+  帖子点击与主页点击 & 点击帖子卡片、头像或用户名              & \texttt{click/profile\_click}埋点写入\texttt{ActionType.CLICK/PROFILE\_CLICK}和对应\texttt{SignalType}                         & 增强内容兴趣和作者亲和，供Hydrator读取近期行为。                                        \\
+  点赞、回复、转发  & 帖子操作栏按钮和评论抽屉               & \texttt{/like}、\texttt{/comments}、\texttt{/repost}写入推荐事件                                                                & 增强显式兴趣、训练标签和RealGraph作者边。                                           \\
+  引用动态      & 帖子更多菜单中的”引用动态”按钮，输入引用内容后发布 & \texttt{POST /api/space/posts}携带\texttt{quotePostId/quoteContent}，写入\texttt{ActionType.QUOTE}和\texttt{SignalType.QUOTE} & 进入\texttt{quoteCount}、\texttt{quoteScore}、Phoenix训练标签和RealGraph社交边。 \\
+  分享与外链点击   & 分享按钮、Markdown外链            & 分享入口和\texttt{open\_link}埋点写入\texttt{SignalType.SHARE/OPEN\_LINK}，外链保留\texttt{targetUrl}                                 & 作为轻量兴趣和内容传播信号。                                                      \\
+  搜索与话题点击   & 探索页搜索框、热门趋势和话题chip         & \texttt{search\_query/hashtag\_click}桥接为\texttt{TargetType.SEARCH\_QUERY/TOPIC}                                         & 更新兴趣关键词和探索面意图。                                                      \\
+  关注        & 推荐关注卡片或个人主页关注按钮            & \texttt{POST /api/space/users/:id/follow}和analytics对账写入\texttt{SignalType.FOLLOW}                                       & 进入关注召回、作者亲和和RealGraph。                                              \\
+  \bottomrule
 \end{longtable}
 \endgroup
 
 \begingroup
 \hbadness=10000
 \scriptsize
-\begin{longtable}{L{0.13\textwidth}L{0.19\textwidth}L{0.25\textwidth}L{0.29\textwidth}}
-\toprule
-负向特征 & 前端入口 & 落库/接口 & 推荐侧影响\\
-\midrule
-\endhead
-不感兴趣 & 帖子更多菜单中的“不感兴趣”按钮 & \path{/api/space/posts/:id/not-interested}，写入\path{ActionType.DISMISS}和\path{SignalType.DISMISS_POST} & 作为帖子级强负反馈，进入\path{notInterestedScore/dismissScore}和后续训练样本，降低相似内容排序。\\
-隐藏帖子 & 帖子更多菜单中的“隐藏此帖”按钮 & \path{/api/space/posts/:id/hide}，写入\path{ActionType.HIDE}和\path{SignalType.HIDE_POST} & 当前请求中移除该帖子，并作为负反馈事实用于后续过滤、行为审计和训练。\\
-举报 & 帖子更多菜单中的“举报”按钮，二级原因包含垃圾内容、骚扰、虚假信息、暴力仇恨和其他原因 & \path{/api/space/posts/:id/report}，写入\texttt{ActionType.REPORT}和\texttt{SignalType.REPORT} & 在\texttt{WeightedScorer}中按\texttt{REPORT\_WEIGHT=-8.0}扣分，同时进入RealGraph的\texttt{reportCount}。\\
-屏蔽作者 & 帖子更多菜单中的“屏蔽 @作者”按钮 & \path{/api/space/users/:id/block}，写入联系人\texttt{blocked}状态和\texttt{SignalType.BLOCK} & 进入\texttt{blockedUserIds}硬过滤、\path{blockAuthorScore/blockScore}扣分和RealGraph的\texttt{blockCount}。\\
-静音作者 & 帖子更多菜单中的“静音 @作者”按钮 & \path{/api/space/users/:id/mute}，写入用户设置和\texttt{SignalType.MUTE} & 进入\texttt{mutedUserIds}过滤、\texttt{muteAuthorScore}扣分和RealGraph的\texttt{muteCount}。\\
-取消关注 & 推荐关注卡片或个人主页中的关注状态按钮，已关注时显示为“已关注”并可再次点击取消 & \texttt{DELETE} \path{/api/space/users/:id/follow}，写入\texttt{SignalType.UNFOLLOW} & 将作者关系从关注网络移除，并在RealGraph中减少\texttt{followCount}。\\
-取消点赞 & 帖子点赞按钮的已点赞状态再次点击 & 前端埋点\texttt{unlike}映射到\path{SignalType.UNFAVORITE}，业务接口为\texttt{DELETE} \path{/api/space/posts/:id/like} & 作为轻度负向修正，降低用户对该内容/相似内容的偏好置信度。\\
-取消转发 & 帖子转发按钮在已转发状态下显示为“取消转发”语义按钮 & \texttt{DELETE} \path{/api/space/posts/:id/repost}，写入\path{SignalType.UNRETWEET} & 与\texttt{UNRETWEET=-1.0}负权重对齐，作为撤销转发的轻度负反馈进入实时用户信号。\\
-取消书签、通知关闭 & \texttt{UserSignal}权重表预留 & 当前Space Feed未提供书签和通知关闭入口 & 属于其他业务面或后续扩展字段，不应在Space演示中宣称已经由前端按钮采集。\\
-\bottomrule
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{L{0.11\textwidth}L{0.17\textwidth}L{0.23\textwidth}L{0.31\textwidth}}
+  \toprule
+  负向特征      & 前端入口                                        & 落库/接口                                                                                                        & 推荐侧影响                                                                                              \\
+  \midrule
+  \endhead
+  不感兴趣      & 帖子更多菜单中的”不感兴趣”按钮                            & \texttt{/api/space/posts/:id/not-interested}，写入\texttt{ActionType.DISMISS}和\texttt{SignalType.DISMISS\_POST} & 作为帖子级强负反馈，进入\texttt{notInterestedScore/dismissScore}和后续训练样本，降低相似内容排序。                              \\
+  隐藏帖子      & 帖子更多菜单中的”隐藏此帖”按钮                            & \texttt{/api/space/posts/:id/hide}，写入\texttt{ActionType.HIDE}和\texttt{SignalType.HIDE\_POST}                 & 当前请求中移除该帖子，并作为负反馈事实用于后续过滤、行为审计和训练。                                                                 \\
+  举报        & 帖子更多菜单中的”举报”按钮，二级原因包含垃圾内容、骚扰、虚假信息、暴力仇恨和其他原因 & \texttt{/api/space/posts/:id/report}，写入\texttt{ActionType.REPORT}和\texttt{SignalType.REPORT}                 & 在\texttt{WeightedScorer}中按\texttt{REPORT\_WEIGHT=-8.0}扣分，同时进入RealGraph的\texttt{reportCount}。       \\
+  屏蔽作者      & 帖子更多菜单中的”屏蔽 @作者”按钮                          & \texttt{/api/space/users/:id/block}，写入联系人\texttt{blocked}状态和\texttt{SignalType.BLOCK}                        & 进入\texttt{blockedUserIds}硬过滤、\texttt{blockAuthorScore/blockScore}扣分和RealGraph的\texttt{blockCount}。 \\
+  静音作者      & 帖子更多菜单中的”静音 @作者”按钮                          & \texttt{/api/space/users/:id/mute}，写入用户设置和\texttt{SignalType.MUTE}                                           & 进入\texttt{mutedUserIds}过滤、\texttt{muteAuthorScore}扣分和RealGraph的\texttt{muteCount}。                 \\
+  取消关注      & 推荐关注卡片或个人主页中的关注状态按钮，已关注时显示为”已关注”并可再次点击取消    & \texttt{DELETE /api/space/users/:id/follow}，写入\texttt{SignalType.UNFOLLOW}                                   & 将作者关系从关注网络移除，并在RealGraph中减少\texttt{followCount}。                                                   \\
+  取消点赞      & 帖子点赞按钮的已点赞状态再次点击                            & 前端埋点\texttt{unlike}映射到\texttt{SignalType.UNFAVORITE}，业务接口为\texttt{DELETE /api/space/posts/:id/like}          & 作为轻度负向修正，降低用户对该内容/相似内容的偏好置信度。                                                                      \\
+  取消转发      & 帖子转发按钮在已转发状态下显示为”取消转发”语义按钮                  & \texttt{DELETE /api/space/posts/:id/repost}，写入\texttt{SignalType.UNRETWEET}                                  & 与\texttt{UNRETWEET=-1.0}负权重对齐，作为撤销转发的轻度负反馈进入实时用户信号。                                                \\
+  取消书签、通知关闭 & \texttt{UserSignal}权重表预留                    & 当前Space Feed未提供书签和通知关闭入口                                                                                     & 属于其他业务面或后续扩展字段，不应在Space演示中宣称已经由前端按钮采集。                                                             \\
+  \bottomrule
 \end{longtable}
 \endgroup
 
@@ -266,7 +268,7 @@ RealGraph社交边 & \texttt{followCount}、\texttt{likeCount}、\texttt{replyCo
 多路召回阶段的目标是在可控延迟内从海量内容集合$\mathcal{C}$中构造较小候选集$\mathcal{R}_u$。如果直接对所有内容排序，时间复杂度为$O(|\mathcal{C}|)$，在实际Feed场景中不可接受。因此系统将召回看作多个弱检索器的并集：
 
 \[
-\mathcal{R}_u = \bigcup_{m=1}^{M} \mathcal{R}_u^{(m)}
+  \mathcal{R}_u = \bigcup_{m=1}^{M} \mathcal{R}_u^{(m)}
 \]
 
 其中$m$表示召回通道，$\mathcal{R}_u^{(m)}$表示第$m$路召回结果。每一路召回承担不同的信息增益：
@@ -283,7 +285,7 @@ RealGraph社交边 & \texttt{followCount}、\texttt{likeCount}、\texttt{replyCo
 从概率角度看，每一路召回都近似估计一个条件概率$P(c|u,m)$。关注召回强调$P(c|follow(u))$，社交图谱召回强调$P(c|G_u)$，向量召回强调$P(c|\mathbf{p}_u)$，热门召回强调$P(c|global)$。最终候选集并不是简单平均，而是根据用户状态动态调整各路配额。设用户状态为$z_u \in \{\text{cold},\text{sparse},\text{warm},\text{heavy}\}$，第$m$路召回配额为：
 
 \[
-K_m(u)=K \cdot \frac{\pi_m(z_u)\cdot h_m}{\sum_{j=1}^{M}\pi_j(z_u)\cdot h_j}
+  K_m(u)=K \cdot \frac{\pi_m(z_u)\cdot h_m}{\sum_{j=1}^{M}\pi_j(z_u)\cdot h_j}
 \]
 
 其中$K$表示总候选规模，$\pi_m(z_u)$表示不同用户状态下的召回偏好，$h_m$表示召回源健康度。对于冷启动用户，热门召回和地区语言召回权重更高；对于重度用户，关注召回、向量召回和作者亲和召回权重更高。该设计可以避免“新用户无结果”和“老用户结果过于热门化”两个常见问题。
@@ -293,7 +295,7 @@ K_m(u)=K \cdot \frac{\pi_m(z_u)\cdot h_m}{\sum_{j=1}^{M}\pi_j(z_u)\cdot h_j}
 召回阶段追求覆盖率，过滤阶段追求安全性和有效性。设召回候选为$\mathcal{R}_u$，过滤后候选为$\mathcal{F}_u$，则：
 
 \[
-\mathcal{F}_u=\{c \in \mathcal{R}_u \mid g_k(u,c)=1,\; k=1,2,\dots,L\}
+  \mathcal{F}_u=\{c \in \mathcal{R}_u \mid g_k(u,c)=1,\; k=1,2,\dots,L\}
 \]
 
 其中$g_k$是第$k$个硬约束函数。系统中主要约束包括：去重约束、已曝光过滤、自身内容过滤、屏蔽用户过滤、敏感词过滤、内容时效过滤和重复转发过滤。硬约束的优先级高于模型得分，因为违反这些规则会直接损害用户体验或平台安全。
@@ -301,7 +303,7 @@ K_m(u)=K \cdot \frac{\pi_m(z_u)\cdot h_m}{\sum_{j=1}^{M}\pi_j(z_u)\cdot h_j}
 对已曝光内容，系统维护集合$\mathcal{E}_u$，如果$c \in \mathcal{E}_u$，则过滤该内容或显著降低得分。该机制解决推荐系统中的重复曝光问题。对负反馈内容，系统不仅过滤具体内容，还会将负反馈传播到相似作者、相似主题和相似关键词：
 
 \[
-penalty(u,c)=\beta_1 I(author(c)\in B_u)+\beta_2 sim(topic(c),T_u^{-})+\beta_3 sim(keyword(c),K_u^{-})
+  penalty(u,c)=\beta_1 I(author(c)\in B_u)+\beta_2 sim(topic(c),T_u^{-})+\beta_3 sim(keyword(c),K_u^{-})
 \]
 
 其中$B_u$表示用户屏蔽作者集合，$T_u^{-}$表示负反馈主题集合，$K_u^{-}$表示负反馈关键词集合。该惩罚项进入排序阶段，避免系统反复推荐用户明确拒绝的内容。
@@ -311,7 +313,7 @@ penalty(u,c)=\beta_1 I(author(c)\in B_u)+\beta_2 sim(topic(c),T_u^{-})+\beta_3 s
 评分阶段采用可解释的多目标融合模型。设候选内容$c$对用户$u$的最终得分为$S(u,c)$，可表示为：
 
 \[
-S(u,c)=w_1E(u,c)+w_2A(u,c)+w_3Q(c)+w_4R(c)+w_5M(u,c)-w_6N(u,c)
+  S(u,c)=w_1E(u,c)+w_2A(u,c)+w_3Q(c)+w_4R(c)+w_5M(u,c)-w_6N(u,c)
 \]
 
 其中，$E(u,c)$表示用户行为兴趣得分，$A(u,c)$表示作者亲和度，$Q(c)$表示内容质量，$R(c)$表示新鲜度，$M(u,c)$表示语义匹配得分，$N(u,c)$表示负反馈惩罚项。权重$w_i$可以由实验配置控制，也可以在后续通过学习排序模型自动学习。
@@ -330,7 +332,7 @@ S(u,c)=w_1E(u,c)+w_2A(u,c)+w_3Q(c)+w_4R(c)+w_5M(u,c)-w_6N(u,c)
 新鲜度采用指数衰减模型：
 
 \[
-R(c)=\exp\left(-\frac{t_{now}-t_c}{\tau}\right)
+  R(c)=\exp\left(-\frac{t_{now}-t_c}{\tau}\right)
 \]
 
 其中$t_c$为内容发布时间，$\tau$为时间半衰参数。新闻类内容对新鲜度敏感，$\tau$应较小；知识类或长期有效内容对新鲜度不敏感，$\tau$可以增大。该函数可以避免旧内容长期占据高位，同时不会让刚发布但质量很低的内容无条件排在前面。
@@ -338,7 +340,7 @@ R(c)=\exp\left(-\frac{t_{now}-t_c}{\tau}\right)
 行为兴趣得分采用归一化加权形式：
 
 \[
-E(u,c)=\sigma\left(\sum_{a \in \mathcal{A}^{+}}\alpha_a f_a(u,c)-\sum_{b \in \mathcal{A}^{-}}\gamma_b f_b(u,c)\right)
+  E(u,c)=\sigma\left(\sum_{a \in \mathcal{A}^{+}}\alpha_a f_a(u,c)-\sum_{b \in \mathcal{A}^{-}}\gamma_b f_b(u,c)\right)
 \]
 
 其中$\sigma(x)=1/(1+e^{-x})$为Sigmoid函数，$\mathcal{A}^{+}$为正向行为集合，$\mathcal{A}^{-}$为负向行为集合。使用Sigmoid的原因是将原始行为强度压缩到$[0,1]$区间，避免某个高频行为单独支配排序。
@@ -348,8 +350,8 @@ E(u,c)=\sigma\left(\sum_{a \in \mathcal{A}^{+}}\alpha_a f_a(u,c)-\sum_{b \in \ma
 如果直接按照$S(u,c)$取TopK，系统容易出现“信息茧房”和“作者集中”问题。为此，最终选择阶段采用带多样性约束的贪心重排。设已选择集合为$\mathcal{S}$，下一条内容$c^\ast$满足：
 
 \[
-c^\ast=\arg\max_{c \in \mathcal{F}_u \setminus \mathcal{S}}
-\left[S(u,c)-\eta \max_{c' \in \mathcal{S}} sim(c,c')\right]
+  c^\ast=\arg\max_{c \in \mathcal{F}_u \setminus \mathcal{S}}
+  \left[S(u,c)-\eta \max_{c' \in \mathcal{S}} sim(c,c')\right]
 \]
 
 其中$sim(c,c')$表示两个内容在作者、主题、来源或向量空间中的相似度，$\eta$为多样性惩罚系数。该公式与最大边际相关性（MMR）思想一致\cite{carbonell1998mmr}。当已选择列表中存在同主题内容时，相似候选会被惩罚，从而提升推荐列表的信息覆盖面。
@@ -357,7 +359,7 @@ c^\ast=\arg\max_{c \in \mathcal{F}_u \setminus \mathcal{S}}
 同时，系统对不同召回来源进行校准。由于热门召回天然具有较高互动数，向量召回天然更贴近兴趣但可能互动较少，若不校准会导致某一路召回长期占优。系统引入来源校准项：
 
 \[
-S'(u,c)=S(u,c)+\delta_{source(c)}+\delta_{bucket(u)}
+  S'(u,c)=S(u,c)+\delta_{source(c)}+\delta_{bucket(u)}
 \]
 
 其中$\delta_{source(c)}$用于修正不同召回源的系统性偏差，$\delta_{bucket(u)}$用于支持实验分桶。这样既可以做工程上的灰度实验，也可以在报告层面体现推荐算法的可观测和可调优能力。
@@ -367,8 +369,8 @@ S'(u,c)=S(u,c)+\delta_{source(c)}+\delta_{bucket(u)}
 从优化目标看，推荐系统不是单纯最大化点击率，而是多目标优化问题。系统希望同时提升点击、停留、分享和满意度，并降低负反馈。因此可定义总体效用函数：
 
 \[
-J=\mathbb{E}_{(u,c)\sim \mathcal{D}}
-\left[\theta_1 click+\theta_2 dwell+\theta_3 share-\theta_4 negative-\theta_5 latency\right]
+  J=\mathbb{E}_{(u,c)\sim \mathcal{D}}
+  \left[\theta_1 click+\theta_2 dwell+\theta_3 share-\theta_4 negative-\theta_5 latency\right]
 \]
 
 其中$\mathcal{D}$为线上请求分布，$latency$表示推荐接口延迟。该目标函数体现了课程项目中的工程权衡：推荐结果要相关，但接口也要稳定、快速、可解释。离线评估可以使用Precision@K、Recall@K、NDCG@K和覆盖率；在线评估可以使用CTR、平均停留时长、分享率、负反馈率和P95延迟。实验表中的\texttt{experiments}表正是为后续A/B测试准备的。
@@ -387,24 +389,24 @@ J=\mathbb{E}_{(u,c)\sim \mathcal{D}}
 \end{figure}
 
 \begin{longtable}{L{0.25\textwidth}L{0.18\textwidth}L{0.48\textwidth}}
-\caption{核心数据表说明}\\
-\toprule
-表名 & 当前记录数 & 用途说明 \\
-\midrule
-\endfirsthead
-\toprule
-表名 & 当前记录数 & 用途说明 \\
-\midrule
-\endhead
-\texttt{users} & 642 & 保存用户编号、用户名、邮箱、头像、地区、语言和在线状态。\\
-\texttt{groups} & 6 & 保存群组名称、描述、群主、类型、成员数量和最大成员数。\\
-\texttt{group\_members} & 764 & 保存用户与群组的成员关系、角色、状态和加入时间。\\
-\texttt{contacts} & 195 & 保存联系人关系、联系人状态和备注名。\\
-\texttt{news\_articles} & 838 & 保存新闻标题、摘要、来源、分类、关键词、向量、互动计数和有效状态。\\
-\texttt{news\_user\_events} & 2386 & 保存曝光、点击、停留、分享等用户行为事件。\\
-\texttt{news\_user\_vectors} & 6 & 保存用户短期兴趣向量和长期兴趣向量。\\
-\texttt{experiments} & 2 & 保存推荐实验名称、状态、流量比例、分桶方式和评价指标。\\
-\bottomrule
+  \caption{核心数据表说明}                                                        \\
+  \toprule
+  表名                           & 当前记录数 & 用途说明                              \\
+  \midrule
+  \endfirsthead
+  \toprule
+  表名                           & 当前记录数 & 用途说明                              \\
+  \midrule
+  \endhead
+  \texttt{users}               & 642   & 保存用户编号、用户名、邮箱、头像、地区、语言和在线状态。      \\
+  \texttt{groups}              & 6     & 保存群组名称、描述、群主、类型、成员数量和最大成员数。       \\
+  \texttt{group\_members}      & 764   & 保存用户与群组的成员关系、角色、状态和加入时间。          \\
+  \texttt{contacts}            & 195   & 保存联系人关系、联系人状态和备注名。                \\
+  \texttt{news\_articles}      & 838   & 保存新闻标题、摘要、来源、分类、关键词、向量、互动计数和有效状态。 \\
+  \texttt{news\_user\_events}  & 2386  & 保存曝光、点击、停留、分享等用户行为事件。             \\
+  \texttt{news\_user\_vectors} & 6     & 保存用户短期兴趣向量和长期兴趣向量。                \\
+  \texttt{experiments}         & 2     & 保存推荐实验名称、状态、流量比例、分桶方式和评价指标。       \\
+  \bottomrule
 \end{longtable}
 
 \subsection{接口设计}
@@ -412,21 +414,21 @@ J=\mathbb{E}_{(u,c)\sim \mathcal{D}}
 系统核心接口设计如下：
 
 \begin{longtable}{L{0.13\textwidth}L{0.34\textwidth}L{0.41\textwidth}}
-\caption{核心接口设计}\\
-\toprule
-方法 & 路径 & 说明 \\
-\midrule
-\endfirsthead
-\toprule
-方法 & 路径 & 说明 \\
-\midrule
-\endhead
-GET & \path{/api/space/feed} & 获取个性化推荐Feed，支持分页、数量限制和是否只看关注内容。\\
-POST & \path{/api/space/feed} & 携带已曝光内容、请求编号和客户端上下文获取Feed。\\
-GET & \path{/api/space/trends} & 获取趋势主题和热门内容。\\
-GET & \path{/api/space/recommend/users} & 推荐可能感兴趣的用户或作者。\\
-POST & \path{/api/events/news} & 上报曝光、点击、停留、分享等行为事件。\\
-\bottomrule
+  \caption{核心接口设计}                                                             \\
+  \toprule
+  方法   & 路径                                  & 说明                              \\
+  \midrule
+  \endfirsthead
+  \toprule
+  方法   & 路径                                  & 说明                              \\
+  \midrule
+  \endhead
+  GET  & \texttt{/api/space/feed}            & 获取个性化推荐Feed，支持分页、数量限制和是否只看关注内容。 \\
+  POST & \texttt{/api/space/feed}            & 携带已曝光内容、请求编号和客户端上下文获取Feed。      \\
+  GET  & \texttt{/api/space/trends}          & 获取趋势主题和热门内容。                    \\
+  GET  & \texttt{/api/space/recommend/users} & 推荐可能感兴趣的用户或作者。                  \\
+  POST & \texttt{/api/events/news}           & 上报曝光、点击、停留、分享等行为事件。             \\
+  \bottomrule
 \end{longtable}
 
 \subsection{安全设计}

@@ -1,0 +1,6 @@
+  curl https://api.xuziqi.tech/health
+  ssh root@159.203.142.13 '
+  for port in 5000 4000 4100 4200 4300; do
+  curl --silent --show-error --max-time 10 \
+  "http://127.0.0.1:${port}/health"
+  done'

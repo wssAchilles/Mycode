@@ -8,7 +8,7 @@
 \vspace*{1.15cm}
 
 \begin{center}
-  {\heiti\bfseries\zihao{2} 基于Spring Boot的分布式推荐系统\par}
+  {\heiti\bfseries\zihao{2} 面向社交图谱与消息投递的分布式推荐系统\par}
   \vspace{0.55cm}
   {\heiti\bfseries\zihao{3} 摘\quad 要\par}
 \end{center}
@@ -16,13 +16,13 @@
 \vspace{0.25cm}
 
 {\songti\zihao{-4}\setlength{\parindent}{2em}\linespread{1.65}\selectfont
-本文围绕“基于Spring Boot的分布式推荐系统”展开设计与实现说明。系统面向类即时通信与内容社区场景，将后端设计为以Spring Boot业务服务为核心、Go消息投递服务和C++图计算内核协同工作的多语言分布式系统。系统通过RESTful接口接收前端请求，使用Supabase PostgreSQL保存用户、群组、联系人、新闻内容、行为事件、兴趣向量与实验配置，并结合Redis完成缓存、时间线加速和消息流消费。
+  本文围绕“基于Spring Boot的分布式推荐系统”展开设计与实现说明。系统面向类即时通信与内容社区场景，将后端设计为以Spring Boot业务服务为核心、Go消息投递服务和C++图计算内核协同工作的多语言分布式系统。系统通过RESTful接口接收前端请求，使用Supabase PostgreSQL保存用户、群组、联系人、新闻内容、行为事件、兴趣向量与实验配置，并结合Redis完成缓存、时间线加速和消息流消费。
 
-推荐模块采用“上下文构建、特征补全、多路召回、规则过滤、加权评分、TopK选择、曝光记录”的流水线结构，综合关注关系、社交图谱、新闻向量、作者兴趣、热门内容和冷启动内容生成个性化Feed。Go侧通过keyed worker lane、批量ACK、PEL恢复和分块update id预留提升有序投递吞吐；C++侧通过紧凑CSR快照、请求级时间采样和streaming top-K overlap加速图查询。系统采用Apifox进行接口联调，并补充Go单元测试、C++基准测试和统一性能门禁。结果表明，该方案能够支撑分布式后端、云端数据库、前后端分离、接口联调与推荐算法设计等课程要求，具备继续扩展为真实线上服务的工程基础。
+  推荐模块采用“上下文构建、特征补全、多路召回、规则过滤、加权评分、TopK选择、曝光记录”的流水线结构，综合关注关系、社交图谱、新闻向量、作者兴趣、热门内容和冷启动内容生成个性化Feed。Go侧通过keyed worker lane、批量ACK、PEL恢复和分块update id预留提升有序投递吞吐；C++侧通过紧凑CSR快照、请求级时间采样和streaming top-K overlap加速图查询。系统采用Apifox进行接口联调，并补充Go单元测试、C++基准测试和统一性能门禁。结果表明，该方案能够支撑分布式后端、云端数据库、前后端分离、接口联调与推荐算法设计等课程要求，具备继续扩展为真实线上服务的工程基础。
 
-\vspace{0.65cm}
-\noindent{\heiti 关键词：}Spring Boot；Go；C++；分布式系统；推荐算法；Supabase
-\par}
+  \vspace{0.65cm}
+  \noindent{\heiti 关键词：}Spring Boot；Go；C++；分布式系统；推荐算法；Supabase
+  \par}
 
 \clearpage
 \thispagestyle{abstracten}
@@ -31,7 +31,7 @@
 \vspace*{0.9cm}
 
 \begin{center}
-  {\rmfamily\bfseries\zihao{3} Spring Boot Based Distributed Recommendation System\par}
+  {\rmfamily\bfseries\zihao{3} A Distributed Recommender System for Social Graphs and Message Delivery\par}
   \vspace{0.45cm}
   {\rmfamily\bfseries\zihao{3} Abstract\par}
 \end{center}
@@ -39,10 +39,10 @@
 \vspace{0.15cm}
 
 {\rmfamily\zihao{-4}\setlength{\parindent}{2em}\linespread{1.45}\selectfont
-This report presents the design of a distributed recommendation system based on Spring Boot. The system targets an instant-messaging and content-community scenario. Its back end is organized as a multi-language distributed system centered on a layered Spring Boot service and supported by a Go delivery service and a C++ graph kernel. The system exposes RESTful APIs, stores users, groups, contacts, news articles, user events, user vectors, and experiment configurations in Supabase PostgreSQL, and uses Redis for caching, timeline acceleration, and stream consumption.
+  This report presents the design of a distributed recommendation system based on Spring Boot. The system targets an instant-messaging and content-community scenario. Its back end is organized as a multi-language distributed system centered on a layered Spring Boot service and supported by a Go delivery service and a C++ graph kernel. The system exposes RESTful APIs, stores users, groups, contacts, news articles, user events, user vectors, and experiment configurations in Supabase PostgreSQL, and uses Redis for caching, timeline acceleration, and stream consumption.
 
-The recommendation module follows a pipeline of context construction, feature hydration, multi-source recall, rule-based filtering, weighted scoring, TopK selection, and impression logging. It combines following timelines, social graph expansion, news vectors, author-interest matching, popular content, and cold-start content to generate personalized feeds. The Go delivery path uses keyed worker lanes, batched ACKs, PEL recovery, and block update-id reservation to improve ordered fanout throughput. The C++ graph service uses compact CSR snapshots, request-level time sampling, and streaming top-K overlap queries to accelerate social graph retrieval. Apifox integration tests, Go unit tests, C++ benchmarks, and a unified performance gate are used as engineering evidence. The project satisfies the course requirements for a distributed back end, cloud database, front-end/back-end separation, API testing, and recommendation algorithm design.
+  The recommendation module follows a pipeline of context construction, feature hydration, multi-source recall, rule-based filtering, weighted scoring, TopK selection, and impression logging. It combines following timelines, social graph expansion, news vectors, author-interest matching, popular content, and cold-start content to generate personalized feeds. The Go delivery path uses keyed worker lanes, batched ACKs, PEL recovery, and block update-id reservation to improve ordered fanout throughput. The C++ graph service uses compact CSR snapshots, request-level time sampling, and streaming top-K overlap queries to accelerate social graph retrieval. Apifox integration tests, Go unit tests, C++ benchmarks, and a unified performance gate are used as engineering evidence. The project satisfies the course requirements for a distributed back end, cloud database, front-end/back-end separation, API testing, and recommendation algorithm design.
 
-\vspace{0.45cm}
-\noindent{\bfseries Keywords:} Spring Boot; Go; C++; Distributed System; Recommendation Algorithm; Supabase
-\par}
+  \vspace{0.45cm}
+  \noindent{\bfseries Keywords:} Spring Boot; Go; C++; Distributed System; Recommendation Algorithm; Supabase
+  \par}
