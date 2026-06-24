@@ -11,5 +11,5 @@ export const handleContactRequestSchema = z.object({
 
 export const searchUsersSchema = z.object({
   query: z.string().min(1).max(100).transform((val) => val.replace(/[%_]/g, '\\$&')),
-  limit: z.number().min(1).max(50).optional(),
+  limit: z.coerce.number().min(1).max(50).optional(),
 });

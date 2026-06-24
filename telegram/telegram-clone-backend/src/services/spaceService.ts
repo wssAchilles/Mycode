@@ -1436,12 +1436,30 @@ class SpaceService {
         }
 
         const query = `#${normalizedTag}`;
-        const result = await this.searchPostsPage(query, limit, cursor);
-        if (result.posts.length === 0) {
-            return this.searchNewsTopicPosts(normalizedTag, limit, cursor);
-        }
+        const [socialResult, newsResult] = await Promise.all([
+            this.searchPostsPage(query, limit, cursor),
+            this.searchNewsTopicPosts(normalizedTag, limit, cursor),
+        ]);
+
+        const mergedPosts = [...socialResult.posts, ...newsResult.posts];
+        mergedPosts.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0).getTime();
+            const dateB = new Date(b.createdAt || 0).getTime();
+            return dateB - dateA;
+        });
+
+        const posts = mergedPosts.slice(0, limit);
+        const hasMore = socialResult.hasMore || newsResult.hasMore || mergedPosts.length > limit;
+        const lastPost = posts[posts.length - 1];
+        const nextCursor = hasMore && lastPost?.createdAt
+            ? new Date(lastPost.createdAt).toISOString()
+            : undefined;
+
         return {
-            ...result,
+            posts,
+            totalCount: socialResult.totalCount + newsResult.totalCount,
+            hasMore,
+            nextCursor,
             query,
             tag: normalizedTag,
         };
