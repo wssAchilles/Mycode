@@ -15,6 +15,21 @@ const actionLabelMap: Record<NotificationItem['type'], string> = {
     quote: '引用了你',
 };
 
+const getNotificationKey = (item: NotificationItem) =>
+    [item.actor.id, item.type, item.postId ?? ''].join(':');
+
+const dedupeNotifications = (notifications: NotificationItem[]) => {
+    const seen = new Set<string>();
+    return notifications.filter((item) => {
+        const key = getNotificationKey(item);
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+};
+
 const formatTime = (iso: string) => {
     const date = new Date(iso);
     return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -32,7 +47,7 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
         setError(null);
         try {
             const result = await spaceAPI.getNotifications(20, reset ? undefined : cursor);
-            setItems((prev) => (reset ? result.items : [...prev, ...result.items]));
+            setItems((prev) => dedupeNotifications(reset ? result.items : [...prev, ...result.items]));
             setHasMore(result.hasMore);
             setCursor(result.nextCursor);
         } catch (error) {

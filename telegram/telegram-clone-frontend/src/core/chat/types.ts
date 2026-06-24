@@ -330,6 +330,7 @@ export interface ChatCoreApi {
   setConnectivity(socketConnected: boolean): Promise<void>;
   connectRealtime(): Promise<void>;
   disconnectRealtime(): Promise<void>;
+  subscribePresence(userIds: string[]): Promise<void>;
 
   prefetchChat(chatId: ChatId, isGroup: boolean): Promise<void>;
   prefetchChats(targets: ChatPrefetchTarget[]): Promise<void>;

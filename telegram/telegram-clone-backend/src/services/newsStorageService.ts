@@ -189,8 +189,22 @@ export const newsStorageService = {
       await fs.writeFile(fullPath, response.data);
       return { path: relativePath, url: toPublicUrl(relativePath) };
     } catch {
-      return { path: null, url: imageUrl || null };
+      return { path: null, url: null };
     }
+  },
+
+  async saveImageFromUrls(id: string, imageUrls: Array<string | null | undefined>): Promise<{ path: string | null; url: string | null }> {
+    const seen = new Set<string>();
+    for (const rawUrl of imageUrls) {
+      const imageUrl = String(rawUrl || '').trim();
+      if (!imageUrl || seen.has(imageUrl)) continue;
+      seen.add(imageUrl);
+
+      const result = await this.saveImageFromUrl(id, imageUrl);
+      if (result.url) return result;
+    }
+
+    return { path: null, url: null };
   },
 
   async deleteImage(imagePathOrUrl?: string | null): Promise<void> {

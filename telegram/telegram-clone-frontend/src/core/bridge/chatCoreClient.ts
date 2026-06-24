@@ -245,6 +245,10 @@ class ChatCoreClient {
     await this.executeWithRecovery('disconnectRealtime', (api) => api.disconnectRealtime());
   }
 
+  async subscribePresence(userIds: string[]): Promise<void> {
+    await this.executeWithRecovery('subscribePresence', (api) => api.subscribePresence(userIds));
+  }
+
   async getRuntimeInfo(): Promise<ChatCoreRuntimeInfo> {
     return this.executeWithRecovery('getRuntimeInfo', (api) => api.getRuntimeInfo());
   }

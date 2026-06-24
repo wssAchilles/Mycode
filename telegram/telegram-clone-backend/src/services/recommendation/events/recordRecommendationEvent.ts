@@ -47,6 +47,10 @@ export async function recordRecommendationEvents(
                     targetType === TargetType.POST && mongoose.Types.ObjectId.isValid(targetId)
                         ? new mongoose.Types.ObjectId(targetId)
                         : undefined,
+                targetCommentId:
+                    event.targetCommentId && mongoose.Types.ObjectId.isValid(String(event.targetCommentId))
+                        ? new mongoose.Types.ObjectId(String(event.targetCommentId))
+                        : undefined,
                 targetAuthorId: event.targetAuthorId,
                 requestId: event.requestId,
                 dwellTimeMs: event.dwellTimeMs,

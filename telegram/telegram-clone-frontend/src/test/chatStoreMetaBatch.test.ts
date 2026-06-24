@@ -115,6 +115,36 @@ describe('chatStore applyChatMetaBatch', () => {
     expect(st.chats[0].id).toBe(u1);
   });
 
+  it('keeps selected contact presence in sync with realtime meta updates', () => {
+    const u1 = 'u1';
+    const selected = makeContact(u1);
+
+    useChatStore.setState({
+      chats: [makeChat(u1, false)],
+      contacts: [selected],
+      pendingRequests: [],
+      selectedContact: selected,
+      selectedGroup: null,
+      selectedChatId: u1,
+      isGroupChatMode: false,
+      isLoading: false,
+      isLoadingContacts: false,
+      isLoadingPendingRequests: false,
+      isLoadingGroupDetails: false,
+      groupDetailsSeq: 0,
+      error: null,
+    } as any);
+
+    useChatStore.getState().applyChatMetaBatch({
+      onlineUpdates: [{ userId: u1, isOnline: true }],
+    });
+
+    const st = useChatStore.getState();
+    expect(st.selectedContact?.isOnline).toBe(true);
+    expect(st.contacts.find((c) => c.userId === u1)?.isOnline).toBe(true);
+    expect(st.chats.find((c) => c.id === u1)?.online).toBe(true);
+  });
+
   it('reorders multiple updates by timestamp descending', () => {
     const u1 = 'u1';
     const g1 = 'g1';

@@ -97,7 +97,7 @@ export function useAnimeScope<
         },
       };
 
-      methodsRef.current = setup(context) ?? {};
+      methodsRef.current = (setup(context) ?? {}) as Partial<TMethods>;
     });
 
     return () => {

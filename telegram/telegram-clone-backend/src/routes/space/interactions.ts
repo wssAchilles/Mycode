@@ -10,7 +10,6 @@ import {
     log,
     transformPostToResponse,
     extractPostKeywords,
-    logPostAction,
     logAction,
     logSignal,
     ActionType,
@@ -33,8 +32,7 @@ router.post('/posts/:id/like', async (req: Request, res: Response) => {
 
         const success = await spaceService.likePost(id, userId);
         if (success) {
-            logPostAction(userId, id, ActionType.LIKE);
-        logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST });
+            logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST });
         }
         return res.json({ success, liked: success });
     } catch (error) {
@@ -83,7 +81,6 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
         const repostedPost = await spaceService.repostPost(id, userId);
         if (!repostedPost) return res.status(400).json({ error: '转发失败或已转发' });
 
-        logPostAction(userId, id, ActionType.REPOST);
         logSignal({ userId, signalType: SignalType.RETWEET, targetId: id, targetType: TargetType.POST });
 
         const transformed = await transformPostToResponse(repostedPost);
@@ -281,7 +278,6 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
 
         const comment = await spaceService.createComment(id, userId, content, parentId);
 
-        logPostAction(userId, id, ActionType.REPLY);
         logSignal({ userId, signalType: SignalType.REPLY, targetId: id, targetType: TargetType.POST });
 
         const author = await User.findByPk(userId, { attributes: ['id', 'username', 'avatarUrl'] });

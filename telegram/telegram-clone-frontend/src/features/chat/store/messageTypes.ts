@@ -41,6 +41,7 @@ export interface MessageState {
   setVisibleRange: (start: number, end: number) => void;
   connectRealtime: () => void;
   disconnectRealtime: () => void;
+  subscribePresence: (userIds: string[]) => void;
   setSocketConnected: (connected: boolean) => void;
   sendRealtimeMessage: (payload: SocketMessageSendPayload) => Promise<{ success: boolean; messageId?: string; seq?: number; error?: string }>;
   joinRealtimeRoom: (roomId: string) => void;

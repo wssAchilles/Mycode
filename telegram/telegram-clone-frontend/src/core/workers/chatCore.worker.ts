@@ -157,6 +157,7 @@ let workerSocketHandlersBound = false;
 const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
 let workerSocketLastConnectAttemptAt = 0;
 const desiredJoinedRooms = new Set<string>();
+const desiredPresenceUserIds = new Set<string>();
 let workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
 let workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
 let searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
@@ -1813,6 +1814,11 @@ function requestWorkerSocketConnect(force = false) {
   workerSocket.connect();
 }
 
+function emitWorkerPresenceSubscribe() {
+  if (!workerSocket?.connected || !workerSocketAuthenticated || !desiredPresenceUserIds.size) return;
+  workerSocket.emit('presenceSubscribe', Array.from(desiredPresenceUserIds));
+}
+
 function bindWorkerSocketHandlers(socket: Socket) {
   if (workerSocketHandlersBound) return;
   workerSocketHandlersBound = true;
@@ -1852,6 +1858,7 @@ function bindWorkerSocketHandlers(socket: Socket) {
         socket.emit('joinRoom', { roomId });
       }
     }
+    emitWorkerPresenceSubscribe();
     if (socketConnected) {
       setSyncPhase('live', 'worker_socket_authenticated');
       stopSyncLoop();
@@ -4303,6 +4310,20 @@ const apiImpl: ChatCoreApi = {
     await setConnectivityFromSocket(false, 'worker_socket_manual_disconnect');
   },
 
+  async subscribePresence(userIds: string[]) {
+    desiredPresenceUserIds.clear();
+    if (Array.isArray(userIds)) {
+      for (const userId of userIds) {
+        if (typeof userId === 'string' && userId) {
+          desiredPresenceUserIds.add(userId);
+        }
+      }
+    }
+    if (!desiredPresenceUserIds.size) return;
+    await connectWorkerSocketInternal();
+    emitWorkerPresenceSubscribe();
+  },
+
   async prefetchChat(chatId: string, isGroup: boolean) {
     await prefetchChatsInternal([{ chatId, isGroup }]);
   },
@@ -4840,6 +4861,7 @@ const apiImpl: ChatCoreApi = {
   async shutdown() {
     detachWorkerSocket();
     desiredJoinedRooms.clear();
+    desiredPresenceUserIds.clear();
     stopReconnectGapRecover();
     stopSyncLoop();
     stopChatFetches();

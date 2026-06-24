@@ -98,7 +98,6 @@ export class ChannelSyncManager {
     }
     return result;
   }
-  }
 
   // -------------------------------------------------------------------------
   // Gap detection
@@ -159,7 +158,7 @@ export class ChannelSyncManager {
   getStats(): ChannelSyncStats {
     let totalPts = 0;
     let maxPts = 0;
-    let channelsWithGaps = 0;
+    const channelsWithGaps = 0;
 
     for (const state of this.channelPts.values()) {
       totalPts += state.pts;

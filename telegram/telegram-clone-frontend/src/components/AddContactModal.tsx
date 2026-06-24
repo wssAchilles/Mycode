@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { contactAPI } from '../services/apiClient';
+import { contactAPI, getErrorMessage } from '../services/apiClient';
 import {
   createTimeline,
   limitedMotionItems,
@@ -17,6 +17,7 @@ interface User {
   username: string;
   email: string;
   avatarUrl?: string;
+  contactStatus?: 'accepted' | 'pending' | 'blocked' | 'rejected' | null;
 }
 
 interface AddContactModalProps {
@@ -45,7 +46,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     ({ root, reducedMotion, duration, runHeavy }) => ({
       enter: () => {
         if (reducedMotion || !root) return;
-        const modal = root.querySelector('.tg-modal');
+        const modal = root.querySelector<HTMLElement>('.tg-modal');
         if (!modal) return;
         runHeavy(motionDurations.normal, () => {
           createTimeline()
@@ -73,7 +74,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
           finishExit();
           return;
         }
-        const modal = root.querySelector('.tg-modal');
+        const modal = root.querySelector<HTMLElement>('.tg-modal');
         if (!modal) {
           finishExit();
           return;
@@ -101,7 +102,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
       },
       revealResults: () => {
         if (reducedMotion || !root) return;
-        const cards = limitedMotionItems(root.querySelectorAll('.tg-modal__user-card'));
+        const cards = limitedMotionItems(root.querySelectorAll<HTMLElement>('.tg-modal__user-card'));
         if (cards.length === 0) return;
         waapi.animate(cards, {
           opacity: [0, 1],
@@ -153,7 +154,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
       setSearchResults(response.users || []);
     } catch (error: unknown) {
       console.error('搜索用户失败:', error);
-      setMessage(`搜索失败: ${error.message}`);
+      setMessage(`搜索失败: ${getErrorMessage(error, '搜索用户失败')}`);
       setMessageType('error');
     } finally {
       setIsSearching(false);
@@ -173,7 +174,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
         handleClose();
       }, 1500);
     } catch (error: unknown) {
-      setMessage(`添加失败: ${error.message}`);
+      setMessage(`添加失败: ${getErrorMessage(error, '添加联系人失败')}`);
       setMessageType('error');
     } finally {
       setAddingContactId(null);
@@ -188,6 +189,22 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     if (e.key === 'Enter') {
       handleSearch();
     }
+  };
+
+  const getContactAction = (user: User) => {
+    if (addingContactId === user.id) {
+      return { label: '添加中', disabled: true, loading: true };
+    }
+    if (user.contactStatus === 'accepted') {
+      return { label: '已是联系人', disabled: true, loading: false };
+    }
+    if (user.contactStatus === 'pending') {
+      return { label: '已发送', disabled: true, loading: false };
+    }
+    if (user.contactStatus === 'blocked') {
+      return { label: '已屏蔽', disabled: true, loading: false };
+    }
+    return { label: '✚ 添加', disabled: false, loading: false };
   };
 
   // 阻止点击模态框内部时关闭
@@ -268,42 +285,46 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
               </div>
             )}
 
-            {searchResults.map((user) => (
-              <div key={user.id} className="tg-modal__user-card">
-                <div
-                  className="tg-modal__user-avatar"
-                  style={
-                    user.avatarUrl
-                      ? { backgroundImage: `url(${user.avatarUrl})` }
-                      : undefined
-                  }
-                >
-                  {!user.avatarUrl && user.username.charAt(0).toUpperCase()}
-                </div>
+            {searchResults.map((user) => {
+              const action = getContactAction(user);
 
-                <div className="tg-modal__user-info">
-                  <div className="tg-modal__user-name">{user.username}</div>
-                  <div className="tg-modal__user-email">{user.email}</div>
-                </div>
+              return (
+                <div key={user.id} className="tg-modal__user-card">
+                  <div
+                    className="tg-modal__user-avatar"
+                    style={
+                      user.avatarUrl
+                        ? { backgroundImage: `url(${user.avatarUrl})` }
+                        : undefined
+                    }
+                  >
+                    {!user.avatarUrl && user.username.charAt(0).toUpperCase()}
+                  </div>
 
-                <button
-                  type="button"
-                  className={`tg-modal__add-btn ${addingContactId === user.id ? 'tg-modal__add-btn--loading' : ''}`}
-                  onClick={() => handleAddContact(user.id)}
-                  disabled={addingContactId === user.id}
-                  aria-label={`添加联系人 ${user.username}`}
-                >
-                  {addingContactId === user.id ? (
-                    <>
-                      <span className="tg-modal__spinner" />
-                      添加中
-                    </>
-                  ) : (
-                    <>✚ 添加</>
-                  )}
-                </button>
-              </div>
-            ))}
+                  <div className="tg-modal__user-info">
+                    <div className="tg-modal__user-name">{user.username}</div>
+                    <div className="tg-modal__user-email">{user.email}</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`tg-modal__add-btn ${action.loading ? 'tg-modal__add-btn--loading' : ''}`}
+                    onClick={() => handleAddContact(user.id)}
+                    disabled={action.disabled}
+                    aria-label={`添加联系人 ${user.username}`}
+                  >
+                    {action.loading ? (
+                      <>
+                        <span className="tg-modal__spinner" />
+                        {action.label}
+                      </>
+                    ) : (
+                      <>{action.label}</>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

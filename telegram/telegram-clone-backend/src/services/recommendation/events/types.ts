@@ -31,6 +31,7 @@ export interface RecommendationEventInput {
     eventType: RecommendationEventType;
     targetType?: TargetType | 'post' | 'user' | 'topic' | 'list' | 'notification' | 'search_query';
     targetId?: string | mongoose.Types.ObjectId;
+    targetCommentId?: string | mongoose.Types.ObjectId;
     targetAuthorId?: string;
     requestId?: string;
     productSurface?: ProductSurface | string;

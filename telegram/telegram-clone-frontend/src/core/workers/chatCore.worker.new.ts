@@ -220,6 +220,10 @@ const api: ChatCoreApi = {
     }
   },
 
+  async subscribePresence(userIds: string[]) {
+    await socketBridge.subscribePresence(userIds);
+  },
+
   async subscribe(patchHandler: (patches: ChatPatch[]) => void) {
     // TODO: Implement patch subscription
   },

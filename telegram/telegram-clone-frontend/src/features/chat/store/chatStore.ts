@@ -582,7 +582,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 chats[chatIdx] = { ...chats[chatIdx], online: isOnline };
             }
 
-            return { contacts, chats };
+            const selectedContact = state.selectedContact?.userId === userId
+                ? { ...state.selectedContact, isOnline, lastSeen }
+                : state.selectedContact;
+
+            return { contacts, chats, selectedContact };
         });
     },
 
@@ -820,6 +824,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const cIdx = contactIdxByUserId.get(userId);
                     if (cIdx !== undefined) {
                         contacts[cIdx] = { ...contacts[cIdx], isOnline: u.isOnline, lastSeen: u.lastSeen };
+                    }
+
+                    if (selectedContact?.userId === userId) {
+                        selectedContact = { ...selectedContact, isOnline: u.isOnline, lastSeen: u.lastSeen };
                     }
 
                     const chIdx = chatIdxById.get(userId);

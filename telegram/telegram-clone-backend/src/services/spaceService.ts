@@ -671,6 +671,7 @@ class SpaceService {
             userId,
             eventType: 'reply',
             targetId: postObjId,
+            targetCommentId: comment._id as mongoose.Types.ObjectId,
             targetAuthorId: post.authorId,
             actionText: String(content || '').slice(0, 280),
             productSurface: 'space_feed',
@@ -1139,8 +1140,14 @@ class SpaceService {
             return { post, score };
         });
 
-        return scored
-            .sort((a, b) => b.score - a.score)
+        const ranked = scored.sort((a, b) => b.score - a.score);
+        const mediaRanked = ranked.filter(({ post }) => {
+            const coverUrl = String(post.media?.[0]?.url || '').trim();
+            return /^https?:\/\//i.test(coverUrl) || coverUrl.startsWith('/api/');
+        });
+        const selected = mediaRanked.length >= limit ? mediaRanked : ranked;
+
+        return selected
             .slice(0, limit)
             .map(({ post }) => ({
                 postId: post._id?.toString(),
@@ -1436,12 +1443,18 @@ class SpaceService {
         }
 
         const query = `#${normalizedTag}`;
-        const [socialResult, newsResult] = await Promise.all([
-            this.searchPostsPage(query, limit, cursor),
+        const textQueries = this.buildTopicTextSearchQueries(normalizedTag);
+        const [textResults, exactTextResults, newsResult] = await Promise.all([
+            Promise.all(textQueries.map((textQuery) => this.searchPostsPage(textQuery, limit, cursor))),
+            Promise.all(textQueries.map((textQuery) => this.searchPostsByExactTextPage(textQuery, limit, cursor))),
             this.searchNewsTopicPosts(normalizedTag, limit, cursor),
         ]);
 
-        const mergedPosts = [...socialResult.posts, ...newsResult.posts];
+        const mergedPosts = this.dedupePostsById([
+            ...textResults.flatMap((result) => result.posts),
+            ...exactTextResults.flatMap((result) => result.posts),
+            ...newsResult.posts,
+        ]);
         mergedPosts.sort((a, b) => {
             const dateA = new Date(a.createdAt || 0).getTime();
             const dateB = new Date(b.createdAt || 0).getTime();
@@ -1449,15 +1462,24 @@ class SpaceService {
         });
 
         const posts = mergedPosts.slice(0, limit);
-        const hasMore = socialResult.hasMore || newsResult.hasMore || mergedPosts.length > limit;
+        const hasMore = textResults.some((result) => result.hasMore)
+            || exactTextResults.some((result) => result.hasMore)
+            || newsResult.hasMore
+            || mergedPosts.length > limit;
         const lastPost = posts[posts.length - 1];
         const nextCursor = hasMore && lastPost?.createdAt
             ? new Date(lastPost.createdAt).toISOString()
             : undefined;
+        const totalCount = Math.max(
+            posts.length,
+            newsResult.totalCount,
+            ...textResults.map((result) => result.totalCount),
+            ...exactTextResults.map((result) => result.totalCount),
+        );
 
         return {
             posts,
-            totalCount: socialResult.totalCount + newsResult.totalCount,
+            totalCount,
             hasMore,
             nextCursor,
             query,
@@ -1555,6 +1577,76 @@ class SpaceService {
         const normalizedQuery = String(query || '').trim();
         if (!normalizedQuery) return 0;
         return Post.countDocuments(this.buildTextSearchQuery(normalizedQuery)).exec();
+    }
+
+    private async searchPostsByExactTextPage(
+        query: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<SpaceSearchPageResult> {
+        const normalizedQuery = String(query || '').trim();
+        const safeLimit = this.normalizeSearchLimit(limit);
+        if (!normalizedQuery) {
+            return {
+                posts: [],
+                totalCount: 0,
+                hasMore: false,
+                query: normalizedQuery,
+            };
+        }
+
+        const [totalCount, fetchedPosts] = await Promise.all([
+            this.countExactTextSearchMatches(normalizedQuery),
+            this.fetchExactTextSearchPosts(normalizedQuery, safeLimit + 1, cursor),
+        ]);
+        const hasMore = fetchedPosts.length > safeLimit;
+        const posts = hasMore ? fetchedPosts.slice(0, safeLimit) : fetchedPosts;
+        const lastPost = posts[posts.length - 1];
+        const nextCursor = hasMore && lastPost?.createdAt
+            ? new Date(lastPost.createdAt).toISOString()
+            : undefined;
+
+        return {
+            posts,
+            totalCount,
+            hasMore,
+            nextCursor,
+            query: normalizedQuery,
+        };
+    }
+
+    private buildExactTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
+        const escaped = this.escapeRegexLiteral(query);
+        const searchQuery: Record<string, unknown> = {
+            deletedAt: null,
+            $or: [
+                { content: { $regex: escaped, $options: 'i' } },
+                { 'newsMetadata.title': { $regex: escaped, $options: 'i' } },
+            ],
+        };
+
+        if (cursor) {
+            searchQuery.createdAt = { $lt: cursor };
+        }
+
+        return searchQuery;
+    }
+
+    private async fetchExactTextSearchPosts(
+        query: string,
+        limit: number,
+        cursor?: Date
+    ): Promise<IPost[]> {
+        return Post.find(this.buildExactTextSearchQuery(query, cursor))
+            .sort({ createdAt: -1, _id: -1 })
+            .limit(limit)
+            .exec();
+    }
+
+    private async countExactTextSearchMatches(query: string): Promise<number> {
+        const normalizedQuery = String(query || '').trim();
+        if (!normalizedQuery) return 0;
+        return Post.countDocuments(this.buildExactTextSearchQuery(normalizedQuery)).exec();
     }
 
     /**
@@ -1673,11 +1765,44 @@ class SpaceService {
         const normalizedTag = this.normalizeTopicTag(tag);
         if (!normalizedTag) return 0;
         try {
-            return await this.countTextSearchMatches(`#${normalizedTag}`);
+            const counts = await Promise.all(
+                this.buildTopicTextSearchQueries(normalizedTag)
+                    .flatMap((query) => [
+                        this.countTextSearchMatches(query),
+                        this.countExactTextSearchMatches(query),
+                    ])
+            );
+            return Math.max(0, ...counts);
         } catch (error) {
             log.warn({ data: { tag: normalizedTag, error } }, '[SpaceService] trend search count failed');
             return 0;
         }
+    }
+
+    private buildTopicTextSearchQueries(normalizedTag: string): string[] {
+        return Array.from(new Set([
+            `#${normalizedTag}`,
+            normalizedTag,
+            normalizedTag.replace(/[-_]+/g, ' '),
+        ].map((query) => query.trim()).filter(Boolean)));
+    }
+
+    private escapeRegexLiteral(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    private dedupePostsById(posts: IPost[]): IPost[] {
+        const seen = new Set<string>();
+        const deduped: IPost[] = [];
+        for (const post of posts) {
+            const rawId = (post as unknown as { _id?: unknown; id?: unknown })._id
+                ?? (post as unknown as { id?: unknown }).id;
+            const key = rawId ? String(rawId) : `${post.authorId}:${post.createdAt}:${post.content}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            deduped.push(post);
+        }
+        return deduped;
     }
 
     private dedupeTrendsByTag(trends: SpaceTrendResult[]): SpaceTrendResult[] {
@@ -1949,6 +2074,8 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<{ items: Array<any>; hasMore: boolean; nextCursor?: string }> {
+        const safeLimit = Math.max(1, Math.min(limit, 50));
+        const scanLimit = Math.min(safeLimit * 3, 150);
         const query: Record<string, unknown> = {
             targetAuthorId: userId,
             userId: { $ne: userId },
@@ -1960,12 +2087,30 @@ class SpaceService {
 
         const actions = await UserAction.find(query)
             .sort({ timestamp: -1 })
-            .limit(limit)
+            .limit(scanLimit)
             .lean();
 
-        const actorIds = Array.from(new Set(actions.map((a: any) => a.userId)));
-        const postIds = Array.from(new Set(actions.map((a: any) => a.targetPostId).filter(Boolean)));
-        const commentIdsRaw = actions
+        const dedupedActions: any[] = [];
+        const seenNotifications = new Set<string>();
+        for (const action of actions) {
+            const key = [
+                action.userId,
+                action.action,
+                action.targetPostId ? action.targetPostId.toString() : '',
+            ].join(':');
+            if (seenNotifications.has(key)) {
+                continue;
+            }
+            seenNotifications.add(key);
+            dedupedActions.push(action);
+            if (dedupedActions.length >= safeLimit) {
+                break;
+            }
+        }
+
+        const actorIds = Array.from(new Set(dedupedActions.map((a: any) => a.userId)));
+        const postIds = Array.from(new Set(dedupedActions.map((a: any) => a.targetPostId).filter(Boolean)));
+        const commentIdsRaw = dedupedActions
             .filter((a: any) => a.action === ActionType.REPLY && a.targetCommentId)
             .map((a: any) => String(a.targetCommentId))
             .filter(Boolean);
@@ -1997,7 +2142,7 @@ class SpaceService {
             if (c._id) commentMap.set(c._id.toString(), { content: c.content });
         });
 
-        const items = actions.map((a: any) => {
+        const items = dedupedActions.map((a: any) => {
             const actor = userMap.get(a.userId);
             const post = a.targetPostId ? postMap.get(a.targetPostId.toString()) : null;
             const snippet = post?.content ? post.content.slice(0, 80) : '';
@@ -2027,9 +2172,9 @@ class SpaceService {
 
         return {
             items,
-            hasMore: actions.length >= limit,
-            nextCursor: actions.length > 0
-                ? (actions[actions.length - 1].timestamp as Date).toISOString()
+            hasMore: actions.length >= scanLimit || dedupedActions.length >= safeLimit,
+            nextCursor: dedupedActions.length > 0
+                ? (dedupedActions[dedupedActions.length - 1].timestamp as Date).toISOString()
                 : undefined,
         };
     }

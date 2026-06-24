@@ -61,8 +61,8 @@ apiClient.interceptors.request.use(
     const isFormData =
       typeof FormData !== 'undefined' && config.data instanceof FormData;
     if (isFormData) {
-      delete (config.headers as any)?.['Content-Type'];
-      delete (config.headers as any)?.['content-type'];
+      delete config.headers?.['Content-Type'];
+      delete config.headers?.['content-type'];
     }
     return config;
   },
@@ -134,7 +134,7 @@ export const authAPI = {
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
       authStorage.setUser(normalizedUser);
 
-      return { ...response.data, user: normalizedUser };
+      return { ...response.data.data, user: normalizedUser };
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ message?: string }>)?.response?.data?.message || '登录失败，请重试';
       throw new Error(errorMessage);
@@ -149,7 +149,8 @@ export const authAPI = {
         throw new Error('密码和确认密码不匹配');
       }
 
-      const { confirmPassword, ...registerData } = credentials;
+      const registerData: Partial<RegisterCredentials> = { ...credentials };
+      delete registerData.confirmPassword;
       const response = await apiClient.post<{ success: boolean; data: AuthResponse }>('/api/auth/register', registerData);
 
       // 后端返回 { success: true, data: { message, user, tokens } }
@@ -184,7 +185,7 @@ export const authAPI = {
   logout: async (): Promise<void> => {
     try {
       await apiClient.post('/api/auth/logout');
-    } catch (error) {
+    } catch {
       console.warn('登出请求失败，但将继续清除本地存储');
     } finally {
       // 清除本地存储
@@ -439,9 +440,12 @@ export const contactAPI = {
   searchUsers: async (query: string, limit = 20) => {
     try {
       const response = await apiClient.get(`/api/contacts/search?query=${encodeURIComponent(query)}&limit=${limit}`);
-      return response.data;
+      return {
+        users: response.data.data ?? response.data.users ?? [],
+        meta: response.data.meta,
+      };
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '搜索用户失败';
+      const errorMessage = getErrorMessage(error, '搜索用户失败');
       throw new Error(errorMessage);
     }
   }

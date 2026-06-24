@@ -20,6 +20,7 @@ export function createRealtimeActions(
   MessageState,
   | 'connectRealtime'
   | 'disconnectRealtime'
+  | 'subscribePresence'
   | 'setSocketConnected'
   | 'sendRealtimeMessage'
   | 'joinRealtimeRoom'
@@ -76,6 +77,18 @@ export function createRealtimeActions(
           // ignore
         } finally {
           deps.setWorkerRealtimeMode(false);
+        }
+      })();
+    },
+
+    subscribePresence: (userIds: string[]) => {
+      if (!Array.isArray(userIds)) return;
+      void (async () => {
+        try {
+          await deps.ensureCoreReady();
+          await chatCoreClient.subscribePresence(userIds);
+        } catch {
+          // ignore
         }
       })();
     },

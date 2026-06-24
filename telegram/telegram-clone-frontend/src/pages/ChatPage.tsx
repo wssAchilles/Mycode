@@ -74,6 +74,7 @@ const ChatPage: React.FC = () => {
   const isGroupChatMode = useChatStore((state) => state.isGroupChatMode);  // 新增
   const selectedChatId = useChatStore((state) => state.selectedChatId);
   const chats = useChatStore((state) => state.chats);
+  const contacts = useChatStore((state) => state.contacts);
   const pendingRequests = useChatStore((state) => state.pendingRequests);
   const loadContacts = useChatStore((state) => state.loadContacts);
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
@@ -93,6 +94,7 @@ const ChatPage: React.FC = () => {
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
   const connectRealtime = useMessageStore((state) => state.connectRealtime);
   const disconnectRealtime = useMessageStore((state) => state.disconnectRealtime);
+  const subscribePresence = useMessageStore((state) => state.subscribePresence);
   const sendRealtimeMessage = useMessageStore((state) => state.sendRealtimeMessage);
   const joinRealtimeRoom = useMessageStore((state) => state.joinRealtimeRoom);
   const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
@@ -185,6 +187,14 @@ const ChatPage: React.FC = () => {
     };
     initializeUser();
   }, [navigate, connectRealtime, loadContacts, loadPendingRequests]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const userIds = contacts
+      .map((contact) => contact.userId)
+      .filter((userId): userId is string => Boolean(userId));
+    subscribePresence(userIds);
+  }, [contacts, currentUser, subscribePresence]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {

@@ -53,6 +53,7 @@ export class SocketBridge {
   private socketLastConnectAttemptAt = 0;
   private workerSocketAuthBlocked = false;
   private workerSocketAuthenticated = false;
+  private readonly desiredPresenceUserIds = new Set<string>();
 
   private readonly SOCKET_CONNECT_THROTTLE_MS = 1_000;
 
@@ -149,6 +150,7 @@ export class SocketBridge {
           socket.emit('joinRoom', { roomId });
         }
       }
+      this.emitPresenceSubscribe(socket);
       this.ctx.setSyncPhase('live', 'worker_socket_authenticated');
       this.ctx.stopSyncLoop();
       this.ctx.requestReadSyncFlush(0);
@@ -267,6 +269,23 @@ export class SocketBridge {
         resolve(ack);
       });
     });
+  }
+
+  async subscribePresence(userIds: string[]): Promise<void> {
+    this.desiredPresenceUserIds.clear();
+    for (const userId of userIds) {
+      if (typeof userId === 'string' && userId) {
+        this.desiredPresenceUserIds.add(userId);
+      }
+    }
+    await this.connectWorkerSocketInternal();
+    if (!this.socket?.connected || !this.workerSocketAuthenticated) return;
+    this.emitPresenceSubscribe(this.socket);
+  }
+
+  private emitPresenceSubscribe(socket: Socket): void {
+    if (!this.desiredPresenceUserIds.size) return;
+    socket.emit('presenceSubscribe', Array.from(this.desiredPresenceUserIds));
   }
 
   // -------------------------------------------------------------------------

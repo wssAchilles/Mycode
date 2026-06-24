@@ -31,6 +31,11 @@ export interface NewsIngestItem {
   category?: string;
   top_image?: string;
   images?: string[];
+  image_url?: string;
+  imageUrl?: string;
+  thumbnail_url?: string;
+  thumbnailUrl?: string;
+  coverImageUrl?: string;
   cluster_id?: number;
   embedding?: number[];
 }
@@ -49,6 +54,24 @@ const normalizeUrl = (url: string) => {
 };
 
 const hashUrl = (url: string) => crypto.createHash('sha256').update(url).digest('hex');
+
+const buildImageCandidates = (item: NewsIngestItem): string[] => {
+  const candidates = [
+    item.top_image,
+    item.image_url,
+    item.imageUrl,
+    item.thumbnail_url,
+    item.thumbnailUrl,
+    item.coverImageUrl,
+    ...(Array.isArray(item.images) ? item.images : []),
+  ];
+
+  return Array.from(new Set(
+    candidates
+      .map((value) => String(value || '').trim())
+      .filter((value) => /^https?:\/\//i.test(value))
+  ));
+};
 
 const NEWS_TIMEZONE = process.env.NEWS_TIMEZONE || 'Asia/Shanghai';
 const NEWS_TOPICS_WINDOW_HOURS = parsePositiveInt(
@@ -318,8 +341,7 @@ export const newsService = {
       // Save readable markdown and image. Content is stored with a hash in the key, so we delete the old blob on update.
       const readableContent = buildReadableContent(item.title, summary, contentText, item.source_url || normalizedUrl);
       const contentResult = contentText ? await newsStorageService.saveContent(article.id, readableContent) : { path: article.contentPath || null, url: article.contentPath || null };
-      const imageUrl = item.top_image || item.images?.[0] || null;
-      const imageResult = await newsStorageService.saveImageFromUrl(article.id, imageUrl);
+      const imageResult = await newsStorageService.saveImageFromUrls(article.id, buildImageCandidates(item));
 
       const oldContentPath = article.contentPath || null;
       const oldCover = article.coverImageUrl || null;

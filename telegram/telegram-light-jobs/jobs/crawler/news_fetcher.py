@@ -26,6 +26,7 @@ DEFAULT_UA = os.getenv(
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
 )
 REQUEST_TIMEOUT = int(os.getenv("CRAWLER_REQUEST_TIMEOUT", "12"))
+PUSH_TIMEOUT = int(os.getenv("CRAWLER_PUSH_TIMEOUT", "120"))
 MAX_RETRIES = int(os.getenv("CRAWLER_MAX_RETRIES", "2"))
 SLEEP_SEC = float(os.getenv("CRAWLER_SLEEP_SEC", "0.4"))
 MAX_ENTRIES_PER_FEED = int(os.getenv("CRAWLER_MAX_ENTRIES_PER_FEED", "5"))
@@ -47,20 +48,58 @@ def _parse_published(entry) -> str:
     return datetime.now().isoformat()
 
 
-def _extract_rss_image(entry) -> str:
+def _extract_rss_images(entry) -> List[str]:
+    images: List[tuple[int, str]] = []
+
+    def add(url: str, width: int = 0, height: int = 0):
+        if not url:
+            return
+        url = str(url).strip()
+        if not url.startswith(("http://", "https://")):
+            return
+        images.append((max(width, 0) * max(height, 0), url))
+
     try:
         for key in ("media_thumbnail", "media_content"):
             value = entry.get(key)
             if isinstance(value, list) and value:
-                url = value[0].get("url")
-                if url:
-                    return url
-        for link in entry.get("links", []) or []:
-            if (link.get("type") or "").startswith("image") and link.get("href"):
-                return link["href"]
+                for item in value:
+                    add(
+                        item.get("url"),
+                        int(item.get("width") or 0),
+                        int(item.get("height") or 0),
+                    )
+        for key in ("enclosures", "links"):
+            for link in entry.get(key, []) or []:
+                if (link.get("type") or "").startswith("image") and link.get("href"):
+                    add(link["href"], int(link.get("width") or 0), int(link.get("height") or 0))
+        image = entry.get("image")
+        if isinstance(image, dict):
+            add(image.get("href") or image.get("url"))
+        elif isinstance(image, str):
+            add(image)
     except Exception:
         pass
-    return ""
+
+    deduped: List[str] = []
+    for _, url in sorted(images, reverse=True):
+        if url not in deduped:
+            deduped.append(url)
+    return deduped
+
+
+def _extract_rss_image(entry) -> str:
+    images = _extract_rss_images(entry)
+    return images[0] if images else ""
+
+
+def _merge_images(*groups: List[str]) -> List[str]:
+    merged: List[str] = []
+    for group in groups:
+        for url in group or []:
+            if url and url not in merged:
+                merged.append(url)
+    return merged
 
 
 class NewsCrawler:
@@ -102,7 +141,8 @@ class NewsCrawler:
                     seen_urls.add(article_url)
 
                     summary = entry.get("summary", "") or entry.get("description", "") or ""
-                    rss_image = _extract_rss_image(entry)
+                    rss_images = _extract_rss_images(entry)
+                    rss_image = rss_images[0] if rss_images else ""
 
                     try:
                         article = newspaper.Article(article_url, config=self.article_config)
@@ -123,7 +163,11 @@ class NewsCrawler:
                                 "content": content.strip() + f"\n\n**[阅读原文 / Read Original]({article_url})**",
                                 "summary": _trim_summary(summary or content),
                                 "top_image": article.top_image or rss_image,
-                                "images": list(article.images)[:5] if article.images else ([rss_image] if rss_image else []),
+                                "images": _merge_images(
+                                    [article.top_image] if article.top_image else [],
+                                    list(article.images)[:5] if article.images else [],
+                                    rss_images,
+                                ),
                             }
                         )
                     except Exception as exc:
@@ -140,7 +184,7 @@ class NewsCrawler:
                                 "content": summary.strip() + f"\n\n**[阅读原文 / Read Original]({article_url})**",
                                 "summary": _trim_summary(summary),
                                 "top_image": rss_image,
-                                "images": [rss_image] if rss_image else [],
+                                "images": rss_images,
                             }
                         )
                     time.sleep(SLEEP_SEC)
@@ -183,7 +227,7 @@ class NewsCrawler:
             response = self.session.post(
                 authenticated_endpoint,
                 json={"articles": articles},
-                timeout=REQUEST_TIMEOUT,
+                timeout=PUSH_TIMEOUT,
             )
             if response.status_code == 200:
                 print("  > Successfully pushed news to backend.")
