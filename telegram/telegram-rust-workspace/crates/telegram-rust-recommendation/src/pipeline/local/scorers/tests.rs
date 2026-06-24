@@ -1407,6 +1407,7 @@ fn exploration_scorer_marks_quality_novel_candidates() {
 #[test]
 fn fatigue_scorer_penalizes_repeated_exposure() {
     let mut query = query();
+    let timestamp = Utc::now().to_rfc3339();
     query.user_action_sequence = Some(
         (0..5)
             .map(|_| {
@@ -1414,7 +1415,7 @@ fn fatigue_scorer_penalizes_repeated_exposure() {
                     ("action".to_string(), json!("impression")),
                     ("targetPostId".to_string(), json!("post-fatigue")),
                     ("targetAuthorId".to_string(), json!("author-fatigue")),
-                    ("timestamp".to_string(), json!("2026-04-25T00:00:00Z")),
+                    ("timestamp".to_string(), json!(timestamp)),
                 ])
             })
             .collect(),
