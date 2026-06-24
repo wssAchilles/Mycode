@@ -4,6 +4,7 @@ import { newsService } from '../services/newsService';
 import { simClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { realGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
 import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
+import { newsMaterializationService } from '../services/recommendation/newsMaterialization';
 import { createChildLogger } from '../utils/logger';
 import {
   runtimeControlPlane,
@@ -12,6 +13,16 @@ import {
 } from '../services/controlPlane/runtimeControlPlane';
 
 const log = createChildLogger('bootstrap:scheduler');
+
+async function materializeRecentNewsPosts(context: string): Promise<void> {
+  const result = await newsMaterializationService.materialize({
+    limit: 300,
+    batchSize: 100,
+    since: new Date(Date.now() - 72 * 60 * 60 * 1000),
+    refreshFeatureSnapshots: true,
+  });
+  log.info({ ...result, context }, 'News articles materialized into Space posts');
+}
 
 export function registerCronJobs(): void {
   // Daily Cleanup (00:00)
@@ -50,10 +61,22 @@ export function registerCronJobs(): void {
   });
   log.info('News 用户向量任务已启动 (每日 01:00)');
 
+  // News materialization for Space personalized brief (01:20)
+  cron.schedule('20 1 * * *', async () => {
+    log.info('Starting news post materialization...');
+    try {
+      await materializeRecentNewsPosts('daily-news-materialization');
+    } catch (error) {
+      log.error({ err: error }, 'News post materialization failed');
+    }
+  });
+  log.info('News Space 物化任务已启动 (每日 01:20)');
+
   // Unified recommendation closure (02:00)
   cron.schedule('0 2 * * *', async () => {
     log.info('Starting daily recommendation refresh closure...');
     try {
+      await materializeRecentNewsPosts('pre-daily-recommendation-refresh');
       const result = await dailyRecommendationRefreshJob.run({ trigger: 'cron' });
       log.info({
         users: result.users,

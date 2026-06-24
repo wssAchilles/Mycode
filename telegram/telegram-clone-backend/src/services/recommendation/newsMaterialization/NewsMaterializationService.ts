@@ -74,6 +74,7 @@ export class NewsMaterializationService {
                             keywords: article.keywords || [],
                             language: article.language || undefined,
                             engagementScore: article.engagementScore || 0,
+                            media: this.mediaFor(article),
                             isNews: true,
                             isNsfw: false,
                             isPinned: false,
@@ -99,7 +100,6 @@ export class NewsMaterializationService {
                                 commentCount: article.clickCount || article.viewCount || 0,
                                 viewCount: article.viewCount || 0,
                             },
-                            media: [],
                             isRepost: false,
                             isReply: false,
                         },
@@ -126,6 +126,17 @@ export class NewsMaterializationService {
     private contentFor(article: NewsArticle): string {
         const parts = [article.title, article.summary || article.lead].filter(Boolean);
         return parts.join('\n\n').slice(0, 2000);
+    }
+
+    private mediaFor(article: NewsArticle) {
+        if (!article.coverImageUrl) return [];
+        return [
+            {
+                type: 'image',
+                url: article.coverImageUrl,
+                thumbnailUrl: article.coverImageUrl,
+            },
+        ];
     }
 }
 
