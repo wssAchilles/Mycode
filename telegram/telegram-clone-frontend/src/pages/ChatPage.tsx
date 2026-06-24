@@ -3,7 +3,7 @@
  * 核心职责：状态管理、Socket 消息处理、子组件协调
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
@@ -188,13 +188,19 @@ const ChatPage: React.FC = () => {
     initializeUser();
   }, [navigate, connectRealtime, loadContacts, loadPendingRequests]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const userIds = contacts
+  const contactUserIdsStr = useMemo(() => {
+    return contacts
       .map((contact) => contact.userId)
-      .filter((userId): userId is string => Boolean(userId));
+      .filter((userId): userId is string => Boolean(userId))
+      .sort()
+      .join(',');
+  }, [contacts]);
+
+  useEffect(() => {
+    if (!currentUser || !contactUserIdsStr) return;
+    const userIds = contactUserIdsStr.split(',');
     subscribePresence(userIds);
-  }, [contacts, currentUser, subscribePresence]);
+  }, [contactUserIdsStr, currentUser, subscribePresence]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {
