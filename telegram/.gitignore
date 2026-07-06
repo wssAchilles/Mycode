@@ -55,3 +55,6 @@ target/
 ml-services/data/
 ml-services/models/
 graphify-out
+.codebase-memory
+reports
+docs/分布式
