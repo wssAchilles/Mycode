@@ -11,16 +11,16 @@ run_preset() {
   cmake --preset "$preset" -S "$ROOT_DIR"
 
   echo "==> Building $name"
-  cmake --build --preset "$preset"
+  (cd "$ROOT_DIR" && cmake --build --preset "$preset")
 
   echo "==> Running $name tests"
-  ctest --preset "$preset" --test-dir "$ROOT_DIR"
+  (cd "$ROOT_DIR" && ctest --preset "$preset")
 }
 
-run_preset "ASan + UBSan" "asan-ubsan"
+run_preset "ASan + UBSan" "asan"
 
 if [[ "${GRAPH_SANITIZER_SKIP_TSAN:-0}" == "1" ]]; then
   echo "Skipping ThreadSanitizer because GRAPH_SANITIZER_SKIP_TSAN=1"
 else
-  run_preset "TSan + UBSan" "tsan-ubsan"
+  run_preset "TSan + UBSan" "tsan"
 fi

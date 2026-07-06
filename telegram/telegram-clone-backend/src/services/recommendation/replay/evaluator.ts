@@ -3,6 +3,7 @@ import type {
     ReplayBucketSummary,
     ReplayCandidateSnapshot,
     ReplayEvaluationSummary,
+    LoggingReadinessSummary,
     ReplayRankingCandidate,
     ReplayRankingMetrics,
     ReplayRequestDelta,
@@ -79,8 +80,10 @@ export function evaluateReplayRequests(
     let candidatesWithRank = 0;
     let candidatesWithFeedback = 0;
     let attributedFeedbackCandidates = 0;
+    const loggingReadiness = createLoggingReadinessSummary(requestCount);
 
     for (const request of requests) {
+        addLoggingReadinessRequest(loggingReadiness, request);
         for (const candidate of request.candidates) {
             const hasRank = typeof candidate.rank === 'number' || Number.isFinite(candidate.baselineRank);
             const hasFeedback = candidateHasFeedback(candidate);
@@ -211,6 +214,7 @@ export function evaluateReplayRequests(
             candidatesWithFeedbackRate: candidatesWithFeedback / Math.max(1, candidateCount),
             attributedFeedbackRate: attributedFeedbackCandidates / Math.max(1, candidatesWithFeedback),
         },
+        loggingReadiness,
         baseline,
         variantMetrics,
         delta: diffMetrics(variantMetrics, baseline),
@@ -230,6 +234,55 @@ export function evaluateReplayRequests(
                 .slice(0, 5),
         },
     };
+}
+
+function createLoggingReadinessSummary(totalRequests: number): LoggingReadinessSummary {
+    return {
+        totalRequests,
+        requestsMissingRank: 0,
+        requestsMissingRecallSource: 0,
+        requestsMissingScore: 0,
+        requestsMissingExperimentKeys: 0,
+        requestsMissingFeedbackJoinKey: 0,
+    };
+}
+
+function addLoggingReadinessRequest(
+    summary: LoggingReadinessSummary,
+    request: ReplayRequestSnapshot,
+): void {
+    if (request.candidates.some((candidate) => !hasReplayRank(candidate))) {
+        summary.requestsMissingRank += 1;
+    }
+    if (request.candidates.some((candidate) => !String(candidate.recallSource || '').trim())) {
+        summary.requestsMissingRecallSource += 1;
+    }
+    if (request.candidates.some((candidate) => !hasReplayScore(candidate))) {
+        summary.requestsMissingScore += 1;
+    }
+    if (!Array.isArray(request.experimentKeys) || request.experimentKeys.filter(Boolean).length === 0) {
+        summary.requestsMissingExperimentKeys += 1;
+    }
+    if (!String(request.requestId || '').trim() || request.candidates.some((candidate) => !hasFeedbackJoinKey(candidate))) {
+        summary.requestsMissingFeedbackJoinKey += 1;
+    }
+}
+
+function hasReplayRank(candidate: ReplayCandidateSnapshot): boolean {
+    return Number.isFinite(candidate.rank) || Number.isFinite(candidate.baselineRank);
+}
+
+function hasReplayScore(candidate: ReplayCandidateSnapshot): boolean {
+    return Number.isFinite(candidate.score)
+        || Number.isFinite(candidate.weightedScore)
+        || Number.isFinite(candidate.pipelineScore);
+}
+
+function hasFeedbackJoinKey(candidate: ReplayCandidateSnapshot): boolean {
+    return Boolean(
+        String(candidate.postId || '').trim()
+        || String(candidate.modelPostId || '').trim(),
+    );
 }
 
 function candidateHasFeedback(candidate: ReplayCandidateSnapshot): boolean {

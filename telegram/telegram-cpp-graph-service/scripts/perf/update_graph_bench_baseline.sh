@@ -2,12 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${GRAPH_BENCH_BUILD_DIR:-$ROOT_DIR/build}"
+BUILD_DIR="${GRAPH_BENCH_BUILD_DIR:-$ROOT_DIR/build/release}"
 BASELINE_FILE="${1:-$ROOT_DIR/benchmarks/graph_store_baseline.json}"
 BENCH_RUNS="${GRAPH_BENCH_RUNS:-3}"
 
 if ! [[ "$BENCH_RUNS" =~ ^[0-9]+$ ]] || [[ "$BENCH_RUNS" -lt 1 ]]; then
   BENCH_RUNS=1
+fi
+
+if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+  cmake --preset release -S "$ROOT_DIR"
 fi
 
 cmake --build "$BUILD_DIR" --target graph-store-bench

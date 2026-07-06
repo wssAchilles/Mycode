@@ -2,11 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${GRAPH_BUILD_DIR:-$ROOT_DIR/build}"
+BUILD_DIR="${GRAPH_BUILD_DIR:-$ROOT_DIR/build/release}"
 OUT_DIR="${GRAPH_REPORT_OUT_DIR:-$ROOT_DIR/reports/perf/$(date +%Y%m%d-%H%M%S)}"
 REPORT_FILE="$OUT_DIR/graph.md"
 
 mkdir -p "$OUT_DIR"
+
+if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+  cmake --preset release -S "$ROOT_DIR"
+fi
 
 cmake --build "$BUILD_DIR" --target graph-store-bench >/dev/null
 BENCH_OUTPUT="$("$BUILD_DIR/graph-store-bench" --json)"

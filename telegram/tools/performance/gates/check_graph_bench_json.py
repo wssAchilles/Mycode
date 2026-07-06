@@ -8,8 +8,10 @@ from pathlib import Path
 def load_results(path: Path) -> dict[str, dict]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if isinstance(payload, dict):
+        payload = payload.get("results")
     if not isinstance(payload, list):
-        raise ValueError(f"{path} must contain a JSON array")
+        raise ValueError(f"{path} must contain a JSON array or an object with a results array")
     results: dict[str, dict] = {}
     for item in payload:
         name = item.get("name")

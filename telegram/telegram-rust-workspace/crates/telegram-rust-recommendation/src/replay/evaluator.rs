@@ -14,7 +14,7 @@ use crate::selectors::top_k::{
 };
 
 use super::contracts::{
-    REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload,
+    LoggingReadinessSummary, REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload,
     RecommendationReplayScenarioPayload, ReplayEvaluationResultPayload,
 };
 use super::stage_contracts::replay_stage_contract_violations;
@@ -36,6 +36,7 @@ pub fn evaluate_replay_fixture(
 
 pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> ReplayEvaluationResult {
     let scenario = normalize_replay_clock(scenario);
+    let logging_readiness = logging_readiness_summary(&scenario);
     let pre_filter = run_pre_score_filters(&scenario.query, scenario.candidates.clone());
     let kept_post_ids = pre_filter
         .candidates
@@ -395,8 +396,53 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         selected_source_counts,
         selector_deferred_reason_counts,
         selected_post_ids,
+        logging_readiness,
         violations,
     }
+}
+
+fn logging_readiness_summary(
+    scenario: &RecommendationReplayScenarioPayload,
+) -> LoggingReadinessSummary {
+    let candidates = &scenario.candidates;
+
+    LoggingReadinessSummary {
+        total_requests: 1,
+        requests_missing_rank: usize::from(!candidates.is_empty()),
+        requests_missing_recall_source: usize::from(
+            candidates
+                .iter()
+                .any(|candidate| candidate.recall_source.as_deref().is_none_or(str::is_empty)),
+        ),
+        requests_missing_score: usize::from(candidates.iter().any(|candidate| {
+            !usable_score(candidate.score)
+                && !usable_score(candidate.weighted_score)
+                && !usable_score(candidate.pipeline_score)
+        })),
+        requests_missing_experiment_keys: usize::from(
+            !scenario
+                .query
+                .experiment_context
+                .as_ref()
+                .is_some_and(|context| {
+                    context.assignments.iter().any(|assignment| {
+                        !assignment.experiment_id.is_empty()
+                            || !assignment.experiment_name.is_empty()
+                    })
+                }),
+        ),
+        requests_missing_feedback_join_key: usize::from(
+            scenario.query.request_id.is_empty()
+                || candidates.iter().any(|candidate| {
+                    candidate.post_id.is_empty()
+                        && candidate.model_post_id.as_deref().is_none_or(str::is_empty)
+                }),
+        ),
+    }
+}
+
+fn usable_score(score: Option<f64>) -> bool {
+    score.is_some_and(f64::is_finite)
 }
 
 fn normalize_replay_clock(

@@ -60,7 +60,9 @@ type ImpressionRecord = {
     selectionReason?: string;
     modelPostId?: string;
     recallSource?: string;
+    secondaryRecallSources?: string[];
     experimentKeys?: string[];
+    productSurface?: string;
 };
 
 type FollowUpRecord = {
@@ -201,6 +203,18 @@ function engagementBucketPrior(bucket?: string | null): number {
     }
 }
 
+function normalizeStringArray(value?: string[]): string[] {
+    return Array.isArray(value)
+        ? value.map((entry) => entry.trim()).filter(Boolean)
+        : [];
+}
+
+function feedbackLabel(labels: ReturnType<typeof summarizeActionsInWindow>): 'positive' | 'negative' | null {
+    if (labels.negative) return 'negative';
+    if (labels.engagement || labels.click || labels.dwellTimeMs > 0) return 'positive';
+    return null;
+}
+
 async function main() {
     const args = parseArgs();
     const now = new Date();
@@ -220,8 +234,8 @@ async function main() {
 
     const impressionCursor = UserAction.find(impressionQuery)
         .select(
-            'userId targetPostId targetAuthorId requestId rank timestamp inNetwork isNews score weightedScore modelPostId recallSource experimentKeys'
-            + ' selectionPool selectionReason'
+            'userId targetPostId targetAuthorId requestId rank timestamp inNetwork isNews score weightedScore modelPostId recallSource secondaryRecallSources experimentKeys'
+            + ' productSurface selectionPool selectionReason'
         )
         .sort({ timestamp: -1 });
 
@@ -434,11 +448,14 @@ async function main() {
             isNews: imp.isNews === true,
             score: imp.score ?? null,
             weightedScore: imp.weightedScore ?? null,
+            secondaryRecallSources: normalizeStringArray(imp.secondaryRecallSources),
             selectionPool: imp.selectionPool || '',
             selectionReason: imp.selectionReason || '',
             modelPostId: imp.modelPostId || '',
-            recallSource: imp.recallSource || 'unknown',
+            recallSource: imp.recallSource || null,
             experimentKeys: imp.experimentKeys || [],
+            productSurface: imp.productSurface || args.surface || null,
+            feedbackLabel: feedbackLabel(labels),
             windowHours: args.windowHours,
             labelClick: labels.click ? 1 : 0,
             labelLike: labels.like ? 1 : 0,

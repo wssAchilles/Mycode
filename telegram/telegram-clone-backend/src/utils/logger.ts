@@ -1,11 +1,19 @@
 import pino from 'pino';
 
 const isDev = (process.env.NODE_ENV || 'development') === 'development';
+const hasPrettyTransport = (() => {
+  try {
+    require.resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
   // 生产环境使用 JSON 格式，开发环境使用 pretty 格式
-  transport: isDev
+  transport: isDev && hasPrettyTransport
     ? { target: 'pino-pretty', options: { colorize: true, translateTime: 'SYS:standard' } }
     : undefined,
   // 敏感字段脱敏

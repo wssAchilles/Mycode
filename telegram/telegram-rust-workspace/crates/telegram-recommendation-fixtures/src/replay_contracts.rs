@@ -56,6 +56,8 @@ pub struct ReplayEvaluationResultPayload {
     pub selected_source_counts: HashMap<String, usize>,
     pub selector_deferred_reason_counts: HashMap<String, usize>,
     pub selected_post_ids: Vec<String>,
+    #[serde(default)]
+    pub logging_readiness: LoggingReadinessSummary,
     pub violations: Vec<String>,
 }
 
@@ -63,6 +65,17 @@ impl ReplayEvaluationResultPayload {
     pub fn passed(&self) -> bool {
         self.violations.is_empty()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoggingReadinessSummary {
+    pub total_requests: usize,
+    pub requests_missing_rank: usize,
+    pub requests_missing_recall_source: usize,
+    pub requests_missing_score: usize,
+    pub requests_missing_experiment_keys: usize,
+    pub requests_missing_feedback_join_key: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -135,7 +148,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION,
+        LoggingReadinessSummary, REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION,
         RecommendationReplayFixturePayload, RecommendationReplayScenarioManifestPayload,
         ReplayEvaluationResultPayload,
     };
@@ -175,6 +188,7 @@ mod tests {
             selected_source_counts: HashMap::new(),
             selector_deferred_reason_counts: HashMap::new(),
             selected_post_ids: vec!["post-1".to_string()],
+            logging_readiness: LoggingReadinessSummary::default(),
             violations: Vec::new(),
         };
 

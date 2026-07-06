@@ -6,7 +6,7 @@ use crate::pipeline::local::scorers::local_ranking_ladder_specs;
 
 use super::{
     REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION, RecommendationReplayFixturePayload,
-    evaluate_replay_fixture, stage_contracts::replay_stage_contract_violations,
+    evaluate_replay_fixture, evaluate_scenario, stage_contracts::replay_stage_contract_violations,
 };
 
 use telegram_filter_primitives::FILTER_DECISION_DROP_COUNT_FIELD;
@@ -16,6 +16,11 @@ use telegram_pipeline_primitives::{
     PIPELINE_STAGE_KIND_FILTER, PIPELINE_STAGE_KIND_SELECTOR, PIPELINE_STAGE_KIND_SERVING,
     PIPELINE_STAGE_KIND_SOURCE_MERGE,
 };
+use telegram_recommendation_contracts::contracts::{
+    ExperimentAssignmentPayload, ExperimentContextPayload,
+};
+use telegram_recommendation_fixtures::replay_contracts::LoggingReadinessSummary;
+use telegram_recommendation_fixtures::replay_contracts::ReplayEvaluationResultPayload;
 use telegram_recommendation_fixtures::{
     REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
     replay_fixture_scenario_names, replay_manifest_alignment_violations,
@@ -125,6 +130,88 @@ fn rejects_unknown_replay_fixture_version() {
 
     let error = evaluate_replay_fixture(&fixture).expect_err("version mismatch should fail");
     assert!(error.contains(REPLAY_FIXTURE_VERSION));
+}
+
+#[test]
+fn replay_evaluation_reports_ready_logging_fields() {
+    let mut fixture: RecommendationReplayFixturePayload =
+        serde_json::from_str(REPLAY_WARM_USER).expect("parse replay fixture");
+    let scenario = &mut fixture.scenarios[0];
+    scenario.query.experiment_context = Some(ExperimentContextPayload {
+        user_id: scenario.query.user_id.clone(),
+        assignments: vec![ExperimentAssignmentPayload {
+            experiment_id: "exp-1".to_string(),
+            experiment_name: String::new(),
+            bucket: "control".to_string(),
+            config: HashMap::new(),
+            in_experiment: true,
+        }],
+    });
+    for (index, candidate) in scenario.candidates.iter_mut().enumerate() {
+        candidate.recall_source = Some("fixture".to_string());
+        candidate.weighted_score = Some(index as f64);
+        if candidate.post_id.is_empty() {
+            candidate.model_post_id = Some(format!("model-{index}"));
+        }
+    }
+
+    let result = evaluate_scenario(scenario);
+
+    assert_eq!(result.logging_readiness.total_requests, 1);
+    assert_eq!(result.logging_readiness.requests_missing_rank, 1);
+    assert_eq!(result.logging_readiness.requests_missing_recall_source, 0);
+    assert_eq!(result.logging_readiness.requests_missing_score, 0);
+    assert_eq!(result.logging_readiness.requests_missing_experiment_keys, 0);
+    assert_eq!(
+        result.logging_readiness.requests_missing_feedback_join_key,
+        0
+    );
+}
+
+#[test]
+fn replay_evaluation_result_deserializes_missing_logging_readiness() {
+    let result: ReplayEvaluationResultPayload = serde_json::from_value(json!({
+        "scenarioName": "legacy",
+        "stageNames": [],
+        "filterDropCounts": {},
+        "filteredPostIds": [],
+        "selectedLaneCounts": {},
+        "selectedSourceCounts": {},
+        "selectorDeferredReasonCounts": {},
+        "selectedPostIds": [],
+        "violations": []
+    }))
+    .expect("deserialize legacy replay result");
+
+    assert_eq!(result.logging_readiness, LoggingReadinessSummary::default());
+}
+
+#[test]
+fn replay_evaluation_counts_missing_logging_readiness_once_per_request() {
+    let mut fixture: RecommendationReplayFixturePayload =
+        serde_json::from_str(REPLAY_WARM_USER).expect("parse replay fixture");
+    let scenario = &mut fixture.scenarios[0];
+    scenario.query.request_id.clear();
+    scenario.query.experiment_context = None;
+    scenario.candidates[0].post_id.clear();
+    scenario.candidates[0].model_post_id = None;
+    scenario.candidates[0].recall_source = Some(String::new());
+    scenario.candidates[0].score = None;
+    scenario.candidates[0].weighted_score = None;
+    scenario.candidates[0].pipeline_score = None;
+    scenario.candidates[1].recall_source = None;
+
+    let result = evaluate_scenario(scenario);
+
+    assert_eq!(result.logging_readiness.total_requests, 1);
+    assert_eq!(result.logging_readiness.requests_missing_rank, 1);
+    assert_eq!(result.logging_readiness.requests_missing_recall_source, 1);
+    assert_eq!(result.logging_readiness.requests_missing_score, 1);
+    assert_eq!(result.logging_readiness.requests_missing_experiment_keys, 1);
+    assert_eq!(
+        result.logging_readiness.requests_missing_feedback_join_key,
+        1
+    );
 }
 
 #[test]

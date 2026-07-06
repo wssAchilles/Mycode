@@ -64,6 +64,18 @@ function mapKey(userId: string, postId: string): string {
     return `${userId}:${postId}`;
 }
 
+function normalizeStringArray(value?: string[]): string[] {
+    return Array.isArray(value)
+        ? value.map((entry) => entry.trim()).filter(Boolean)
+        : [];
+}
+
+function feedbackLabel(labels: ReturnType<typeof summarizeActionsInWindow>): 'positive' | 'negative' | null {
+    if (labels.negative) return 'negative';
+    if (labels.engagement || labels.click || labels.dwellTimeMs > 0) return 'positive';
+    return null;
+}
+
 async function main() {
     const args = parseArgs();
     const now = new Date();
@@ -153,19 +165,24 @@ async function main() {
                         dwellTimeMs?: number;
                     }>;
                 const labels = summarizeActionsInWindow(requestAt, candidateFollowups, windowMs);
-                acc.push({
+                const replayCandidate = {
+                    requestId: trace.requestId || '',
                     postId,
-                    modelPostId: candidate.modelPostId || undefined,
+                    modelPostId: candidate.modelPostId || '',
                     authorId: candidate.authorId,
-                    rank: candidate.rank,
-                    baselineRank: candidate.rank,
-                    recallSource: candidate.recallSource || 'unknown',
-                    selectionPool: candidate.selectionPool || undefined,
-                    selectionReason: candidate.selectionReason || undefined,
+                    rank: finiteNumberOrMissing(candidate.rank),
+                    baselineRank: finiteNumberOrMissing(candidate.rank),
+                    recallSource: candidate.recallSource || '',
+                    secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources),
+                    selectionPool: candidate.selectionPool || '',
+                    selectionReason: candidate.selectionReason || '',
                     inNetwork: candidate.inNetwork === true,
                     isNews: candidate.isNews === true,
                     score: candidate.score ?? null,
                     weightedScore: candidate.weightedScore ?? null,
+                    experimentKeys: normalizeStringArray(candidate.experimentKeys || trace.experimentKeys),
+                    productSurface: trace.productSurface || 'space_feed',
+                    feedbackLabel: feedbackLabel(labels),
                     pipelineScore: candidate.pipelineScore ?? null,
                     scoreBreakdown: candidate.scoreBreakdown || undefined,
                     recommendationDetail: candidate.recommendationDetail || undefined,
@@ -176,7 +193,8 @@ async function main() {
                         ? new Date(candidate.createdAt).toISOString()
                         : undefined,
                     labels: toReplayLabels(labels),
-                });
+                };
+                acc.push(replayCandidate);
                 return acc;
             },
             [],
@@ -221,6 +239,10 @@ async function main() {
     console.log(`[ExportRecsysReplay] requests=${exportedRequests}`);
     console.log(`[ExportRecsysReplay] candidates=${exportedCandidates}`);
     console.log(`[ExportRecsysReplay] wrote ${outputPath}`);
+}
+
+function finiteNumberOrMissing(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN;
 }
 
 function toReplayLabels(labels: ReturnType<typeof summarizeActionsInWindow>): ReplayCandidateLabelSummary {

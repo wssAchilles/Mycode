@@ -21,14 +21,19 @@ export interface ReplayCandidateLabelSummary {
 }
 
 export interface ReplayCandidateSnapshot {
+    requestId?: string;
     postId: string;
     modelPostId?: string;
     authorId: string;
     rank?: number;
     baselineRank: number;
     recallSource: string;
+    secondaryRecallSources?: string[];
     selectionPool?: string;
     selectionReason?: string;
+    experimentKeys?: string[];
+    productSurface?: string;
+    feedbackLabel?: 'positive' | 'negative' | null;
     inNetwork: boolean;
     isNews: boolean;
     score?: number | null;
@@ -128,6 +133,15 @@ export interface ReplayAttributionCoverageSummary {
     attributedFeedbackRate: number;
 }
 
+export interface LoggingReadinessSummary {
+    totalRequests: number;
+    requestsMissingRank: number;
+    requestsMissingRecallSource: number;
+    requestsMissingScore: number;
+    requestsMissingExperimentKeys: number;
+    requestsMissingFeedbackJoinKey: number;
+}
+
 export interface ReplayCandidateSetKindSummary {
     requests: number;
     averageObservedCandidates: number;
@@ -142,6 +156,7 @@ export interface ReplayEvaluationSummary {
     variant: ReplayVariantName;
     candidateSet: ReplayCandidateSetSummary;
     attributionCoverage: ReplayAttributionCoverageSummary;
+    loggingReadiness: LoggingReadinessSummary;
     baseline: ReplayRankingMetrics;
     variantMetrics: ReplayRankingMetrics;
     delta: ReplayRankingMetrics;

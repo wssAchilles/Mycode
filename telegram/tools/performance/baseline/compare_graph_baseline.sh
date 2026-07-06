@@ -3,13 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 GRAPH_DIR="$ROOT_DIR/telegram-cpp-graph-service"
-BUILD_DIR="${GRAPH_BENCH_BUILD_DIR:-$GRAPH_DIR/build}"
+BUILD_DIR="${GRAPH_BENCH_BUILD_DIR:-$GRAPH_DIR/build/release}"
 OUT_DIR="${PERFORMANCE_VERIFY_OUT_DIR:-$ROOT_DIR/reports/perf/latest}"
 CURRENT_JSON="$OUT_DIR/graph-store-bench.json"
 BASELINE_JSON="${GRAPH_BENCH_JSON_BASELINE_FILE:-$GRAPH_DIR/benchmarks/graph_store_baseline.json}"
 SAMPLE_COUNT="${GRAPH_BENCH_VERIFY_SAMPLE_COUNT:-3}"
 
 mkdir -p "$OUT_DIR"
+if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+  cmake --preset release -S "$GRAPH_DIR"
+fi
 cmake --build "$BUILD_DIR" --target graph-store-bench
 
 TMP_DIR="$(mktemp -d)"
@@ -24,12 +27,19 @@ import statistics
 import sys
 from pathlib import Path
 
+def results_from_payload(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+        return payload["results"]
+    raise ValueError("benchmark payload must be a JSON array or an object with a results array")
+
 out = Path(sys.argv[1])
 sample_dir = Path(sys.argv[2])
 samples: dict[str, list[dict]] = {}
 for path in sorted(sample_dir.glob("current-*.json")):
     with path.open("r", encoding="utf-8") as handle:
-        for item in json.load(handle):
+        for item in results_from_payload(json.load(handle)):
             samples.setdefault(item["name"], []).append(item)
 
 merged = []
