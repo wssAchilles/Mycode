@@ -98,6 +98,19 @@ export interface RecommendationExplain {
     signals?: Record<string, number>;
 }
 
+export interface RecommendationContext {
+    requestId?: string;
+    rank?: number;
+    primarySource?: string;
+    secondarySources: string[];
+    recallEvidence: Array<Record<string, unknown>>;
+    selectionPool?: string;
+    selectionReason?: string;
+    score?: number;
+    weightedScore?: number;
+    experimentKeys: string[];
+}
+
 export type InterestPoolKind =
     | 'dense_pool'
     | 'cluster_pool'
@@ -230,6 +243,8 @@ export interface FeedCandidate {
     _pipelineScore?: number;
     /** 统一的推荐解释字段（用于 API debug / trace / 面试演示） */
     recommendationExplain?: RecommendationExplain;
+    /** 实验桶归因（用于曝光、回放和训练样本 join） */
+    experimentKeys?: string[];
 
     /** 图召回附加信号 */
     graphScore?: number;

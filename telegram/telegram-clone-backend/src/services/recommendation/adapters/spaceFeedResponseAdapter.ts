@@ -1,4 +1,8 @@
-import type { FeedCandidate, RecommendationExplain } from '../types/FeedCandidate';
+import type {
+    FeedCandidate,
+    RecommendationContext,
+    RecommendationExplain,
+} from '../types/FeedCandidate';
 import {
     pickFeedSignalGroup,
     readFeedSignalValue,
@@ -69,6 +73,7 @@ export function transformFeedCandidateToResponse(
         _recallSource: servingAttribution.recallSource,
         _selectionPool: servingAttribution.selectionPool,
         _selectionReason: servingAttribution.selectionReason,
+        _recommendationContext: buildRecommendationContext(candidate, servingAttribution, context),
         _recommendationDetail: recommendationDetail,
         _recommendationExplain: buildPublicRecommendationExplain(
             candidate.recommendationExplain,
@@ -86,6 +91,29 @@ export function transformFeedCandidateToResponse(
             }
             : {}),
     };
+}
+
+function buildRecommendationContext(
+    candidate: FeedCandidate,
+    servingAttribution: ReturnType<typeof buildServingAttribution>,
+    context: SpaceFeedResponseAdapterContext,
+): RecommendationContext {
+    return {
+        requestId: context.requestId,
+        rank: context.rank,
+        primarySource: servingAttribution.recallSource,
+        secondarySources: candidate.secondaryRecallSources ?? [],
+        recallEvidence: buildRecallEvidence(candidate),
+        selectionPool: servingAttribution.selectionPool,
+        selectionReason: servingAttribution.selectionReason,
+        score: candidate.score,
+        weightedScore: candidate.weightedScore,
+        experimentKeys: candidate.experimentKeys ?? [],
+    };
+}
+
+function buildRecallEvidence(candidate: FeedCandidate): Array<Record<string, unknown>> {
+    return candidate.recallEvidence ? [{ ...candidate.recallEvidence }] : [];
 }
 
 function buildServingAttribution(candidate: FeedCandidate) {

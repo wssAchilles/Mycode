@@ -27,6 +27,7 @@ export type RecommendationEventType =
     | 'open_link';
 
 export interface RecommendationEventInput {
+    clientEventId?: string;
     userId: string;
     eventType: RecommendationEventType;
     targetType?: TargetType | 'post' | 'user' | 'topic' | 'list' | 'notification' | 'search_query';
@@ -37,6 +38,7 @@ export interface RecommendationEventInput {
     productSurface?: ProductSurface | string;
     position?: number;
     recommendationSource?: string;
+    secondaryRecallSources?: string[];
     dwellTimeMs?: number;
     score?: number;
     weightedScore?: number;
@@ -57,4 +59,37 @@ export interface RecommendationEventInput {
 export interface RecommendationEventBatchResult {
     actionsWritten: number;
     signalsWritten: number;
+}
+
+export interface RecommendationEventIdentity {
+    clientEventId?: string;
+    recommendationEventKey: string;
+}
+
+export function buildRecommendationEventKey(input: {
+    clientEventId?: string;
+    userId: string;
+    eventType: string;
+    targetId?: string;
+    requestId?: string;
+    rank?: number;
+    occurredAt?: Date | string;
+}): string {
+    const clientEventId = typeof input.clientEventId === 'string'
+        ? input.clientEventId.trim()
+        : '';
+    if (clientEventId) return clientEventId;
+    const hasServingAnchor = Boolean(input.requestId) || input.rank !== undefined;
+    const occurredAt = !hasServingAnchor && input.occurredAt
+        ? new Date(input.occurredAt).toISOString()
+        : undefined;
+
+    return [
+        input.userId,
+        input.eventType,
+        input.targetId || 'no_target',
+        input.requestId || 'no_request',
+        input.rank ?? 'no_rank',
+        occurredAt,
+    ].filter((part) => part !== undefined).map((part) => String(part)).join(':');
 }

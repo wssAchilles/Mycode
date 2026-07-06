@@ -20,8 +20,17 @@ function candidate(): FeedCandidate {
         weightedScore: 1.0,
         inNetwork: false,
         recallSource: 'GraphSource',
+        secondaryRecallSources: ['TwoTowerSource'],
+        recallEvidence: {
+            primarySource: 'GraphSource',
+            sourceCount: 2,
+            sameLaneSourceCount: 1,
+            crossLaneSourceCount: 1,
+            confidence: 0.7,
+        },
         selectionPool: 'primary',
         selectionReason: 'graph_primary',
+        experimentKeys: ['space_feed_recsys:treatment'],
         recommendationExplain: {
             primarySource: 'GraphSource',
             sourceReason: 'graph_match',
@@ -70,6 +79,24 @@ describe('space feed response adapter', () => {
         expect(response._recallSource).toBe('GraphSource');
         expect(response._selectionPool).toBe('primary');
         expect(response._selectionReason).toBe('graph_primary');
+        expect(response._recommendationContext).toEqual({
+            requestId: 'req-serving-1',
+            rank: 3,
+            primarySource: 'GraphSource',
+            secondarySources: ['TwoTowerSource'],
+            recallEvidence: [{
+                primarySource: 'GraphSource',
+                sourceCount: 2,
+                sameLaneSourceCount: 1,
+                crossLaneSourceCount: 1,
+                confidence: 0.7,
+            }],
+            selectionPool: 'primary',
+            selectionReason: 'graph_primary',
+            score: 1.2,
+            weightedScore: 1.0,
+            experimentKeys: ['space_feed_recsys:treatment'],
+        });
         expect(response._recommendationExplain.signals).toBeUndefined();
         expect(response._scoreBreakdown).toBeUndefined();
         expect(response._pipelineScore).toBeUndefined();

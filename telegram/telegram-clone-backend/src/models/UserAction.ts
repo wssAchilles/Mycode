@@ -58,6 +58,7 @@ export interface IUserAction extends Document {
     isNews?: boolean; // 是否新闻候选
     modelPostId?: string; // 模型 ID（news externalId / social objectId）
     recallSource?: string; // 候选召回来源（Following/NewsAnn/...）
+    secondaryRecallSources?: string[]; // 合并候选的其他召回来源
     selectionPool?: string; // selector 输出分桶
     selectionReason?: string; // selector 选择原因
     experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
@@ -65,6 +66,11 @@ export interface IUserAction extends Document {
     targetUrl?: string; // 外链点击目标
     /** 行为内容（例如评论文本/引用文本），用于通知展示。 */
     actionText?: string;
+    metadata?: {
+        clientEventId?: string;
+        recommendationEventKey?: string;
+        [key: string]: unknown;
+    };
 
     // 来源信息 (用于分析)
     productSurface?: string; // 来源页面 (feed, profile, search)
@@ -114,6 +120,7 @@ const UserActionSchema = new Schema<IUserAction>(
             index: true,
         },
         recallSource: String,
+        secondaryRecallSources: [String],
         selectionPool: String,
         selectionReason: String,
         experimentKeys: [String],
@@ -126,6 +133,10 @@ const UserActionSchema = new Schema<IUserAction>(
         actionText: {
             type: String,
             maxlength: 2000,
+        },
+        metadata: {
+            type: Schema.Types.Mixed,
+            default: undefined,
         },
         timestamp: {
             type: Date,
@@ -150,6 +161,16 @@ UserActionSchema.index({ userId: 1, targetAuthorId: 1, timestamp: -1 });
 UserActionSchema.index({ requestId: 1, action: 1, rank: 1 });
 UserActionSchema.index({ action: 1, timestamp: -1, recallSource: 1 });
 UserActionSchema.index({ action: 1, timestamp: -1, experimentKeys: 1 });
+UserActionSchema.index(
+    { 'metadata.recommendationEventKey': 1 },
+    {
+        unique: true,
+        name: 'uniq_recommendation_event_key',
+        partialFilterExpression: {
+            'metadata.recommendationEventKey': { $type: 'string', $gt: '' },
+        },
+    },
+);
 
 // TTL 索引: 自动清理 30 天前的行为记录 (User requested permanent storage, so disabling TTL)
 // UserActionSchema.index(
@@ -199,12 +220,34 @@ UserActionSchema.statics.getAuthorAffinityActions = async function (
 UserActionSchema.statics.logActions = async function (
     actions: Partial<IUserAction>[]
 ): Promise<void> {
-    await this.insertMany(
-        actions.map((a) => ({
-            ...a,
-            timestamp: a.timestamp || new Date(),
-        }))
-    );
+    const docs = actions.map((a) => ({
+        ...a,
+        timestamp: a.timestamp || new Date(),
+    }));
+    const keyedDocs = docs.filter((doc) => doc.metadata?.recommendationEventKey);
+    const unkeyedDocs = docs.filter((doc) => !doc.metadata?.recommendationEventKey);
+
+    const writes: Promise<unknown>[] = [];
+    if (keyedDocs.length > 0) {
+        const dedupedDocs = Array.from(
+            new Map(keyedDocs.map((doc) => [doc.metadata!.recommendationEventKey, doc])).values(),
+        );
+        writes.push(this.bulkWrite(
+            dedupedDocs.map((doc) => ({
+                updateOne: {
+                    filter: { 'metadata.recommendationEventKey': doc.metadata!.recommendationEventKey },
+                    update: { $setOnInsert: doc },
+                    upsert: true,
+                },
+            })),
+            { ordered: false },
+        ));
+    }
+    if (unkeyedDocs.length > 0) {
+        writes.push(this.insertMany(unkeyedDocs));
+    }
+
+    await Promise.all(writes);
 };
 
 interface UserActionModel extends Model<IUserAction> {

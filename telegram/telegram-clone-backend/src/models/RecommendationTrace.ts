@@ -11,6 +11,7 @@ export interface RecommendationTraceCandidate {
     authorId: string;
     rank: number;
     recallSource: string;
+    secondaryRecallSources?: string[];
     inNetwork: boolean;
     isNews: boolean;
     score?: number;
@@ -123,6 +124,10 @@ const TraceCandidateSchema = new Schema<RecommendationTraceCandidate>(
             type: String,
             required: true,
             index: true,
+        },
+        secondaryRecallSources: {
+            type: [String],
+            default: undefined,
         },
         inNetwork: {
             type: Boolean,

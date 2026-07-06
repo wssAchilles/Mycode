@@ -117,6 +117,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                     isNews: c.isNews === true,
                     modelPostId: this.resolveModelPostId(c),
                     recommendationSource: c.recallSource,
+                    secondaryRecallSources: c.secondaryRecallSources,
                     experimentKeys,
                     productSurface: 'space_feed',
                     requestId: query.requestId,

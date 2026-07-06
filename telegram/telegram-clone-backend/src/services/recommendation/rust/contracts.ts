@@ -15,17 +15,20 @@ import type {
   UserSignalFeatures,
   UserStateContext,
 } from '../types/FeedQuery';
+import type { EmbeddingContract } from '../contracts/embeddingContract';
 
 type SerializedUserFeatures = Omit<UserFeatures, 'accountCreatedAt'> & {
   accountCreatedAt?: string;
 };
 
 type SerializedSparseEmbeddingEntry = SparseEmbeddingEntry;
+type SerializedEmbeddingContract = Partial<EmbeddingContract>;
 
 type SerializedEmbeddingContext = Omit<EmbeddingContext, 'computedAt'> & {
   computedAt?: string;
   interestedInClusters: SerializedSparseEmbeddingEntry[];
   producerEmbedding: SerializedSparseEmbeddingEntry[];
+  embeddingContract?: SerializedEmbeddingContract;
 };
 
 type SerializedUserStateContext = UserStateContext;
@@ -249,6 +252,7 @@ export interface RecommendationTraceCandidatePayload {
   authorId: string;
   rank: number;
   recallSource: string;
+  secondaryRecallSources?: string[];
   inNetwork: boolean;
   isNews: boolean;
   score?: number;
@@ -419,6 +423,17 @@ const sparseEmbeddingEntrySchema = z.object({
   score: z.number(),
 });
 
+const embeddingContractSchema = z.object({
+  embeddingSpace: z.string().optional(),
+  dimensions: z.number().int().positive().optional(),
+  retrievalEmbeddingDim: z.number().int().positive().optional(),
+  rankingEmbeddingDim: z.number().int().positive().optional(),
+  modelVersion: z.string().optional(),
+  artifactVersion: z.string().optional(),
+  producer: z.string().optional(),
+  semantic: z.boolean().optional(),
+});
+
 const embeddingContextSchema = z.object({
   interestedInClusters: z.array(sparseEmbeddingEntrySchema),
   producerEmbedding: z.array(sparseEmbeddingEntrySchema),
@@ -431,6 +446,7 @@ const embeddingContextSchema = z.object({
   artifactVersion: z.string().optional(),
   modelProfile: z.string().optional(),
   embeddingDim: z.number().int().positive().optional(),
+  embeddingContract: embeddingContractSchema.optional(),
   usable: z.boolean(),
   stale: z.boolean().optional(),
 });
@@ -711,6 +727,7 @@ const recommendationTracePayloadSchema = z.object({
     authorId: z.string().min(1),
     rank: z.number().int().min(1),
     recallSource: z.string().min(1),
+    secondaryRecallSources: z.array(z.string()).optional(),
     inNetwork: z.boolean(),
     isNews: z.boolean(),
     score: z.number().optional(),

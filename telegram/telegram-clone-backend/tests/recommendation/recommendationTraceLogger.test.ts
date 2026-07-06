@@ -58,6 +58,7 @@ describe('RecommendationTraceLogger', () => {
             makeCandidate(oid('507f191e810c19729de87071'), {
                 authorId: 'author-a',
                 recallSource: 'FollowingSource',
+                secondaryRecallSources: ['TwoTowerSource'],
                 inNetwork: true,
             }) as any,
             makeCandidate(oid('507f191e810c19729de87072'), {
@@ -94,6 +95,7 @@ describe('RecommendationTraceLogger', () => {
         expect((update as any).$set.candidates[0]).toMatchObject({
             rank: 1,
             recallSource: 'FollowingSource',
+            secondaryRecallSources: ['TwoTowerSource'],
             inNetwork: true,
             score: 1.2,
             weightedScore: 1.5,
@@ -119,6 +121,7 @@ describe('RecommendationTraceLogger', () => {
                 authorId: `author-rust-${index}`,
                 rank: index + 1,
                 recallSource: 'EmbeddingAuthorSource',
+                secondaryRecallSources: ['GraphSource'],
                 inNetwork: false,
                 isNews: false,
                 score: 2.4 - (index * 0.01),
@@ -195,6 +198,7 @@ describe('RecommendationTraceLogger', () => {
                         authorId: 'author-rust',
                         rank: 1,
                         recallSource: 'EmbeddingAuthorSource',
+                        secondaryRecallSources: ['GraphSource'],
                         inNetwork: false,
                         isNews: false,
                         score: 2.4,
@@ -252,6 +256,7 @@ describe('RecommendationTraceLogger', () => {
         expect((update as any).$set.replayPool.candidates[0]).toMatchObject({
             authorId: 'author-rust-0',
             recallSource: 'EmbeddingAuthorSource',
+            secondaryRecallSources: ['GraphSource'],
             score: 2.4,
         });
         expect((update as any).$set.replayPool.candidates).toHaveLength(75);

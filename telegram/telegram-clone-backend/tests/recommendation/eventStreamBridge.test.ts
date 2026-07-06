@@ -40,7 +40,9 @@ describe('EventStreamService recommendation bridge', () => {
 
     it('writes recommendation attribution fields into UserAction and UserSignal', async () => {
         const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
-        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockImplementation(async (signals: any) => ({
+            insertedSignals: signals,
+        }));
         const service = new EventStreamService();
         const events: UserBehaviorEvent[] = [
             {
@@ -121,7 +123,9 @@ describe('EventStreamService recommendation bridge', () => {
 
     it('maps negative feedback and skips invalid post events without blocking valid events', async () => {
         const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
-        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockImplementation(async (signals: any) => ({
+            insertedSignals: signals,
+        }));
         const service = new EventStreamService();
         const events: UserBehaviorEvent[] = [
             {
@@ -185,7 +189,9 @@ describe('EventStreamService recommendation bridge', () => {
 
     it('bridges profile, search, topic, and link events with non-post target types', async () => {
         const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
-        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockImplementation(async (signals: any) => ({
+            insertedSignals: signals,
+        }));
         const service = new EventStreamService();
         const events: UserBehaviorEvent[] = [
             {
@@ -297,7 +303,9 @@ describe('EventStreamService recommendation bridge', () => {
 
     it('bridges recommendation events even when Redis is unavailable', async () => {
         const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
-        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockImplementation(async (signals: any) => ({
+            insertedSignals: signals,
+        }));
         const service = new EventStreamService();
         (service as any).redis = null;
 
@@ -319,6 +327,52 @@ describe('EventStreamService recommendation bridge', () => {
         expect((actionSpy.mock.calls[0][0] as any[])[0]).toMatchObject({
             action: ActionType.SEARCH_QUERY,
             targetKeywords: ['home mixer'],
+        });
+    });
+
+    it('persists client event ids through Redis stream readback', async () => {
+        const xadd = vi.fn();
+        const pipeline = {
+            xadd,
+            zadd: vi.fn(),
+            zremrangebyrank: vi.fn(),
+            expire: vi.fn(),
+            exec: vi.fn().mockResolvedValue([]),
+        };
+        const service = new EventStreamService();
+        (service as any).redis = {
+            pipeline: () => pipeline,
+            xrevrange: vi.fn().mockResolvedValue([
+                ['stream-id-1', [
+                    'type', 'click',
+                    'postId', '65f000000000000000000011',
+                    'userId', 'user-5',
+                    'timestamp', '2026-06-06T00:00:00.000Z',
+                    'clientEventId', 'evt_redis_1',
+                    'metadata', '{}',
+                ]],
+            ]),
+        };
+
+        await service.logBatch([{
+            clientEventId: 'evt_redis_1',
+            type: 'click',
+            userId: 'user-5',
+            postId: '65f000000000000000000011',
+            timestamp: new Date('2026-06-06T00:00:00.000Z'),
+            metadata: {},
+        }]);
+        await service.flush();
+
+        expect(xadd.mock.calls[0]).toContain('clientEventId');
+        expect(xadd.mock.calls[0]).toContain('evt_redis_1');
+
+        const events = await service.readRecentEvents(1);
+        expect(events[0]).toMatchObject({
+            clientEventId: 'evt_redis_1',
+            type: 'click',
+            postId: '65f000000000000000000011',
+            userId: 'user-5',
         });
     });
 });

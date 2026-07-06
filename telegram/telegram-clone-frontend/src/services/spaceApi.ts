@@ -67,6 +67,7 @@ interface PostResponse {
     _selectionPool?: string;
     _selectionReason?: string;
     _inNetwork?: boolean;
+    _recommendationContext?: RecommendationContextResponse;
     newsMetadata?: {
         title?: string;
         summary?: string;
@@ -74,6 +75,19 @@ interface PostResponse {
         source?: string;
         clusterId?: number;
     };
+}
+
+interface RecommendationContextResponse {
+    requestId?: string;
+    rank?: number;
+    primarySource?: string;
+    secondarySources?: string[];
+    recallEvidence?: Array<Record<string, unknown>>;
+    selectionPool?: string;
+    selectionReason?: string;
+    score?: number;
+    weightedScore?: number;
+    experimentKeys?: string[];
 }
 
 interface RecommendationExplainResponse {
@@ -336,41 +350,46 @@ const mapRecallSource = (
 };
 
 // 转换后端响应为前端类型
-const transformPost = (post: PostResponse): PostData => ({
-    id: post._id || post.id || '',
-    originalPostId: post.originalPostId,
-    replyToPostId: post.replyToPostId,
-    conversationId: post.conversationId,
-    author: {
-        id: post.authorId,
-        username: post.authorUsername || 'Unknown',
-        avatarUrl: resolveSpaceMediaUrl(post.authorAvatarUrl) ?? post.authorAvatarUrl,
-    },
-    content: post.content,
-    media: (post.media || []).map((m) => ({
-        ...m,
-        url: resolveSpaceMediaUrl(m.url) || '',
-        thumbnailUrl: resolveSpaceMediaUrl(m.thumbnailUrl || null) || undefined,
-    })) as PostMedia[],
-    createdAt: new Date(post.createdAt),
-    likeCount: post.likeCount || 0,
-    commentCount: post.commentCount || 0,
-    repostCount: post.repostCount || 0,
-    isLiked: post.isLiked || false,
-    isReposted: post.isReposted || false,
-    isPinned: post.isPinned || false,
-    isNews: post.isNews || false,
-    recallSource: mapRecallSource(post._recallSource, post._inNetwork),
-    recommendationDetail: post._recommendationDetail,
-    recommendationExplain: post._recommendationExplain,
-    recommendationRequestId: post._recommendationRequestId,
-    recommendationRank: post._recommendationRank,
-    recommendationScore: post._recommendationScore,
-    weightedScore: post._weightedScore,
-    selectionPool: post._selectionPool,
-    selectionReason: post._selectionReason,
-    newsMetadata: post.newsMetadata,
-});
+export const transformPost = (post: PostResponse): PostData => {
+    const recommendationContext = post._recommendationContext;
+    const primarySource = recommendationContext?.primarySource ?? post._recallSource;
+
+    return {
+        id: post._id || post.id || '',
+        originalPostId: post.originalPostId,
+        replyToPostId: post.replyToPostId,
+        conversationId: post.conversationId,
+        author: {
+            id: post.authorId,
+            username: post.authorUsername || 'Unknown',
+            avatarUrl: resolveSpaceMediaUrl(post.authorAvatarUrl) ?? post.authorAvatarUrl,
+        },
+        content: post.content,
+        media: (post.media || []).map((m) => ({
+            ...m,
+            url: resolveSpaceMediaUrl(m.url) || '',
+            thumbnailUrl: resolveSpaceMediaUrl(m.thumbnailUrl || null) || undefined,
+        })) as PostMedia[],
+        createdAt: new Date(post.createdAt),
+        likeCount: post.likeCount || 0,
+        commentCount: post.commentCount || 0,
+        repostCount: post.repostCount || 0,
+        isLiked: post.isLiked || false,
+        isReposted: post.isReposted || false,
+        isPinned: post.isPinned || false,
+        isNews: post.isNews || false,
+        recallSource: mapRecallSource(primarySource, post._inNetwork),
+        recommendationDetail: post._recommendationDetail,
+        recommendationExplain: post._recommendationExplain,
+        recommendationRequestId: recommendationContext?.requestId ?? post._recommendationRequestId,
+        recommendationRank: recommendationContext?.rank ?? post._recommendationRank,
+        recommendationScore: recommendationContext?.score ?? post._recommendationScore,
+        weightedScore: recommendationContext?.weightedScore ?? post._weightedScore,
+        selectionPool: recommendationContext?.selectionPool ?? post._selectionPool,
+        selectionReason: recommendationContext?.selectionReason ?? post._selectionReason,
+        newsMetadata: post.newsMetadata,
+    };
+};
 
 const attachRecommendationRequestContext = (
     posts: PostResponse[],

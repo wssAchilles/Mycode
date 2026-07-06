@@ -118,6 +118,7 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
                 isNews: candidate.isNews === true,
                 modelPostId: this.resolveModelPostId(candidate),
                 recommendationSource: candidate.recallSource,
+                secondaryRecallSources: candidate.secondaryRecallSources,
                 experimentKeys,
                 productSurface: 'space_feed',
                 occurredAt: new Date(),

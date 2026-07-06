@@ -5,6 +5,7 @@
 
 import { ExperimentContext } from '../../experiment/types';
 import { v4 as uuidv4 } from 'uuid';
+import type { EmbeddingContract } from '../contracts/embeddingContract';
 
 /**
  * 用户特征 (用于推荐)
@@ -56,6 +57,7 @@ export interface EmbeddingContext {
     artifactVersion?: string;
     modelProfile?: string;
     embeddingDim?: number;
+    embeddingContract?: Partial<EmbeddingContract>;
     usable: boolean;
     stale?: boolean;
 }

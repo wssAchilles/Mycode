@@ -139,12 +139,14 @@ export type UserBehaviorEventType =
     | 'profile_click' | 'search_query' | 'hashtag_click' | 'open_link';
 
 export interface UserBehaviorEvent {
+    clientEventId?: string;
     type: UserBehaviorEventType;
     postId: string;
     userId: string;
     timestamp: Date;
     metadata?: {
         source?: string; // 召回源
+        recommendationSource?: string; // 兼容旧调用方的召回源字段
         position?: number; // 在 feed 中的位置
         requestId?: string; // 推荐请求 ID
         recommendationScore?: number; // 推荐分数
@@ -161,5 +163,6 @@ export interface UserBehaviorEvent {
         url?: string; // 外链目标
         targetType?: string; // 推荐目标类型
         productSurface?: string; // 产品表面
+        clientEventId?: string; // 客户端幂等事件 ID
     };
 }

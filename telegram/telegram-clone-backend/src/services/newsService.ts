@@ -4,11 +4,26 @@ import NewsArticle from '../models/NewsArticle';
 import NewsSource from '../models/NewsSource';
 import NewsUserEvent, { NewsEventType } from '../models/NewsUserEvent';
 import NewsUserVector from '../models/NewsUserVector';
+import { recordRecommendationEvent } from './recommendation/events';
 import { getNewsTrendsRustMode, newsTrendService, type NewsTrendTopicResult } from './newsTrends';
 import { newsStorageService } from './newsStorageService';
+import {
+  type EmbeddingContract,
+} from './recommendation/contracts/embeddingContract';
 
 type NewsWindow = 'today' | '72h';
 type NewsRankMode = 'time' | 'personalized';
+
+export interface NewsRecommendationFeedbackInput {
+  userId: string;
+  newsId: string;
+  eventType: NewsEventType;
+  dwellMs?: number;
+  requestId?: string;
+  rank?: number;
+  source?: string;
+  clientEventId?: string;
+}
 
 export interface NewsTopicArticleSearchResult {
   articles: NewsArticle[];
@@ -38,6 +53,7 @@ export interface NewsIngestItem {
   coverImageUrl?: string;
   cluster_id?: number;
   embedding?: number[];
+  embeddingContract?: Partial<EmbeddingContract>;
 }
 
 const normalizeUrl = (url: string) => {
@@ -54,6 +70,27 @@ const normalizeUrl = (url: string) => {
 };
 
 const hashUrl = (url: string) => crypto.createHash('sha256').update(url).digest('hex');
+
+export const shouldStoreSemanticNewsEmbedding = (
+  embedding?: number[] | null,
+  contract?: Partial<EmbeddingContract> | null,
+): boolean => (
+  Array.isArray(embedding) &&
+  embedding.length > 0 &&
+    contract?.semantic === true &&
+  Boolean(contract.embeddingSpace) &&
+  Boolean(contract.modelVersion) &&
+  Boolean(contract.artifactVersion) &&
+  (
+    contract.retrievalEmbeddingDim === embedding.length ||
+    contract.dimensions === embedding.length
+  )
+);
+
+const normalizeNewsEmbeddingForStorage = (item: NewsIngestItem): number[] | undefined => {
+  const embedding = Array.isArray(item.embedding) ? item.embedding : undefined;
+  return shouldStoreSemanticNewsEmbedding(embedding, item.embeddingContract) ? embedding : undefined;
+};
 
 const buildImageCandidates = (item: NewsIngestItem): string[] => {
   const candidates = [
@@ -297,6 +334,12 @@ const computeSimilarity = (vector: Record<string, number> | null | undefined, ke
   return score / norm;
 };
 
+const normalizeNewsRank = (rank: unknown): number | undefined => {
+  if (typeof rank !== 'number' || !Number.isFinite(rank)) return undefined;
+  const normalized = Math.floor(rank);
+  return normalized > 0 ? normalized : undefined;
+};
+
 export const newsService = {
   async ingestArticles(items: NewsIngestItem[]): Promise<number> {
     let createdOrUpdated = 0;
@@ -312,6 +355,7 @@ export const newsService = {
       const summary = buildEnhancedSummary(item.summary || contentText);
       const lead = buildLead(summary || contentText);
       const keywords = extractKeywords(`${item.title}\n${summary}`);
+      const embedding = normalizeNewsEmbeddingForStorage(item);
 
       const safePublishedAt = publishedAt && !isNaN(publishedAt.getTime()) ? publishedAt : null;
       const fetchedAt = new Date(baseMs + idx);
@@ -335,7 +379,7 @@ export const newsService = {
               hashUrl: hash,
               clusterId: item.cluster_id || null,
               keywords,
-              embedding: Array.isArray(item.embedding) ? item.embedding : undefined,
+              embedding,
             });
 
       // Save readable markdown and image. Content is stored with a hash in the key, so we delete the old blob on update.
@@ -360,7 +404,7 @@ export const newsService = {
         category: item.category || null,
         clusterId: item.cluster_id || null,
         keywords,
-        embedding: Array.isArray(item.embedding) ? item.embedding : undefined,
+        embedding,
         contentPath: contentResult.path || oldContentPath,
         coverImageUrl: imageResult.url || oldCover,
         isActive: true,
@@ -600,6 +644,30 @@ export const newsService = {
     if (Object.keys(increments).length > 0) {
       await NewsArticle.increment(increments, { where: { id: newsId } });
     }
+  },
+
+  async recordRecommendationFeedback(input: NewsRecommendationFeedbackInput) {
+    const article = await NewsArticle.findByPk(input.newsId, {
+      attributes: ['id', 'source', 'sourceUrl', 'canonicalUrl', 'keywords'],
+    });
+
+    await recordRecommendationEvent({
+      clientEventId: input.clientEventId,
+      userId: input.userId,
+      eventType: input.eventType,
+      targetType: 'post',
+      targetId: input.newsId,
+      productSurface: 'news_feed',
+      requestId: input.requestId,
+      position: normalizeNewsRank(input.rank),
+      recommendationSource: input.source || article?.source || 'NewsFeed',
+      dwellTimeMs: input.eventType === 'dwell' ? input.dwellMs : undefined,
+      isNews: true,
+      modelPostId: article?.id || input.newsId,
+      targetUrl: article?.canonicalUrl || article?.sourceUrl || undefined,
+      targetKeywords: article?.keywords || undefined,
+      occurredAt: new Date(),
+    });
   },
 
   async updateUserVectors(): Promise<number> {

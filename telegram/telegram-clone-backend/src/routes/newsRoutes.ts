@@ -71,11 +71,39 @@ router.post('/events', async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ error: '未授权' });
     }
-    const { newsId, eventType, dwellMs } = req.body as { newsId?: string; eventType?: string; dwellMs?: number };
+    const {
+      newsId,
+      eventType,
+      dwellMs,
+      requestId,
+      rank,
+      source,
+      clientEventId,
+    } = req.body as {
+      newsId?: string;
+      eventType?: string;
+      dwellMs?: number;
+      requestId?: string;
+      rank?: number;
+      source?: string;
+      clientEventId?: string;
+    };
     if (!newsId || !eventType) {
       return res.status(400).json({ error: 'newsId and eventType required' });
     }
     await newsService.logEvent(userId, newsId, eventType as any, dwellMs);
+    newsService.recordRecommendationFeedback({
+      userId,
+      newsId,
+      eventType: eventType as any,
+      dwellMs,
+      requestId,
+      rank,
+      source,
+      clientEventId,
+    }).catch((err) => {
+      log.warn({ err }, '新闻推荐反馈桥接失败');
+    });
     return res.status(201).json({ success: true });
   } catch (error) {
     log.error({ err: error }, '记录新闻事件失败');

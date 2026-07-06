@@ -6,6 +6,7 @@ vi.mock('../../src/services/recommendation/utils/redisClient', () => ({
 }));
 
 import UserAction, { ActionType } from '../../src/models/UserAction';
+import UserSignal from '../../src/models/UserSignal';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 import { ImpressionLogger } from '../../src/services/recommendation/sideeffects/ImpressionLogger';
 import { ServeCacheSideEffect } from '../../src/services/recommendation/sideeffects/ServeCacheSideEffect';
@@ -57,6 +58,9 @@ describe('Feed action logging contract', () => {
 
     it('ImpressionLogger writes request-level training fields', async () => {
         const spy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
+        vi.spyOn(UserSignal, 'logSignalsBatch').mockImplementation(async (signals: any) => ({
+            insertedSignals: signals,
+        }));
         const query = createFeedQuery('u-impression-contract', 20, false, {
             requestId: 'req-impression-contract',
         });
@@ -66,6 +70,7 @@ describe('Feed action logging contract', () => {
             isNews: false,
             modelPostId: '507f191e810c19729de87031',
             recallSource: 'FollowingSource',
+            secondaryRecallSources: ['TwoTowerSource'],
             score: 2.3,
             weightedScore: 2.7,
         });
@@ -75,6 +80,7 @@ describe('Feed action logging contract', () => {
             modelPostId: 'N12345',
             newsMetadata: { externalId: 'N12345' },
             recallSource: 'NewsAnnSource',
+            secondaryRecallSources: ['TrendSource'],
             score: 0.9,
             weightedScore: 1.1,
         });
@@ -94,6 +100,7 @@ describe('Feed action logging contract', () => {
             isNews: false,
             modelPostId: '507f191e810c19729de87031',
             recallSource: 'FollowingSource',
+            secondaryRecallSources: ['TwoTowerSource'],
             experimentKeys: ['space_feed_recsys_alignment:treatment'],
             productSurface: 'space_feed',
         });
@@ -107,6 +114,7 @@ describe('Feed action logging contract', () => {
             isNews: true,
             modelPostId: 'N12345',
             recallSource: 'NewsAnnSource',
+            secondaryRecallSources: ['TrendSource'],
             experimentKeys: ['space_feed_recsys_alignment:treatment'],
             productSurface: 'space_feed',
         });
@@ -123,6 +131,7 @@ describe('Feed action logging contract', () => {
             isNews: false,
             modelPostId: '507f191e810c19729de87041',
             recallSource: 'FollowingSource',
+            secondaryRecallSources: ['GraphSource'],
             score: 1.8,
             weightedScore: 2.1,
         });
@@ -132,6 +141,7 @@ describe('Feed action logging contract', () => {
             modelPostId: undefined,
             newsMetadata: { externalId: 'N67890' },
             recallSource: 'NewsAnnSource',
+            secondaryRecallSources: ['TrendSource'],
             score: Number.NaN,
             weightedScore: undefined,
         });
@@ -152,6 +162,7 @@ describe('Feed action logging contract', () => {
             isNews: false,
             modelPostId: '507f191e810c19729de87041',
             recallSource: 'FollowingSource',
+            secondaryRecallSources: ['GraphSource'],
             experimentKeys: ['space_feed_recsys_alignment:treatment'],
             productSurface: 'space_feed',
         });
@@ -163,6 +174,7 @@ describe('Feed action logging contract', () => {
             isNews: true,
             modelPostId: 'N67890',
             recallSource: 'NewsAnnSource',
+            secondaryRecallSources: ['TrendSource'],
             experimentKeys: ['space_feed_recsys_alignment:treatment'],
             productSurface: 'space_feed',
         });

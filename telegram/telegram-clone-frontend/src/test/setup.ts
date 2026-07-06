@@ -5,6 +5,39 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+const createMemoryStorage = (): Storage => {
+    let store: Record<string, string> = {};
+
+    return {
+        get length() {
+            return Object.keys(store).length;
+        },
+        clear: () => {
+            store = {};
+        },
+        getItem: (key: string) => store[key] ?? null,
+        key: (index: number) => Object.keys(store)[index] ?? null,
+        removeItem: (key: string) => {
+            delete store[key];
+        },
+        setItem: (key: string, value: string) => {
+            store[key] = String(value);
+        },
+    };
+};
+
+const ensureStorage = (name: 'localStorage' | 'sessionStorage') => {
+    if (typeof globalThis[name] !== 'undefined') return;
+
+    Object.defineProperty(globalThis, name, {
+        configurable: true,
+        value: createMemoryStorage(),
+    });
+};
+
+ensureStorage('localStorage');
+ensureStorage('sessionStorage');
+
 // 每个测试后清理
 afterEach(() => {
     cleanup();

@@ -12,6 +12,7 @@ const log = createChildLogger('services:eventStreamService');
 
 // 事件类型
 export interface UserBehaviorEvent {
+    clientEventId?: string;
     type:
         | 'impression'
         | 'click'
@@ -56,6 +57,7 @@ export interface UserBehaviorEvent {
         url?: string;
         targetType?: string;
         productSurface?: string;
+        clientEventId?: string;
     };
 }
 
@@ -185,6 +187,7 @@ export class EventStreamService {
                         'postId', event.postId,
                         'userId', event.userId,
                         'timestamp', event.timestamp.toISOString(),
+                        'clientEventId', event.clientEventId || '',
                         'metadata', JSON.stringify(event.metadata || {})
                     );
                 }
@@ -231,6 +234,7 @@ export class EventStreamService {
                     type: fieldMap.type as UserBehaviorEvent['type'],
                     postId: fieldMap.postId,
                     userId: fieldMap.userId,
+                    clientEventId: fieldMap.clientEventId || undefined,
                     timestamp: new Date(fieldMap.timestamp),
                     metadata: JSON.parse(fieldMap.metadata || '{}'),
                 };
@@ -365,11 +369,14 @@ export class EventStreamService {
             const selectionPool = this.trimmedString(event.metadata?.selectionPool);
             const selectionReason = this.trimmedString(event.metadata?.selectionReason);
             const targetUrl = this.normalizeUrl(event.metadata?.url);
+            const clientEventId = this.trimmedString(event.clientEventId)
+                ?? this.trimmedString(event.metadata?.clientEventId);
             const experimentKeys = event.metadata?.experimentId
                 ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
                 : undefined;
 
             recommendationEvents.push({
+                clientEventId,
                 userId: event.userId,
                 eventType: event.type === 'scroll' ? 'dwell' : event.type,
                 targetId: target.targetId,

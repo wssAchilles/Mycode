@@ -47,6 +47,7 @@ type StoredTraceCandidate = {
     authorId?: string;
     rank?: number;
     recallSource?: string;
+    secondaryRecallSources?: string[];
     inNetwork?: boolean;
     isNews?: boolean;
     score?: number;
@@ -211,6 +212,8 @@ function sanitizeRustCandidates(
                 authorId: candidate.authorId,
                 rank: Math.max(1, Math.round(candidate.rank)),
                 recallSource: candidate.recallSource || 'unknown',
+                secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources)
+                    ?? normalizeStringArray(local?.secondaryRecallSources),
                 inNetwork: candidate.inNetwork === true,
                 isNews: candidate.isNews === true,
                 score: toFiniteNumber(candidate.score),
@@ -288,6 +291,7 @@ function traceCandidate(candidate: FeedCandidate, rank: number) {
         authorId: candidate.authorId,
         rank,
         recallSource: candidate.recallSource || 'unknown',
+        secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources),
         inNetwork: candidate.inNetwork === true,
         isNews: candidate.isNews === true,
         score: toFiniteNumber(candidate.score),
@@ -314,6 +318,14 @@ function finiteBreakdown(value?: Record<string, number>): Record<string, number>
 
 function toFiniteNumber(value: number | undefined): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeStringArray(values: string[] | undefined): string[] | undefined {
+    if (!Array.isArray(values)) return undefined;
+    const normalized = values
+        .map((value) => value.trim())
+        .filter(Boolean);
+    return normalized.length > 0 ? normalized : undefined;
 }
 
 function toNonNegativeInteger(value: number | undefined): number | undefined {
