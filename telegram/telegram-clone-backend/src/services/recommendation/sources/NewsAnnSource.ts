@@ -11,6 +11,12 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import { AnnClient, HttpAnnClient } from '../clients/ANNClient';
+import {
+    CRAWLER_TFIDF_EMBEDDING_CONTRACT,
+    buildEmbeddingContract,
+    isEmbeddingContractCompatible,
+    type EmbeddingContract,
+} from '../contracts/embeddingContract';
 
 const ANN_MIN_TOPK = 200;
 const ANN_MAX_TOPK = 1000;
@@ -23,6 +29,20 @@ const NEWS_ANN_RETRIES = Math.max(
     0,
     parseInt(String(process.env.NEWS_ANN_RETRIES || '0'), 10) || 0,
 );
+const DEFAULT_NEWS_ANN_DIMENSIONS = Math.max(
+    1,
+    parseInt(String(process.env.NEWS_ANN_EMBEDDING_DIMENSIONS || '256'), 10) || 256,
+);
+const REQUIRED_NEWS_ANN_CONTRACT: EmbeddingContract = {
+    embeddingSpace: 'semantic_news_v1',
+    dimensions: DEFAULT_NEWS_ANN_DIMENSIONS,
+    retrievalEmbeddingDim: DEFAULT_NEWS_ANN_DIMENSIONS,
+    rankingEmbeddingDim: DEFAULT_NEWS_ANN_DIMENSIONS,
+    modelVersion: process.env.NEWS_ANN_REQUIRED_MODEL_VERSION || 'semantic_news_v1',
+    artifactVersion: process.env.NEWS_ANN_REQUIRED_ARTIFACT_VERSION || 'semantic_news_artifact_v1',
+    producer: 'NewsAnnSource',
+    semantic: true,
+};
 
 export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'NewsAnnSource';
@@ -47,7 +67,8 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
         // 1) Prefer ANN retrieval
-        if (this.annClient) {
+        const runtimeContract = getNewsAnnRuntimeContract();
+        if (this.annClient && isEmbeddingContractCompatible(runtimeContract, REQUIRED_NEWS_ANN_CONTRACT)) {
             try {
                 const historyExternalIds = (query.newsHistoryExternalIds || []).map(String).filter(Boolean);
                 const topK = Math.min(
@@ -60,6 +81,7 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                     keywords: [],
                     historyPostIds: historyExternalIds,
                     topK,
+                    corpusContract: runtimeContract,
                 });
 
                 const annByExternalId = new Map(
@@ -167,4 +189,26 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
             if (timer) clearTimeout(timer);
         }
     }
+}
+
+function getNewsAnnRuntimeContract(): EmbeddingContract {
+    const dimensions = Math.max(
+        1,
+        parseInt(String(process.env.NEWS_ANN_EMBEDDING_DIMENSIONS || DEFAULT_NEWS_ANN_DIMENSIONS), 10)
+        || DEFAULT_NEWS_ANN_DIMENSIONS,
+    );
+    if (process.env.NEWS_ANN_SEMANTIC_CONTRACT_ENABLED === 'true') {
+        return {
+            embeddingSpace: process.env.NEWS_ANN_EMBEDDING_SPACE || REQUIRED_NEWS_ANN_CONTRACT.embeddingSpace,
+            dimensions,
+            retrievalEmbeddingDim: dimensions,
+            rankingEmbeddingDim: dimensions,
+            modelVersion: process.env.NEWS_ANN_MODEL_VERSION || REQUIRED_NEWS_ANN_CONTRACT.modelVersion,
+            artifactVersion: process.env.NEWS_ANN_ARTIFACT_VERSION || REQUIRED_NEWS_ANN_CONTRACT.artifactVersion,
+            producer: process.env.NEWS_ANN_PRODUCER || 'news-ann-service',
+            semantic: true,
+        };
+    }
+
+    return buildEmbeddingContract(CRAWLER_TFIDF_EMBEDDING_CONTRACT, dimensions);
 }

@@ -14,6 +14,41 @@ import {
 
 const log = createChildLogger('bootstrap:scheduler');
 
+export type RecommendationScheduleJobName =
+  | 'daily-recommendation-refresh'
+  | 'simclusters-batch-repair'
+  | 'realgraph-decay-repair';
+
+export interface RecommendationScheduledJob {
+  name: RecommendationScheduleJobName;
+  cron: string;
+  hour: number;
+  minute: number;
+}
+
+export interface RecommendationSchedulePlan {
+  defaultJobs: RecommendationScheduledJob[];
+  repairJobs: RecommendationScheduledJob[];
+}
+
+export function buildRecommendationSchedulePlan(input: { enableRepairJobs: boolean }): RecommendationSchedulePlan {
+  const defaultJobs: RecommendationScheduledJob[] = [
+    { name: 'daily-recommendation-refresh', cron: '0 2 * * *', hour: 2, minute: 0 },
+  ];
+  const repairJobs: RecommendationScheduledJob[] = input.enableRepairJobs
+    ? [
+        { name: 'simclusters-batch-repair', cron: '0 3 * * *', hour: 3, minute: 0 },
+        { name: 'realgraph-decay-repair', cron: '0 4 * * *', hour: 4, minute: 0 },
+      ]
+    : [];
+
+  return { defaultJobs, repairJobs };
+}
+
+function isRecommendationRepairJobsEnabled(): boolean {
+  return String(process.env.RECOMMENDATION_REPAIR_JOBS_ENABLED || '').trim().toLowerCase() === 'true';
+}
+
 async function materializeRecentNewsPosts(context: string): Promise<void> {
   const result = await newsMaterializationService.materialize({
     limit: 300,
@@ -25,6 +60,10 @@ async function materializeRecentNewsPosts(context: string): Promise<void> {
 }
 
 export function registerCronJobs(): void {
+  const recommendationSchedulePlan = buildRecommendationSchedulePlan({
+    enableRepairJobs: isRecommendationRepairJobsEnabled(),
+  });
+
   // Daily Cleanup (00:00)
   cron.schedule('0 0 * * *', async () => {
     log.info('Starting daily news cleanup...');
@@ -73,7 +112,11 @@ export function registerCronJobs(): void {
   log.info('News Space 物化任务已启动 (每日 01:20)');
 
   // Unified recommendation closure (02:00)
-  cron.schedule('0 2 * * *', async () => {
+  const dailyRefreshJob = recommendationSchedulePlan.defaultJobs.find(
+    (job) => job.name === 'daily-recommendation-refresh',
+  );
+  if (dailyRefreshJob) {
+    cron.schedule(dailyRefreshJob.cron, async () => {
     log.info('Starting daily recommendation refresh closure...');
     try {
       await materializeRecentNewsPosts('pre-daily-recommendation-refresh');
@@ -87,32 +130,41 @@ export function registerCronJobs(): void {
     } catch (error) {
       log.error({ err: error }, 'Daily recommendation refresh closure failed');
     }
-  });
-  log.info('推荐特征闭环刷新任务已启动 (每日 02:00)');
+    });
+    log.info('推荐特征闭环刷新任务已启动 (每日 02:00)');
+  }
 
-  // SimClusters 离线嵌入计算 (03:00)
-  cron.schedule('0 3 * * *', async () => {
-    log.info('Starting SimClusters batch job...');
-    try {
-      const result = await simClustersBatchJob.run();
-      log.info({ success: result.success, durationMs: result.durationMs }, 'SimClusters completed');
-    } catch (error) {
-      log.error({ err: error }, 'SimClusters job failed');
-    }
-  });
-  log.info('SimClusters 批量任务已启动 (每日 03:00)');
+  const simClustersRepairJob = recommendationSchedulePlan.repairJobs.find(
+    (job) => job.name === 'simclusters-batch-repair',
+  );
+  if (simClustersRepairJob) {
+    cron.schedule(simClustersRepairJob.cron, async () => {
+      log.info('Starting SimClusters repair job...');
+      try {
+        const result = await simClustersBatchJob.run({ trigger: 'cron' });
+        log.info({ success: result.success, durationMs: result.durationMs }, 'SimClusters repair completed');
+      } catch (error) {
+        log.error({ err: error }, 'SimClusters repair job failed');
+      }
+    });
+    log.info('SimClusters repair 任务已启动 (每日 03:00)');
+  }
 
-  // RealGraph 衰减计算 (04:00)
-  cron.schedule('0 4 * * *', async () => {
-    log.info('Starting RealGraph decay job...');
-    try {
-      const result = await realGraphDecayJob.run();
-      log.info({ decayedEdges: result.decayedEdges, durationMs: result.durationMs }, 'RealGraph decay completed');
-    } catch (error) {
-      log.error({ err: error }, 'RealGraph decay failed');
-    }
-  });
-  log.info('RealGraph 衰减任务已启动 (每日 04:00)');
+  const realGraphRepairJob = recommendationSchedulePlan.repairJobs.find(
+    (job) => job.name === 'realgraph-decay-repair',
+  );
+  if (realGraphRepairJob) {
+    cron.schedule(realGraphRepairJob.cron, async () => {
+      log.info('Starting RealGraph decay repair job...');
+      try {
+        const result = await realGraphDecayJob.run({ trigger: 'cron' });
+        log.info({ decayedEdges: result.decayedEdges, durationMs: result.durationMs }, 'RealGraph decay repair completed');
+      } catch (error) {
+        log.error({ err: error }, 'RealGraph decay repair failed');
+      }
+    });
+    log.info('RealGraph 衰减 repair 任务已启动 (每日 04:00)');
+  }
 
   runtimeControlPlane.markUnit({
     unit: 'cron',

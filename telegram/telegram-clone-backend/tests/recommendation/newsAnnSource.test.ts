@@ -17,6 +17,7 @@ describe('NewsAnnSource', () => {
     });
 
     it('hydrates ANN externalIds to posts and preserves ANN order', async () => {
+        vi.stubEnv('NEWS_ANN_SEMANTIC_CONTRACT_ENABLED', 'true');
         const q = createFeedQuery('user', 20);
         q.newsHistoryExternalIds = ['N0'];
 
@@ -75,6 +76,7 @@ describe('NewsAnnSource', () => {
     });
 
     it('falls back to recent news when ANN exceeds the source budget', async () => {
+        vi.stubEnv('NEWS_ANN_SEMANTIC_CONTRACT_ENABLED', 'true');
         vi.useFakeTimers();
         try {
             const q = createFeedQuery('user', 20);

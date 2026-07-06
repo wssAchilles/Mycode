@@ -44,11 +44,13 @@ export interface IPostFeatureSnapshot extends Document {
     denseEmbedding: number[];
     embeddingContract?: {
         embeddingSpace: string;
+        dimensions?: number;
         retrievalEmbeddingDim: number;
         rankingEmbeddingDim: number;
         modelVersion: string;
         artifactVersion: string;
         producer: string;
+        semantic?: boolean;
     };
     embeddingModelMode: PostFeatureModelMode;
     embeddingPlanVersion?: string;
@@ -133,11 +135,13 @@ const PostFeatureSnapshotSchema = new Schema<IPostFeatureSnapshot>(
         },
         embeddingContract: {
             embeddingSpace: String,
+            dimensions: Number,
             retrievalEmbeddingDim: Number,
             rankingEmbeddingDim: Number,
             modelVersion: String,
             artifactVersion: String,
             producer: String,
+            semantic: Boolean,
         },
         embeddingModelMode: {
             type: String,

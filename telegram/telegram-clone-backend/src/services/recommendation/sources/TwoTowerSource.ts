@@ -27,6 +27,10 @@ import {
 } from '../utils/embeddingRetrieval';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 import { isSourceEnabledForQuery } from '../utils/sourceMixing';
+import {
+    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+    isEmbeddingContractCompatible,
+} from '../contracts/embeddingContract';
 
 const MAX_RESULTS = 80;
 const CANDIDATE_POOL = 240;
@@ -311,6 +315,9 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         if (!this.annClient) {
             return [];
         }
+        if (!isEmbeddingContractCompatible(query.embeddingContext?.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)) {
+            return [];
+        }
 
         const postIds = (query.userActionSequence || [])
             .map((action) => action.targetPostId)
@@ -332,6 +339,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                 keywords: historyKeywords,
                 historyPostIds: postIds.map((id) => id.toString()),
                 topK: MAX_RESULTS,
+                embeddingContract: query.embeddingContext?.embeddingContract,
             });
 
             const valid = annCandidates.filter((candidate) => /^[0-9a-fA-F]{24}$/.test(String(candidate.postId)));

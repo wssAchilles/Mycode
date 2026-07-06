@@ -190,7 +190,8 @@ export class UserSignalService {
         metadata?: Record<string, any>;
     }>): Promise<void> {
         // 直接写入 DB (绕过缓冲区)
-        await UserSignal.logSignalsBatch(signals);
+        const writeResult = await UserSignal.logSignalsBatch(signals);
+        const persistedSignals = writeResult?.insertedSignals ?? signals;
 
         // 批量更新 RealGraph
         const interactions: Array<{
@@ -200,7 +201,7 @@ export class UserSignalService {
             value?: number;
         }> = [];
 
-        for (const signal of signals) {
+        for (const signal of persistedSignals) {
             if (signal.targetAuthorId && signal.targetType === TargetType.POST) {
                 const interactionType = CONFIG.signalToInteraction[signal.signalType];
                 if (interactionType) {

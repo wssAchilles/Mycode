@@ -65,6 +65,7 @@ export enum SignalType {
 export enum ProductSurface {
     HOME_FEED = 'home_feed',         // 首页 Feed
     SPACE_FEED = 'space_feed',       // Space 推荐 Feed
+    NEWS_FEED = 'news_feed',         // 新闻 Feed
     SEARCH = 'search',               // 搜索页
     PROFILE = 'profile',             // 个人主页
     NOTIFICATIONS = 'notifications', // 通知页
@@ -150,6 +151,10 @@ export interface UserSignalInput {
     };
 }
 
+export interface UserSignalBatchWriteResult {
+    insertedSignals: UserSignalInput[];
+}
+
 // ========== Schema 定义 ==========
 const UserSignalSchema = new Schema<IUserSignal>(
     {
@@ -226,6 +231,17 @@ UserSignalSchema.index({ userId: 1, targetAuthorId: 1, timestamp: -1 });
 // 目标查询 (分析某帖子的信号)
 UserSignalSchema.index({ targetId: 1, signalType: 1, timestamp: -1 });
 
+UserSignalSchema.index(
+    { 'metadata.recommendationEventKey': 1 },
+    {
+        unique: true,
+        name: 'uniq_recommendation_signal_event_key',
+        partialFilterExpression: {
+            'metadata.recommendationEventKey': { $type: 'string', $gt: '' },
+        },
+    },
+);
+
 // ========== 信号配置 ==========
 const SIGNAL_CONFIG = {
     // 各信号类型的权重 (用于聚合评分)
@@ -287,7 +303,7 @@ interface UserSignalStatics {
     /**
      * 批量记录信号
      */
-    logSignalsBatch(signals: UserSignalInput[]): Promise<void>;
+    logSignalsBatch(signals: UserSignalInput[]): Promise<UserSignalBatchWriteResult>;
 
     /**
      * 获取用户最近信号
@@ -359,7 +375,7 @@ UserSignalSchema.statics.logSignal = async function (
 // 批量记录信号
 UserSignalSchema.statics.logSignalsBatch = async function (
     signals: UserSignalInput[]
-): Promise<void> {
+): Promise<UserSignalBatchWriteResult> {
     const now = new Date();
 
     const docs = signals.map(signal => {
@@ -374,7 +390,43 @@ UserSignalSchema.statics.logSignalsBatch = async function (
         };
     });
 
-    await this.insertMany(docs, { ordered: false });
+    const keyedDocs = docs.filter((doc) => doc.metadata?.recommendationEventKey);
+    const unkeyedDocs = docs.filter((doc) => !doc.metadata?.recommendationEventKey);
+    const writes: Promise<unknown>[] = [];
+    let newKeyedDocs = keyedDocs;
+
+    if (keyedDocs.length > 0) {
+        const dedupedDocs = Array.from(
+            new Map(keyedDocs.map((doc) => [doc.metadata!.recommendationEventKey, doc])).values(),
+        );
+        const eventKeys = dedupedDocs.map((doc) => doc.metadata!.recommendationEventKey);
+        const existingDocs = await this.find(
+            { 'metadata.recommendationEventKey': { $in: eventKeys } },
+            { 'metadata.recommendationEventKey': 1 },
+        ).lean();
+        const existingKeys = new Set(
+            existingDocs
+                .map((doc: any) => doc.metadata?.recommendationEventKey)
+                .filter((key: unknown): key is string => typeof key === 'string' && key.length > 0),
+        );
+        newKeyedDocs = dedupedDocs.filter((doc) => !existingKeys.has(doc.metadata!.recommendationEventKey!));
+        writes.push(this.bulkWrite(
+            dedupedDocs.map((doc) => ({
+                updateOne: {
+                    filter: { 'metadata.recommendationEventKey': doc.metadata!.recommendationEventKey },
+                    update: { $setOnInsert: doc },
+                    upsert: true,
+                },
+            })),
+            { ordered: false },
+        ));
+    }
+    if (unkeyedDocs.length > 0) {
+        writes.push(this.insertMany(unkeyedDocs, { ordered: false }));
+    }
+
+    await Promise.all(writes);
+    return { insertedSignals: [...newKeyedDocs, ...unkeyedDocs] as UserSignalInput[] };
 };
 
 // 获取用户最近信号

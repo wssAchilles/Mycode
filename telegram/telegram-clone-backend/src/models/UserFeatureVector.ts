@@ -84,11 +84,13 @@ export interface IUserFeatureVector extends Document {
     embeddingDim?: number;
     embeddingContract?: {
         embeddingSpace: string;
+        dimensions?: number;
         retrievalEmbeddingDim: number;
         rankingEmbeddingDim: number;
         modelVersion: string;
         artifactVersion: string;
         producer: string;
+        semantic?: boolean;
     };
 
     // 计算时间戳
@@ -157,11 +159,13 @@ const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
         embeddingDim: Number,
         embeddingContract: {
             embeddingSpace: String,
+            dimensions: Number,
             retrievalEmbeddingDim: Number,
             rankingEmbeddingDim: Number,
             modelVersion: String,
             artifactVersion: String,
             producer: String,
+            semantic: Boolean,
         },
         computedAt: {
             type: Date,

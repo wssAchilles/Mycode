@@ -15,6 +15,9 @@
 import { simClustersService } from '../recommendation/SimClustersService';
 import UserFeatureVector from '../../models/UserFeatureVector';
 import RealGraphEdge from '../../models/RealGraphEdge';
+import RecommendationJobRun from '../../models/RecommendationJobRun';
+
+type Trigger = 'cron' | 'manual' | 'script';
 
 // ========== 配置 ==========
 const CONFIG = {
@@ -44,6 +47,7 @@ export class SimClustersBatchJob {
     async run(options?: {
         maxUsers?: number;
         onlyStale?: boolean;
+        trigger?: Trigger;
         onProgress?: (processed: number, total: number) => void;
     }): Promise<{
         success: number;
@@ -59,6 +63,16 @@ export class SimClustersBatchJob {
         this.abortRequested = false;
 
         const startTime = Date.now();
+        const startedAt = new Date();
+        const runDoc = await RecommendationJobRun.create({
+            jobName: 'simclusters-batch-repair',
+            mode: 'repair',
+            status: 'running',
+            startedAt,
+            trigger: options?.trigger ?? 'manual',
+            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
+            summary: { mode: 'repair' },
+        });
         let success = 0;
         let failed = 0;
         let skipped = 0;
@@ -74,7 +88,10 @@ export class SimClustersBatchJob {
 
             if (userIds.length === 0) {
                 console.log('[SimClustersBatchJob] No users to process');
-                return { success: 0, failed: 0, skipped: 0, durationMs: Date.now() - startTime };
+                const durationMs = Date.now() - startTime;
+                const counts = { success: 0, failed: 0, skipped: 0, durationMs };
+                await this.markRunSucceeded(runDoc._id, counts);
+                return counts;
             }
 
             // Step 2: 分批处理
@@ -103,18 +120,31 @@ export class SimClustersBatchJob {
                     }
                 }
             }
-
+            const durationMs = Date.now() - startTime;
+            const counts = { success, failed, skipped, durationMs };
+            await this.markRunSucceeded(runDoc._id, counts);
+            console.log(
+                `[SimClustersBatchJob] Completed in ${durationMs}ms - ` +
+                `success: ${success}, failed: ${failed}, skipped: ${skipped}`
+            );
+            return counts;
+        } catch (error) {
+            const finishedAt = new Date();
+            await RecommendationJobRun.updateOne(
+                { _id: runDoc._id },
+                {
+                    $set: {
+                        status: 'failed',
+                        finishedAt,
+                        durationMs: finishedAt.getTime() - startedAt.getTime(),
+                        error: error instanceof Error ? error.message : String(error),
+                    },
+                },
+            );
+            throw error;
         } finally {
             this.isRunning = false;
         }
-
-        const durationMs = Date.now() - startTime;
-        console.log(
-            `[SimClustersBatchJob] Completed in ${durationMs}ms - ` +
-            `success: ${success}, failed: ${failed}, skipped: ${skipped}`
-        );
-
-        return { success, failed, skipped, durationMs };
     }
 
     /**
@@ -227,6 +257,27 @@ export class SimClustersBatchJob {
         }
 
         return { success, failed };
+    }
+
+    private async markRunSucceeded(
+        runId: unknown,
+        counts: { success: number; failed: number; skipped: number; durationMs: number },
+    ): Promise<void> {
+        await RecommendationJobRun.updateOne(
+            { _id: runId },
+            {
+                $set: {
+                    status: 'success',
+                    finishedAt: new Date(),
+                    durationMs: counts.durationMs,
+                    counts,
+                    summary: {
+                        mode: 'repair',
+                        counts,
+                    },
+                },
+            },
+        );
     }
 }
 

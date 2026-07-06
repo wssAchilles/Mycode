@@ -106,6 +106,7 @@ export class UserEmbeddingQueryHydrator implements QueryHydrator<FeedQuery> {
                 artifactVersion: embedding.artifactVersion,
                 modelProfile: embedding.modelProfile,
                 embeddingDim: embedding.embeddingDim,
+                embeddingContract: embedding.embeddingContract,
                 usable,
                 stale,
             };

@@ -4,12 +4,14 @@ export type RecommendationJobStatus = 'running' | 'success' | 'failed';
 
 export interface IRecommendationJobRun extends Document {
     jobName: string;
+    mode?: 'default' | 'repair';
     status: RecommendationJobStatus;
     startedAt: Date;
     finishedAt?: Date;
     durationMs?: number;
     trigger: 'cron' | 'manual' | 'script';
     releaseTag?: string;
+    counts?: Record<string, unknown>;
     summary: Record<string, unknown>;
     error?: string;
 }
@@ -19,6 +21,11 @@ const RecommendationJobRunSchema = new Schema<IRecommendationJobRun>(
         jobName: {
             type: String,
             required: true,
+            index: true,
+        },
+        mode: {
+            type: String,
+            enum: ['default', 'repair'],
             index: true,
         },
         status: {
@@ -43,6 +50,10 @@ const RecommendationJobRunSchema = new Schema<IRecommendationJobRun>(
             index: true,
         },
         releaseTag: String,
+        counts: {
+            type: Schema.Types.Mixed,
+            default: undefined,
+        },
         summary: {
             type: Schema.Types.Mixed,
             default: {},

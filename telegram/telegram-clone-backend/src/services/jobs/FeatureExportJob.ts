@@ -155,13 +155,9 @@ export class FeatureExportJob {
                 if (
                     user.twoTowerEmbedding
                     && user.twoTowerEmbedding.length === CONFIG.userEmbeddingDim
-                    && (
-                        !user.embeddingContract
-                        || (
-                            isEmbeddingContractCompatible(user.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
-                            && isVectorCompatibleWithContract(user.twoTowerEmbedding, user.embeddingContract)
-                        )
-                    )
+                    && user.embeddingContract
+                    && isEmbeddingContractCompatible(user.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
+                    && isVectorCompatibleWithContract(user.twoTowerEmbedding, user.embeddingContract)
                 ) {
                     embeddings.push({
                         id: user.userId,
@@ -240,8 +236,9 @@ export class FeatureExportJob {
                     continue;
                 }
                 if (
-                    (post as any).embeddingContract
-                    && !isVectorCompatibleWithContract((post as any).denseEmbedding, (post as any).embeddingContract)
+                    !(post as any).embeddingContract
+                    || (post as any).embeddingContract.semantic !== true
+                    || !isVectorCompatibleWithContract((post as any).denseEmbedding, (post as any).embeddingContract)
                 ) {
                     continue;
                 }

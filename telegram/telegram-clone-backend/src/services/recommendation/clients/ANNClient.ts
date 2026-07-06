@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import type { EmbeddingContract } from '../contracts/embeddingContract';
 
 export interface AnnCandidate {
     postId: string;
@@ -10,6 +11,8 @@ export interface AnnRequest {
     keywords: string[];
     historyPostIds: string[];
     topK: number;
+    embeddingContract?: Partial<EmbeddingContract>;
+    corpusContract?: Partial<EmbeddingContract>;
 }
 
 export interface AnnClient {

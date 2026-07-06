@@ -14,6 +14,9 @@
 
 import { realGraphService } from '../recommendation/RealGraphService';
 import RealGraphEdge, { DECAY_CONFIG } from '../../models/RealGraphEdge';
+import RecommendationJobRun from '../../models/RecommendationJobRun';
+
+type Trigger = 'cron' | 'manual' | 'script';
 
 // ========== 配置 ==========
 const CONFIG = {
@@ -40,6 +43,7 @@ export class RealGraphDecayJob {
      */
     async run(options?: {
         skipCleanup?: boolean;
+        trigger?: Trigger;
         onProgress?: (batches: number, edges: number) => void;
     }): Promise<{
         decayedEdges: number;
@@ -55,6 +59,16 @@ export class RealGraphDecayJob {
         this.abortRequested = false;
 
         const startTime = Date.now();
+        const startedAt = new Date();
+        const runDoc = await RecommendationJobRun.create({
+            jobName: 'realgraph-decay-repair',
+            mode: 'repair',
+            status: 'running',
+            startedAt,
+            trigger: options?.trigger ?? 'manual',
+            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
+            summary: { mode: 'repair' },
+        });
         let decayedEdges = 0;
         let cleanedEdges = 0;
         let batches = 0;
@@ -85,17 +99,48 @@ export class RealGraphDecayJob {
                 options.onProgress(batches, decayedEdges);
             }
 
+            const durationMs = Date.now() - startTime;
+            const finishedAt = new Date();
+            const counts = { decayedEdges, cleanedEdges, batches, durationMs };
+            await RecommendationJobRun.updateOne(
+                { _id: runDoc._id },
+                {
+                    $set: {
+                        status: 'success',
+                        finishedAt,
+                        durationMs,
+                        counts,
+                        summary: {
+                            mode: 'repair',
+                            counts,
+                        },
+                    },
+                },
+            );
+
+            console.log(
+                `[RealGraphDecayJob] Completed in ${durationMs}ms - ` +
+                `decayed: ${decayedEdges}, cleaned: ${cleanedEdges}`
+            );
+
+            return counts;
+        } catch (error) {
+            const finishedAt = new Date();
+            await RecommendationJobRun.updateOne(
+                { _id: runDoc._id },
+                {
+                    $set: {
+                        status: 'failed',
+                        finishedAt,
+                        durationMs: finishedAt.getTime() - startedAt.getTime(),
+                        error: error instanceof Error ? error.message : String(error),
+                    },
+                },
+            );
+            throw error;
         } finally {
             this.isRunning = false;
         }
-
-        const durationMs = Date.now() - startTime;
-        console.log(
-            `[RealGraphDecayJob] Completed in ${durationMs}ms - ` +
-            `decayed: ${decayedEdges}, cleaned: ${cleanedEdges}`
-        );
-
-        return { decayedEdges, cleanedEdges, batches, durationMs };
     }
 
     /**
