@@ -1,6 +1,8 @@
 import RealGraphEdge from '../../models/RealGraphEdge';
+import { Types } from 'mongoose';
 import type {
   GraphKernelSignalCounts,
+  GraphKernelSnapshotCursor,
   GraphKernelSnapshotEdge,
   GraphKernelSnapshotPage,
 } from './contracts';
@@ -9,10 +11,23 @@ export interface GraphKernelSnapshotRequest {
   offset?: number;
   limit?: number;
   minScore?: number;
+  afterSourceUserId?: string;
+  afterTargetUserId?: string;
+  afterId?: string;
+  snapshotVersion?: string;
 }
 
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 5000;
+
+export class GraphKernelSnapshotVersionMismatchError extends Error {
+  constructor(
+    readonly expectedSnapshotVersion: string,
+    readonly actualSnapshotVersion: string,
+  ) {
+    super('graph kernel snapshot version mismatch');
+  }
+}
 
 const EMPTY_SIGNAL_COUNTS: GraphKernelSignalCounts = {
   followCount: 0,
@@ -103,6 +118,35 @@ function deriveEdgeKinds(
   return Array.from(kinds).sort();
 }
 
+function normalizeSnapshotVersion(
+  latestEdge: { _id?: unknown; updatedAt?: Date } | null,
+  totalEdgeCount: number,
+): string {
+  return latestEdge?.updatedAt
+    ? `graph_snapshot_v2:${new Date(latestEdge.updatedAt).getTime()}:${String(latestEdge._id || 'unknown')}:${totalEdgeCount}`
+    : 'graph_snapshot_v2:empty';
+}
+
+function readCursor(request: GraphKernelSnapshotRequest): GraphKernelSnapshotCursor | null {
+  const afterSourceUserId = String(request.afterSourceUserId || '').trim();
+  const afterTargetUserId = String(request.afterTargetUserId || '').trim();
+  const afterId = String(request.afterId || '').trim();
+  const hasPartialCursor = Boolean(afterSourceUserId || afterTargetUserId || afterId);
+
+  if (!hasPartialCursor) {
+    return null;
+  }
+  if (!afterSourceUserId || !afterTargetUserId || !afterId || !Types.ObjectId.isValid(afterId)) {
+    throw new Error('invalid_graph_snapshot_cursor');
+  }
+
+  return {
+    afterSourceUserId,
+    afterTargetUserId,
+    afterId,
+  };
+}
+
 class GraphKernelSnapshotService {
   async getSnapshotPage(request: GraphKernelSnapshotRequest = {}): Promise<GraphKernelSnapshotPage> {
     const offset = Math.max(0, Number.parseInt(String(request.offset ?? 0), 10) || 0);
@@ -111,14 +155,47 @@ class GraphKernelSnapshotService {
       Math.min(MAX_LIMIT, Number.parseInt(String(request.limit ?? DEFAULT_LIMIT), 10) || DEFAULT_LIMIT),
     );
     const minScore = Number.isFinite(request.minScore) ? Number(request.minScore) : 0.05;
+    const cursor = readCursor(request);
 
     const filter = {
       decayedSum: { $gte: minScore },
+    } as {
+      decayedSum: { $gte: number };
+      $or?: Array<Record<string, unknown>>;
     };
 
-    const [edges, latestEdge] = await Promise.all([
-      RealGraphEdge.find(filter)
+    if (cursor) {
+      filter.$or = [
+        { sourceUserId: { $gt: cursor.afterSourceUserId } },
+        {
+          sourceUserId: cursor.afterSourceUserId,
+          targetUserId: { $gt: cursor.afterTargetUserId },
+        },
+        {
+          sourceUserId: cursor.afterSourceUserId,
+          targetUserId: cursor.afterTargetUserId,
+          _id: { $gt: new Types.ObjectId(cursor.afterId) },
+        },
+      ];
+    }
+
+    const versionFilter = { decayedSum: { $gte: minScore } };
+    const [latestEdge, totalEdgeCount] = await Promise.all([
+      RealGraphEdge.findOne(versionFilter)
+        .select({ _id: 1, updatedAt: 1 })
+        .sort({ updatedAt: -1, _id: -1 })
+        .lean(),
+      RealGraphEdge.countDocuments(versionFilter),
+    ]);
+    const snapshotVersion = normalizeSnapshotVersion(latestEdge, totalEdgeCount);
+    const requestedSnapshotVersion = String(request.snapshotVersion || '').trim();
+    if (requestedSnapshotVersion && requestedSnapshotVersion !== snapshotVersion) {
+      throw new GraphKernelSnapshotVersionMismatchError(requestedSnapshotVersion, snapshotVersion);
+    }
+
+    const query = RealGraphEdge.find(filter)
       .select({
+        _id: 1,
         sourceUserId: 1,
         targetUserId: 1,
         decayedSum: 1,
@@ -129,13 +206,14 @@ class GraphKernelSnapshotService {
         updatedAt: 1,
       })
       .sort({ sourceUserId: 1, targetUserId: 1, _id: 1 })
-      .skip(offset)
-      .limit(limit)
-      .lean(),
-      RealGraphEdge.findOne(filter).select({ updatedAt: 1 }).sort({ updatedAt: -1, _id: -1 }).lean(),
-    ]);
+      .limit(limit);
+    if (!cursor && offset > 0) {
+      query.skip(offset);
+    }
+    const edges = await query.lean();
 
-    const typedEdges = edges as Array<{
+    const typedEdges = edges as unknown as Array<{
+      _id: Types.ObjectId;
       sourceUserId: string;
       targetUserId: string;
       decayedSum?: number;
@@ -145,10 +223,6 @@ class GraphKernelSnapshotService {
       lastInteractionAt?: Date;
       updatedAt?: Date;
     }>;
-
-    const snapshotVersion = latestEdge?.updatedAt
-      ? `graph_snapshot_v2:${new Date(latestEdge.updatedAt).getTime()}`
-      : 'graph_snapshot_v2:empty';
 
     const normalized: GraphKernelSnapshotEdge[] = typedEdges.map((edge) => {
       const dailySignalCounts = normalizeSignalCounts(edge.dailyCounts ?? EMPTY_SIGNAL_COUNTS);
@@ -165,12 +239,21 @@ class GraphKernelSnapshotService {
         updatedAtMs: edge.updatedAt?.getTime(),
       };
     });
+    const lastEdge = typedEdges[typedEdges.length - 1];
+    const nextCursor = normalized.length < limit || !lastEdge
+      ? null
+      : {
+          afterSourceUserId: String(lastEdge.sourceUserId),
+          afterTargetUserId: String(lastEdge.targetUserId),
+          afterId: String(lastEdge._id),
+        };
 
     return {
       edges: normalized,
       offset,
       limit,
       nextOffset: normalized.length < limit ? null : offset + normalized.length,
+      nextCursor,
       done: normalized.length < limit,
       snapshotVersion,
     };

@@ -1,6 +1,9 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import { sendSuccess } from '../utils/apiResponse';
-import { graphKernelSnapshotService } from '../services/graphKernel/snapshotService';
+import { ErrorCode, sendError, sendSuccess } from '../utils/apiResponse';
+import {
+  GraphKernelSnapshotVersionMismatchError,
+  graphKernelSnapshotService,
+} from '../services/graphKernel/snapshotService';
 
 const router = Router();
 
@@ -64,13 +67,35 @@ router.get('/health', (_req, res) => {
 });
 
 router.post('/snapshot', async (req, res) => {
-  const page = await graphKernelSnapshotService.getSnapshotPage({
-    offset: Number.parseInt(String(req.body?.offset ?? 0), 10) || 0,
-    limit: Number.parseInt(String(req.body?.limit ?? 1000), 10) || 1000,
-    minScore: Number(req.body?.minScore ?? 0.05),
-  });
+  try {
+    const page = await graphKernelSnapshotService.getSnapshotPage({
+      offset: Number.parseInt(String(req.body?.offset ?? 0), 10) || 0,
+      limit: Number.parseInt(String(req.body?.limit ?? 1000), 10) || 1000,
+      minScore: Number(req.body?.minScore ?? 0.05),
+      afterSourceUserId: req.body?.afterSourceUserId,
+      afterTargetUserId: req.body?.afterTargetUserId,
+      afterId: req.body?.afterId,
+      snapshotVersion: req.body?.snapshotVersion,
+    });
 
-  return sendSuccess(res, page);
+    return sendSuccess(res, page);
+  } catch (error) {
+    if (error instanceof GraphKernelSnapshotVersionMismatchError) {
+      return sendError(
+        res,
+        ErrorCode.CONFLICT,
+        'graph snapshot version changed during pagination',
+        {
+          expectedSnapshotVersion: error.expectedSnapshotVersion,
+          actualSnapshotVersion: error.actualSnapshotVersion,
+        },
+      );
+    }
+    if (error instanceof Error && error.message === 'invalid_graph_snapshot_cursor') {
+      return sendError(res, ErrorCode.BAD_REQUEST, 'invalid graph snapshot cursor');
+    }
+    throw error;
+  }
 });
 
 export default router;

@@ -27,37 +27,61 @@ describe('GraphSource graph kernel orchestration', () => {
     };
 
     const graphKernelClient = {
-      socialNeighbors: vi.fn().mockResolvedValue([
-        {
-          userId: 'author-1',
-          score: 8,
-          engagementScore: 6,
-          recentnessScore: 0.4,
-          relationKinds: ['follow', 'reply'],
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [
+          {
+            userId: 'author-1',
+            score: 8,
+            engagementScore: 6,
+            recentnessScore: 0.4,
+            relationKinds: ['follow', 'reply'],
+          },
+        ],
+        diagnostics: {
+          kernel: 'social_neighbors',
+          snapshotVersion: 'snapshot_2026_07_06',
+          budgetExhausted: false,
+          truncatedCount: 0,
         },
-      ]),
-      recentEngagers: vi.fn().mockResolvedValue([
-        {
-          userId: 'author-1',
-          score: 3,
-          engagementScore: 7,
-          recentnessScore: 0.9,
-          relationKinds: ['recent_activity'],
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [
+          {
+            userId: 'author-1',
+            score: 3,
+            engagementScore: 7,
+            recentnessScore: 0.9,
+            relationKinds: ['recent_activity'],
+          },
+        ],
+        diagnostics: {
+          kernel: 'recent_engagers',
+          snapshotVersion: 'snapshot_2026_07_06',
+          budgetExhausted: false,
+          truncatedCount: 1,
         },
-      ]),
-      bridgeUsers: vi.fn().mockResolvedValue([
-        {
-          userId: 'author-2',
-          score: 4,
-          depth: 2,
-          pathCount: 3,
-          viaUserIds: ['bridge-a', 'bridge-b'],
-          bridgeStrength: 6.5,
-          viaUserCount: 2,
+      }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [
+          {
+            userId: 'author-2',
+            score: 4,
+            depth: 2,
+            pathCount: 3,
+            viaUserIds: ['bridge-a', 'bridge-b'],
+            bridgeStrength: 6.5,
+            viaUserCount: 2,
+          },
+        ],
+        diagnostics: {
+          kernel: 'bridge_users',
+          snapshotVersion: 'snapshot_2026_07_06',
+          budgetExhausted: false,
+          truncatedCount: 0,
         },
-      ]),
-      coEngagers: vi.fn().mockResolvedValue([]),
-      contentAffinityNeighbors: vi.fn().mockResolvedValue([]),
+      }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
     };
 
     const legacyClient = {
@@ -93,11 +117,11 @@ describe('GraphSource graph kernel orchestration', () => {
 
     const candidates = await source.getCandidates(query);
 
-    expect(graphKernelClient.socialNeighbors).toHaveBeenCalledOnce();
-    expect(graphKernelClient.recentEngagers).toHaveBeenCalledOnce();
-    expect(graphKernelClient.bridgeUsers).toHaveBeenCalledOnce();
-    expect(graphKernelClient.coEngagers).toHaveBeenCalledOnce();
-    expect(graphKernelClient.contentAffinityNeighbors).toHaveBeenCalledOnce();
+    expect(graphKernelClient.socialNeighborsWithDiagnostics).toHaveBeenCalledOnce();
+    expect(graphKernelClient.recentEngagersWithDiagnostics).toHaveBeenCalledOnce();
+    expect(graphKernelClient.bridgeUsersWithDiagnostics).toHaveBeenCalledOnce();
+    expect(graphKernelClient.coEngagersWithDiagnostics).toHaveBeenCalledOnce();
+    expect(graphKernelClient.contentAffinityNeighborsWithDiagnostics).toHaveBeenCalledOnce();
     expect(legacyClient.recall).not.toHaveBeenCalled();
 
     expect(candidates).toHaveLength(2);
@@ -113,6 +137,79 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(candidates[1].authorId).toBe('author-2');
     expect(candidates[1].graphRecallType).toBe('cpp_graph_bridge_user');
     expect(candidates[1].graphPath).toContain('via_users:bridge-a|bridge-b');
+
+    expect(source.stageDetail(query, candidates)).toMatchObject({
+      graphKernelSource: true,
+      graphKernelDiagnostics: {
+        'social-neighbors': {
+          snapshotVersion: 'snapshot_2026_07_06',
+          budgetExhausted: false,
+        },
+        'recent-engagers': {
+          truncatedCount: 1,
+        },
+      },
+      graphKernelSnapshotVersions: ['snapshot_2026_07_06'],
+      graphKernelRankedAuthorCount: 2,
+      graphKernelReturnedCandidateCount: 2,
+      graphKernelMaterializerDiagnostics: {
+        requestedAuthorCount: 2,
+        uniqueAuthorCount: 2,
+        returnedPostCount: 2,
+      },
+    });
+  });
+
+  it('preserves graph-kernel empty diagnostics when falling back to legacy graph source', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    query.userFeatures = {
+      followedUserIds: [],
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+    };
+
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [],
+        diagnostics: {
+          kernel: 'social_neighbors',
+          snapshotVersion: 'snapshot_empty',
+          empty: true,
+          emptyReason: 'no_social_neighbors',
+        },
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+    };
+    const legacyClient = {
+      recall: vi.fn().mockResolvedValue([]),
+    };
+
+    const source = new GraphSource({
+      client: legacyClient as any,
+      graphKernelClient: graphKernelClient as any,
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates).toEqual([]);
+    expect(legacyClient.recall).toHaveBeenCalledOnce();
+    expect(source.stageDetail(query, candidates)).toMatchObject({
+      graphKernelSource: true,
+      graphKernelDiagnostics: {
+        'social-neighbors': {
+          snapshotVersion: 'snapshot_empty',
+          empty: true,
+          emptyReason: 'no_social_neighbors',
+        },
+      },
+      graphKernelRankedAuthorCount: 0,
+      graphKernelReturnedCandidateCount: 0,
+    });
   });
 
   it('accepts extended graph materializer retry lookback contract', () => {

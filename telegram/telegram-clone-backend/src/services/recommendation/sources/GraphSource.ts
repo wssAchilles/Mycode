@@ -19,7 +19,14 @@ import {
     getGraphKernelClient,
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
-import { materializeGraphAuthorPosts } from '../providers/graphKernel/authorPostMaterializer';
+import type {
+    GraphKernelCandidateResponse,
+    GraphKernelDiagnostics,
+} from '../../graphKernel/contracts';
+import {
+    materializeGraphAuthorPostsWithDiagnostics,
+    type GraphAuthorPostMaterializerDiagnostics,
+} from '../providers/graphKernel/authorPostMaterializer';
 import { isSourceEnabledForQuery } from '../utils/sourceMixing';
 import {
     buildNormalizedAuthorSignalMap,
@@ -48,6 +55,13 @@ type GraphKernelAuthorAggregate = {
     pathConfidence: number;
     pathFreshness: number;
     componentScores: Partial<Record<GraphKernelSourceKind, number>>;
+};
+
+type GraphKernelQueryTrace = {
+    label: string;
+    returnedCount: number;
+    diagnostics?: GraphKernelDiagnostics;
+    error?: string;
 };
 
 /**
@@ -84,6 +98,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
     private config: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelClient'>>;
     private client: GraphClient;
     private graphKernelClient: GraphKernelClient | null;
+    private stageDetails = new Map<string, Record<string, unknown>>();
 
     constructor(config?: GraphSourceConfig) {
         this.config = {
@@ -121,6 +136,13 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         return this.config.enabled;
     }
 
+    stageDetail(query: FeedQuery): Record<string, unknown> | undefined {
+        const key = this.stageDetailKey(query);
+        const detail = this.stageDetails.get(key);
+        this.stageDetails.delete(key);
+        return detail;
+    }
+
     /**
      * 获取候选集
      */
@@ -134,6 +156,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     }
                 } catch (kernelError) {
                     console.warn('[GraphSource] graph kernel unavailable, falling back to legacy graph client:', kernelError);
+                    this.recordStageDetail(query, {
+                        graphKernelSource: true,
+                        graphKernelFallback: true,
+                        graphKernelFallbackReason: kernelError instanceof Error ? kernelError.message : String(kernelError),
+                    });
                 }
             }
 
@@ -250,6 +277,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         ];
         const { directLimit, bridgeLimit } = this.graphKernelRequestLimits(query);
         const sourceWeights = this.graphKernelSourceWeights(query);
+        const queryTraces: GraphKernelQueryTrace[] = [];
         const viewerAuthorSignals = buildNormalizedAuthorSignalMap(
             (query.userActionSequence || []).map((action) => ({
                 action: String(action.action || ''),
@@ -262,36 +290,36 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
 
         const [socialNeighbors, recentEngagers, bridgeUsers, coEngagers, contentAffinityNeighbors] = await Promise.all([
             this.runGraphKernelQuery('social-neighbors', () =>
-                this.graphKernelClient!.socialNeighbors({
+                this.graphKernelClient!.socialNeighborsWithDiagnostics({
                     userId: query.userId,
                     limit: directLimit,
                     excludeUserIds: excludedUserIds,
-                })),
+                }), queryTraces),
             this.runGraphKernelQuery('recent-engagers', () =>
-                this.graphKernelClient!.recentEngagers({
+                this.graphKernelClient!.recentEngagersWithDiagnostics({
                     userId: query.userId,
                     limit: directLimit,
                     excludeUserIds: excludedUserIds,
-                })),
+                }), queryTraces),
             this.runGraphKernelQuery('bridge-users', () =>
-                this.graphKernelClient!.bridgeUsers({
+                this.graphKernelClient!.bridgeUsersWithDiagnostics({
                     userId: query.userId,
                     limit: bridgeLimit,
                     maxDepth: 3,
                     excludeUserIds: excludedUserIds,
-                })),
+                }), queryTraces),
             this.runGraphKernelQuery('co-engagers', () =>
-                this.graphKernelClient!.coEngagers({
+                this.graphKernelClient!.coEngagersWithDiagnostics({
                     userId: query.userId,
                     limit: directLimit,
                     excludeUserIds: excludedUserIds,
-                })),
+                }), queryTraces),
             this.runGraphKernelQuery('content-affinity-neighbors', () =>
-                this.graphKernelClient!.contentAffinityNeighbors({
+                this.graphKernelClient!.contentAffinityNeighborsWithDiagnostics({
                     userId: query.userId,
                     limit: directLimit,
                     excludeUserIds: excludedUserIds,
-                })),
+                }), queryTraces),
         ]);
 
         const authorAggregates = new Map<string, GraphKernelAuthorAggregate>();
@@ -377,6 +405,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             .slice(0, Math.max(this.config.maxTotal, 32));
 
         if (rankedAuthors.length === 0) {
+            this.recordStageDetail(query, this.buildGraphKernelStageDetail(queryTraces, 0, undefined, 0));
             return [];
         }
 
@@ -386,11 +415,12 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             { ...candidate, rank: index },
         ]));
 
-        const posts = await materializeGraphAuthorPosts({
+        const materializedPosts = await materializeGraphAuthorPostsWithDiagnostics({
             authorIds,
             limitPerAuthor: 2,
             lookbackDays: 7,
         });
+        const posts = materializedPosts.candidates;
 
         const candidates: GraphKernelFeedCandidate[] = [];
 
@@ -477,19 +507,86 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             return right.createdAt.getTime() - left.createdAt.getTime();
         });
 
-        return candidates.slice(0, this.config.maxTotal);
+        const selectedCandidates = candidates.slice(0, this.config.maxTotal);
+        this.recordStageDetail(
+            query,
+            this.buildGraphKernelStageDetail(
+                queryTraces,
+                rankedAuthors.length,
+                materializedPosts.diagnostics,
+                selectedCandidates.length,
+            ),
+        );
+
+        return selectedCandidates;
     }
 
     private async runGraphKernelQuery<T>(
         label: string,
-        callback: () => Promise<T[]>,
+        callback: () => Promise<GraphKernelCandidateResponse<T>>,
+        traces: GraphKernelQueryTrace[],
     ): Promise<T[]> {
         try {
-            return await callback();
+            const response = await callback();
+            traces.push({
+                label,
+                returnedCount: response.candidates.length,
+                diagnostics: response.diagnostics,
+            });
+            return response.candidates;
         } catch (error) {
             console.warn(`[GraphSource] ${label} query failed:`, error);
+            traces.push({
+                label,
+                returnedCount: 0,
+                error: error instanceof Error ? error.message : String(error),
+            });
             return [];
         }
+    }
+
+    private buildGraphKernelStageDetail(
+        queryTraces: GraphKernelQueryTrace[],
+        rankedAuthorCount: number,
+        materializerDiagnostics: GraphAuthorPostMaterializerDiagnostics | undefined,
+        returnedCandidateCount: number,
+    ): Record<string, unknown> {
+        const diagnostics: Record<string, GraphKernelDiagnostics> = {};
+        const errors: Record<string, string> = {};
+        const returnedCounts: Record<string, number> = {};
+        const snapshotVersions = new Set<string>();
+
+        for (const trace of queryTraces) {
+            returnedCounts[trace.label] = trace.returnedCount;
+            if (trace.diagnostics) {
+                diagnostics[trace.label] = trace.diagnostics;
+                if (trace.diagnostics.snapshotVersion) {
+                    snapshotVersions.add(trace.diagnostics.snapshotVersion);
+                }
+            }
+            if (trace.error) {
+                errors[trace.label] = trace.error;
+            }
+        }
+
+        return {
+            graphKernelSource: true,
+            graphKernelQueryReturnedCounts: returnedCounts,
+            graphKernelDiagnostics: diagnostics,
+            graphKernelSnapshotVersions: Array.from(snapshotVersions).sort(),
+            graphKernelQueryErrors: errors,
+            graphKernelRankedAuthorCount: rankedAuthorCount,
+            graphKernelReturnedCandidateCount: returnedCandidateCount,
+            graphKernelMaterializerDiagnostics: materializerDiagnostics,
+        };
+    }
+
+    private recordStageDetail(query: FeedQuery, detail: Record<string, unknown>): void {
+        this.stageDetails.set(this.stageDetailKey(query), detail);
+    }
+
+    private stageDetailKey(query: FeedQuery): string {
+        return query.requestId;
     }
 
     private graphKernelRequestLimits(

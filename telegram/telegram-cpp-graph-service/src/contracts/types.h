@@ -216,9 +216,9 @@ inline void to_json(nlohmann::json& json, const GraphQueryDiagnostics& diagnosti
       {"empty", diagnostics.empty},
       {"relationKinds", diagnostics.relation_kinds},
   };
-  if (diagnostics.empty_reason.has_value()) {
-    json["emptyReason"] = diagnostics.empty_reason.value();
-  }
+  json["emptyReason"] = diagnostics.empty_reason.has_value()
+      ? nlohmann::json(diagnostics.empty_reason.value())
+      : nlohmann::json(nullptr);
 }
 
 inline nlohmann::json success_response(const nlohmann::json& data) {

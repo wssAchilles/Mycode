@@ -34,8 +34,15 @@ export interface GraphKernelSnapshotPage {
   offset: number;
   limit: number;
   nextOffset: number | null;
+  nextCursor?: GraphKernelSnapshotCursor | null;
   done: boolean;
   snapshotVersion: string;
+}
+
+export interface GraphKernelSnapshotCursor {
+  afterSourceUserId: string;
+  afterTargetUserId: string;
+  afterId: string;
 }
 
 export interface GraphKernelAuthorCandidate {
@@ -70,6 +77,28 @@ export interface GraphKernelBridgeCandidate {
   viaUserIds: string[];
   bridgeStrength?: number;
   viaUserCount?: number;
+}
+
+export interface GraphKernelDiagnostics {
+  kernel?: string;
+  queryDurationMs?: number;
+  candidateCount?: number;
+  requestedLimit?: number;
+  availableCount?: number;
+  truncatedCount?: number;
+  snapshotVersion?: string;
+  snapshotLoadedAtMs?: number;
+  prunedCount?: number;
+  frontierMaxSize?: number;
+  budgetExhausted?: boolean;
+  empty?: boolean;
+  emptyReason?: string | null;
+  relationKinds?: string[];
+}
+
+export interface GraphKernelCandidateResponse<TCandidate> {
+  candidates: TCandidate[];
+  diagnostics?: GraphKernelDiagnostics;
 }
 
 export interface GraphKernelOpsSnapshot {

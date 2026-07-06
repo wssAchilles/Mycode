@@ -115,6 +115,12 @@ pub struct GraphKernelQueryDiagnostics {
     pub available_count: usize,
     #[serde(default)]
     pub truncated_count: usize,
+    pub snapshot_version: Option<String>,
+    pub snapshot_loaded_at_ms: Option<u64>,
+    #[serde(default)]
+    pub pruned_count: usize,
+    #[serde(default)]
+    pub frontier_max_size: usize,
     #[serde(default)]
     pub budget_exhausted: bool,
     pub empty: bool,
@@ -193,6 +199,13 @@ mod tests {
                     "queryDurationMs": 12,
                     "candidateCount": 1,
                     "requestedLimit": 10,
+                    "availableCount": 4,
+                    "truncatedCount": 3,
+                    "snapshotVersion": "snapshot_2026_07_06",
+                    "snapshotLoadedAtMs": 1783278000000_u64,
+                    "prunedCount": 2,
+                    "frontierMaxSize": 8,
+                    "budgetExhausted": true,
                     "empty": false,
                     "emptyReason": null
                 }
@@ -210,6 +223,17 @@ mod tests {
                 .map(|diagnostics| diagnostics.kernel.as_str()),
             Some("social_neighbors")
         );
+        let diagnostics = result.diagnostics.as_ref().expect("diagnostics");
+        assert_eq!(
+            diagnostics.snapshot_version.as_deref(),
+            Some("snapshot_2026_07_06")
+        );
+        assert_eq!(diagnostics.snapshot_loaded_at_ms, Some(1_783_278_000_000));
+        assert_eq!(diagnostics.available_count, 4);
+        assert_eq!(diagnostics.truncated_count, 3);
+        assert_eq!(diagnostics.pruned_count, 2);
+        assert_eq!(diagnostics.frontier_max_size, 8);
+        assert!(diagnostics.budget_exhausted);
     }
 
     #[test]

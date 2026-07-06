@@ -755,7 +755,7 @@ TEST(GraphHandlerTest, GraphDiagnosticsExposeSnapshotAndExecutionFields) {
   const auto response = handler(telegram::graph::http::HttpRequest{
       .method = "POST",
       .path = "/graph/neighbors",
-      .body = R"({"userId":"u1","limit":2})",
+      .body = R"({"userId":"u1","limit":20})",
   });
   const auto body = nlohmann::json::parse(response.body);
   const auto diagnostics = body.at("data").at("diagnostics");
@@ -765,6 +765,9 @@ TEST(GraphHandlerTest, GraphDiagnosticsExposeSnapshotAndExecutionFields) {
   EXPECT_TRUE(diagnostics.contains("snapshotLoadedAtMs"));
   EXPECT_EQ(diagnostics.at("prunedCount"), 0);
   EXPECT_EQ(diagnostics.at("frontierMaxSize"), 0);
+  EXPECT_EQ(diagnostics.at("budgetExhausted"), false);
+  EXPECT_TRUE(diagnostics.contains("emptyReason"));
+  EXPECT_TRUE(diagnostics.at("emptyReason").is_null());
 }
 
 TEST(OpsPayloadTest, ReportsHttpRuntimeMetrics) {

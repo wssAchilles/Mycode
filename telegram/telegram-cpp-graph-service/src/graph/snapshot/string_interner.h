@@ -4,7 +4,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -16,7 +15,6 @@ class StringInterner {
   using Id = std::uint32_t;
 
   void reserve(const std::size_t expected_values) {
-    // Pre-allocate vector to guarantee pointer stability for string_views
     values_.reserve(expected_values);
     ids_.reserve(expected_values);
   }
@@ -28,8 +26,7 @@ class StringInterner {
     }
     const auto next_id = static_cast<Id>(values_.size());
     values_.push_back(value);
-    // Use string_view pointing to the stable vector element
-    ids_.emplace(std::string_view(values_.back()), next_id);
+    ids_.emplace(values_.back(), next_id);
     return next_id;
   }
 
@@ -58,14 +55,15 @@ class StringInterner {
     for (const auto& value : values_) {
       total += value.capacity();
     }
-    // ids_ now stores string_view (no duplicate allocation)
-    total += ids_.size() * (sizeof(std::string_view) + sizeof(Id));
+    total += ids_.size() * (sizeof(std::string) + sizeof(Id));
+    for (const auto& [key, _] : ids_) {
+      total += key.capacity();
+    }
     return total;
   }
 
  private:
-  // string_view keys point into values_ vector (pointer-stable since we only append)
-  std::unordered_map<std::string_view, Id> ids_;
+  std::unordered_map<std::string, Id> ids_;
   std::vector<std::string> values_;
 };
 
