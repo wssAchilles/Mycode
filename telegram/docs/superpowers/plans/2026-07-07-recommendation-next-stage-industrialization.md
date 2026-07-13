@@ -56,7 +56,7 @@
 验收：
 
 - Ops readiness 不再因字段缺失而误判 ready。
-- Strict audit 的 helper 测试可稳定证明失败分支。
+- Strict audit 有确定性证据证明失败分支。
 - Release verification 在 live evidence 不兼容时明确失败。
 - Phase 0 不修改 Python、Go 或 C++ 业务代码。
 

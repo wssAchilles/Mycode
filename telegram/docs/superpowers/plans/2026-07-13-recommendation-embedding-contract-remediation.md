@@ -34,20 +34,11 @@
 
 主要修改范围：
 
-- `telegram-clone-backend/src/services/recommendation/contracts/`
-- `telegram-clone-backend/src/models/UserFeatureVector.ts`
-- `telegram-clone-backend/src/services/recommendation/users/registeredUserFeatureBootstrap.ts`
-- `telegram-clone-backend/src/services/recommendation/hydrators/UserEmbeddingQueryHydrator.ts`
-- `telegram-clone-backend/src/services/recommendation/sources/TwoTowerSource.ts`
-- `telegram-clone-backend/src/services/jobs/FeatureExportJob.ts`
-- `telegram-clone-backend/src/services/recommendation/contentFeatures/denseEmbedding.ts`
-- `telegram-clone-backend/src/services/ops/recommendation/dailyRefreshOps.ts`
-- `telegram-clone-backend/src/scripts/auditEmbeddingContracts.ts`
-- `telegram-clone-backend/src/scripts/backfillEmbeddingContracts.ts`
-- `telegram-clone-backend/src/scripts/demo/prepareInterviewDemo.ts`
-- 对应的少量高价值 Vitest 测试
-- `tools/release/verify_all.sh`
-- 主协调计划文档
+- 向量契约与证据分类边界。
+- 用户向量 writer、cold-start、repair 与缓存一致性边界。
+- Serving、export、ANN 与相似度消费边界。
+- Audit、daily ops、dry-run/apply、rollback 与 release gate。
+- 对应的少量高价值测试和协调文档。
 
 本阶段不扩展 Rust、frontend、Go、C++ 或 Python 的向量 sidecar 契约。
 
@@ -55,13 +46,10 @@
 
 修改方向：
 
-- 增加注册用户 cold-start 非语义契约。
-- 增加纯证据分类模块，统一输出 local fallback、semantic ready、quarantined、invalid、unclassified 五态。
-- 当前没有权威 semantic manifest，因此 `semantic_ready` 在 Phase 0.5 中保持不可达；默认 sentinel 不得被提升。
-- 固定 mixed-lineage quarantine reason，未知 reason 归类为 invalid。
-- 向量结构校验同时检查维度、数值类型和有限性。
-- 在用户模型中增加 Two-Tower 与 Phoenix 独立 sidecar，保留 legacy shared field 仅用于兼容读取。
-- 将向量 checksum 和 quarantine digest 放入共享纯模块，使用确定性字节序和 UTF-8 排序。
+- 建立已知本地契约、每向量 sidecar 与统一的五态证据分类。
+- 缺少权威 semantic manifest 时保持 `semantic_ready` 不可达，默认 sentinel 不得被提升。
+- 对未知 lineage、非法结构和不受支持的 quarantine 证据一律 fail-closed。
+- 形成可跨 audit、ops 与 repair 复用的确定性 checksum 和 digest 语义。
 
 验收：
 
@@ -74,11 +62,10 @@
 
 修改方向：
 
-- 移除稀疏 SimClusters 更新对 legacy semantic contract 的隐式写入。
-- 所有 dense write 必须携带对应 sidecar，且向量与 sidecar 结构匹配。
-- Sparse-only update 不得触碰 dense vectors、per-vector sidecars 或 legacy shared contract。
-- SimClusters 写入后失效两套现有用户 embedding cache namespace。
-- 直接写入 dense vectors 的 demo seed 脚本改为显式非语义 sidecar，并使纯构造逻辑可测试、CLI entrypoint 可安全导入。
+- 明确 sparse 与 dense writer 的字段所有权，禁止稀疏写入隐式改写向量契约。
+- Dense write 必须携带结构一致的对应 sidecar；legacy shared contract 只读兼容。
+- 写入成功后维护现有 embedding 缓存的一致性。
+- Demo writer 遵守同一非语义契约边界。
 
 验收：
 
@@ -91,11 +78,10 @@
 
 修改方向：
 
-- 暴露现有确定性 cold-start generator 供 replay 与测试复用，不改变算法输出。
-- 新用户创建时原子写入两组 cold-start sidecar，不再写 shared semantic contract。
-- Repair 只填补缺失槽位，或修复已被 sidecar 明确标记为 cold-start 且结构损坏的槽位。
-- 不根据维度、model profile、model version 或 legacy contract 猜测生产者。
-- Mixed-lineage Two-Tower 数组必须逐元素保留。
+- 复用确定性 cold-start 语义，并为新记录写入独立的非语义 sidecar。
+- Repair 只处理缺失或已被可信证据标记为本地 cold-start 的损坏槽位。
+- 不根据维度、版本标签或 legacy contract 推断生产者。
+- Mixed-lineage 与未知 lineage 的已有向量保持非破坏性处理。
 
 验收：
 
@@ -108,11 +94,9 @@
 
 修改方向：
 
-- Hydrator 只读取 Two-Tower sidecar 和 quarantine 状态，并输出共享 evidence status。
-- `TwoTowerSource` 只有在 evidence status 为 semantic-ready 时才能调用 ANN；Phase 0.5 默认保持 fail-closed。
-- Feature export 使用同一分类器，不再凭 default sentinel 或 `semantic: true` 直接放行。
-- Cold-start、sentinel-only 和 quarantined 用户都不得进入 ANN 或用户向量导出。
-- Dense cosine 对不同维度直接拒绝，不再比较公共前缀。
+- Serving、export 与 ANN 统一消费同一 evidence status，并对非 semantic-ready 输入 fail-closed。
+- Cold-start、sentinel-only、quarantined 与 unknown lineage 不得伪装成语义向量。
+- 相似度计算必须遵守完整维度契约，不允许前缀比较掩盖不兼容。
 
 验收：
 
@@ -124,12 +108,10 @@
 
 修改方向：
 
-- Strict audit 与 daily ops 复用同一 evidence classifier、计数器、checksum 和 quarantine digest。
-- User Two-Tower/Phoenix 独立分类；post 必须用持久化输入重新生成 48 维 heuristic embedding 并逐元素比对。
-- Full scan 使用稳定 `_id` 顺序且没有静默 limit；报告明确 consistency mode。
-- Strict mode 禁止限量扫描，并要求 approved quarantine digest。
-- Release gate 要求 quarantined Two-Tower 记录数量固定为 4，身份摘要完全匹配。
-- Daily ops 保留其他 action、signal、graph、job-run 查询不变。
+- Strict audit 与 daily ops 复用同一分类、计数、checksum 和 quarantine 身份语义。
+- 用户与帖子向量均以持久化 producer evidence 或确定性 replay 证明来源。
+- Full scan 不得有静默上限，并必须明确一致性能力与限制。
+- Strict gate 只接受预先批准且身份稳定的 quarantine 集合。
 
 验收：
 
@@ -142,20 +124,14 @@
 
 修改方向：
 
-- 原地改造现有 backfill CLI，默认全量 dry-run，禁止隐式写入。
-- 参数解析拒绝未知参数、非法数值、apply without strict、strict/apply with limit。
-- Mixed-lineage quarantine 必须同时满足固定 model profile、model version、两组 256 维有限向量、Phoenix replay 匹配、Two-Tower replay 不匹配。
-- Post metadata 仅在 48 维 replay 逐元素一致时生成 proposal。
-- 生成覆盖全部目标记录、desired metadata 和 before-vector checksum 的 canonical proposal digest。
-- Apply 必须绑定 approved proposal/quarantine digests。
-- Apply 前完成全量 preflight 和第二次全量 checksum/digest 验证，任何差异都必须在零写入状态停止。
-- Dry-run、apply 和 rollback 都不得写入任何 vector array。
-- 增加 metadata-only backup artifact；rollback 在全量校验当前 vector checksum 后只恢复 contract/quarantine metadata。
-- CLI 使用受保护 entrypoint，测试导入不得连接数据库或启动主流程。
+- Repair 工具默认全量 dry-run，并对所有不完整、漂移或未经批准的证据 fail-closed。
+- Proposal 必须覆盖目标记录、期望 metadata 与写前向量身份，并形成可审阅的 canonical digest。
+- Apply 必须绑定独立批准的 proposal 与 quarantine 证据，且任何验证差异都在零写入状态停止。
+- Dry-run、apply、backup 与 rollback 均保持 metadata-only，不修改向量数组。
 
 验收：
 
-- 默认 dry-run 不调用 save、bulkWrite、Redis、scheduler 或 process control。
+- 默认 dry-run 不产生持久化、缓存、调度或进程变更。
 - 任一 mismatch、unclassified 或 digest 漂移时 apply 写入次数为零。
 - Apply/rollback 操作不含 Two-Tower、Phoenix 或 post dense vector 字段。
 - Backup 可重复验证，rollback 遇到 vector drift 时零写入。
@@ -164,10 +140,9 @@
 
 修改方向：
 
-- `verify_all.sh` 移除 limited strict audit。
-- Release gate 明确要求外部提供 approved quarantine digest 与 approved proposal digest，不能由同一次运行自我批准。
-- Live audit 前运行确定性 audit/repair helper tests。
-- 主协调计划将 Phase 1 入口同时依赖 Phase 0 与 Phase 0.5。
+- Release gate 使用全量 strict evidence，并禁止同一次运行自我批准 digest。
+- Live evidence 前必须先通过确定性契约与 repair 行为验证。
+- 主协调计划将后续阶段同时绑定 Phase 0 与 Phase 0.5 的完成证据。
 
 验收：
 
@@ -179,16 +154,15 @@
 
 修改方向：
 
-- 运行所有相关 Node tests、TypeScript check 和 release shell syntax check。
-- 运行 full-collection read-only repair dry-run，保存原始 JSON 证据，不使用会改写 stdout 的包装器。
-- 运行 full strict audit，记录 sidecar 尚未 apply 时的真实阻断结果。
-- 独立 final spec reviewer 与 final code-quality reviewer 检查全部可达验收标准。
-- 输出生产授权包：精确 cohort 数量、proposal digest、quarantine digest、vector checksums、metadata changes、writer pause、backup、apply、rollback、cache invalidation、Node refresh 和剩余 blocker。
+- 完成相关代码验证、类型检查、release script 检查与全量只读证据采集。
+- 使用原始机器可读输出记录 dry-run 与 strict audit 的真实结果。
+- 由独立规格 reviewer 和质量 reviewer 检查全部可达验收标准。
+- 生成足以独立审阅 writer pause、metadata apply、rollback 与恢复条件的生产授权包。
 
 验收：
 
 - Dry-run 覆盖全部 user/post 记录，无静默上限。
-- 历史基线 642 cold-start user、1,917 post、4 mixed-lineage 仅作为对照；live 增长必须报告真实数量。
+- 历史基线仅作为对照，授权包必须报告真实 live totals。
 - Dry-run 证明零 Mongo/Redis/scheduler/process/Python mutation。
 - 到此必须停止并请求生产操作的单独授权。
 
@@ -196,13 +170,10 @@
 
 执行边界：
 
-- 本任务只在用户明确授权 writer pause、Mongo apply、失败回滚、Redis 删除和 Node refresh 后执行。
-- 先部署 writer fix 并确认没有旧 Node writer，再暂停 Node daily/manual/export 与现有 Python refresh writer。
-- Writer pause 后生成最终 backup 和 authoritative full plan，对比已批准的 proposal/quarantine digests 与 checksums。
-- Digest-bound apply 只更新 metadata。
-- Apply 后失效批准的两类缓存并刷新 Node 进程。
-- Full strict audit 与 release verification 通过后，仅恢复批准的 Node jobs；Python writer 保持禁用。
-- 任一 post-check 失败时执行 metadata-only rollback，再次失效缓存并刷新 Node。
+- 仅在用户明确批准生产 mutation、writer pause 与失败回滚后执行。
+- Writer pause 后重新生成权威证据，并只执行 digest-bound metadata apply。
+- Apply 后完成缓存与进程一致性处理；任一验证失败都执行 metadata-only rollback。
+- 只有严格验证通过后才恢复获批准的 Node jobs，Python writer 保持禁用。
 
 验收：
 
