@@ -82,12 +82,14 @@
 - Repair 只处理缺失或已被可信证据标记为本地 cold-start 的损坏槽位。
 - 不根据维度、版本标签或 legacy contract 推断生产者。
 - Mixed-lineage 与未知 lineage 的已有向量保持非破坏性处理。
+- 旧迁移与补齐路径不得重新引入 shared legacy contract。
 
 验收：
 
 - 相同用户输入 replay 完全一致。
 - 新用户拥有两组非语义 sidecar。
 - Repair 不覆盖未知或 quarantined 的非空向量。
+- 两个向量槽位独立修复；修复一个槽位不会改变另一个非空 unknown、quarantined 或 mixed-lineage 槽位。
 - Daily refresh 回归路径保持可用。
 
 ## Task 4: Serving, Export And Similarity Boundaries
