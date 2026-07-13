@@ -8,6 +8,10 @@ import { simClustersService } from '../recommendation/SimClustersService';
 import { realGraphService } from '../recommendation/RealGraphService';
 import { registeredUserFeatureBootstrapService } from '../recommendation/users';
 import { postFeatureSnapshotService } from '../recommendation/contentFeatures';
+import {
+    scanEmbeddingContractEvidence,
+    type PersistedEmbeddingEvidenceSummary,
+} from '../ops/recommendation/embeddingEvidenceAudit';
 import { featureExportJob } from './FeatureExportJob';
 
 type Trigger = 'cron' | 'manual' | 'script';
@@ -43,6 +47,7 @@ export interface DailyRecommendationRefreshResult {
         postsExported: number;
         durationMs: number;
     };
+    embeddingEvidence: PersistedEmbeddingEvidenceSummary;
 }
 
 const CONFIG = {
@@ -126,6 +131,7 @@ export class DailyRecommendationRefreshJob {
         const featureExport = options.skipFeatureExport
             ? undefined
             : await featureExportJob.run();
+        const { embeddingEvidence } = await scanEmbeddingContractEvidence({ limit: undefined });
 
         return {
             users: {
@@ -142,6 +148,7 @@ export class DailyRecommendationRefreshJob {
             },
             posts: postRefresh,
             featureExport,
+            embeddingEvidence,
         };
     }
 

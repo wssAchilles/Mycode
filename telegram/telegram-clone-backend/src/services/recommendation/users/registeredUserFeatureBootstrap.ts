@@ -8,6 +8,7 @@ import {
     type EmbeddingContract,
 } from '../contracts/embeddingContract';
 import { isCompleteEmbeddingContract } from '../contracts/embeddingContractEvidence';
+import { buildRegisteredUserColdStartEmbedding } from './coldStartEmbedding';
 
 const COLD_START_DIM = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.retrievalEmbeddingDim;
 const MODEL_VERSION = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.modelVersion;
@@ -119,12 +120,7 @@ export class RegisteredUserFeatureBootstrapService {
             );
             if (!repairTwoTower && !repairPhoenix) continue;
 
-            const vector = deterministicDenseVector([
-                user.id,
-                user.username,
-                user.region || '',
-                user.language || '',
-            ]);
+            const vector = buildRegisteredUserColdStartEmbedding(user);
             const $set: Record<string, unknown> = {};
             if (repairTwoTower) {
                 $set.twoTowerEmbedding = vector;
@@ -155,12 +151,7 @@ export class RegisteredUserFeatureBootstrapService {
     }
 
     private buildVector(user: Pick<User, 'id' | 'username' | 'region' | 'language' | 'createdAt'>) {
-        const vector = deterministicDenseVector([
-            user.id,
-            user.username,
-            user.region || '',
-            user.language || '',
-        ]);
+        const vector = buildRegisteredUserColdStartEmbedding(user);
         const knownForCluster = deterministicClusterId(user.region || user.language || user.id);
         const now = new Date();
         return {
@@ -214,21 +205,6 @@ function isRegisteredUserColdStartContract(contract: unknown): contract is Embed
         && contract.artifactVersion === expected.artifactVersion
         && contract.producer === expected.producer
         && contract.semantic === expected.semantic;
-}
-
-function deterministicDenseVector(parts: string[]): number[] {
-    const values: number[] = [];
-    let seed = parts.join('|');
-    while (values.length < COLD_START_DIM) {
-        const hash = crypto.createHash('sha256').update(seed).digest();
-        for (const byte of hash) {
-            values.push((byte / 255) * 2 - 1);
-            if (values.length >= COLD_START_DIM) break;
-        }
-        seed = hash.toString('hex');
-    }
-    const norm = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0)) || 1;
-    return values.map((value) => Number((value / norm).toFixed(8)));
 }
 
 function deterministicClusterId(value: string): number {

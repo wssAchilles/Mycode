@@ -247,29 +247,28 @@ describe('RegisteredUserFeatureBootstrapService', () => {
     });
 });
 
-describe('legacy embedding-contract backfill boundary', () => {
-    it('is import-safe and permanently excludes user-vector shared-contract writes', async () => {
+describe('embedding-contract repair boundary', () => {
+    it('is import-safe, defaults to full dry-run, and rejects legacy shared-contract writes', async () => {
         vi.clearAllMocks();
-        mocks.postFeatureFind.mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
-        });
         const backfill = await import('../../src/scripts/backfillEmbeddingContracts');
 
         expect(mocks.dotenvConfig).not.toHaveBeenCalled();
         expect(mocks.connectMongoDB).not.toHaveBeenCalled();
-        const result = await backfill.backfillEmbeddingContracts({
-            dryRun: false,
-            limit: 10,
-            batchSize: 5,
+        expect(backfill.parseArgs([])).toMatchObject({
+            mode: 'dry-run',
+            limit: undefined,
         });
-        expect(mocks.featureFind).not.toHaveBeenCalled();
-        expect(mocks.postFeatureFind).toHaveBeenCalledOnce();
-        expect(result.users).toEqual({
-            scanned: 0,
-            matched: 0,
-            updated: 0,
-            disabled: true,
-        });
+        expect(() => backfill.assertMetadataOnlyOperations([{
+            collection: 'user_feature_vectors',
+            id: 'user-vector-1',
+            userId: user.id,
+            replayInputDigest: 'a'.repeat(64),
+            expectedVectors: [],
+            currentMetadata: { embeddingContract: { legacy: true } },
+            expectedPostApplyMetadata: {},
+            patch: { set: {}, unset: ['embeddingContract'] },
+            restorePatch: { set: { embeddingContract: { legacy: true } }, unset: [] },
+        }])).toThrow('embedding_repair_legacy_contract_write_forbidden');
     });
 });
 

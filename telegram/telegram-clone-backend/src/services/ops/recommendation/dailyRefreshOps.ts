@@ -5,7 +5,10 @@ import UserSignal from '../../../models/UserSignal';
 import RealGraphEdge from '../../../models/RealGraphEdge';
 import PostFeatureSnapshot from '../../../models/PostFeatureSnapshot';
 import RecommendationJobRun from '../../../models/RecommendationJobRun';
-import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../../recommendation/contracts/embeddingContract';
+import {
+    isFullEmbeddingEvidenceSummary,
+    type PersistedEmbeddingEvidenceSummary,
+} from './embeddingEvidenceAudit';
 
 const DAILY_RECOMMENDATION_REFRESH_JOB = 'daily_recommendation_refresh';
 const DEFAULT_FRESHNESS_HOURS = 24;
@@ -25,6 +28,7 @@ export interface DailyRecommendationRefreshAudit {
         hours: number;
         since: string;
     };
+    embeddingEvidence: PersistedEmbeddingEvidenceSummary | null;
     dailyJobEvidence: {
         latest: {
             status: DailyRecommendationRefreshStatus;
@@ -49,7 +53,6 @@ export interface DailyRecommendationRefreshAudit {
         coverageRatio: number;
         refreshedInWindow: number;
         refreshedRatio: number;
-        embeddingContractCoverageRatio: number;
         compatibleDenseVectorRatio: number;
     };
     eventFactsAreRealtimeNotDailySynthetic: {
@@ -100,6 +103,9 @@ export interface RecommendationDailyRefreshOps {
         postsExported: number;
         clustersExported: number;
     };
+    embeddingEvidence:
+        | ({ status: 'available' } & PersistedEmbeddingEvidenceSummary)
+        | { status: 'unavailable' };
     schedule: {
         label: typeof DAILY_REFRESH_LABEL;
         cron: typeof DAILY_REFRESH_CRON;
@@ -120,8 +126,6 @@ export async function buildDailyRecommendationRefreshAudit(
         registeredUsers,
         userVectors,
         userVectorsFresh,
-        userVectorsWithContract,
-        userVectorsCompatible,
         actionsTotal,
         actionsFresh,
         signalsTotal,
@@ -138,12 +142,6 @@ export async function buildDailyRecommendationRefreshAudit(
         User.count(),
         UserFeatureVector.countDocuments(),
         UserFeatureVector.countDocuments({ computedAt: { $gte: since } }),
-        UserFeatureVector.countDocuments({ 'embeddingContract.artifactVersion': { $exists: true, $ne: '' } }),
-        UserFeatureVector.countDocuments({
-            'embeddingContract.embeddingSpace': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.embeddingSpace,
-            'embeddingContract.retrievalEmbeddingDim': DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
-            twoTowerEmbedding: { $size: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim },
-        }),
         UserAction.countDocuments(),
         UserAction.countDocuments({ createdAt: { $gte: since } }),
         UserSignal.countDocuments(),
@@ -170,6 +168,8 @@ export async function buildDailyRecommendationRefreshAudit(
             .limit(5)
             .lean(),
     ]);
+    const latestSummary = latestJobRun ? normalizeSummary(latestJobRun.summary) : {};
+    const embeddingEvidence = readPersistedEmbeddingEvidence(latestSummary.embeddingEvidence);
 
     return {
         auditedAt: new Date().toISOString(),
@@ -177,6 +177,7 @@ export async function buildDailyRecommendationRefreshAudit(
             hours,
             since: since.toISOString(),
         },
+        embeddingEvidence,
         dailyJobEvidence: {
             latest: latestJobRun ? {
                 status: normalizeStatus(latestJobRun.status),
@@ -184,7 +185,7 @@ export async function buildDailyRecommendationRefreshAudit(
                 finishedAt: latestJobRun.finishedAt ?? null,
                 durationMs: latestJobRun.durationMs ?? null,
                 trigger: latestJobRun.trigger ?? null,
-                summary: normalizeSummary(latestJobRun.summary),
+                summary: latestSummary,
                 error: latestJobRun.error ?? null,
             } : null,
             runsInWindow: recentJobRuns.length,
@@ -201,8 +202,13 @@ export async function buildDailyRecommendationRefreshAudit(
             coverageRatio: ratio(userVectors, registeredUsers),
             refreshedInWindow: userVectorsFresh,
             refreshedRatio: ratio(userVectorsFresh, registeredUsers),
-            embeddingContractCoverageRatio: ratio(userVectorsWithContract, userVectors),
-            compatibleDenseVectorRatio: ratio(userVectorsCompatible, registeredUsers),
+            compatibleDenseVectorRatio: embeddingEvidence
+                ? ratio(
+                    embeddingEvidence.cohorts.userVectors.verified_local_fallback
+                        + embeddingEvidence.cohorts.userVectors.semantic_ready,
+                    embeddingEvidence.cohorts.userVectors.total,
+                )
+                : 0,
         },
         eventFactsAreRealtimeNotDailySynthetic: {
             userActionsTotal: actionsTotal,
@@ -239,6 +245,7 @@ export function mapDailyRefreshAuditToOps(
     const realGraphSummary = readRecord(summary.realGraph);
     const postsSummary = readRecord(summary.posts);
     const featureExportSummary = readRecord(summary.featureExport);
+    const embeddingEvidence = audit.embeddingEvidence;
     const lastRefreshAt = latest
         ? toIsoString(latest.finishedAt) ?? toIsoString(latest.startedAt)
         : null;
@@ -276,6 +283,9 @@ export function mapDailyRefreshAuditToOps(
             postsExported: readNumber(featureExportSummary.postsExported) ?? 0,
             clustersExported: readNumber(featureExportSummary.clustersExported) ?? 0,
         },
+        embeddingEvidence: embeddingEvidence
+            ? { status: 'available', ...embeddingEvidence }
+            : { status: 'unavailable' },
         schedule: {
             label: DAILY_REFRESH_LABEL,
             cron: DAILY_REFRESH_CRON,
@@ -307,6 +317,10 @@ function readRecord(value: unknown): Record<string, unknown> {
 
 function readNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readPersistedEmbeddingEvidence(value: unknown): PersistedEmbeddingEvidenceSummary | null {
+    return isFullEmbeddingEvidenceSummary(value) ? value : null;
 }
 
 function toIsoString(value: unknown): string | null {

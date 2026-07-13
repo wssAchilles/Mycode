@@ -23,7 +23,7 @@ export interface RecommendationOpsSummaryInput {
   rustPrimaryFallbackRate?: number;
   graphKernelMissingDiagnosticsRate?: number;
   replayLoggingReadiness?: RecommendationOpsReplayLoggingReadiness;
-  embeddingContractIncompatibleCount?: number;
+  embeddingContractIncompatibleCount?: number | null;
   baseBlockers?: string[];
 }
 
@@ -105,7 +105,7 @@ async function buildRecommendationReadiness(input: {
     rustPrimaryFallbackRate: rustPrimaryFallbackRate(traceSummary),
     graphKernelMissingDiagnosticsRate: graphKernelMissingDiagnosticsRate(input.graphKernel),
     replayLoggingReadiness: traceSummary?.replayLoggingReadiness,
-    embeddingContractIncompatibleCount: Number(traceSummary?.embeddingContractIncompatibleCount || 0),
+    embeddingContractIncompatibleCount: traceSummary?.embeddingContractIncompatibleCount,
     baseBlockers: blockers,
   });
 
@@ -151,9 +151,13 @@ export function buildRecommendationOpsSummary(input: RecommendationOpsSummaryInp
     rustPrimaryFallbackRate: finiteRate(input.rustPrimaryFallbackRate),
     graphKernelMissingDiagnosticsRate: finiteRate(input.graphKernelMissingDiagnosticsRate),
     replayLoggingReadiness: input.replayLoggingReadiness || {},
-    embeddingContractIncompatibleCount: finiteCount(input.embeddingContractIncompatibleCount),
+    embeddingContractIncompatibleCount: isNonNegativeInteger(input.embeddingContractIncompatibleCount)
+      ? input.embeddingContractIncompatibleCount
+      : null,
   };
   const blockers = [...(input.baseBlockers || [])];
+  const replayLoggingReadinessMissing = input.replayLoggingReadiness === undefined;
+  const embeddingContractEvidenceMissing = evidence.embeddingContractIncompatibleCount === null;
 
   if (evidence.rustPrimaryFallbackRate > thresholds.rustPrimaryFallbackRate) {
     blockers.push('rust_primary_fallback_rate_high');
@@ -161,10 +165,17 @@ export function buildRecommendationOpsSummary(input: RecommendationOpsSummaryInp
   if (evidence.graphKernelMissingDiagnosticsRate > thresholds.graphKernelMissingDiagnosticsRate) {
     blockers.push('graph_kernel_diagnostics_missing');
   }
-  if (replayLoggingReadinessIncomplete(evidence.replayLoggingReadiness)) {
+  if (replayLoggingReadinessMissing) {
+    blockers.push('replay_logging_readiness_missing');
+  } else if (replayLoggingReadinessIncomplete(evidence.replayLoggingReadiness)) {
     blockers.push('replay_logging_readiness_incomplete');
   }
-  if (evidence.embeddingContractIncompatibleCount > thresholds.embeddingContractIncompatibleCount) {
+  if (embeddingContractEvidenceMissing) {
+    blockers.push('embedding_contract_evidence_missing');
+  } else if (
+    evidence.embeddingContractIncompatibleCount !== null
+    && evidence.embeddingContractIncompatibleCount > thresholds.embeddingContractIncompatibleCount
+  ) {
     blockers.push('embedding_contract_incompatible');
   }
 
@@ -245,13 +256,20 @@ function graphKernelMissingDiagnosticsRate(
 }
 
 function replayLoggingReadinessIncomplete(readiness: RecommendationOpsReplayLoggingReadiness): boolean {
-  return [
+  const counters = [
     readiness.requestsMissingRank,
     readiness.requestsMissingRecallSource,
     readiness.requestsMissingScore,
     readiness.requestsMissingExperimentKeys,
     readiness.requestsMissingFeedbackJoinKey,
-  ].some((value) => finiteCount(value) > 0);
+  ];
+  if (!isNonNegativeInteger(readiness.totalRequests) || readiness.totalRequests === 0) return true;
+  if (!counters.every(isNonNegativeInteger)) return true;
+  return counters.some((value) => value > 0);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
 }
 
 function readFirstFiniteNumber(...values: unknown[]): number | undefined {

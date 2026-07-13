@@ -6,6 +6,7 @@
 import { QueryHydrator } from '../framework';
 import { FeatureStore } from '../featureStore';
 import { EmbeddingContext, FeedQuery, SparseEmbeddingEntry } from '../types/FeedQuery';
+import { classifyEmbeddingContractEvidence } from '../contracts/embeddingContractEvidence';
 
 const CONFIG = {
     maxInterestedInClusters: Math.max(
@@ -93,6 +94,12 @@ export class UserEmbeddingQueryHydrator implements QueryHydrator<FeedQuery> {
                 !stale &&
                 qualityScore >= CONFIG.minQualityScore &&
                 interestedInClusters.length > 0;
+            const denseEvidence = classifyEmbeddingContractEvidence({
+                vector: embedding.twoTowerEmbedding,
+                perVectorContract: embedding.twoTowerEmbeddingContract,
+                legacySharedContract: embedding.embeddingContract,
+                quarantineReason: embedding.twoTowerEmbeddingQuarantineReason,
+            });
 
             return {
                 interestedInClusters,
@@ -106,7 +113,9 @@ export class UserEmbeddingQueryHydrator implements QueryHydrator<FeedQuery> {
                 artifactVersion: embedding.artifactVersion,
                 modelProfile: embedding.modelProfile,
                 embeddingDim: embedding.embeddingDim,
-                embeddingContract: embedding.embeddingContract,
+                embeddingContract: denseEvidence === 'semantic_ready'
+                    ? embedding.twoTowerEmbeddingContract
+                    : undefined,
                 usable,
                 stale,
             };

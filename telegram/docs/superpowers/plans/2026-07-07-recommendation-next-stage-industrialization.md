@@ -1,6 +1,6 @@
 # Recommendation Next-Stage Industrialization Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` for every implementation phase. Plans describe direction and acceptance gates; implementers derive concrete code changes from current source using TDD.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` for every implementation phase. Steps use checkbox (`- [ ]`) syntax for tracking; completed phases and tasks must retain their recorded status.
 
 **Goal:** 将现有多语言推荐系统收敛为可回放、可诊断、可灰度、可阻断错误发布的工业化主路径，并在 release evidence 稳定后逐步完善跨运行时契约、Node 证据、PIT 数据、C++ 图快照、ANN telemetry 与 runtime ownership。
 
@@ -13,6 +13,9 @@
 ## Global Execution Rules
 
 - 每个阶段开始前并行派出 code verifier、research verifier、plan/scope verifier。
+- 所有后续 code verifier、research verifier、plan/scope verifier、implementer、spec reviewer、quality reviewer、fixer 和 final reviewer 的每次调度都必须显式设置 `model=gpt-5.6-sol` 与 `reasoning_effort=ultra`。
+- 上述模型约束覆盖 Superpowers `subagent-driven-development` 的默认 Model Selection；不得继承、不得省略、不得降级。调度器若不能同时显式设置这两个值，必须 fail-closed，禁止调度并禁止推进阶段。
+- 每次调度的阶段证据必须记录实际 agent id、实际 model 和实际 reasoning effort；任一记录缺失或不等于 `gpt-5.6-sol` / `ultra` 时，该 verifier、实现或审查结果无效。
 - Research verifier 使用 `agent-reach` 阅读权威工业资料和顶会/顶刊论文，并给出 claim-to-source 映射。
 - 主线程在 verifier 运行期间继续做代码图谱、调用链、dirty-worktree 和最小测试基线检查。
 - 验证结论为阻塞时不得启动实现；需要调整但不阻塞时，先修正阶段方向再实现。
@@ -33,9 +36,10 @@
 
 ## Research Basis
 
-- Product Mixer/Home Mixer：阶段化 candidate source、hydrator、filter、scorer、selector 与可观测发布门。
+- Product Mixer/Home Mixer：仅支持阶段化 candidate source、hydrator、filter、scorer、selector 组件边界和 observability；不得据此声称其负责本项目 release bless/veto。
+- ML Test Score 类实践：仅作为 readiness rubric 与自动 schema/pipeline validation evidence 的研究依据；它不授予本项目 release bless/veto、canary 或 rollback authority，生产授权仍由本项目独立审批边界决定。
 - YouTube/Instagram/LinkedIn/Pinterest：多源召回、两阶段排序、版本化特征和线上反馈闭环。
-- Open Bandit Dataset/Pipeline：logging completeness、propensity 与离线反事实评估前置条件。
+- Open Bandit Dataset/Pipeline：rank/source/score/joinability 只支持 replay/diagnostic readiness；缺少可验证 propensity 时不得称为 OPE-ready，离线反事实评估继续 fail-closed。
 - Feature-store/PVLDB/Feast：event time、feature time、version 与 point-in-time join。
 - GraphJet/Pixie/RealGraph：实时图召回、快照一致性、random walk/pruning 与 affinity。
 - FAISS/ANN evaluation：exact-vs-ANN、recall@K、latency 与 index version 切片。
@@ -50,7 +54,7 @@
 - Trace summary 真实产出 replay logging readiness 与 embedding incompatibility evidence。
 - Recommendation ops readiness 在证据缺失、replay 未就绪或 embedding incompatible 时 fail-closed。
 - Embedding audit 提供确定性 strict failure 路径，并接入 release verification。
-- Release script 保留 C++、Go、performance、Node、Rust 的现有验证顺序，不绕过失败步骤。
+- Release script 保留 C++、Go、Node、Rust 的现有验证顺序，不绕过失败步骤。
 - Minimal fixture 仅在无法通过现有确定性测试覆盖 release-gate surface 时增加。
 
 验收：
@@ -79,6 +83,14 @@
 - 每个 live dense vector 有 verified contract 或 approved quarantine。
 - Full dry-run 覆盖全部 user/post 记录且证明零写入。
 - Phase 0.5 production apply 必须单独授权。
+
+Task-scoped checks、code-and-dry-run readiness 与 post-apply final gate 边界：
+
+- Task 4 只运行其 focused Vitest、backend TypeScript 检查和文档规定的静态检查；不得运行 `tools/release/verify_all.sh`。
+- Task 8 只运行确定性 tests/type/syntax/diff、full uncapped dry-run proposal，以及可选的 pre-apply full baseline audit。Baseline audit 的 evidence failure 允许并预期返回非零；连接、凭据、解析或程序错误仍阻断。Task 8 完成状态只能是 code-and-dry-run ready，不得要求 strict pass 或运行 `tools/release/verify_all.sh`。
+- 缺少 `RECOMMENDATION_AUDIT_MONGODB_URI`、operator-reviewed `RECOMMENDATION_AUDIT_READ_ONLY_EVIDENCE_FILE` 或其 SHA-256 绑定时 fail-closed，不运行 dry-run/baseline audit；不得回落到普通 `MONGODB_URI`。连接必须明确使用 `autoIndex: false` 与 `autoCreate: false`。
+- Post-apply full strict audit exit 0、cache/process refresh 和 `tools/release/verify_all.sh` exit 0 全部属于 Task 9；只有单独生产授权、writer pause 和 metadata-only apply 后才能执行。Task 9 当前未授权。
+- Task 9 的 post-apply `verify_all.sh` 也不得执行 Python utility 或 performance script；仍禁止修改或测试 `ml-services/**`，禁止 Python tests、formatters、generators 和 endpoint checks。
 
 ## Phase 1: Cross-Runtime Golden Contracts
 
@@ -131,7 +143,7 @@
 - Export 与 feedback join 使用稳定 ID 空间和版本证据。
 - 仅修改 Node/Rust/前后端/Go/C++ 相关边界；Python training/export 代码保持不变。
 
-研究验证：PVLDB feature store、Feast entity/event timestamp、Open Bandit logging completeness。
+研究验证：PVLDB feature store、Feast entity/event timestamp，以及 Open Bandit 对 logging completeness 的要求；在 propensity 缺失时只形成 replay/diagnostic readiness，不声明 OPE-ready。
 
 验收：
 
@@ -205,14 +217,16 @@
 - Rust：运行受影响 crate 的 targeted tests，再运行 recommendation replay/contract tests。
 - Go：仅在实际修改时运行受影响 package 与 `go test ./...`。
 - C++：运行受影响 graph target、release build 和现有 sanitizer gate。
-- Shell：验证 release scripts syntax，并运行允许范围内的 release verification。
-- Python：不运行 Python tests、formatters、generators 或 endpoint implementation checks。
+- Shell：Task 4-8 只做相关 release script syntax；Phase 0.5 的 `tools/release/verify_all.sh` 仅在已单独授权的 Task 9 post-apply final gate 运行。
+- Python：不运行 Python tests、formatters、generators、endpoint implementation checks 或 `tools/performance/**` utility。
 - 每阶段结束前检查 `git diff --check`、工作树范围和无 `ml-services/**` 变更。
 
 ## Completion Protocol
 
 - 每个阶段必须拥有 code/research/scope 三方进入证据。
 - 每个实现任务必须完成 implementer、spec reviewer、quality reviewer 三段闭环。
+- 每份进入、实现、修复和审查证据必须包含实际 agent id、`model=gpt-5.6-sol` 与 `reasoning_effort=ultra`；缺项或降级即 fail-closed。
 - 阶段完成声明必须基于 fresh verification output。
+- Phase 0.5 Task 8 只能声明 code-and-dry-run ready；Phase 0.5 gate complete 必须等 Task 9 获单独授权并完成 post-apply strict、cache/process refresh 与 `verify_all.sh`。
 - 生产 mutation 与代码完成分开授权、分开报告。
 - 全部阶段完成后使用 `superpowers:verification-before-completion` 与 `superpowers:finishing-a-development-branch`，再决定合并、保留或继续修复。

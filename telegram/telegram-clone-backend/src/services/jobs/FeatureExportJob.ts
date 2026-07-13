@@ -17,9 +17,9 @@ import ClusterDefinition from '../../models/ClusterDefinition';
 import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
 import {
     DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
-    isEmbeddingContractCompatible,
     isVectorCompatibleWithContract,
 } from '../recommendation/contracts/embeddingContract';
+import { classifyEmbeddingContractEvidence } from '../recommendation/contracts/embeddingContractEvidence';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -63,6 +63,8 @@ interface ExportMetadata {
     postEmbeddingDim: number;
 }
 
+type ExportArtifactMetadata = Omit<ExportMetadata, 'exportedAt' | 'version'>;
+
 // ========== 作业类 ==========
 export class FeatureExportJob {
     private isRunning = false;
@@ -90,34 +92,69 @@ export class FeatureExportJob {
         let usersExported = 0;
         let clustersExported = 0;
         let postsExported = 0;
+        let publishedUserCount: number | undefined;
 
         const outputDir = options?.outputDir || CONFIG.exportDir;
+        const exportUsers = !options?.onlyClusters && !options?.onlyPosts;
+        const exportClusters = !options?.onlyUsers && !options?.onlyPosts;
+        const exportPosts = !options?.onlyUsers && !options?.onlyClusters;
+        const partialRun = !(exportUsers && exportClusters && exportPosts);
 
         try {
             console.log('[FeatureExportJob] Starting export job...');
 
-            // 确保输出目录存在
+            const existingUserArtifact = await this.fileExists(
+                path.join(outputDir, CONFIG.files.userEmbeddings),
+            );
+            const previousMetadata = partialRun || (exportUsers && existingUserArtifact)
+                ? await this.readExistingMetadata(outputDir)
+                : undefined;
             await this.ensureDir(outputDir);
 
             // 导出用户嵌入
-            if (!options?.onlyClusters && !options?.onlyPosts) {
-                usersExported = await this.exportUserEmbeddings(outputDir);
+            if (exportUsers) {
+                publishedUserCount = await this.exportUserEmbeddings(outputDir);
+                usersExported = publishedUserCount ?? 0;
                 console.log(`[FeatureExportJob] Exported ${usersExported} user embeddings`);
             }
 
             // 导出聚类质心
-            if (!options?.onlyUsers && !options?.onlyPosts) {
+            if (exportClusters) {
                 clustersExported = await this.exportClusterCentroids(outputDir);
                 console.log(`[FeatureExportJob] Exported ${clustersExported} cluster centroids`);
             }
 
-            if (!options?.onlyUsers && !options?.onlyClusters) {
+            if (exportPosts) {
                 postsExported = await this.exportPostEmbeddings(outputDir);
                 console.log(`[FeatureExportJob] Exported ${postsExported} post embeddings`);
             }
 
-            // 写入元数据
-            await this.writeMetadata(outputDir, usersExported, clustersExported, postsExported);
+            const artifactPublished = publishedUserCount !== undefined || exportClusters || exportPosts;
+            if (artifactPublished) {
+                await this.writeMetadata(outputDir, {
+                    userCount: exportUsers
+                        ? publishedUserCount ?? previousMetadata?.userCount ?? 0
+                        : previousMetadata!.userCount,
+                    clusterCount: exportClusters
+                        ? clustersExported
+                        : previousMetadata!.clusterCount,
+                    postCount: exportPosts
+                        ? postsExported
+                        : previousMetadata!.postCount,
+                    userEmbeddingDim: exportUsers && publishedUserCount !== undefined
+                        ? CONFIG.userEmbeddingDim
+                        : previousMetadata?.userEmbeddingDim ?? CONFIG.userEmbeddingDim,
+                    clusterEmbeddingDim: exportClusters
+                        ? CONFIG.clusterEmbeddingDim
+                        : previousMetadata!.clusterEmbeddingDim,
+                    postEmbeddingDim: exportPosts
+                        ? parseInt(
+                            String(process.env.RECOMMENDATION_CONTENT_DENSE_EMBEDDING_DIMENSIONS || '48'),
+                            10,
+                        ) || 48
+                        : previousMetadata!.postEmbeddingDim,
+                });
+            }
 
         } finally {
             this.isRunning = false;
@@ -135,7 +172,7 @@ export class FeatureExportJob {
     /**
      * 导出用户嵌入
      */
-    private async exportUserEmbeddings(outputDir: string): Promise<number> {
+    private async exportUserEmbeddings(outputDir: string): Promise<number | undefined> {
         const embeddings: ExportedEmbedding[] = [];
         let processed = 0;
 
@@ -145,19 +182,24 @@ export class FeatureExportJob {
             const batch = await UserFeatureVector.find({
                 twoTowerEmbedding: { $exists: true, $ne: null },
             })
-                .select('userId twoTowerEmbedding qualityScore embeddingContract')
+                .select(
+                    'userId twoTowerEmbedding twoTowerEmbeddingContract twoTowerEmbeddingQuarantineReason qualityScore',
+                )
                 .skip(skip)
                 .limit(CONFIG.batchSize);
 
             if (batch.length === 0) break;
 
             for (const user of batch) {
+                const evidence = classifyEmbeddingContractEvidence({
+                    vector: user.twoTowerEmbedding,
+                    perVectorContract: user.twoTowerEmbeddingContract,
+                    quarantineReason: user.twoTowerEmbeddingQuarantineReason,
+                });
                 if (
-                    user.twoTowerEmbedding
+                    evidence === 'semantic_ready'
+                    && user.twoTowerEmbedding
                     && user.twoTowerEmbedding.length === CONFIG.userEmbeddingDim
-                    && user.embeddingContract
-                    && isEmbeddingContractCompatible(user.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
-                    && isVectorCompatibleWithContract(user.twoTowerEmbedding, user.embeddingContract)
                 ) {
                     embeddings.push({
                         id: user.userId,
@@ -171,6 +213,10 @@ export class FeatureExportJob {
             }
 
             skip += CONFIG.batchSize;
+        }
+
+        if (embeddings.length === 0) {
+            return undefined;
         }
 
         // 写入文件
@@ -273,23 +319,44 @@ export class FeatureExportJob {
      */
     private async writeMetadata(
         outputDir: string,
-        userCount: number,
-        clusterCount: number,
-        postCount: number,
+        artifactMetadata: ExportArtifactMetadata,
     ): Promise<void> {
         const metadata: ExportMetadata = {
             exportedAt: new Date().toISOString(),
             version: Date.now(),
-            userCount,
-            clusterCount,
-            postCount,
-            userEmbeddingDim: CONFIG.userEmbeddingDim,
-            clusterEmbeddingDim: CONFIG.clusterEmbeddingDim,
-            postEmbeddingDim: parseInt(String(process.env.RECOMMENDATION_CONTENT_DENSE_EMBEDDING_DIMENSIONS || '48'), 10) || 48,
+            ...artifactMetadata,
         };
 
         const outputPath = path.join(outputDir, CONFIG.files.metadata);
         await fs.promises.writeFile(outputPath, JSON.stringify(metadata, null, 2));
+    }
+
+    private async readExistingMetadata(outputDir: string): Promise<ExportMetadata> {
+        try {
+            const contents = await fs.promises.readFile(
+                path.join(outputDir, CONFIG.files.metadata),
+                'utf8',
+            );
+            const metadata: unknown = JSON.parse(contents);
+            if (!isExportMetadata(metadata)) {
+                throw new Error('invalid');
+            }
+            return metadata;
+        } catch {
+            throw new Error('feature_export_existing_metadata_invalid');
+        }
+    }
+
+    private async fileExists(filePath: string): Promise<boolean> {
+        try {
+            await fs.promises.access(filePath);
+            return true;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                return false;
+            }
+            throw error;
+        }
     }
 
     /**
@@ -314,3 +381,25 @@ export class FeatureExportJob {
 // ========== 导出单例 ==========
 export const featureExportJob = new FeatureExportJob();
 export default featureExportJob;
+
+function isExportMetadata(value: unknown): value is ExportMetadata {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const metadata = value as Partial<ExportMetadata>;
+    return typeof metadata.exportedAt === 'string'
+        && !Number.isNaN(Date.parse(metadata.exportedAt))
+        && isNonNegativeInteger(metadata.version)
+        && isNonNegativeInteger(metadata.userCount)
+        && isNonNegativeInteger(metadata.clusterCount)
+        && isNonNegativeInteger(metadata.postCount)
+        && isPositiveInteger(metadata.userEmbeddingDim)
+        && isPositiveInteger(metadata.clusterEmbeddingDim)
+        && isPositiveInteger(metadata.postEmbeddingDim);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+    return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+    return Number.isSafeInteger(value) && Number(value) > 0;
+}

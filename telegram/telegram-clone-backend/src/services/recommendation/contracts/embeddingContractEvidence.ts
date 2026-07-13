@@ -32,6 +32,12 @@ export interface QuarantineDigestEntry {
     reason: string;
 }
 
+export interface QuarantineDigestChecksumEntry {
+    userId: string;
+    vectorChecksum: string;
+    reason: string;
+}
+
 const KNOWN_LOCAL_CONTRACTS = [
     REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
     HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
@@ -92,12 +98,22 @@ export function vectorChecksum(vector: readonly number[]): string {
 }
 
 export function quarantineDigest(entries: readonly QuarantineDigestEntry[]): string {
+    return quarantineDigestFromChecksums(entries.map((entry) => ({
+        userId: entry.userId,
+        vectorChecksum: vectorChecksum(entry.vector),
+        reason: entry.reason,
+    })));
+}
+
+export function quarantineDigestFromChecksums(
+    entries: readonly QuarantineDigestChecksumEntry[],
+): string {
     const rows = entries.map((entry) => {
         const userId = Buffer.from(entry.userId, 'utf8');
         const row = Buffer.concat([
             userId,
             Buffer.from([0]),
-            Buffer.from(vectorChecksum(entry.vector), 'utf8'),
+            Buffer.from(entry.vectorChecksum, 'utf8'),
             Buffer.from([0]),
             Buffer.from(entry.reason, 'utf8'),
         ]);

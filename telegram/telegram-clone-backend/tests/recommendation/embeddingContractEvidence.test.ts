@@ -11,6 +11,7 @@ import {
     LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
     classifyEmbeddingContractEvidence,
     quarantineDigest,
+    quarantineDigestFromChecksums,
     vectorChecksum,
     type EmbeddingEvidenceStatus,
 } from '../../src/services/recommendation/contracts/embeddingContractEvidence';
@@ -257,6 +258,10 @@ describe('embedding contract evidence', () => {
         expect(quarantineDigest([{ ...first, userId: 'user-c' }, second])).not.toBe(digest);
         expect(quarantineDigest([{ ...first, vector: [-0.25, 0.5] }, second])).not.toBe(digest);
         expect(quarantineDigest([{ ...first, reason: 'other_reason' }, second])).not.toBe(digest);
+        expect(quarantineDigestFromChecksums([
+            { userId: first.userId, vectorChecksum: vectorChecksum(first.vector), reason: first.reason },
+            { userId: second.userId, vectorChecksum: vectorChecksum(second.vector), reason: second.reason },
+        ])).toBe(digest);
     });
 
     it('registers optional per-vector sidecar schema paths and keeps the legacy contract', () => {

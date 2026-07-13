@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     repairDenseVectors: vi.fn(),
     refreshSnapshotsByPostIds: vi.fn(),
     featureExportRun: vi.fn(),
+    scanEmbeddingContractEvidence: vi.fn(),
 }));
 
 vi.mock('../../src/models/User', () => ({
@@ -72,6 +73,10 @@ vi.mock('../../src/services/jobs/FeatureExportJob', () => ({
     },
 }));
 
+vi.mock('../../src/services/ops/recommendation/embeddingEvidenceAudit', () => ({
+    scanEmbeddingContractEvidence: mocks.scanEmbeddingContractEvidence,
+}));
+
 import { DailyRecommendationRefreshJob } from '../../src/services/jobs/DailyRecommendationRefreshJob';
 
 describe('DailyRecommendationRefreshJob', () => {
@@ -105,6 +110,9 @@ describe('DailyRecommendationRefreshJob', () => {
             clustersExported: 12,
             postsExported: 2,
             durationMs: 50,
+        });
+        mocks.scanEmbeddingContractEvidence.mockResolvedValue({
+            embeddingEvidence: embeddingEvidenceSummary,
         });
 
         const result = await new DailyRecommendationRefreshJob().run({
@@ -145,6 +153,7 @@ describe('DailyRecommendationRefreshJob', () => {
                             embeddingFailures: 0,
                             denseVectorsRepaired: 2,
                         },
+                        embeddingEvidence: embeddingEvidenceSummary,
                     }),
                 }),
             }),
@@ -166,7 +175,9 @@ describe('DailyRecommendationRefreshJob', () => {
                 scanned: 2,
                 refreshed: 2,
             },
+            embeddingEvidence: embeddingEvidenceSummary,
         });
+        expect(mocks.scanEmbeddingContractEvidence).toHaveBeenCalledWith({ limit: undefined });
     });
 
     it('marks the job run as failed when a refresh step throws', async () => {
@@ -188,6 +199,42 @@ describe('DailyRecommendationRefreshJob', () => {
         );
     });
 });
+
+const embeddingEvidenceSummary = {
+    total: 5,
+    verified_local_fallback: 4,
+    semantic_ready: 0,
+    quarantined: 1,
+    invalid: 0,
+    unclassified: 0,
+    cohorts: {
+        userVectors: {
+            total: 4,
+            verified_local_fallback: 3,
+            semantic_ready: 0,
+            quarantined: 1,
+            invalid: 0,
+            unclassified: 0,
+        },
+        postFeatureSnapshots: {
+            total: 1,
+            verified_local_fallback: 1,
+            semantic_ready: 0,
+            quarantined: 0,
+            invalid: 0,
+            unclassified: 0,
+        },
+    },
+    quarantineDigest: 'a'.repeat(64),
+    scan: {
+        userDocuments: 2,
+        postFeatureSnapshots: 1,
+        mode: 'full' as const,
+        limit: null,
+        diagnosticOnly: false,
+        ordering: '_id_ascending' as const,
+    },
+};
 
 function findPostsResult(posts: Array<{ _id: string; createdAt: Date }>) {
     return {

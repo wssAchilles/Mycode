@@ -24,12 +24,12 @@ type TraceSummaryRecord = {
     selectedCount?: number;
     userState?: string;
     experimentKeys?: string[];
-    candidates?: unknown[];
+    candidates?: TraceSummaryCandidate[];
     replayPool?: {
         poolKind?: string;
         totalCount?: number;
         truncated?: boolean;
-        candidates?: unknown[];
+        candidates?: TraceSummaryCandidate[];
     };
     shadowComparison?: {
         overlapCount?: number;
@@ -38,6 +38,16 @@ type TraceSummaryRecord = {
         baselineCount?: number;
     };
     createdAt: Date | string;
+};
+
+type TraceSummaryCandidate = {
+    postId?: unknown;
+    modelPostId?: string;
+    rank?: number;
+    recallSource?: string;
+    score?: number | null;
+    weightedScore?: number | null;
+    pipelineScore?: number | null;
 };
 
 type DimensionAccumulator = {
@@ -97,12 +107,23 @@ export interface RecommendationTraceShadowSummary {
     averageBaselineCount: number;
 }
 
+export interface RecommendationTraceReplayLoggingReadiness {
+    totalRequests: number;
+    requestsMissingRank: number;
+    requestsMissingRecallSource: number;
+    requestsMissingScore: number;
+    requestsMissingExperimentKeys: number;
+    requestsMissingFeedbackJoinKey: number;
+}
+
 export interface RecommendationTraceOpsSummary {
     windowHours: number;
     limit: number;
     surface?: string;
     requests: number;
     replayPoolCoverage: number;
+    replayLoggingReadiness: RecommendationTraceReplayLoggingReadiness;
+    embeddingContractIncompatibleCount: number | null;
     candidateSet: RecommendationTraceCandidateSetSummary;
     shadow: RecommendationTraceShadowSummary;
     byPipelineVersion: Record<string, RecommendationTraceDimensionSummary>;
@@ -151,8 +172,10 @@ export async function buildRecommendationTraceSummary(
     const fallbackCounts = new Map<string, number>();
     const userStateCounts = new Map<string, number>();
     const degradedReasonCounts = new Map<string, number>();
+    const replayLoggingReadiness = createReplayLoggingReadiness(traces.length);
 
     let replayPoolCount = 0;
+    let embeddingContractIncompatibleCount: number | null = null;
     let observedCandidatesSum = 0;
     let totalCandidatesSum = 0;
     let truncatedCount = 0;
@@ -173,6 +196,12 @@ export async function buildRecommendationTraceSummary(
             ? clamp01(rawShadowOverlapRatio)
             : undefined;
 
+        addReplayLoggingReadinessTrace(replayLoggingReadiness, trace);
+        const incompatibleEmbeddingContracts = countEmbeddingContractIncompatibleReasons(trace);
+        if (incompatibleEmbeddingContracts > 0) {
+            embeddingContractIncompatibleCount = (embeddingContractIncompatibleCount || 0)
+                + incompatibleEmbeddingContracts;
+        }
         if (trace.replayPool) replayPoolCount += 1;
         observedCandidatesSum += observedCandidates;
         totalCandidatesSum += totalCandidates;
@@ -265,6 +294,8 @@ export async function buildRecommendationTraceSummary(
         surface: options.surface,
         requests,
         replayPoolCoverage: requests > 0 ? replayPoolCount / requests : 0,
+        replayLoggingReadiness,
+        embeddingContractIncompatibleCount,
         candidateSet: {
             averageObservedCandidates: average(observedCandidatesSum, requests),
             averageTotalCandidates: average(totalCandidatesSum, requests),
@@ -368,6 +399,74 @@ function finalizeReasonMap(map: Map<string, number>): ReasonRow[] {
 
 function incrementCount(map: Map<string, number>, key: string): void {
     map.set(key, (map.get(key) || 0) + 1);
+}
+
+function createReplayLoggingReadiness(totalRequests: number): RecommendationTraceReplayLoggingReadiness {
+    return {
+        totalRequests,
+        requestsMissingRank: 0,
+        requestsMissingRecallSource: 0,
+        requestsMissingScore: 0,
+        requestsMissingExperimentKeys: 0,
+        requestsMissingFeedbackJoinKey: 0,
+    };
+}
+
+function addReplayLoggingReadinessTrace(
+    summary: RecommendationTraceReplayLoggingReadiness,
+    trace: TraceSummaryRecord,
+): void {
+    const candidates = readReplayCandidates(trace);
+    const noCandidates = candidates.length === 0;
+
+    if (noCandidates || candidates.some((candidate) => !Number.isFinite(candidate.rank))) {
+        summary.requestsMissingRank += 1;
+    }
+    if (noCandidates || candidates.some((candidate) => !String(candidate.recallSource || '').trim())) {
+        summary.requestsMissingRecallSource += 1;
+    }
+    if (noCandidates || candidates.some((candidate) => !hasReplayScore(candidate))) {
+        summary.requestsMissingScore += 1;
+    }
+    if (!Array.isArray(trace.experimentKeys) || trace.experimentKeys.filter(Boolean).length === 0) {
+        summary.requestsMissingExperimentKeys += 1;
+    }
+    if (
+        !String(trace.requestId || '').trim()
+        || noCandidates
+        || candidates.some((candidate) => !hasFeedbackJoinKey(candidate))
+    ) {
+        summary.requestsMissingFeedbackJoinKey += 1;
+    }
+}
+
+function readReplayCandidates(trace: TraceSummaryRecord): TraceSummaryCandidate[] {
+    if (trace.replayPool) {
+        return trace.replayPool.candidates ?? [];
+    }
+    return trace.candidates || [];
+}
+
+function hasReplayScore(candidate: TraceSummaryCandidate): boolean {
+    return Number.isFinite(candidate.score)
+        || Number.isFinite(candidate.weightedScore)
+        || Number.isFinite(candidate.pipelineScore);
+}
+
+function hasFeedbackJoinKey(candidate: TraceSummaryCandidate): boolean {
+    return Boolean(
+        String(candidate.postId || '').trim()
+        || String(candidate.modelPostId || '').trim(),
+    );
+}
+
+function countEmbeddingContractIncompatibleReasons(trace: TraceSummaryRecord): number {
+    return (trace.degradedReasons || []).filter((reason) => {
+        const normalized = String(reason || '').toLowerCase();
+        return normalized.includes('embedding')
+            && normalized.includes('contract')
+            && (normalized.includes('incompatible') || normalized.includes('mismatch'));
+    }).length;
 }
 
 function readCandidateSetKind(trace: TraceSummaryRecord): string {

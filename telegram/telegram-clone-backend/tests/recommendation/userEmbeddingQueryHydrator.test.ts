@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FeatureStore } from '../../src/services/recommendation/featureStore';
+import {
+  DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+  REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+} from '../../src/services/recommendation/contracts/embeddingContract';
+import { LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON } from '../../src/services/recommendation/contracts/embeddingContractEvidence';
 import { UserEmbeddingQueryHydrator } from '../../src/services/recommendation/hydrators/UserEmbeddingQueryHydrator';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
@@ -82,5 +87,54 @@ describe('UserEmbeddingQueryHydrator', () => {
     const hydrated = await hydrator.hydrate(createFeedQuery('viewer-4', 20));
 
     expect(hydrated.embeddingContext).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: 'legacy default sentinel',
+      dense: {
+        twoTowerEmbedding: new Array(DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0),
+        embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+      },
+    },
+    {
+      name: 'verified cold-start fallback',
+      dense: {
+        twoTowerEmbedding: new Array(REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0),
+        twoTowerEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+      },
+    },
+    {
+      name: 'quarantined legacy vector',
+      dense: {
+        twoTowerEmbedding: new Array(DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0),
+        twoTowerEmbeddingQuarantineReason: LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+      },
+    },
+    {
+      name: 'unknown semantic producer',
+      dense: {
+        twoTowerEmbedding: new Array(DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0),
+        twoTowerEmbeddingContract: {
+          ...DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+          producer: 'unverified-external-producer',
+        },
+      },
+    },
+  ])('keeps sparse context usable but withholds ANN contract for $name', async ({ dense }) => {
+    vi.spyOn(FeatureStore, 'getUserEmbedding').mockResolvedValue({
+      interestedInClusters: [{ clusterId: 101, score: 0.7 }],
+      producerEmbedding: [{ clusterId: 101, score: 0.5 }],
+      qualityScore: 0.8,
+      computedAt: new Date().toISOString(),
+      version: 3,
+      ...dense,
+    } as any);
+
+    const hydrated = await new UserEmbeddingQueryHydrator()
+      .hydrate(createFeedQuery('viewer-evidence', 20));
+
+    expect(hydrated.embeddingContext?.usable).toBe(true);
+    expect(hydrated.embeddingContext?.embeddingContract).toBeUndefined();
   });
 });

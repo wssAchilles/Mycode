@@ -22,10 +22,10 @@ describe('NewsAnnSource', () => {
         q.newsHistoryExternalIds = ['N0'];
 
         const annClient = {
-            retrieve: async () => [
+            retrieve: vi.fn().mockResolvedValue([
                 { postId: 'N2', score: 0.9 },
                 { postId: 'N1', score: 0.8 },
-            ],
+            ]),
         } as any;
 
         const p1 = {
@@ -63,6 +63,8 @@ describe('NewsAnnSource', () => {
         const source = new NewsAnnSource(annClient);
         const out = await source.getCandidates(q as any);
 
+        expect(q.embeddingContext?.embeddingContract).toBeUndefined();
+        expect(annClient.retrieve).toHaveBeenCalledOnce();
         expect(out).toHaveLength(2);
         expect(out[0].newsMetadata?.externalId).toBe('N2');
         expect(out[1].newsMetadata?.externalId).toBe('N1');
