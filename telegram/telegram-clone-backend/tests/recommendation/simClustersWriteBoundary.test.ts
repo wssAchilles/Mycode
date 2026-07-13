@@ -89,18 +89,18 @@ describe('SimClustersService write boundary', () => {
     });
 
     it.each(['simclusters', 'feature-cache'] as const)(
-        'returns the stored embedding and attempts both invalidations when %s invalidation rejects',
+        'rejects after attempting both invalidations when %s invalidation rejects',
         async (failure) => {
+            const invalidationError = new Error(`${failure} unavailable`);
             if (failure === 'simclusters') {
-                mocks.redisDel.mockRejectedValue(new Error('redis unavailable'));
+                mocks.redisDel.mockRejectedValue(invalidationError);
             } else {
-                mocks.invalidateFeatureCache.mockRejectedValue(new Error('feature cache unavailable'));
+                mocks.invalidateFeatureCache.mockRejectedValue(invalidationError);
             }
             const service = buildService();
 
-            const result = await service.computeAndStoreEmbedding('user-1');
+            await expect(service.computeAndStoreEmbedding('user-1')).rejects.toBe(invalidationError);
 
-            expect(result).toBe(storedEmbedding);
             expect(mocks.redisDel).toHaveBeenCalledWith('sc:embed:user-1');
             expect(mocks.invalidateFeatureCache).toHaveBeenCalledWith('user-1');
         },

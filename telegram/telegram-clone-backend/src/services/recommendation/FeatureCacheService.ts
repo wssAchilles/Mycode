@@ -241,11 +241,7 @@ export class FeatureCacheService {
     async invalidateUserEmbedding(userId: string): Promise<void> {
         const cacheKey = `${CONFIG.l2.keyPrefix}emb:${userId}`;
         this.userEmbeddingL1.delete(cacheKey);
-        try {
-            await redis.del(cacheKey);
-        } catch {
-            // 忽略
-        }
+        await redis.del(cacheKey);
     }
 
     // ========== RealGraph 边分数缓存 ==========

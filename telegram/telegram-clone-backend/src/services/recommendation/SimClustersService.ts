@@ -320,10 +320,15 @@ export class SimClustersService {
 
         // 清除当前 SimClusters 缓存和 FeatureCache 当前进程 L1/L2
         const cacheKey = `${CONFIG.cache.keyPrefix}${userId}`;
-        await Promise.allSettled([
+        const invalidationResults = await Promise.allSettled([
             redis.del(cacheKey),
             FeatureCacheService.getInstance().invalidateUserEmbedding(userId),
         ]);
+        for (const result of invalidationResults) {
+            if (result.status === 'rejected') {
+                throw result.reason;
+            }
+        }
 
         return embedding;
     }

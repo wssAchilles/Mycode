@@ -128,6 +128,14 @@ describe('embedding contract evidence', () => {
             { ...coldStart, rankingEmbeddingDim: 0 },
             { ...coldStart, dimensions: coldStart.retrievalEmbeddingDim - 1 },
         );
+        for (const field of [
+            'embeddingSpace',
+            'modelVersion',
+            'artifactVersion',
+            'producer',
+        ] as const) {
+            invalidContracts.push({ ...coldStart, [field]: '   ' });
+        }
 
         for (const contract of invalidContracts) {
             expect(classifyEmbeddingContractEvidence({
