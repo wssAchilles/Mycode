@@ -3,14 +3,15 @@ import crypto from 'crypto';
 import User from '../../../models/User';
 import UserFeatureVector from '../../../models/UserFeatureVector';
 import {
-    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
-    isEmbeddingContractCompatible,
+    REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
     isVectorCompatibleWithContract,
+    type EmbeddingContract,
 } from '../contracts/embeddingContract';
+import { isCompleteEmbeddingContract } from '../contracts/embeddingContractEvidence';
 
-const COLD_START_DIM = DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim;
-const MODEL_VERSION = 'registered_user_cold_start_v1';
-const ARTIFACT_VERSION = 'registered_user_profile_features_v1';
+const COLD_START_DIM = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.retrievalEmbeddingDim;
+const MODEL_VERSION = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.modelVersion;
+const ARTIFACT_VERSION = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.artifactVersion;
 
 export interface RegisteredUserFeatureBootstrapResult {
     scanned: number;
@@ -89,22 +90,32 @@ export class RegisteredUserFeatureBootstrapService {
 
         const userIds = users.map((user) => user.id);
         const docs = await UserFeatureVector.find({ userId: { $in: userIds } })
-            .select('userId twoTowerEmbedding phoenixEmbedding embeddingContract')
+            .select([
+                'userId',
+                'twoTowerEmbedding',
+                'twoTowerEmbeddingContract',
+                'twoTowerEmbeddingQuarantineReason',
+                'phoenixEmbedding',
+                'phoenixEmbeddingContract',
+            ].join(' '))
             .lean();
         const docsByUserId = new Map(docs.map((doc) => [doc.userId, doc]));
         const operations = [];
 
         for (const user of users) {
             const doc = docsByUserId.get(user.id);
-            const twoTowerCompatible = doc
-                && isEmbeddingContractCompatible(doc.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
-                && isVectorCompatibleWithContract(doc.twoTowerEmbedding, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT);
-            const phoenixCompatible = doc
-                && isVectorCompatibleWithContract(doc.phoenixEmbedding, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT);
+            if (!doc) continue;
 
-            if (twoTowerCompatible && phoenixCompatible) {
-                continue;
-            }
+            const repairTwoTower = shouldRepairColdStartSlot(
+                doc.twoTowerEmbedding,
+                doc.twoTowerEmbeddingContract,
+                doc.twoTowerEmbeddingQuarantineReason,
+            );
+            const repairPhoenix = shouldRepairColdStartSlot(
+                doc.phoenixEmbedding,
+                doc.phoenixEmbeddingContract,
+            );
+            if (!repairTwoTower && !repairPhoenix) continue;
 
             const vector = deterministicDenseVector([
                 user.id,
@@ -112,29 +123,29 @@ export class RegisteredUserFeatureBootstrapService {
                 user.region || '',
                 user.language || '',
             ]);
+            const $set: Record<string, unknown> = {};
+            if (repairTwoTower) {
+                $set.twoTowerEmbedding = vector;
+                $set.twoTowerEmbeddingContract = { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT };
+            }
+            if (repairPhoenix) {
+                $set.phoenixEmbedding = vector;
+                $set.phoenixEmbeddingContract = { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT };
+            }
+
             operations.push({
                 updateOne: {
                     filter: { userId: user.id },
-                    update: {
-                        $set: {
-                            twoTowerEmbedding: vector,
-                            phoenixEmbedding: vector,
-                            embeddingDim: COLD_START_DIM,
-                            modelVersion: MODEL_VERSION,
-                            artifactVersion: ARTIFACT_VERSION,
-                            modelProfile: 'cold_start_registered_user',
-                            embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
-                        },
-                    },
+                    update: { $set },
                 },
             });
         }
 
-        if (operations.length > 0) {
-            await UserFeatureVector.bulkWrite(operations, { ordered: false });
-        }
+        const result = operations.length > 0
+            ? await UserFeatureVector.bulkWrite(operations, { ordered: false })
+            : undefined;
 
-        return { scanned: users.length, repaired: operations.length };
+        return { scanned: users.length, repaired: result?.modifiedCount ?? 0 };
     }
 
     private buildVector(user: Pick<User, 'id' | 'username' | 'region' | 'language' | 'createdAt'>) {
@@ -156,18 +167,47 @@ export class RegisteredUserFeatureBootstrapService {
             knownForScore: 0.1,
             producerEmbedding: [{ clusterId: knownForCluster, score: 0.1 }],
             twoTowerEmbedding: vector,
+            twoTowerEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
             phoenixEmbedding: vector,
+            phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
             version: 1,
             modelVersion: MODEL_VERSION,
             artifactVersion: ARTIFACT_VERSION,
             modelProfile: 'cold_start_registered_user',
             embeddingDim: COLD_START_DIM,
-            embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
             computedAt: now,
             expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
             qualityScore: 0.05,
         };
     }
+}
+
+function shouldRepairColdStartSlot(
+    vector: unknown,
+    contract?: EmbeddingContract | null,
+    quarantineReason?: string | null,
+): boolean {
+    if (quarantineReason !== undefined && quarantineReason !== null) return false;
+    const trustedColdStart = isRegisteredUserColdStartContract(contract);
+    const missing = vector === undefined
+        || vector === null
+        || (Array.isArray(vector) && vector.length === 0);
+    if (missing) return contract === undefined || contract === null || trustedColdStart;
+    return trustedColdStart
+        && !isVectorCompatibleWithContract(vector, REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT);
+}
+
+function isRegisteredUserColdStartContract(contract: unknown): contract is EmbeddingContract {
+    if (!isCompleteEmbeddingContract(contract)) return false;
+    const expected = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT;
+    return contract.embeddingSpace === expected.embeddingSpace
+        && contract.dimensions === expected.dimensions
+        && contract.retrievalEmbeddingDim === expected.retrievalEmbeddingDim
+        && contract.rankingEmbeddingDim === expected.rankingEmbeddingDim
+        && contract.modelVersion === expected.modelVersion
+        && contract.artifactVersion === expected.artifactVersion
+        && contract.producer === expected.producer
+        && contract.semantic === expected.semantic;
 }
 
 function deterministicDenseVector(parts: string[]): number[] {

@@ -2,10 +2,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
 import { connectMongoDB } from '../config/db';
-import UserFeatureVector from '../models/UserFeatureVector';
 import PostFeatureSnapshot from '../models/PostFeatureSnapshot';
-
-dotenv.config();
 
 function parseArgs() {
     const args = process.argv.slice(2);
@@ -27,66 +24,30 @@ function parseArgs() {
 }
 
 async function main() {
+    dotenv.config();
     const args = parseArgs();
     await connectMongoDB();
     const result = await backfillEmbeddingContracts(args);
     console.log(JSON.stringify(result, null, 2));
 }
 
-async function backfillEmbeddingContracts(options: {
+export async function backfillEmbeddingContracts(options: {
     dryRun: boolean;
     limit: number;
     batchSize: number;
     since?: Date;
 }) {
-    const [users, posts] = await Promise.all([
-        backfillUsers(options),
-        backfillPosts(options),
-    ]);
+    const posts = await backfillPosts(options);
     return {
         dryRun: options.dryRun,
-        users,
+        users: {
+            scanned: 0,
+            matched: 0,
+            updated: 0,
+            disabled: true,
+        },
         postFeatureSnapshots: posts,
     };
-}
-
-async function backfillUsers(options: {
-    dryRun: boolean;
-    limit: number;
-    batchSize: number;
-    since?: Date;
-}) {
-    const query: Record<string, unknown> = {
-        $or: [
-            { embeddingContract: { $exists: false } },
-            { 'embeddingContract.artifactVersion': { $exists: false } },
-        ],
-    };
-    if (options.since) query.updatedAt = { $gte: options.since };
-
-    const docs = await UserFeatureVector.find(query).limit(options.limit);
-    let matched = 0;
-    let updated = 0;
-    for (const doc of docs) {
-        const vector = Array.isArray(doc.phoenixEmbedding) && doc.phoenixEmbedding.length > 0
-            ? doc.phoenixEmbedding
-            : doc.twoTowerEmbedding;
-        if (!Array.isArray(vector) || vector.length === 0) continue;
-        matched += 1;
-        if (options.dryRun) continue;
-        doc.embeddingDim = vector.length;
-        doc.embeddingContract = {
-            embeddingSpace: `user_dense_dim_${vector.length}`,
-            retrievalEmbeddingDim: vector.length,
-            rankingEmbeddingDim: vector.length,
-            modelVersion: doc.modelVersion || `user_dense_dim_${vector.length}_v1`,
-            artifactVersion: doc.artifactVersion || `mongo_user_vectors_${vector.length}_v1`,
-            producer: 'backfillEmbeddingContracts',
-        };
-        await doc.save();
-        updated += 1;
-    }
-    return { scanned: docs.length, matched, updated };
 }
 
 async function backfillPosts(options: {
@@ -126,17 +87,19 @@ async function backfillPosts(options: {
     return { scanned: docs.length, matched, updated };
 }
 
-main()
-    .catch((error) => {
-        console.error('[BackfillEmbeddingContracts] failed:', error);
-        process.exitCode = 1;
-    })
-    .finally(async () => {
-        try {
-            mongoose.connection.removeAllListeners('disconnected');
-            mongoose.connection.removeAllListeners('error');
-            await mongoose.disconnect();
-        } catch {
-            // ignore
-        }
-    });
+if (require.main === module) {
+    main()
+        .catch((error) => {
+            console.error('[BackfillEmbeddingContracts] failed:', error);
+            process.exitCode = 1;
+        })
+        .finally(async () => {
+            try {
+                mongoose.connection.removeAllListeners('disconnected');
+                mongoose.connection.removeAllListeners('error');
+                await mongoose.disconnect();
+            } catch {
+                // ignore
+            }
+        });
+}
