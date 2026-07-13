@@ -91,7 +91,9 @@ export class RegisteredUserFeatureBootstrapService {
         const userIds = users.map((user) => user.id);
         const docs = await UserFeatureVector.find({ userId: { $in: userIds } })
             .select([
+                '_id',
                 'userId',
+                'updatedAt',
                 'twoTowerEmbedding',
                 'twoTowerEmbeddingContract',
                 'twoTowerEmbeddingQuarantineReason',
@@ -135,7 +137,11 @@ export class RegisteredUserFeatureBootstrapService {
 
             operations.push({
                 updateOne: {
-                    filter: { userId: user.id },
+                    filter: {
+                        _id: doc._id,
+                        updatedAt: (doc as typeof doc & { updatedAt?: Date }).updatedAt
+                            ?? { $exists: false },
+                    },
                     update: { $set },
                 },
             });

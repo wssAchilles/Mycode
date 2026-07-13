@@ -209,6 +209,41 @@ describe('RegisteredUserFeatureBootstrapService', () => {
         const result = await new RegisteredUserFeatureBootstrapService().repairDenseVectors([user]);
 
         expect(result).toEqual({ scanned: 1, repaired: 0 });
+        expect(mocks.featureBulkWrite).toHaveBeenCalledOnce();
+    });
+
+    it('guards repair writes with the observed document identity and timestamp', async () => {
+        const updatedAt = new Date('2026-07-13T01:00:00.000Z');
+        mocks.featureFind.mockReturnValue(findManyResult([{
+            _id: 'feature-vector-1',
+            userId: user.id,
+            updatedAt,
+            phoenixEmbedding: vectorFor(),
+            phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+        }]));
+
+        await new RegisteredUserFeatureBootstrapService().repairDenseVectors([user]);
+
+        expect(firstBulkOperation().filter).toEqual({
+            _id: 'feature-vector-1',
+            updatedAt,
+        });
+    });
+
+    it('matches the absence of updatedAt for historical documents instead of widening the repair filter', async () => {
+        mocks.featureFind.mockReturnValue(findManyResult([{
+            _id: 'legacy-feature-vector-1',
+            userId: user.id,
+            phoenixEmbedding: vectorFor(),
+            phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+        }]));
+
+        await new RegisteredUserFeatureBootstrapService().repairDenseVectors([user]);
+
+        expect(firstBulkOperation().filter).toEqual({
+            _id: 'legacy-feature-vector-1',
+            updatedAt: { $exists: false },
+        });
     });
 });
 
@@ -245,7 +280,7 @@ function findOneResult(value: unknown) {
     };
 }
 
-function findManyResult(value: unknown[]) {
+function findManyResult(value: Array<Record<string, unknown>>) {
     return {
         select: vi.fn().mockReturnThis(),
         lean: vi.fn().mockResolvedValue(value),
@@ -253,9 +288,19 @@ function findManyResult(value: unknown[]) {
 }
 
 function firstBulkSet(): Record<string, unknown> {
+    return firstBulkOperation().update.$set;
+}
+
+function firstBulkOperation(): {
+    filter: Record<string, unknown>;
+    update: { $set: Record<string, unknown> };
+} {
     const operations = mocks.featureBulkWrite.mock.calls[0][0] as Array<{
-        updateOne: { update: { $set: Record<string, unknown> } };
+        updateOne: {
+            filter: Record<string, unknown>;
+            update: { $set: Record<string, unknown> };
+        };
     }>;
     expect(operations).toHaveLength(1);
-    return operations[0].updateOne.update.$set;
+    return operations[0].updateOne;
 }
