@@ -127,7 +127,7 @@ function isKnownLocalContract(contract: EmbeddingContract): boolean {
     ));
 }
 
-function isCompleteEmbeddingContract(contract: unknown): contract is EmbeddingContract {
+export function isCompleteEmbeddingContract(contract: unknown): contract is EmbeddingContract {
     if (!contract || typeof contract !== 'object') return false;
     const candidate = contract as Partial<EmbeddingContract>;
     return isNonEmptyString(candidate.embeddingSpace)

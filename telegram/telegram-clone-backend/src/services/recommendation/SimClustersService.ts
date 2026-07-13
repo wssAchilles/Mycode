@@ -19,6 +19,7 @@ import UserFeatureVector, {
 import ClusterDefinition, { IClusterDefinition } from '../../models/ClusterDefinition';
 import RealGraphEdge from '../../models/RealGraphEdge';
 import { redis } from '../../config/redis';
+import { FeatureCacheService } from './FeatureCacheService';
 
 // ========== 配置常量 ==========
 const CONFIG = {
@@ -317,13 +318,12 @@ export class SimClustersService {
             version
         );
 
-        // 清除缓存
+        // 清除当前 SimClusters 缓存和 FeatureCache 当前进程 L1/L2
         const cacheKey = `${CONFIG.cache.keyPrefix}${userId}`;
-        try {
-            await redis.del(cacheKey);
-        } catch {
-            // 忽略缓存错误
-        }
+        await Promise.allSettled([
+            redis.del(cacheKey),
+            FeatureCacheService.getInstance().invalidateUserEmbedding(userId),
+        ]);
 
         return embedding;
     }

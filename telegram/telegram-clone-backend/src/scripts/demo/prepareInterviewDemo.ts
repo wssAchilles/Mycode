@@ -49,6 +49,7 @@ import {
 import { prepareGroupAvatarUrls, preparePortraitPool } from './avatarStorage';
 import { cleanupDemoCohort, collectExistingDemoState } from './cohortStore';
 import type { DemoClusterKey, DemoGroupSeed, DemoUserSeed } from './contracts';
+import type { EmbeddingContract } from '../../services/recommendation/contracts/embeddingContract';
 import {
   buildFrontendTargetWarnings,
   connectDemoStores,
@@ -92,6 +93,26 @@ type InteractionContext = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const DEMO_TWO_TOWER_EMBEDDING_CONTRACT: EmbeddingContract = {
+  embeddingSpace: 'interview_demo_two_tower_seed_v1',
+  dimensions: 16,
+  retrievalEmbeddingDim: 16,
+  rankingEmbeddingDim: 16,
+  modelVersion: 'interview_demo_two_tower_seed_v1',
+  artifactVersion: 'prepare_interview_demo_two_tower_seed_v1',
+  producer: 'prepareInterviewDemo.buildUserFeatureDocuments',
+  semantic: false,
+};
+const DEMO_PHOENIX_EMBEDDING_CONTRACT: EmbeddingContract = {
+  embeddingSpace: 'interview_demo_phoenix_seed_v1',
+  dimensions: 24,
+  retrievalEmbeddingDim: 24,
+  rankingEmbeddingDim: 24,
+  modelVersion: 'interview_demo_phoenix_seed_v1',
+  artifactVersion: 'prepare_interview_demo_phoenix_seed_v1',
+  producer: 'prepareInterviewDemo.buildUserFeatureDocuments',
+  semantic: false,
+};
 
 const parseArg = (flag: string): string | null => {
   const direct = process.argv.find((value) => value.startsWith(`${flag}=`));
@@ -1009,11 +1030,13 @@ const buildDenseEmbedding = (clusterIds: number[], seed: number, dimensions: num
     return Number(value.toFixed(6));
   });
 
-const buildUserFeatureDocuments = (input: {
+export type BuildUserFeatureDocumentsInput = {
   viewer: DemoUserSeed;
   authorsByCluster: Record<DemoClusterKey, DemoUserSeed[]>;
   bridges: DemoUserSeed[];
-}): any[] => {
+};
+
+export const buildUserFeatureDocuments = (input: BuildUserFeatureDocumentsInput): any[] => {
   const docs: any[] = [];
   const expiresAt = new Date(Date.now() + 90 * DAY_MS);
 
@@ -1034,7 +1057,9 @@ const buildUserFeatureDocuments = (input: {
           { clusterId: DEMO_CLUSTER_CONFIGS[adjacent].clusterId, score: 0.22 },
         ],
         twoTowerEmbedding: buildDenseEmbedding([config.clusterId, DEMO_CLUSTER_CONFIGS[adjacent].clusterId], index),
+        twoTowerEmbeddingContract: DEMO_TWO_TOWER_EMBEDDING_CONTRACT,
         phoenixEmbedding: buildDenseEmbedding([config.clusterId], index + 10, 24),
+        phoenixEmbeddingContract: DEMO_PHOENIX_EMBEDDING_CONTRACT,
         version: 1,
         modelVersion: 'demo-cohort-v1',
         computedAt: new Date(),
@@ -1058,7 +1083,9 @@ const buildUserFeatureDocuments = (input: {
       { clusterId: DEMO_CLUSTER_CONFIGS.ai.clusterId, score: 0.24 },
     ],
     twoTowerEmbedding: buildDenseEmbedding(DEMO_CLUSTER_IDS, 101),
+    twoTowerEmbeddingContract: DEMO_TWO_TOWER_EMBEDDING_CONTRACT,
     phoenixEmbedding: buildDenseEmbedding([DEMO_CLUSTER_CONFIGS.recsys.clusterId, DEMO_CLUSTER_CONFIGS.ai.clusterId], 111, 24),
+    phoenixEmbeddingContract: DEMO_PHOENIX_EMBEDDING_CONTRACT,
     version: 1,
     modelVersion: 'demo-cohort-v1',
     computedAt: new Date(),
@@ -1083,11 +1110,13 @@ const buildUserFeatureDocuments = (input: {
         [DEMO_CLUSTER_CONFIGS[cluster].clusterId, DEMO_CLUSTER_CONFIGS[secondary].clusterId],
         index + 200,
       ),
+      twoTowerEmbeddingContract: DEMO_TWO_TOWER_EMBEDDING_CONTRACT,
       phoenixEmbedding: buildDenseEmbedding(
         [DEMO_CLUSTER_CONFIGS[cluster].clusterId, DEMO_CLUSTER_CONFIGS[secondary].clusterId],
         index + 220,
         24,
       ),
+      phoenixEmbeddingContract: DEMO_PHOENIX_EMBEDDING_CONTRACT,
       version: 1,
       modelVersion: 'demo-cohort-v1',
       computedAt: new Date(),
@@ -1712,8 +1741,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(async (error) => {
-  console.error('[demo:prepare] failed:', error);
-  await disconnectDemoStores();
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(async (error) => {
+    console.error('[demo:prepare] failed:', error);
+    await disconnectDemoStores();
+    process.exit(1);
+  });
+}
