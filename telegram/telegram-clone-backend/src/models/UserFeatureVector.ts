@@ -15,7 +15,10 @@
  */
 
 import mongoose, { Document, Schema, Model } from 'mongoose';
-import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../services/recommendation/contracts/embeddingContract';
+import {
+    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+    type EmbeddingContract,
+} from '../services/recommendation/contracts/embeddingContract';
 
 // ========== 稀疏向量元素类型 ==========
 export interface SparseVectorElement {
@@ -59,10 +62,13 @@ export interface IUserFeatureVector extends Document {
     // Two-Tower 用户嵌入 (64 维)
     // 来源: Two-Tower 模型用户塔输出
     twoTowerEmbedding?: number[];
+    twoTowerEmbeddingContract?: EmbeddingContract;
+    twoTowerEmbeddingQuarantineReason?: string;
 
     // Phoenix 用户嵌入 (256 维)
     // 来源: Phoenix 模型用户表示层
     phoenixEmbedding?: number[];
+    phoenixEmbeddingContract?: EmbeddingContract;
 
     // TwHIN 嵌入 (可选, 图神经网络输出)
     twhinEmbedding?: number[];
@@ -112,6 +118,20 @@ const SparseVectorElementSchema = new Schema<SparseVectorElement>(
     { _id: false }
 );
 
+const EmbeddingContractSchema = new Schema<EmbeddingContract>(
+    {
+        embeddingSpace: { type: String, required: true },
+        dimensions: Number,
+        retrievalEmbeddingDim: { type: Number, required: true },
+        rankingEmbeddingDim: { type: Number, required: true },
+        modelVersion: { type: String, required: true },
+        artifactVersion: { type: String, required: true },
+        producer: { type: String, required: true },
+        semantic: { type: Boolean, required: true },
+    },
+    { _id: false }
+);
+
 const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
     {
         userId: {
@@ -138,10 +158,13 @@ const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
             type: [Number],
             default: undefined,
         },
+        twoTowerEmbeddingContract: EmbeddingContractSchema,
+        twoTowerEmbeddingQuarantineReason: String,
         phoenixEmbedding: {
             type: [Number],
             default: undefined,
         },
+        phoenixEmbeddingContract: EmbeddingContractSchema,
         twhinEmbedding: {
             type: [Number],
             default: undefined,
