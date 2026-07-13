@@ -96,13 +96,14 @@
 
 修改方向：
 
-- Serving、export 与 ANN 统一消费同一 evidence status，并对非 semantic-ready 输入 fail-closed。
+- 用户 Two-Tower ANN 与用户向量导出统一消费同一 evidence status，并对非 semantic-ready 输入 fail-closed。
+- 用户向量 evidence 与目标 runtime/corpus contract 是独立门禁；News ANN 继续由自身 history 与 corpus contract 管理。
 - Cold-start、sentinel-only、quarantined 与 unknown lineage 不得伪装成语义向量。
-- 相似度计算必须遵守完整维度契约，不允许前缀比较掩盖不兼容。
+- 相似度计算必须遵守完整维度契约，不允许前缀比较掩盖不兼容；兼容数值返回不得被记录为真实零相似度。
 
 验收：
 
-- Default、cold-start、quarantine 三类输入均不调用 ANN。
+- Default、cold-start、quarantine 三类输入均不调用用户 Two-Tower ANN。
 - 不合格用户不进入导出。
 - 不等长向量相似度为零，并在真实 retrieval policy 测试中生效。
 
@@ -144,6 +145,7 @@
 
 - Release gate 使用全量 strict evidence，并禁止同一次运行自我批准 digest。
 - Live evidence 前必须先通过确定性契约与 repair 行为验证。
+- 零合格语义向量或空用户导出不得覆盖、发布或晋级既有索引产物。
 - 主协调计划将后续阶段同时绑定 Phase 0 与 Phase 0.5 的完成证据。
 
 验收：
