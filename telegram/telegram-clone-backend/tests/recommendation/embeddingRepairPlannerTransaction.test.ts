@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     createEmbeddingMetadataBackup,
     computeProposalDigest,
+    validateEmbeddingMetadataBackup,
+    validateEmbeddingRepairProposal,
 } from '../../src/services/ops/recommendation/embeddingRepair/artifacts';
 import {
     planEmbeddingContractRepair,
@@ -20,8 +22,11 @@ import {
 } from '../../src/services/recommendation/contentFeatures/denseEmbedding';
 import {
     LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+    quarantineDigest,
 } from '../../src/services/recommendation/contracts/embeddingContractEvidence';
 import {
+    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+    HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
     REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
 } from '../../src/services/recommendation/contracts/embeddingContract';
 
@@ -84,6 +89,140 @@ describe('embedding repair planner', () => {
         expect(proposal.operations[1].currentMetadata).toHaveProperty('embeddingContract');
         expect(JSON.stringify(proposal)).not.toContain(JSON.stringify(cold));
         expect(JSON.stringify(proposal)).not.toContain(JSON.stringify(post.denseEmbedding));
+    });
+
+    it('plans exact serving-lite quarantine and replaces replay-verified post metadata canonically', async () => {
+        const user = servingLiteUserDocument();
+        const post = {
+            ...postDocument(),
+            embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+        };
+        const proposal = await planEmbeddingContractRepair({
+            models: {
+                userFeatureVector: mongoSource([user]).model,
+                postFeatureSnapshot: mongoSource([post]).model,
+            },
+            loadUserInput: vi.fn().mockResolvedValue(userInput),
+        });
+
+        expect(proposal.evidence).toMatchObject({
+            aggregate: { verified_local_fallback: 2, quarantined: 1, invalid: 0, unclassified: 0 },
+            cohorts: {
+                userVectors: { verified_local_fallback: 1, quarantined: 1 },
+                postFeatureSnapshots: { verified_local_fallback: 1, invalid: 0, unclassified: 0 },
+            },
+        });
+        expect(proposal.replay).toEqual({
+            user: { matched: 1, mismatched: 1, inputMissing: 0 },
+            post: { matched: 1, mismatched: 0 },
+        });
+        expect(proposal.quarantineDigest).toBe(quarantineDigest([{
+            userId: userInput.id,
+            vector: user.twoTowerEmbedding,
+            reason: LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+        }]));
+
+        const [postOperation, userOperation] = proposal.operations;
+        expect(postOperation).toMatchObject({
+            collection: 'post_feature_snapshots',
+            patch: { set: { embeddingContract: HEURISTIC_POST_HASH_EMBEDDING_CONTRACT } },
+            restorePatch: { set: { embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } },
+            expectedVectors: [{ field: 'denseEmbedding', classification: 'verified_local_fallback' }],
+        });
+        expect(userOperation).toMatchObject({
+            collection: 'user_feature_vectors',
+            patch: {
+                set: {
+                    phoenixEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+                    twoTowerEmbeddingQuarantineReason:
+                        LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+                },
+            },
+            expectedVectors: [
+                { field: 'phoenixEmbedding', classification: 'verified_local_fallback' },
+                { field: 'twoTowerEmbedding', classification: 'quarantined' },
+            ],
+        });
+        expect(JSON.stringify(proposal.operations)).not.toContain(JSON.stringify(user.twoTowerEmbedding));
+        expect(() => validateEmbeddingRepairProposal(proposal, { forApply: true })).not.toThrow();
+
+        const backup = createEmbeddingMetadataBackup(proposal);
+        expect(validateEmbeddingMetadataBackup(backup)).toEqual(backup);
+        const postApplyProposal = await planEmbeddingContractRepair({
+            models: {
+                userFeatureVector: mongoSource([{
+                    ...user,
+                    ...userOperation.expectedPostApplyMetadata,
+                }]).model,
+                postFeatureSnapshot: mongoSource([{
+                    ...post,
+                    ...postOperation.expectedPostApplyMetadata,
+                }]).model,
+            },
+            loadUserInput: vi.fn().mockResolvedValue(userInput),
+        });
+        expect(postApplyProposal.operations).toEqual([]);
+        expect(postApplyProposal.proposalDigest).toBe(backup.expectedPostApplyProposalDigest);
+    });
+
+    it('does not quarantine exact serving-lite provenance with a wrong Two-Tower dimension', async () => {
+        const servingLiteUser = servingLiteUserDocument();
+        const user = {
+            ...servingLiteUser,
+            twoTowerEmbedding: servingLiteUser.twoTowerEmbedding.slice(0, 255),
+        };
+        const proposal = await planEmbeddingContractRepair({
+            models: {
+                userFeatureVector: mongoSource([user]).model,
+                postFeatureSnapshot: mongoSource([]).model,
+            },
+            loadUserInput: vi.fn().mockResolvedValue(userInput),
+        });
+
+        expect(proposal.evidence).toMatchObject({
+            aggregate: { verified_local_fallback: 1, quarantined: 0, invalid: 1 },
+            cohorts: {
+                userVectors: { verified_local_fallback: 1, quarantined: 0, invalid: 1 },
+            },
+        });
+        const operation = proposal.operations.find(({ collection }) => (
+            collection === 'user_feature_vectors'
+        ));
+        expect(operation?.patch.set).not.toHaveProperty('twoTowerEmbeddingQuarantineReason');
+        expect(operation?.expectedVectors).toContainEqual(expect.objectContaining({
+            field: 'twoTowerEmbedding',
+            classification: 'invalid',
+        }));
+        expect(() => validateEmbeddingRepairProposal(proposal, { forApply: true }))
+            .toThrow('embedding_repair_classification_not_authorizable');
+    });
+
+    it('does not plan serving-lite quarantine for provenance near-misses or an existing sidecar', async () => {
+        const nearMisses = [
+            { modelVersion: 'other-model' },
+            { artifactVersion: 'other-artifact' },
+            { modelProfile: 'full' },
+            { embeddingDim: 255 },
+            { twoTowerEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+            { twoTowerEmbeddingQuarantineReason: 'other-reason' },
+        ];
+
+        for (const patch of nearMisses) {
+            const proposal = await planEmbeddingContractRepair({
+                models: {
+                    userFeatureVector: mongoSource([{
+                        ...servingLiteUserDocument(),
+                        ...patch,
+                    }]).model,
+                    postFeatureSnapshot: mongoSource([]).model,
+                },
+                loadUserInput: vi.fn().mockResolvedValue(userInput),
+            });
+            const operation = proposal.operations.find(({ collection }) => (
+                collection === 'user_feature_vectors'
+            ));
+            expect(operation?.patch.set).not.toHaveProperty('twoTowerEmbeddingQuarantineReason');
+        }
     });
 
     it('uses a limit only for non-authorizable diagnostic proposals', async () => {
@@ -156,12 +295,12 @@ describe('embedding repair transaction adapter', () => {
         ['user replay input', (state: Awaited<ReturnType<typeof transactionFixture>>) => {
             state.user.username = 'renamed_user';
         }, 'embedding_repair_replay_input_drift'],
-        ['classification', (state: Awaited<ReturnType<typeof transactionFixture>>) => {
+        ['per-vector metadata', (state: Awaited<ReturnType<typeof transactionFixture>>) => {
             state.documents.user_feature_vectors['user-vector-1'].phoenixEmbeddingContract = {
                 ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
                 producer: 'unknown-writer',
             };
-        }, 'embedding_repair_classification_drift'],
+        }, 'embedding_repair_metadata_drift'],
         ['current metadata', (state: Awaited<ReturnType<typeof transactionFixture>>) => {
             state.documents.user_feature_vectors['user-vector-1'].embeddingContract = { legacy: 'v2' };
         }, 'embedding_repair_metadata_drift'],
@@ -280,6 +419,48 @@ describe('embedding repair transaction adapter', () => {
         for (const call of state.dependencies.updateMetadata.mock.calls) {
             expect(call[4]).toMatchObject({ timestamps: false });
         }
+    });
+
+    it('applies exact serving-lite quarantine and wrong post replacement without vector writes', async () => {
+        const state = await transactionFixture({ servingLite: true });
+        const vectors = structuredClone({
+            twoTower: state.documents.user_feature_vectors['user-vector-1'].twoTowerEmbedding,
+            phoenix: state.documents.user_feature_vectors['user-vector-1'].phoenixEmbedding,
+            post: state.documents.post_feature_snapshots['post-1'].denseEmbedding,
+        });
+
+        const result = await applyApprovedProposal(state.request);
+
+        expect(result).toMatchObject({ mode: 'apply', completed: true, operations: 2 });
+        expect(state.dependencies.updateMetadata.mock.calls.map((call) => call[2])).toEqual([
+            {
+                set: { embeddingContract: HEURISTIC_POST_HASH_EMBEDDING_CONTRACT },
+                unset: [],
+            },
+            {
+                set: {
+                    twoTowerEmbeddingQuarantineReason:
+                        LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+                    phoenixEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+                },
+                unset: [],
+            },
+        ]);
+        expect(state.documents.user_feature_vectors['user-vector-1'].twoTowerEmbedding)
+            .toEqual(vectors.twoTower);
+        expect(state.documents.user_feature_vectors['user-vector-1'].phoenixEmbedding)
+            .toEqual(vectors.phoenix);
+        expect(state.documents.post_feature_snapshots['post-1'].denseEmbedding)
+            .toEqual(vectors.post);
+    });
+
+    it('rejects serving-lite quarantine checksum drift before any metadata write', async () => {
+        const state = await transactionFixture({ servingLite: true });
+        state.documents.user_feature_vectors['user-vector-1'].twoTowerEmbedding[0] += 0.01;
+
+        await expect(applyApprovedProposal(state.request))
+            .rejects.toThrow('embedding_repair_vector_drift');
+        expect(state.dependencies.updateMetadata).not.toHaveBeenCalled();
     });
 
     it('aborts matched-count mismatch without committing staged writes or falling back', async () => {
@@ -427,6 +608,38 @@ describe('embedding repair rollback transaction adapter', () => {
         }
     });
 
+    it('rolls back serving-lite quarantine and restores the captured legacy post contract', async () => {
+        const state = await rollbackFixture({ servingLite: true });
+        const vectors = structuredClone({
+            twoTower: state.documents.user_feature_vectors['user-vector-1'].twoTowerEmbedding,
+            phoenix: state.documents.user_feature_vectors['user-vector-1'].phoenixEmbedding,
+            post: state.documents.post_feature_snapshots['post-1'].denseEmbedding,
+        });
+
+        const result = await rollbackApprovedBackup(state.request);
+
+        expect(result).toMatchObject({ mode: 'rollback', completed: true, operations: 2 });
+        expect(state.dependencies.updateMetadata.mock.calls.map((call) => call[2])).toEqual([
+            {
+                set: { embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT },
+                unset: [],
+            },
+            {
+                set: {},
+                unset: [
+                    'phoenixEmbeddingContract',
+                    'twoTowerEmbeddingQuarantineReason',
+                ],
+            },
+        ]);
+        expect(state.documents.user_feature_vectors['user-vector-1'].twoTowerEmbedding)
+            .toEqual(vectors.twoTower);
+        expect(state.documents.user_feature_vectors['user-vector-1'].phoenixEmbedding)
+            .toEqual(vectors.phoenix);
+        expect(state.documents.post_feature_snapshots['post-1'].denseEmbedding)
+            .toEqual(vectors.post);
+    });
+
     it('aborts rollback when writer-pause evidence expires after the final staged write', async () => {
         let currentTime = Date.parse('2026-07-12T23:59:59.000Z');
         const state = await rollbackFixture({
@@ -477,6 +690,22 @@ function postDocument() {
     return { ...input, denseEmbedding: buildDensePostEmbedding(input) };
 }
 
+function servingLiteUserDocument() {
+    const cold = buildRegisteredUserColdStartEmbedding(userInput);
+    const twoTowerEmbedding = [...cold];
+    twoTowerEmbedding[0] += 0.01;
+    return {
+        _id: 'serving-lite-vector-1',
+        userId: userInput.id,
+        twoTowerEmbedding,
+        phoenixEmbedding: cold,
+        modelVersion: '2026-04-29_kuai_lite256',
+        artifactVersion: '2026-04-29_kuai_lite256',
+        modelProfile: 'serving-lite',
+        embeddingDim: 256,
+    };
+}
+
 function mongoSource(documents: unknown[]) {
     const query = {
         sort: vi.fn().mockReturnThis(),
@@ -496,6 +725,7 @@ async function transactionFixture(options: {
     secondMatchedCount?: number;
     transactionError?: Error;
     afterLastStagedWrite?: () => void;
+    servingLite?: boolean;
 } = {}) {
     const order: string[] = [];
     const visibleWrites: string[] = [];
@@ -511,13 +741,16 @@ async function transactionFixture(options: {
     const post = postDocument();
     const documents = {
         user_feature_vectors: {
-            'user-vector-1': {
+            'user-vector-1': options.servingLite ? {
+                ...servingLiteUserDocument(),
+                _id: 'user-vector-1',
+            } : {
                 _id: 'user-vector-1',
                 userId: user.id,
                 twoTowerEmbedding: [...cold],
-            phoenixEmbedding: [...cold],
-            phoenixEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
-            embeddingContract: { legacy: 'v1' },
+                phoenixEmbedding: [...cold],
+                phoenixEmbeddingContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+                embeddingContract: { legacy: 'v1' },
             },
             'user-vector-2': {
                 _id: 'user-vector-2',
@@ -529,7 +762,10 @@ async function transactionFixture(options: {
             },
         },
         post_feature_snapshots: {
-            'post-1': { ...post },
+            'post-1': options.servingLite ? {
+                ...post,
+                embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+            } : { ...post },
         },
     };
     const userSource = mongoSource(Object.values(documents.user_feature_vectors));

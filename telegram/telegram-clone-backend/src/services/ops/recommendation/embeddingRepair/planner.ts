@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { isDeepStrictEqual } from 'util';
 
 import User from '../../../../models/User';
 import PostFeatureSnapshot from '../../../../models/PostFeatureSnapshot';
@@ -9,6 +10,7 @@ import {
     type EmbeddingContract,
 } from '../../../recommendation/contracts/embeddingContract';
 import {
+    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
     classifyEmbeddingContractEvidence,
     quarantineDigestFromChecksums,
     vectorChecksum,
@@ -58,6 +60,10 @@ type UserEvidenceDocument = Record<string, unknown> & {
     phoenixEmbedding?: unknown;
     phoenixEmbeddingContract?: EmbeddingContract | null;
     embeddingContract?: Partial<EmbeddingContract> | null;
+    modelVersion?: unknown;
+    artifactVersion?: unknown;
+    modelProfile?: unknown;
+    embeddingDim?: unknown;
 };
 
 type PostEvidenceDocument = Record<string, unknown> & BuildDensePostEmbeddingInput & {
@@ -128,11 +134,16 @@ export async function planEmbeddingContractRepair(
         const replayInputDigest = userInput
             ? canonicalDigest(canonicalRegisteredUserColdStartInput(userInput))
             : MISSING_REPLAY_INPUT_DIGEST;
+        const plannedQuarantineReason = shouldPlanServingLiteQuarantine(document, replayVector)
+            ? LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON
+            : null;
+        const effectiveQuarantineReason = plannedQuarantineReason
+            ?? document.twoTowerEmbeddingQuarantineReason;
         const twoTower = analyzeUserSlot({
             document,
             field: 'twoTowerEmbedding',
             contractField: 'twoTowerEmbeddingContract',
-            quarantineReason: document.twoTowerEmbeddingQuarantineReason,
+            quarantineReason: effectiveQuarantineReason,
             replayVector,
         });
         const phoenix = analyzeUserSlot({
@@ -164,11 +175,14 @@ export async function planEmbeddingContractRepair(
             quarantineEntries.push({
                 userId,
                 vectorChecksum: twoTower.expectedVector.vectorChecksum,
-                reason: String(document.twoTowerEmbeddingQuarantineReason),
+                reason: String(effectiveQuarantineReason),
             });
         }
 
         const set: Record<string, unknown> = {};
+        if (plannedQuarantineReason) {
+            set.twoTowerEmbeddingQuarantineReason = plannedQuarantineReason;
+        }
         if (twoTower.repairContract) {
             set.twoTowerEmbeddingContract = { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT };
         }
@@ -208,7 +222,6 @@ export async function planEmbeddingContractRepair(
         const replayMatched = vectorsEqual(document.denseEmbedding, replayVector);
         const classification = classifyEmbeddingContractEvidence({
             vector: document.denseEmbedding,
-            perVectorContract: document.embeddingContract,
             replayContract: HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
             replayMatched,
         });
@@ -230,7 +243,7 @@ export async function planEmbeddingContractRepair(
         });
         const repairContract = replayMatched
             && classification === 'verified_local_fallback'
-            && (document.embeddingContract === undefined || document.embeddingContract === null);
+            && !isDeepStrictEqual(document.embeddingContract, HEURISTIC_POST_HASH_EMBEDDING_CONTRACT);
         if (!repairContract || !expectedVector) continue;
 
         const currentMetadata = captureMetadata(document, POST_METADATA_FIELDS);
@@ -347,6 +360,25 @@ function analyzeUserSlot({
     };
 }
 
+function shouldPlanServingLiteQuarantine(
+    document: UserEvidenceDocument,
+    replayVector: readonly number[] | null,
+): boolean {
+    return replayVector !== null
+        && document.modelVersion === '2026-04-29_kuai_lite256'
+        && document.artifactVersion === '2026-04-29_kuai_lite256'
+        && document.modelProfile === 'serving-lite'
+        && document.embeddingDim === 256
+        && Array.isArray(document.twoTowerEmbedding)
+        && document.twoTowerEmbedding.length === 256
+        && (document.twoTowerEmbeddingContract === undefined
+            || document.twoTowerEmbeddingContract === null)
+        && (document.twoTowerEmbeddingQuarantineReason === undefined
+            || document.twoTowerEmbeddingQuarantineReason === null)
+        && !vectorsEqual(document.twoTowerEmbedding, replayVector)
+        && vectorsEqual(document.phoenixEmbedding, replayVector);
+}
+
 function buildExpectedVector(
     field: ExpectedVectorArtifact['field'],
     vector: unknown,
@@ -412,6 +444,10 @@ const USER_PROJECTION = [
     'phoenixEmbedding',
     'phoenixEmbeddingContract',
     'embeddingContract',
+    'modelVersion',
+    'artifactVersion',
+    'modelProfile',
+    'embeddingDim',
 ].join(' ');
 
 const POST_PROJECTION = [

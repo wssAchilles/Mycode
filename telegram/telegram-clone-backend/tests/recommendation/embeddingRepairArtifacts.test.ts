@@ -28,6 +28,9 @@ import {
     HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
     REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
 } from '../../src/services/recommendation/contracts/embeddingContract';
+import {
+    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+} from '../../src/services/recommendation/contracts/embeddingContractEvidence';
 
 const invalidAuthorizationChronology = [
     ['proposal approval before writer pause', 'proposal.approval.json', 'approvedAt', '2026-07-12T22:59:00.000Z'],
@@ -122,9 +125,73 @@ describe('embedding repair artifacts', () => {
                 post: { matched: 1, mismatched: 0 },
             },
         }, 'embedding_repair_replay_not_authorizable'],
+        ['missing user replay input', {
+            replay: {
+                user: { matched: 1, mismatched: 0, inputMissing: 1 },
+                post: { matched: 1, mismatched: 0 },
+            },
+        }, 'embedding_repair_replay_not_authorizable'],
+        ['post replay mismatch', {
+            replay: {
+                user: { matched: 2, mismatched: 0, inputMissing: 0 },
+                post: { matched: 0, mismatched: 1 },
+            },
+        }, 'embedding_repair_replay_not_authorizable'],
     ])('rejects %s for apply', (_case, patch, message) => {
         const proposal = withDigest({ ...proposalInput(), ...patch } as EmbeddingContractRepairProposalInput);
         expect(() => validateEmbeddingRepairProposal(proposal, { forApply: true })).toThrow(message);
+    });
+
+    it('authorizes only user replay mismatches covered by user-vector quarantine evidence', () => {
+        const allowed = proposalInput();
+        allowed.evidence = {
+            aggregate: counts({ verified_local_fallback: 2, quarantined: 1 }),
+            cohorts: {
+                userVectors: counts({ verified_local_fallback: 1, quarantined: 1 }),
+                postFeatureSnapshots: counts({ verified_local_fallback: 1 }),
+            },
+        };
+        allowed.replay.user = { matched: 1, mismatched: 1, inputMissing: 0 };
+        allowed.operations[1].expectedVectors[1].classification = 'quarantined';
+        allowed.operations[1].patch = {
+            set: {
+                twoTowerEmbeddingQuarantineReason:
+                    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+            },
+            unset: [],
+        };
+        allowed.operations[1].expectedPostApplyMetadata = {
+            ...allowed.operations[1].currentMetadata,
+            twoTowerEmbeddingQuarantineReason:
+                LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+        };
+        allowed.operations[1].restorePatch = {
+            set: {},
+            unset: ['twoTowerEmbeddingQuarantineReason'],
+        };
+
+        expect(() => validateEmbeddingRepairProposal(withDigest(allowed), { forApply: true }))
+            .not.toThrow();
+
+        const excessMismatch = structuredClone(allowed);
+        excessMismatch.replay.user = { matched: 0, mismatched: 2, inputMissing: 0 };
+        expect(() => validateEmbeddingRepairProposal(
+            withDigest(excessMismatch),
+            { forApply: true },
+        )).toThrow('embedding_repair_replay_not_authorizable');
+
+        const postQuarantineSubstitution = structuredClone(allowed);
+        postQuarantineSubstitution.evidence = {
+            aggregate: counts({ verified_local_fallback: 2, quarantined: 1 }),
+            cohorts: {
+                userVectors: counts({ verified_local_fallback: 2 }),
+                postFeatureSnapshots: counts({ quarantined: 1 }),
+            },
+        };
+        expect(() => validateEmbeddingRepairProposal(
+            withDigest(postQuarantineSubstitution),
+            { forApply: true },
+        )).toThrow('embedding_repair_replay_not_authorizable');
     });
 
     it('binds a canonical exact-inverse backup to proposal, quarantine, slots, replay, and metadata', () => {
@@ -400,28 +467,81 @@ describe('embedding repair metadata policy', () => {
             .toThrow('embedding_repair_contract_not_allowed:twoTowerEmbeddingContract');
     });
 
-    it('forbids forward quarantine classification writes but permits restore-direction parsing', () => {
-        const operation = structuredClone(proposalInput().operations[1]);
-        operation.patch = {
-            set: { twoTowerEmbeddingQuarantineReason: 'manual-review' },
+    it('allows only the fixed quarantine reason as a forward metadata repair', () => {
+        const approved = structuredClone(proposalInput().operations[1]);
+        approved.patch = {
+            set: {
+                twoTowerEmbeddingQuarantineReason:
+                    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+            },
             unset: [],
         };
-        operation.expectedPostApplyMetadata = {
-            ...operation.currentMetadata,
-            twoTowerEmbeddingQuarantineReason: 'manual-review',
+        approved.expectedPostApplyMetadata = {
+            ...approved.currentMetadata,
+            twoTowerEmbeddingQuarantineReason:
+                LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
         };
-        operation.restorePatch = {
+        approved.restorePatch = {
             set: {},
             unset: ['twoTowerEmbeddingQuarantineReason'],
         };
+        expect(() => assertMetadataOnlyOperations([approved])).not.toThrow();
 
-        expect(() => assertMetadataOnlyOperations([operation]))
+        const unsupported = structuredClone(approved);
+        unsupported.patch = {
+            set: { twoTowerEmbeddingQuarantineReason: 'manual-review' },
+            unset: [],
+        };
+        unsupported.expectedPostApplyMetadata = {
+            ...unsupported.currentMetadata,
+            twoTowerEmbeddingQuarantineReason: 'manual-review',
+        };
+
+        expect(() => assertMetadataOnlyOperations([unsupported]))
             .toThrow('embedding_repair_quarantine_forward_write_forbidden');
+        expect(() => assertMetadataPatch('user_feature_vectors', {
+            set: {},
+            unset: ['twoTowerEmbeddingQuarantineReason'],
+        })).toThrow('embedding_repair_quarantine_forward_write_forbidden');
+    });
+
+    it('restores a captured legacy post contract without treating it as a new forward contract', () => {
+        const operation = structuredClone(proposalInput().operations[0]);
+        const legacy = {
+            ...HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
+            producer: 'legacy-post-writer',
+        };
+        operation.currentMetadata = { embeddingContract: legacy };
+        operation.restorePatch = {
+            set: { embeddingContract: legacy },
+            unset: [],
+        };
+
+        expect(() => assertMetadataOnlyOperations([operation])).not.toThrow();
+    });
+
+    it.each([
+        [
+            'vector field',
+            { set: { denseEmbedding: [0.1] }, unset: [] },
+            'embedding_repair_vector_field_forbidden',
+        ],
+        [
+            'dotted field',
+            { set: { 'embeddingContract.producer': 'legacy' }, unset: [] },
+            'embedding_repair_metadata_dotted_path_forbidden',
+        ],
+        [
+            'unknown field',
+            { set: { modelVersion: 'legacy' }, unset: [] },
+            'embedding_repair_metadata_field_forbidden',
+        ],
+    ])('rejects a restore patch containing a %s', (_case, patch, message) => {
         expect(() => assertMetadataPatch(
-            'user_feature_vectors',
-            { set: { twoTowerEmbeddingQuarantineReason: 'manual-review' }, unset: [] },
+            'post_feature_snapshots',
+            patch,
             { direction: 'restore' },
-        )).not.toThrow();
+        )).toThrow(message);
     });
 });
 

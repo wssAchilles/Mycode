@@ -10,6 +10,7 @@ import {
     type EmbeddingContract,
 } from '../../../recommendation/contracts/embeddingContract';
 import {
+    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
     classifyEmbeddingContractEvidence,
     vectorChecksum,
 } from '../../../recommendation/contracts/embeddingContractEvidence';
@@ -301,6 +302,11 @@ async function assertOperationCurrent(
         ? operation.expectedPostApplyMetadata
         : (operation as EmbeddingMetadataOperation).currentMetadata;
     if (rollback) assertMetadataMatches(operation.collection, document, expectedMetadata);
+    const classificationDocument = buildClassificationDocument(
+        operation.collection,
+        document,
+        operation.expectedPostApplyMetadata,
+    );
 
     let userInput: RegisteredUserColdStartInput | null = null;
     let replayVector: readonly number[];
@@ -327,23 +333,46 @@ async function assertOperationCurrent(
             throw rejected(`embedding_repair_vector_drift:${operation.collection}:${operation.id}:${expected.field}`);
         }
         const replayMatched = vectorsEqual(vector, replayVector);
-        if (!replayMatched) {
-            throw rejected(`embedding_repair_replay_drift:${operation.collection}:${operation.id}:${expected.field}`);
-        }
         const classification = operation.collection === 'user_feature_vectors'
-            ? classifyUserVector(document, expected.field, replayMatched)
+            ? classifyUserVector(classificationDocument, expected.field, replayMatched)
             : classifyEmbeddingContractEvidence({
                 vector,
-                perVectorContract: document.embeddingContract as EmbeddingContract | null | undefined,
+                perVectorContract: classificationDocument.embeddingContract as EmbeddingContract | null | undefined,
                 replayContract: HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
                 replayMatched,
             });
+        const approvedQuarantineMismatch = !replayMatched
+            && operation.collection === 'user_feature_vectors'
+            && expected.field === 'twoTowerEmbedding'
+            && expected.classification === 'quarantined'
+            && classification === 'quarantined'
+            && (operation.expectedPostApplyMetadata.twoTowerEmbeddingContract === undefined
+                || operation.expectedPostApplyMetadata.twoTowerEmbeddingContract === null)
+            && operation.expectedPostApplyMetadata.twoTowerEmbeddingQuarantineReason
+                === LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON;
+        if (!replayMatched && !approvedQuarantineMismatch) {
+            throw rejected(`embedding_repair_replay_drift:${operation.collection}:${operation.id}:${expected.field}`);
+        }
         if (classification !== expected.classification) {
             throw rejected(`embedding_repair_classification_drift:${operation.collection}:${operation.id}:${expected.field}`);
         }
     }
 
     if (!rollback) assertMetadataMatches(operation.collection, document, expectedMetadata);
+}
+
+function buildClassificationDocument(
+    collection: EmbeddingRepairCollection,
+    document: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+): Record<string, unknown> {
+    const result = { ...document };
+    const fields = collection === 'user_feature_vectors'
+        ? USER_METADATA_FIELDS
+        : POST_METADATA_FIELDS;
+    for (const field of fields) delete result[field];
+    Object.assign(result, structuredClone(metadata));
+    return result;
 }
 
 function classifyUserVector(

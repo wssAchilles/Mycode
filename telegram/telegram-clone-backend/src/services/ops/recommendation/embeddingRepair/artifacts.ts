@@ -422,7 +422,7 @@ function assertProposalAuthorizable(proposal: EmbeddingContractRepairProposal): 
     if (aggregate.semantic_ready > 0 || aggregate.invalid > 0 || aggregate.unclassified > 0) {
         throw new EmbeddingRepairRejectedError('embedding_repair_classification_not_authorizable');
     }
-    if (proposal.replay.user.mismatched > 0
+    if (proposal.replay.user.mismatched > proposal.evidence.cohorts.userVectors.quarantined
         || proposal.replay.user.inputMissing > 0
         || proposal.replay.post.mismatched > 0) {
         throw new EmbeddingRepairRejectedError('embedding_repair_replay_not_authorizable');

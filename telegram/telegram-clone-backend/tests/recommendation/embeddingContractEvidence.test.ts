@@ -201,12 +201,13 @@ describe('embedding contract evidence', () => {
     it('fails closed for unsupported quarantine and replay evidence', () => {
         const vector = vectorFor(REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT);
         const invalidInputs = [
-            { vector, quarantineReason: 'unknown_reason' },
+            { vector, quarantineReason: 'unknown_reason', replayMatched: false },
             { vector, quarantineReason: '' },
             {
                 vector,
                 quarantineReason: LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
                 perVectorContract: REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
+                replayMatched: false,
             },
             {
                 vector: undefined,
@@ -215,6 +216,7 @@ describe('embedding contract evidence', () => {
             {
                 vector: [Number.NaN],
                 quarantineReason: LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+                replayMatched: false,
             },
             {
                 vector,
@@ -226,6 +228,11 @@ describe('embedding contract evidence', () => {
         for (const input of invalidInputs) {
             expect(classifyEmbeddingContractEvidence(input)).toBe('invalid');
         }
+        expect(classifyEmbeddingContractEvidence({
+            vector,
+            quarantineReason: LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+            replayMatched: false,
+        })).toBe('quarantined');
         expect(classifyEmbeddingContractEvidence({
             vector,
             legacySharedContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,

@@ -4,7 +4,10 @@ import {
     HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
     REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT,
 } from '../../../recommendation/contracts/embeddingContract';
-import { isCompleteEmbeddingContract } from '../../../recommendation/contracts/embeddingContractEvidence';
+import {
+    LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON,
+    isCompleteEmbeddingContract,
+} from '../../../recommendation/contracts/embeddingContractEvidence';
 import type {
     EmbeddingMetadataOperation,
     EmbeddingRepairCollection,
@@ -74,7 +77,12 @@ export function assertMetadataPatch(
     }
 
     for (const field of [...setFields, ...unsetFields]) {
-        if (options.direction !== 'restore' && field.endsWith('QuarantineReason')) {
+        if (options.direction !== 'restore'
+            && field.endsWith('QuarantineReason')
+            && (collection !== 'user_feature_vectors'
+                || field !== 'twoTowerEmbeddingQuarantineReason'
+                || !hasOwn(patch.set, field)
+                || patch.set[field] !== LEGACY_SERVING_LITE_MIXED_LINEAGE_QUARANTINE_REASON)) {
             throw new Error('embedding_repair_quarantine_forward_write_forbidden');
         }
         assertMetadataField(collection, field, true);
@@ -83,7 +91,9 @@ export function assertMetadataPatch(
         if (unsetFields.includes(field)) {
             throw new Error(`embedding_repair_metadata_patch_overlap:${field}`);
         }
-        assertMetadataValue(collection, field, patch.set[field]);
+        if (options.direction !== 'restore') {
+            assertMetadataValue(collection, field, patch.set[field]);
+        }
     }
 }
 

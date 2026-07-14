@@ -46,7 +46,7 @@ const KNOWN_LOCAL_CONTRACTS = [
 export function classifyEmbeddingContractEvidence(
     input: EmbeddingContractEvidenceInput,
 ): EmbeddingEvidenceStatus {
-    if (input.replayMatched === false || !isFiniteVector(input.vector)) {
+    if (!isFiniteVector(input.vector)) {
         return 'invalid';
     }
 
@@ -56,6 +56,8 @@ export function classifyEmbeddingContractEvidence(
             ? 'quarantined'
             : 'invalid';
     }
+
+    if (input.replayMatched === false) return 'invalid';
 
     if (input.perVectorContract !== undefined && input.perVectorContract !== null) {
         if (!isCompleteEmbeddingContract(input.perVectorContract)
