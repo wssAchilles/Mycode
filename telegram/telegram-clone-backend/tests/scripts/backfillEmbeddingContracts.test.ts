@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     connectWriter: vi.fn(),
     disconnectMongo: vi.fn(),
     plan: vi.fn(),
+    sequelize: { close: vi.fn() },
 }));
 
 vi.mock('../../src/services/ops/recommendation/auditMongoAccess', () => ({
@@ -14,6 +15,14 @@ vi.mock('../../src/services/ops/recommendation/auditMongoAccess', () => ({
 vi.mock('../../src/config/db', () => ({
     disconnectMongoDB: mocks.disconnectMongo,
 }));
+
+vi.mock('../../src/config/sequelize', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../src/config/sequelize')>();
+    return {
+        ...actual,
+        sequelize: Object.assign(actual.sequelize, { close: mocks.sequelize.close }),
+    };
+});
 
 vi.mock('../../src/services/ops/recommendation/embeddingRepair/planner', () => ({
     planEmbeddingContractRepair: mocks.plan,
@@ -96,6 +105,28 @@ describe('embedding contract repair CLI arguments', () => {
 
 describe('embedding contract repair CLI boundary', () => {
     beforeEach(() => vi.clearAllMocks());
+
+    it('closes MongoDB and Sequelize connections', async () => {
+        const module = await import('../../src/scripts/backfillEmbeddingContracts');
+
+        await module.closeEmbeddingRepairConnections();
+
+        expect(mocks.disconnectMongo).toHaveBeenCalledOnce();
+        expect(mocks.sequelize.close).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        ['MongoDB', () => mocks.disconnectMongo],
+        ['Sequelize', () => mocks.sequelize.close],
+    ])('settles cleanup when %s disconnect rejects', async (_name, getRejectingDisconnect) => {
+        getRejectingDisconnect().mockRejectedValueOnce(new Error('close failed'));
+        const module = await import('../../src/scripts/backfillEmbeddingContracts');
+
+        await expect(module.closeEmbeddingRepairConnections()).resolves.toBeUndefined();
+
+        expect(mocks.disconnectMongo).toHaveBeenCalledOnce();
+        expect(mocks.sequelize.close).toHaveBeenCalledOnce();
+    });
 
     it('is import-safe and uses the read-only audit connection for a full dry-run', async () => {
         const proposal = { schemaVersion: 1, mode: 'dry-run', proposalDigest: 'a'.repeat(64) };

@@ -1,4 +1,5 @@
 import { disconnectMongoDB } from '../config/db';
+import { sequelize } from '../config/sequelize';
 import {
     connectRecommendationAuditMongo,
 } from '../services/ops/recommendation/auditMongoAccess';
@@ -53,6 +54,10 @@ export {
 export const EMBEDDING_REPAIR_EXIT_SUCCESS = 0 as const;
 export const EMBEDDING_REPAIR_EXIT_REJECTED = 2 as const;
 export const EMBEDDING_REPAIR_EXIT_PROGRAM_FAILURE = 3 as const;
+
+export async function closeEmbeddingRepairConnections(): Promise<void> {
+    await Promise.allSettled([disconnectMongoDB(), sequelize.close()]);
+}
 
 type EmbeddingRepairCliExitCode =
     | typeof EMBEDDING_REPAIR_EXIT_SUCCESS
@@ -279,5 +284,5 @@ if (require.main === module) {
         .then((exitCode) => {
             process.exitCode = exitCode;
         })
-        .finally(disconnectMongoDB);
+        .finally(closeEmbeddingRepairConnections);
 }
