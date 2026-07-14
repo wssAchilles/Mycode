@@ -52,8 +52,9 @@
 - [x] Task 1：Known Contracts And Evidence Classification 已完成并冻结现有验收状态。
 - [x] Task 2：Writer Boundary And Sparse-Update Protection 已完成并冻结现有验收状态。
 - [x] Task 3：Non-Destructive Cold-Start Creation And Repair 已完成并冻结现有验收状态。
-- [ ] Task 4：Serving, Export And Similarity Boundaries 是下一执行入口。
-- [ ] Task 5-8：按下列 RED/GREEN 顺序执行；不得跳过 task review。
+- [x] Task 4：Serving, Export And Similarity Boundaries 已完成并通过 task review。
+- [x] Task 5-7：本地 audit、repair、release-gate 实现已完成并通过 task review。
+- [ ] Task 8：等待 operator-issued 只读 Mongo URI 与证据文件后刷新确定性检查并生成授权包。
 - [ ] Task 9：仅在独立生产授权后执行，当前不属于已授权工作。
 
 ## Task 1: Known Contracts And Evidence Classification
