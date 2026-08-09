@@ -7,6 +7,23 @@
 - Do not spend large amounts of implementation budget on low-value, repetitive, or coverage-driven test files.
 - When tradeoffs are required, prefer advancing the industrial-grade project skeleton and multi-language core path over adding more non-critical tests.
 
+## Algorithm Research Gate
+
+Apply this gate before planning or implementing changes to scorer, ranker, retrieval, policy, OPE, statistical inference, or other algorithm semantics. Research informs design but never replaces reading the repository.
+
+1. Use codebase-memory first to confirm the current implementation, call graph, data contracts, canonical owner, default switches, fallback behavior, observability, and production boundaries.
+2. Derive 3-5 explicit research questions from concrete code problems before searching for evidence. Do not choose an algorithm first and then search only for supporting material.
+3. Prefer foundational and recent top-tier papers, public large-scale industrial practice, official technical reports, mature open-source implementations, and reproducible experiments.
+4. For every source, record the exact title, authors, year, venue or institution, DOI or official link, and reading status (`full_text`, `abstract_or_public_description`, or `unverified`). Never invent papers, experimental results, online gains, or adoption claims.
+5. Produce a concise evidence matrix covering the problem and core idea, required data/PIT/propensity/support assumptions, known limitations or failure cases, corresponding repository files and contracts, and the reason to adopt, adapt, or reject it.
+6. Analyze at least one competing approach and state at least one reason not to adopt a method. Avoid confirmation bias.
+7. Before adoption, check repository-specific feasibility: data scale and availability; PIT and immutable evidence; propensity and support; feature, label, and qHat availability; latency, CPU, memory, and storage cost; Rust/Node/C++/Go ownership; fallback, observability, rollback, and production authorization.
+8. Convert accepted ideas into the smallest verifiable change: canonical owner, versioned contracts, offline/shadow validation, focused fixtures/baselines/ablations/tests, and explicit promotion, rollback, and fail-closed gates.
+9. Report current code facts, research conclusions, accepted and rejected ideas, required plan corrections, and a `GO`, `CONDITIONAL GO`, or `NO-GO` verdict before implementation. Do not implement algorithm changes until the verdict and executable scope are established.
+10. Keep research to roughly 20%-30% of the phase effort. Paper results are design evidence only; repository fixtures, baselines, ablations, performance tests, and shadow evidence must establish project results.
+
+External research may be skipped for pure formatting, naming, mechanical migrations, narrow fixes governed by an existing contract, or tests/build repairs that do not change algorithm semantics. State the reason in one sentence when skipping it.
+
 ## Global commit message rules
 
 For every repository and every git commit, always follow these rules unless the user explicitly asks otherwise.
@@ -36,6 +53,12 @@ type(scope): 中文标题
 - Do not put multiple facts into a bloated title.
 - Do not use literal `\n` as fake line breaks.
 - Do not write the whole body as one long line.
+
+### Incremental phase commits
+
+- 完成每一小块可独立验证的任务之后顺手进行 commit 提交，不要在工作区中留下由当前阶段产生的大片未提交内容。
+- 阶段任务默认由 Codex 在 focused verification 通过后自行分块提交，无需等待额外批准；用户明确禁止提交时除外。
+- 每次只暂存当前小块涉及的文件，保留工作树中既有或无关改动；不得因此自动 push、创建 PR 或提交他人改动。
 
 ## Anti-Flat Architecture Rule
 
