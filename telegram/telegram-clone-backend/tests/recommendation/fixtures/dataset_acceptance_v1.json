@@ -1,0 +1,27 @@
+{
+  "configVersion": "dataset_acceptance_v1",
+  "approvedContentDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "minValidQueries": 2,
+  "minPositiveLabels": 1,
+  "minNegativeLabels": 1,
+  "minPitCoverage": 0.6,
+  "identity": {
+    "servingIdNamespace": "mongo_object_id",
+    "modelIdNamespace": "recommendation_model_post_id",
+    "pipelineVersion": "candidate-pipeline-v1",
+    "graphVersion": "graph-contract-v1",
+    "model": {
+      "id": "recommendation-two-tower",
+      "version": "two-tower-v1"
+    },
+    "artifact": {
+      "id": "recommendation-training-dataset",
+      "version": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "index": {
+      "namespace": "recommendation-post-ann",
+      "id": "post-ann",
+      "version": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  }
+}
