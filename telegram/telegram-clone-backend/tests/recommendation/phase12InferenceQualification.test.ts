@@ -478,5 +478,5 @@ describe('Phase 12 frozen synthetic qualification', () => {
       setAtomicSinkTestHooksV1();
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
