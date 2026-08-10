@@ -182,13 +182,14 @@ sum_(j=0..k-1) O((n-j) log(n-j))
 
 ## 仓库映射
 
-以下事实先由 codebase-memory 图索引确认，再读取具体 symbol/source；图项目名为 `telegram`。
+以下事实先由 codebase-memory 图索引确认，再读取具体 symbol/source；图项目名为
+`telegram-phase24-current`。
 
 | 责任 | 当前事实 | 文件/符号 | Phase 25 含义 |
 |---|---|---|---|
 | 概率 canonical owner | `compute_full_distribution` 对 logits 做 max-shift、temperature、`exp`，再混合 deterministic-top 与 PL；任何空支持、非有限数、权重下溢或概率质量误差均 fail-closed | `telegram-rust-workspace/crates/telegram-randomized-policy-primitives/src/epsilon_plackett_luce.rs:28` | 保持 canonical；不要在 Gumbel 后端复制另一套概率语义 |
 | 无放回 simulation owner | 每 slot 排序 remaining、重算分布、CDF 抽样、记录 selected conditional、remove selected；合同标记 `ConditionalOnPriorSlatePrefixV1`、`without_replacement=true`，输出保持 `servable=false` | `telegram-rust-workspace/crates/telegram-rust-recommendation/src/serving/policy/randomized_slate/mod.rs:72` | 当前 simulation evidence 是逐 slot conditional，不是直接 joint；这正是应保留的语义，但不能据此声称已进入生产服务路径 |
-| canonical owner 调用边界 | 图 inbound trace 显示共享原语同时被线上 `probabilities -> simulate` 与离线 `build_decision_records -> build_target_distribution...` 使用 | `compute_full_distribution` inbound call graph | 改原语会同时影响 behavior simulation 与 offline target distribution，需共同版本化 |
+| canonical owner 调用边界 | 图 inbound trace 显示共享原语同时被 private/test-only `probabilities -> simulate` 与离线 `build_decision_records -> build_target_distribution...` 使用；`simulate` 没有非测试 inbound caller | `compute_full_distribution` 与 `simulate` inbound call graph | 改原语会同时影响 behavior simulation 与 offline target distribution，需共同版本化；不能据此声称 production wiring |
 | decision log 最低校验 | randomized `selectionProbability` 仅要求 finite 且在 `(0,1]` | `telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/decision_log.rs:340` | 不能把现有校验声称为 propensity floor；需另有 evidence contract |
 | OPE prefix/joint | 按 decision/position 排序，累加 `log(target)-log(behavior)`；检查 log overflow/underflow，派生 prefix/weight 并计算 clipping | `telegram-clone-backend/src/services/recommendation/ope/v2/evaluate.ts:120` | 与本文推荐一致；保留 log-space 与 blocker，不要只传浮点 joint |
 | 推断适用性 | 要求 absolute continuity、`behaviorPropensityFloor in (0,1]` 和正且有限的 `maximumImportanceWeight`，否则不适用 | `telegram-clone-backend/src/services/recommendation/ope/inference/qualification/evaluate.ts:149` | Gumbel 后端不能绕过这些门禁 |
@@ -250,7 +251,7 @@ sum_(j=0..k-1) O((n-j) log(n-j))
 ### S5. Slate OPE 原始论文
 
 - **准确标题：** *Off-policy evaluation for slate recommendation*
-- **作者：** Adith Swaminathan, Akshay Krishnamurthy, Alekh Agarwal, Miroslav Dudik, John Langford, Damien Jose, Imed Zitouni
+- **作者：** Adith Swaminathan, Akshay Krishnamurthy, Alekh Agarwal, Miroslav Dudík, John Langford, Damien Jose, Imed Zitouni
 - **年份：** 2017
 - **Venue：** Advances in Neural Information Processing Systems 30 (NIPS 2017)
 - **DOI：** 未分配/官方 proceedings 页面未列 DOI
