@@ -62,7 +62,7 @@ func BuildControlPlane(cfg config.Config, snapshot summary.Snapshot) contracts.C
 		Platform: map[string]any{
 			"streamKey":                 cfg.PlatformStreamKey,
 			"replayStreamKey":           cfg.PlatformReplayStreamKey,
-			"replayScanCount":           cfg.PlatformReplayScanCount,
+			"replayWorkerEnabled":       cfg.PlatformReplayWorkerEnabled,
 			"syncWakeExecutionMode":     cfg.SyncWakeExecutionMode,
 			"presenceExecutionMode":     cfg.PresenceExecutionMode,
 			"notificationExecutionMode": cfg.NotificationExecutionMode,

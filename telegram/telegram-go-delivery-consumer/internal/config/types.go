@@ -11,6 +11,7 @@ type Config struct {
 	PlatformStreamKey            string
 	PlatformDLQStreamKey         string
 	PlatformReplayStreamKey      string
+	PlatformReplayWorkerEnabled  bool
 	ConsumerGroup                string
 	ConsumerName                 string
 	ExecutionMode                string
@@ -55,7 +56,6 @@ type Config struct {
 	MongoEnsureIndexes           bool
 	WakePublishMode              string
 	WakeBatchSize                int
-	PlatformReplayScanCount      int64
 	PprofBindAddr                string
 	DryRun                       bool
 	InternalToken                string

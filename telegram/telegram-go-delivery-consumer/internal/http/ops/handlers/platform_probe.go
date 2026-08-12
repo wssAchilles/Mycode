@@ -17,7 +17,7 @@ type ReplaySummaryBuilder interface {
 
 func PlatformProbe(cfg config.Config, state *summary.Summary, replay ReplaySummaryBuilder) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if cfg.InternalToken != "" && r.Header.Get("X-Internal-Token") != cfg.InternalToken {
+		if cfg.InternalToken == "" || r.Header.Get("X-Internal-Token") != cfg.InternalToken {
 			writeJSON(w, stdhttp.StatusForbidden, map[string]any{"error": "forbidden"})
 			return
 		}
@@ -30,11 +30,11 @@ func PlatformProbe(cfg config.Config, state *summary.Summary, replay ReplaySumma
 
 		snapshot := state.Snapshot()
 		var replayPayload any = map[string]any{
+			"enabled":   cfg.PlatformReplayWorkerEnabled,
 			"available": false,
 			"streamKey": cfg.PlatformReplayStreamKey,
-			"error":     "platform_replay_operator_unavailable",
 		}
-		if replay != nil {
+		if cfg.PlatformReplayWorkerEnabled && replay != nil {
 			payload, err := replay.BuildSummary(r.Context())
 			if err != nil {
 				writeJSON(w, stdhttp.StatusInternalServerError, map[string]any{

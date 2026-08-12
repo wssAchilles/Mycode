@@ -29,7 +29,6 @@ const (
 	defaultReservationMode          = ReservationModeLegacyPerUser
 	defaultReservationBatchSize     = 1
 	defaultMongoInQueryChunkSize    = 1000
-	defaultPlatformReplayScanCount  = 5000
 	defaultWakePubSubChannel        = "sync:update:wake:v1"
 	defaultWakePublishMode          = "single"
 	defaultWakeBatchSize            = 100
