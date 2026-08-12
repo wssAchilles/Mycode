@@ -57,19 +57,19 @@ const SYNTHETIC_ROOT_PREIMAGE = Object.freeze({
   scope: 'synthetic_fixture' as const,
   receiptSchema: 'target_distribution_stream_verification_receipt_v2' as const,
   verifierBuildFingerprintSha256:
-    'a8a15191a185a2f485906f3d9ddc378039720487d036f4fb2e29c4092b5fcb35',
+    '0fda8361ee797ff8fd1e3318e7e62e4191904abf3f1c78fe31e0ed3b46596519',
   expectedReceiptSha256:
-    'ed54b74127a8be8c83d5ac48a908f69ef8a37df0691c15346a3c4e9dac772148',
+    'a736f7df303c6b2b4f29805ac6f12a319169d3aed44ed266ef10accb597bd02e',
   expectedReceiptRawSha256:
-    '1e5022f8f151801ede37c4b353b2603d019e2f1df938e166c71121386050ee16',
+    '496bc5649cc86a6c79962375cfdd6ad1537711a15b49bd066800463ee9fc67a5',
   sourceBundleSha256:
-    'ddc9db1cf053a31baa33e87457266e4cd6cf19c2be6b37964bf80246f32baae9',
+    'ec4ce1375211a7993efddade42dab3f2f582b6920bfebcc5ac27f98905484636',
   validFrom: '2026-07-19T00:00:00.000Z',
   validThrough: '2027-07-19T00:00:00.000Z',
 });
 const SYNTHETIC_ROOT = Object.freeze(trustRootSchema.parse({
   ...SYNTHETIC_ROOT_PREIMAGE,
-  rootDigest: 'dbe75b6de7b192dad5802d88e2a0269422a47726a7d9614d4733f436e4eb29af',
+  rootDigest: '963f42326e676721ed577914135d52985041364f0b7700d2182a5b5b56d524a2',
 }));
 const PHASE16_MULTI_DECISION_SYNTHETIC_ROOT_PREIMAGE = Object.freeze({
   contractVersion: 'rust_target_verifier_trust_root_v1' as const,
