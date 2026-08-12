@@ -1,11 +1,24 @@
 import type {
   GraphKernelAuthorCandidate,
+  GraphKernelBatchQueryDiagnostics,
+  GraphKernelBatchQueryResult,
+  GraphKernelBatchResponse,
   GraphKernelBridgeCandidate,
   GraphKernelCandidateResponse,
   GraphKernelDiagnostics,
   GraphKernelNeighborCandidate,
   GraphKernelOverlapCandidate,
 } from './contracts';
+
+export type GraphKernelBatchMode = 'disabled' | 'shadow_compare';
+
+export interface GraphKernelBatchRequest {
+  userId: string;
+  directLimit: number;
+  bridgeLimit: number;
+  maxDepth: number;
+  excludeUserIds?: string[];
+}
 
 export interface GraphKernelAuthorCandidateRequest {
   userId: string;
@@ -80,6 +93,13 @@ function readOptionalBoolean(source: Record<string, unknown>, key: string): bool
   return typeof value === 'boolean' ? value : undefined;
 }
 
+export function parseGraphKernelBatchMode(value: unknown): GraphKernelBatchMode {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return ['shadow', 'compare', 'shadow_compare'].includes(normalized)
+    ? 'shadow_compare'
+    : 'disabled';
+}
+
 export function parseGraphKernelDiagnostics(payload: unknown): GraphKernelDiagnostics | undefined {
   if (!isRecord(payload)) {
     return undefined;
@@ -98,6 +118,8 @@ export function parseGraphKernelDiagnostics(payload: unknown): GraphKernelDiagno
       | 'requestedLimit'
       | 'availableCount'
       | 'truncatedCount'
+      | 'scannedCount'
+      | 'visitedCount'
       | 'snapshotLoadedAtMs'
       | 'prunedCount'
       | 'frontierMaxSize'
@@ -108,6 +130,8 @@ export function parseGraphKernelDiagnostics(payload: unknown): GraphKernelDiagno
     'requestedLimit',
     'availableCount',
     'truncatedCount',
+    'scannedCount',
+    'visitedCount',
     'snapshotLoadedAtMs',
     'prunedCount',
     'frontierMaxSize',
@@ -165,6 +189,269 @@ export function parseGraphKernelCandidateResponse<TCandidate = unknown>(
   };
 }
 
+function requireBatchString(
+  source: Record<string, unknown>,
+  key: string,
+  context: string,
+): string {
+  const value = source[key];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`graph kernel batch invalid ${context}: ${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireBatchNumber(
+  source: Record<string, unknown>,
+  key: string,
+  context: string,
+): number {
+  const value = source[key];
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(
+      `graph kernel batch invalid ${context}: ${key} must be a non-negative safe integer`,
+    );
+  }
+  return value;
+}
+
+function requireBatchSnapshotTimestamp(
+  source: Record<string, unknown>,
+  key: string,
+  context: string,
+): number {
+  const value = requireBatchNumber(source, key, context);
+  if (value === 0) {
+    throw new Error(
+      `graph kernel batch invalid ${context}: ${key} must be a positive safe integer`,
+    );
+  }
+  return value;
+}
+
+function requireBatchBoolean(
+  source: Record<string, unknown>,
+  key: string,
+  context: string,
+): boolean {
+  const value = source[key];
+  if (typeof value !== 'boolean') {
+    throw new Error(`graph kernel batch invalid ${context}: ${key} must be a boolean`);
+  }
+  return value;
+}
+
+function validateNeighborCandidate(candidate: unknown): candidate is GraphKernelNeighborCandidate {
+  if (!isRecord(candidate)) {
+    return false;
+  }
+  if (typeof candidate.userId !== 'string' || candidate.userId.trim().length === 0) {
+    return false;
+  }
+  if (typeof candidate.score !== 'number' || !Number.isFinite(candidate.score)) {
+    return false;
+  }
+  for (const key of ['interactionProbability', 'engagementScore', 'recentnessScore']) {
+    const value = candidate[key];
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+      return false;
+    }
+  }
+  return candidate.relationKinds === undefined
+    || (Array.isArray(candidate.relationKinds)
+      && candidate.relationKinds.every((value) => typeof value === 'string'));
+}
+
+function validateBridgeCandidate(candidate: unknown): candidate is GraphKernelBridgeCandidate {
+  if (!isRecord(candidate)
+    || typeof candidate.userId !== 'string'
+    || candidate.userId.trim().length === 0
+    || typeof candidate.score !== 'number'
+    || !Number.isFinite(candidate.score)
+    || !Number.isSafeInteger(candidate.depth)
+    || Number(candidate.depth) < 0
+    || !Number.isSafeInteger(candidate.pathCount)
+    || Number(candidate.pathCount) < 0
+    || !Array.isArray(candidate.viaUserIds)
+    || !candidate.viaUserIds.every(
+      (value) => typeof value === 'string' && value.trim().length > 0,
+    )) {
+    return false;
+  }
+  if (candidate.bridgeStrength !== undefined
+    && (typeof candidate.bridgeStrength !== 'number'
+      || !Number.isFinite(candidate.bridgeStrength))) {
+    return false;
+  }
+  return candidate.viaUserCount === undefined
+    || (Number.isSafeInteger(candidate.viaUserCount) && Number(candidate.viaUserCount) >= 0);
+}
+
+function parseStrictBatchDiagnostics(
+  payload: unknown,
+  context: string,
+  expectedKernel: string,
+  snapshotVersion: string,
+  snapshotLoadedAtMs: number,
+): GraphKernelBatchQueryDiagnostics {
+  if (!isRecord(payload)) {
+    throw new Error(`graph kernel batch invalid ${context}: diagnostics are required`);
+  }
+  const kernel = requireBatchString(payload, 'kernel', context);
+  if (kernel !== expectedKernel) {
+    throw new Error(`graph kernel batch invalid ${context}: kernel mismatch`);
+  }
+  const diagnosticsSnapshotVersion = requireBatchString(payload, 'snapshotVersion', context);
+  const diagnosticsSnapshotLoadedAtMs = requireBatchSnapshotTimestamp(
+    payload,
+    'snapshotLoadedAtMs',
+    context,
+  );
+  if (diagnosticsSnapshotVersion !== snapshotVersion
+    || diagnosticsSnapshotLoadedAtMs !== snapshotLoadedAtMs) {
+    throw new Error(`graph kernel batch invalid ${context}: snapshot identity mismatch`);
+  }
+  const emptyReason = payload.emptyReason;
+  if (emptyReason !== null && typeof emptyReason !== 'string') {
+    throw new Error(`graph kernel batch invalid ${context}: emptyReason must be string or null`);
+  }
+  if (!Array.isArray(payload.relationKinds)
+    || !payload.relationKinds.every((value) => typeof value === 'string')) {
+    throw new Error(`graph kernel batch invalid ${context}: relationKinds must be an array`);
+  }
+
+  return {
+    kernel,
+    queryDurationMs: requireBatchNumber(payload, 'queryDurationMs', context),
+    candidateCount: requireBatchNumber(payload, 'candidateCount', context),
+    requestedLimit: requireBatchNumber(payload, 'requestedLimit', context),
+    availableCount: requireBatchNumber(payload, 'availableCount', context),
+    truncatedCount: requireBatchNumber(payload, 'truncatedCount', context),
+    scannedCount: requireBatchNumber(payload, 'scannedCount', context),
+    visitedCount: requireBatchNumber(payload, 'visitedCount', context),
+    snapshotVersion: diagnosticsSnapshotVersion,
+    snapshotLoadedAtMs: diagnosticsSnapshotLoadedAtMs,
+    prunedCount: requireBatchNumber(payload, 'prunedCount', context),
+    frontierMaxSize: requireBatchNumber(payload, 'frontierMaxSize', context),
+    budgetExhausted: requireBatchBoolean(payload, 'budgetExhausted', context),
+    empty: requireBatchBoolean(payload, 'empty', context),
+    emptyReason,
+    relationKinds: payload.relationKinds as string[],
+  };
+}
+
+function parseStrictBatchResult<TCandidate>(
+  payload: unknown,
+  context: string,
+  expectedKernel: string,
+  snapshotVersion: string,
+  snapshotLoadedAtMs: number,
+  validateCandidate: (candidate: unknown) => candidate is TCandidate,
+): GraphKernelBatchQueryResult<TCandidate> {
+  if (!isRecord(payload)) {
+    throw new Error(`graph kernel batch missing kernel response: ${context}`);
+  }
+  if (!Array.isArray(payload.candidates)) {
+    throw new Error(`graph kernel batch invalid ${context}: candidates must be an array`);
+  }
+  const candidates = payload.candidates.map((candidate, index) => {
+    if (!validateCandidate(candidate)) {
+      throw new Error(`graph kernel batch invalid ${context} candidate at index ${index}`);
+    }
+    return candidate;
+  });
+  const diagnostics = parseStrictBatchDiagnostics(
+    payload.diagnostics,
+    context,
+    expectedKernel,
+    snapshotVersion,
+    snapshotLoadedAtMs,
+  );
+  if (diagnostics.candidateCount !== candidates.length) {
+    throw new Error(`graph kernel batch invalid ${context}: candidateCount mismatch`);
+  }
+  if (diagnostics.empty !== (candidates.length === 0)) {
+    throw new Error(`graph kernel batch invalid ${context}: empty state mismatch`);
+  }
+  if (diagnostics.candidateCount > diagnostics.requestedLimit) {
+    throw new Error(`graph kernel batch invalid ${context}: candidateCount exceeds requestedLimit`);
+  }
+  if (diagnostics.availableCount < diagnostics.candidateCount) {
+    throw new Error(`graph kernel batch invalid ${context}: availableCount below candidateCount`);
+  }
+  if (diagnostics.truncatedCount
+    !== diagnostics.availableCount - diagnostics.candidateCount) {
+    throw new Error(`graph kernel batch invalid ${context}: truncatedCount mismatch`);
+  }
+  return { candidates, diagnostics };
+}
+
+export function parseGraphKernelBatchResponse(
+  payload: unknown,
+  expectedUserId?: string,
+): GraphKernelBatchResponse {
+  const source = isRecord(payload) ? payload : {};
+  const userId = requireBatchString(source, 'userId', 'response');
+  if (expectedUserId !== undefined && userId !== expectedUserId) {
+    throw new Error('graph kernel batch invalid response: userId mismatch');
+  }
+  const snapshotVersion = readOptionalString(source, 'snapshotVersion');
+  if (!snapshotVersion || snapshotVersion.trim().length === 0) {
+    throw new Error('graph kernel batch missing snapshot identity');
+  }
+  const snapshotLoadedAtMs = requireBatchSnapshotTimestamp(
+    source,
+    'snapshotLoadedAtMs',
+    'response',
+  );
+
+  return {
+    userId,
+    snapshotVersion,
+    snapshotLoadedAtMs,
+    socialNeighbors: parseStrictBatchResult<GraphKernelNeighborCandidate>(
+      source.socialNeighbors,
+      'socialNeighbors',
+      'social_neighbors',
+      snapshotVersion,
+      snapshotLoadedAtMs,
+      validateNeighborCandidate,
+    ),
+    recentEngagers: parseStrictBatchResult<GraphKernelNeighborCandidate>(
+      source.recentEngagers,
+      'recentEngagers',
+      'recent_engagers',
+      snapshotVersion,
+      snapshotLoadedAtMs,
+      validateNeighborCandidate,
+    ),
+    bridgeUsers: parseStrictBatchResult<GraphKernelBridgeCandidate>(
+      source.bridgeUsers,
+      'bridgeUsers',
+      'bridge_users',
+      snapshotVersion,
+      snapshotLoadedAtMs,
+      validateBridgeCandidate,
+    ),
+    coEngagers: parseStrictBatchResult<GraphKernelNeighborCandidate>(
+      source.coEngagers,
+      'coEngagers',
+      'co_engagers',
+      snapshotVersion,
+      snapshotLoadedAtMs,
+      validateNeighborCandidate,
+    ),
+    contentAffinityNeighbors: parseStrictBatchResult<GraphKernelNeighborCandidate>(
+      source.contentAffinityNeighbors,
+      'contentAffinityNeighbors',
+      'content_affinity_neighbors',
+      snapshotVersion,
+      snapshotLoadedAtMs,
+      validateNeighborCandidate,
+    ),
+  };
+}
+
 export class GraphKernelClient {
   constructor(
     private readonly baseUrl: string,
@@ -175,6 +462,11 @@ export class GraphKernelClient {
     request: GraphKernelAuthorCandidateRequest,
   ): Promise<GraphKernelAuthorCandidate[]> {
     return (await this.authorCandidatesWithDiagnostics(request)).candidates;
+  }
+
+  async batch(request: GraphKernelBatchRequest): Promise<GraphKernelBatchResponse> {
+    const payload = await this.post<unknown>('/graph/batch', request);
+    return parseGraphKernelBatchResponse(payload, request.userId);
   }
 
   async authorCandidatesWithDiagnostics(

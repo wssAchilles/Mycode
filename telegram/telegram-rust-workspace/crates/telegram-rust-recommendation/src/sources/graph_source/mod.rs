@@ -17,6 +17,7 @@ mod detail;
 mod direct;
 mod fallback;
 mod materialization;
+mod shadow;
 
 use fallback::GraphFallbackRequest;
 

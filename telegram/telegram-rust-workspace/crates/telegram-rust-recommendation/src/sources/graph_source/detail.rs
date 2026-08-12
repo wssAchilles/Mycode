@@ -86,6 +86,30 @@ pub(super) fn build_graph_source_detail(
         ),
     ]);
 
+    detail.insert(
+        "perKernelScannedCounts".to_string(),
+        usize_map_to_json(&telemetry.per_kernel_scanned_counts),
+    );
+    detail.insert(
+        "perKernelVisitedCounts".to_string(),
+        usize_map_to_json(&telemetry.per_kernel_visited_counts),
+    );
+    detail.insert(
+        "perKernelSnapshotVersions".to_string(),
+        string_map_to_json(&telemetry.per_kernel_snapshot_versions),
+    );
+    detail.insert(
+        "perKernelSnapshotLoadedAtMs".to_string(),
+        u64_map_to_json(&telemetry.per_kernel_snapshot_loaded_at_ms),
+    );
+    if let Some(batch_shadow_compare) = telemetry.batch_shadow_compare.as_ref() {
+        detail.insert(
+            "batchShadowCompare".to_string(),
+            serde_json::to_value(batch_shadow_compare)
+                .unwrap_or_else(|_| Value::String("serialization_failed".to_string())),
+        );
+    }
+
     if let Some(source) = breakdown.dominant_kernel_source.as_ref() {
         detail.insert(
             GRAPH_DETAIL_DOMINANT_KERNEL_SOURCE_FIELD.to_string(),

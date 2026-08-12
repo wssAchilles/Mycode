@@ -17,9 +17,14 @@ import {
 } from '../clients/GraphClient';
 import {
     getGraphKernelClient,
+    parseGraphKernelBatchMode,
+    type GraphKernelBatchMode,
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
 import type {
+    GraphKernelBatchQueryDiagnostics,
+    GraphKernelBatchQueryResult,
+    GraphKernelBatchResponse,
     GraphKernelCandidateResponse,
     GraphKernelDiagnostics,
 } from '../../graphKernel/contracts';
@@ -64,6 +69,39 @@ type GraphKernelQueryTrace = {
     error?: string;
 };
 
+type GraphKernelBatchShadowObservation = Record<string, unknown> & {
+    mode: 'shadow_compare';
+    status: 'scheduled' | 'completed' | 'failed' | 'dropped';
+};
+
+const DEFAULT_GRAPH_KERNEL_BATCH_SHADOW_MAX_IN_FLIGHT = 2;
+let graphKernelBatchShadowInFlight = 0;
+
+function parseGraphKernelBatchShadowMaxInFlight(value: unknown): number {
+    const normalized = typeof value === 'string' ? value.trim() : value;
+    const parsed = normalized === undefined || normalized === null || normalized === ''
+        ? Number.NaN
+        : Number(normalized);
+    return Number.isSafeInteger(parsed) && parsed >= 0
+        ? parsed
+        : DEFAULT_GRAPH_KERNEL_BATCH_SHADOW_MAX_IN_FLIGHT;
+}
+
+function tryAcquireGraphKernelBatchShadow(maxInFlight: number): (() => void) | undefined {
+    if (graphKernelBatchShadowInFlight >= maxInFlight) {
+        return undefined;
+    }
+    graphKernelBatchShadowInFlight += 1;
+    let released = false;
+    return () => {
+        if (released) {
+            return;
+        }
+        released = true;
+        graphKernelBatchShadowInFlight = Math.max(0, graphKernelBatchShadowInFlight - 1);
+    };
+}
+
 /**
  * GraphSource 配置
  */
@@ -80,9 +118,16 @@ export interface GraphSourceConfig {
     client?: GraphClient;
     /** C++ graph kernel 客户端 */
     graphKernelClient?: GraphKernelClient | null;
+    /** C++ batch 仅用于 shadow compare，不能服务候选 */
+    graphKernelBatchMode?: GraphKernelBatchMode;
+    /** batch shadow compare 的进程内并发上限 */
+    graphKernelBatchShadowMaxInFlight?: number;
 }
 
-const DEFAULT_CONFIG: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelClient'>> = {
+const DEFAULT_CONFIG: Required<Omit<
+    GraphSourceConfig,
+    'client' | 'graphKernelClient' | 'graphKernelBatchMode' | 'graphKernelBatchShadowMaxInFlight'
+>> = {
     enabled: true,
     limitPerType: 30,
     maxTotal: 100,
@@ -95,9 +140,14 @@ const DEFAULT_CONFIG: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelCl
 
 export class GraphSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'GraphSource';
-    private config: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelClient'>>;
+    private config: Required<Omit<
+        GraphSourceConfig,
+        'client' | 'graphKernelClient' | 'graphKernelBatchMode' | 'graphKernelBatchShadowMaxInFlight'
+    >>;
     private client: GraphClient;
     private graphKernelClient: GraphKernelClient | null;
+    private graphKernelBatchMode: GraphKernelBatchMode;
+    private graphKernelBatchShadowMaxInFlight: number;
     private stageDetails = new Map<string, Record<string, unknown>>();
 
     constructor(config?: GraphSourceConfig) {
@@ -109,6 +159,14 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         };
         this.client = config?.client ?? getGraphClient();
         this.graphKernelClient = config?.graphKernelClient ?? getGraphKernelClient();
+        this.graphKernelBatchMode = config?.graphKernelBatchMode
+            ?? parseGraphKernelBatchMode(process.env.CPP_GRAPH_KERNEL_BATCH_MODE);
+        this.graphKernelBatchShadowMaxInFlight = this.graphKernelBatchMode === 'shadow_compare'
+            ? parseGraphKernelBatchShadowMaxInFlight(
+                config?.graphKernelBatchShadowMaxInFlight
+                ?? process.env.CPP_GRAPH_KERNEL_BATCH_SHADOW_MAX_IN_FLIGHT,
+            )
+            : 0;
     }
 
     /**
@@ -287,6 +345,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             })),
             { applyRecency: true },
         );
+        let batchShadowObservation: GraphKernelBatchShadowObservation | undefined;
 
         const [socialNeighbors, recentEngagers, bridgeUsers, coEngagers, contentAffinityNeighbors] = await Promise.all([
             this.runGraphKernelQuery('social-neighbors', () =>
@@ -321,6 +380,55 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     excludeUserIds: excludedUserIds,
                 }), queryTraces),
         ]);
+        if (this.graphKernelBatchMode === 'shadow_compare') {
+            batchShadowObservation = { mode: 'shadow_compare', status: 'scheduled' };
+            const release = tryAcquireGraphKernelBatchShadow(
+                this.graphKernelBatchShadowMaxInFlight,
+            );
+            if (!release) {
+                batchShadowObservation = {
+                    mode: 'shadow_compare',
+                    status: 'dropped',
+                    reason: 'max_in_flight',
+                    inFlight: graphKernelBatchShadowInFlight,
+                    maxInFlight: this.graphKernelBatchShadowMaxInFlight,
+                };
+                console.info('[GraphSource] graph kernel batch shadow observation', {
+                    requestId: query.requestId,
+                    ...batchShadowObservation,
+                });
+            } else {
+                void (async () => {
+                    let finalObservation: GraphKernelBatchShadowObservation;
+                    try {
+                        const response = await this.graphKernelClient!.batch({
+                            userId: query.userId,
+                            directLimit,
+                            bridgeLimit,
+                            maxDepth: 3,
+                            excludeUserIds: excludedUserIds,
+                        });
+                        finalObservation = this.buildGraphKernelBatchShadowCompare(
+                            queryTraces,
+                            { response },
+                        );
+                    } catch (error) {
+                        finalObservation = this.buildGraphKernelBatchShadowCompare(
+                            queryTraces,
+                            {
+                                error: error instanceof Error ? error.message : String(error),
+                            },
+                        );
+                    } finally {
+                        release();
+                    }
+                    console.info('[GraphSource] graph kernel batch shadow observation', {
+                        requestId: query.requestId,
+                        ...finalObservation,
+                    });
+                })();
+            }
+        }
 
         const authorAggregates = new Map<string, GraphKernelAuthorAggregate>();
 
@@ -405,7 +513,16 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             .slice(0, Math.max(this.config.maxTotal, 32));
 
         if (rankedAuthors.length === 0) {
-            this.recordStageDetail(query, this.buildGraphKernelStageDetail(queryTraces, 0, undefined, 0));
+            this.recordStageDetail(
+                query,
+                this.buildGraphKernelStageDetail(
+                    queryTraces,
+                    0,
+                    undefined,
+                    0,
+                    batchShadowObservation,
+                ),
+            );
             return [];
         }
 
@@ -515,6 +632,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 rankedAuthors.length,
                 materializedPosts.diagnostics,
                 selectedCandidates.length,
+                batchShadowObservation,
             ),
         );
 
@@ -550,6 +668,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         rankedAuthorCount: number,
         materializerDiagnostics: GraphAuthorPostMaterializerDiagnostics | undefined,
         returnedCandidateCount: number,
+        batchShadowCompare?: Record<string, unknown>,
     ): Record<string, unknown> {
         const diagnostics: Record<string, GraphKernelDiagnostics> = {};
         const errors: Record<string, string> = {};
@@ -578,6 +697,72 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             graphKernelRankedAuthorCount: rankedAuthorCount,
             graphKernelReturnedCandidateCount: returnedCandidateCount,
             graphKernelMaterializerDiagnostics: materializerDiagnostics,
+            graphKernelBatchShadowCompare: batchShadowCompare,
+        };
+    }
+
+    private buildGraphKernelBatchShadowCompare(
+        queryTraces: GraphKernelQueryTrace[],
+        outcome: { response?: GraphKernelBatchResponse; error?: string },
+    ): GraphKernelBatchShadowObservation {
+        if (outcome.error || !outcome.response) {
+            return {
+                mode: 'shadow_compare',
+                status: 'failed',
+                error: outcome.error || 'batch shadow response missing',
+            };
+        }
+
+        const response = outcome.response;
+        const batchByLabel: Record<string, GraphKernelBatchQueryResult<unknown>> = {
+            'social-neighbors': response.socialNeighbors,
+            'recent-engagers': response.recentEngagers,
+            'bridge-users': response.bridgeUsers,
+            'co-engagers': response.coEngagers,
+            'content-affinity-neighbors': response.contentAffinityNeighbors,
+        };
+        const traceByLabel = new Map(queryTraces.map((trace) => [trace.label, trace]));
+        const legacySnapshotVersions = Array.from(new Set(
+            queryTraces
+                .map((trace) => trace.diagnostics?.snapshotVersion)
+                .filter((value): value is string => Boolean(value)),
+        )).sort();
+        const countDrift: Record<string, number> = {};
+        const diagnosticDrift: Record<string, string[]> = {};
+        const diagnosticKeys: Array<keyof GraphKernelBatchQueryDiagnostics> = [
+            'snapshotVersion',
+            'snapshotLoadedAtMs',
+            'candidateCount',
+            'requestedLimit',
+            'availableCount',
+            'truncatedCount',
+            'scannedCount',
+            'visitedCount',
+            'budgetExhausted',
+            'empty',
+        ];
+
+        for (const [label, batchResult] of Object.entries(batchByLabel)) {
+            const legacy = traceByLabel.get(label);
+            countDrift[label] = batchResult.candidates.length - (legacy?.returnedCount ?? 0);
+            const drift = diagnosticKeys.filter(
+                (key) => batchResult.diagnostics[key] !== legacy?.diagnostics?.[key],
+            );
+            if (drift.length > 0) {
+                diagnosticDrift[label] = drift;
+            }
+        }
+
+        return {
+            mode: 'shadow_compare',
+            status: 'completed',
+            batchSnapshotVersion: response.snapshotVersion,
+            batchSnapshotLoadedAtMs: response.snapshotLoadedAtMs,
+            legacySnapshotVersions,
+            versionDrift: legacySnapshotVersions.length !== 1
+                || legacySnapshotVersions[0] !== response.snapshotVersion,
+            countDrift,
+            diagnosticDrift,
         };
     }
 

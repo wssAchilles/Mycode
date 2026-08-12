@@ -8,6 +8,23 @@ import { graphAuthorMaterializationRequestSchema } from '../../src/services/reco
 
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  let settled = false;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = (value) => {
+      settled = true;
+      resolvePromise(value);
+    };
+    reject = (reason) => {
+      settled = true;
+      rejectPromise(reason);
+    };
+  });
+  return { promise, resolve, reject, isSettled: () => settled };
+}
+
 describe('GraphSource graph kernel orchestration', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -82,6 +99,7 @@ describe('GraphSource graph kernel orchestration', () => {
       }),
       coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
       contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn(),
     };
 
     const legacyClient = {
@@ -122,6 +140,7 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(graphKernelClient.bridgeUsersWithDiagnostics).toHaveBeenCalledOnce();
     expect(graphKernelClient.coEngagersWithDiagnostics).toHaveBeenCalledOnce();
     expect(graphKernelClient.contentAffinityNeighborsWithDiagnostics).toHaveBeenCalledOnce();
+    expect(graphKernelClient.batch).not.toHaveBeenCalled();
     expect(legacyClient.recall).not.toHaveBeenCalled();
 
     expect(candidates).toHaveLength(2);
@@ -210,6 +229,387 @@ describe('GraphSource graph kernel orchestration', () => {
       graphKernelRankedAuthorCount: 0,
       graphKernelReturnedCandidateCount: 0,
     });
+  });
+
+  it('keeps the served path unchanged when batch shadow comparison fails', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    const batchShadow = deferred<never>();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    query.userFeatures = {
+      followedUserIds: [],
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+    };
+
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn(() => batchShadow.promise),
+    };
+    const legacyClient = {
+      recall: vi.fn().mockResolvedValue([]),
+    };
+
+    const source = new GraphSource({
+      client: legacyClient as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates).toEqual([]);
+    expect(legacyClient.recall).toHaveBeenCalledOnce();
+    expect(graphKernelClient.batch).toHaveBeenCalledOnce();
+    const observation = source.stageDetail(query, candidates)?.graphKernelBatchShadowCompare as
+      | Record<string, unknown>
+      | undefined;
+    expect(observation).toEqual({
+      mode: 'shadow_compare',
+      status: 'scheduled',
+    });
+    batchShadow.reject(new Error('batch shadow unavailable'));
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: query.requestId,
+          mode: 'shadow_compare',
+          status: 'failed',
+          error: 'batch shadow unavailable',
+        }),
+      );
+    });
+    expect(observation).toEqual({
+      mode: 'shadow_compare',
+      status: 'scheduled',
+    });
+  });
+
+  it('schedules batch shadow only after all legacy kernel queries complete', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const social = deferred<{ candidates: [] }>();
+    const batchShadow = deferred<never>();
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn(() => social.promise),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn(() => batchShadow.promise),
+    };
+    const source = new GraphSource({
+      client: { recall: vi.fn().mockResolvedValue([]) } as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+    });
+
+    const serving = source.getCandidates(query);
+    await Promise.resolve();
+
+    expect(graphKernelClient.batch).not.toHaveBeenCalled();
+    social.resolve({ candidates: [] });
+    const candidates = await serving;
+    expect(graphKernelClient.batch).toHaveBeenCalledOnce();
+    const observation = source.stageDetail(query, candidates)
+      ?.graphKernelBatchShadowCompare as Record<string, unknown>;
+    expect(observation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+    batchShadow.reject(new Error('release ordering test shadow permit'));
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: query.requestId,
+          status: 'failed',
+        }),
+      );
+    });
+    expect(observation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+  });
+
+  it('records batch shadow drift without serving batch candidates', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    query.userFeatures = {
+      followedUserIds: [],
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+    };
+    const batchDiagnostics = (kernel: string, candidateCount = 0) => ({
+      kernel,
+      queryDurationMs: 1,
+      candidateCount,
+      requestedLimit: 10,
+      availableCount: candidateCount,
+      truncatedCount: 0,
+      scannedCount: candidateCount,
+      visitedCount: 0,
+      snapshotVersion: 'batch-v2',
+      snapshotLoadedAtMs: 200,
+      prunedCount: 0,
+      frontierMaxSize: 0,
+      budgetExhausted: false,
+      empty: candidateCount === 0,
+      emptyReason: candidateCount === 0 ? 'no_candidates' : null,
+      relationKinds: [],
+    });
+    const batchResponse = {
+      userId: query.userId,
+      snapshotVersion: 'batch-v2',
+      snapshotLoadedAtMs: 200,
+      socialNeighbors: {
+        candidates: [{ userId: 'batch-only-author', score: 1 }],
+        diagnostics: {
+          ...batchDiagnostics('social_neighbors', 1),
+          scannedCount: 5,
+        },
+      },
+      recentEngagers: {
+        candidates: [],
+        diagnostics: batchDiagnostics('recent_engagers'),
+      },
+      bridgeUsers: {
+        candidates: [],
+        diagnostics: batchDiagnostics('bridge_users'),
+      },
+      coEngagers: {
+        candidates: [],
+        diagnostics: batchDiagnostics('co_engagers'),
+      },
+      contentAffinityNeighbors: {
+        candidates: [],
+        diagnostics: batchDiagnostics('content_affinity_neighbors'),
+      },
+    };
+    const batchShadow = deferred<typeof batchResponse>();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [],
+        diagnostics: {
+          kernel: 'social_neighbors',
+          candidateCount: 0,
+          scannedCount: 2,
+          snapshotVersion: 'legacy-v1',
+          snapshotLoadedAtMs: 100,
+        },
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn(() => batchShadow.promise),
+    };
+    const legacyClient = {
+      recall: vi.fn().mockResolvedValue([]),
+    };
+    const source = new GraphSource({
+      client: legacyClient as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates).toEqual([]);
+    expect(legacyClient.recall).toHaveBeenCalledOnce();
+    const observation = source.stageDetail(query, candidates)?.graphKernelBatchShadowCompare as
+      | Record<string, unknown>
+      | undefined;
+    expect(observation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+    batchShadow.resolve(batchResponse);
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: query.requestId,
+          mode: 'shadow_compare',
+          status: 'completed',
+          batchSnapshotVersion: 'batch-v2',
+          legacySnapshotVersions: ['legacy-v1'],
+          versionDrift: true,
+          countDrift: expect.objectContaining({
+            'social-neighbors': 1,
+          }),
+          diagnosticDrift: expect.objectContaining({
+            'social-neighbors': expect.arrayContaining([
+              'snapshotVersion',
+              'snapshotLoadedAtMs',
+              'candidateCount',
+              'scannedCount',
+            ]),
+          }),
+        }),
+      );
+    });
+    expect(observation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+  });
+
+  it('does not wait for a hanging batch shadow request before serving candidates', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    query.userFeatures = {
+      followedUserIds: [],
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+    };
+    const batchRequest = deferred<never>();
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [{ userId: 'author-1', score: 1 }],
+        diagnostics: {
+          kernel: 'social_neighbors',
+          snapshotVersion: 'legacy-v1',
+          snapshotLoadedAtMs: 100,
+        },
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn(() => batchRequest.promise),
+    };
+    vi.spyOn(Post as any, 'aggregate').mockResolvedValue([{
+      _id: oid('507f191e810c19729de8b003'),
+      authorId: 'author-1',
+      content: 'served without waiting for batch shadow',
+      createdAt: new Date('2026-04-17T02:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      deletedAt: null,
+    }]);
+    const source = new GraphSource({
+      client: { recall: vi.fn() } as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].authorId).toBe('author-1');
+    expect(graphKernelClient.batch).toHaveBeenCalledOnce();
+    expect(batchRequest.isSettled()).toBe(false);
+    const observation = source.stageDetail(query, candidates)
+      ?.graphKernelBatchShadowCompare as Record<string, unknown>;
+    expect(observation).toEqual({
+      mode: 'shadow_compare',
+      status: 'scheduled',
+    });
+    batchRequest.reject(new Error('release nonblocking test shadow permit'));
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: query.requestId,
+          status: 'failed',
+        }),
+      );
+    });
+    expect(observation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+  });
+
+  it('drops a second hanging batch shadow while preserving both legacy results', async () => {
+    const firstQuery = createFeedQuery('viewer-1', 10);
+    const secondQuery = createFeedQuery('viewer-2', 10);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const batchRequest = deferred<never>();
+    const admittedAfterRelease = deferred<never>();
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [{ userId: 'author-1', score: 1 }],
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      batch: vi.fn()
+        .mockImplementationOnce(() => batchRequest.promise)
+        .mockImplementation(() => admittedAfterRelease.promise),
+    };
+    vi.spyOn(Post as any, 'aggregate').mockResolvedValue([{
+      _id: oid('507f191e810c19729de8b004'),
+      authorId: 'author-1',
+      content: 'served under shadow admission pressure',
+      createdAt: new Date('2026-04-17T02:30:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      deletedAt: null,
+    }]);
+    const firstSource = new GraphSource({
+      client: { recall: vi.fn() } as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+      graphKernelBatchShadowMaxInFlight: 1,
+      maxTotal: 10,
+    });
+    const secondSource = new GraphSource({
+      client: { recall: vi.fn() } as any,
+      graphKernelClient: graphKernelClient as any,
+      graphKernelBatchMode: 'shadow_compare',
+      graphKernelBatchShadowMaxInFlight: 1,
+      maxTotal: 10,
+    });
+
+    const firstCandidates = await firstSource.getCandidates(firstQuery);
+    const secondCandidates = await secondSource.getCandidates(secondQuery);
+
+    expect(firstCandidates).toHaveLength(1);
+    expect(secondCandidates).toHaveLength(1);
+    expect(batchRequest.isSettled()).toBe(false);
+    expect(graphKernelClient.batch).toHaveBeenCalledOnce();
+    const firstObservation = firstSource.stageDetail(firstQuery, firstCandidates)
+      ?.graphKernelBatchShadowCompare as Record<string, unknown>;
+    expect(firstObservation).toMatchObject({
+      status: 'scheduled',
+    });
+    expect(secondSource.stageDetail(secondQuery, secondCandidates)).toMatchObject({
+      graphKernelBatchShadowCompare: {
+        status: 'dropped',
+        reason: 'max_in_flight',
+      },
+    });
+
+    batchRequest.reject(new Error('release first shadow permit'));
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: firstQuery.requestId,
+          status: 'failed',
+        }),
+      );
+    });
+    expect(firstObservation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
+
+    const thirdQuery = createFeedQuery('viewer-3', 10);
+    const thirdCandidates = await secondSource.getCandidates(thirdQuery);
+    expect(thirdCandidates).toHaveLength(1);
+    expect(graphKernelClient.batch).toHaveBeenCalledTimes(2);
+    const thirdObservation = secondSource.stageDetail(thirdQuery, thirdCandidates)
+      ?.graphKernelBatchShadowCompare as Record<string, unknown>;
+    expect(thirdObservation).toMatchObject({ status: 'scheduled' });
+    admittedAfterRelease.reject(new Error('release final shadow permit'));
+    await vi.waitFor(() => {
+      expect(info).toHaveBeenCalledWith(
+        '[GraphSource] graph kernel batch shadow observation',
+        expect.objectContaining({
+          requestId: thirdQuery.requestId,
+          status: 'failed',
+        }),
+      );
+    });
+    expect(thirdObservation).toEqual({ mode: 'shadow_compare', status: 'scheduled' });
   });
 
   it('accepts extended graph materializer retry lookback contract', () => {

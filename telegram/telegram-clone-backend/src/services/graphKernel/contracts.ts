@@ -86,6 +86,8 @@ export interface GraphKernelDiagnostics {
   requestedLimit?: number;
   availableCount?: number;
   truncatedCount?: number;
+  scannedCount?: number;
+  visitedCount?: number;
   snapshotVersion?: string;
   snapshotLoadedAtMs?: number;
   prunedCount?: number;
@@ -99,6 +101,41 @@ export interface GraphKernelDiagnostics {
 export interface GraphKernelCandidateResponse<TCandidate> {
   candidates: TCandidate[];
   diagnostics?: GraphKernelDiagnostics;
+}
+
+export interface GraphKernelBatchQueryDiagnostics {
+  kernel: string;
+  queryDurationMs: number;
+  candidateCount: number;
+  requestedLimit: number;
+  availableCount: number;
+  truncatedCount: number;
+  scannedCount: number;
+  visitedCount: number;
+  snapshotVersion: string;
+  snapshotLoadedAtMs: number;
+  prunedCount: number;
+  frontierMaxSize: number;
+  budgetExhausted: boolean;
+  empty: boolean;
+  emptyReason: string | null;
+  relationKinds: string[];
+}
+
+export interface GraphKernelBatchQueryResult<TCandidate> {
+  candidates: TCandidate[];
+  diagnostics: GraphKernelBatchQueryDiagnostics;
+}
+
+export interface GraphKernelBatchResponse {
+  userId: string;
+  snapshotVersion: string;
+  snapshotLoadedAtMs: number;
+  socialNeighbors: GraphKernelBatchQueryResult<GraphKernelNeighborCandidate>;
+  recentEngagers: GraphKernelBatchQueryResult<GraphKernelNeighborCandidate>;
+  bridgeUsers: GraphKernelBatchQueryResult<GraphKernelBridgeCandidate>;
+  coEngagers: GraphKernelBatchQueryResult<GraphKernelNeighborCandidate>;
+  contentAffinityNeighbors: GraphKernelBatchQueryResult<GraphKernelNeighborCandidate>;
 }
 
 export interface GraphKernelOpsSnapshot {
