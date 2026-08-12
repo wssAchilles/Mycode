@@ -1,0 +1,70 @@
+{
+  "manifestVersion": "recommendation_cross_runtime_manifest_v1",
+  "domains": [
+    {
+      "domain": "replay-cases",
+      "version": "recommendation_replay_v1",
+      "fixtures": [
+        { "path": "replay_warm_user.json", "digest": "41815beb749b19b876620bd682409cec2c486be879500ef66d4dbbfcc34a8601" },
+        { "path": "replay_user_state_matrix.json", "digest": "9e1ef8054e689e232567878c53bafc58ca11937eb94410bf07ca7e768d045cd7" }
+      ]
+    },
+    {
+      "domain": "replay-manifest",
+      "version": "recommendation_replay_manifest_v2",
+      "fixtures": [
+        { "path": "replay_scenarios.json", "digest": "0ce981161ad88e9da2b622ff03345adf3c835a22e3233ad419e61db43371d510" }
+      ]
+    },
+    {
+      "domain": "scorer-contract",
+      "version": "recommendation_scorer_contract_v1",
+      "fixtures": [
+        { "path": "scorer_contract.json", "digest": "5445b7a3c18a57617b6c1e365814afda59c0151e41cd09f2992c64c3ed509b89" }
+      ]
+    },
+    {
+      "domain": "weighted-score",
+      "version": "recommendation_weighted_score_golden_v1",
+      "fixtures": [
+        { "path": "weighted_score_golden.json", "digest": "bedd4840c4f15c27be147214fda21610c19a4704df9df03cf1e7531f46a47a60" }
+      ]
+    },
+    {
+      "domain": "query-hydrator-contract",
+      "version": "recommendation_query_hydrator_contract_v1",
+      "fixtures": [
+        { "path": "query_hydrator_contract.json", "digest": "754f3eb3a2e7218417aba778c06e56b77915e80c62ddae9dcc59a593e86e96a6" }
+      ]
+    },
+    {
+      "domain": "decision-log-contract",
+      "version": "recommendation_decision_log_fixture_v1",
+      "fixtures": [
+        { "path": "decision_log_v1.json", "digest": "a7b1771df89b3a7117a44dc1266c3b7a3e6a94fee7ec8bdcce1366380a56ef59" }
+      ]
+    },
+    {
+      "domain": "randomized-slate-simulation",
+      "version": "randomized_slate_simulation_fixture_v1",
+      "fixtures": [
+        { "path": "randomized_slate_simulation_v1.json", "digest": "51a2c8d8ba3bf910ede869fa645244246e081fa4d8fc4e326d055a27fb188aaf" },
+        { "path": "phase11_synthetic_behavior_trajectory_v1.json", "digest": "1ca6cd6b8c6ad0a8cb6648cbed7e5c24ec84dd7a50e8086b4d95500ffae45a77" }
+      ]
+    },
+    {
+      "domain": "target-policy-distribution-stream",
+      "version": "target_policy_distribution_stream_fixture_v1",
+      "fixtures": [
+        { "path": "target_policy_distribution_stream_v1.json", "digest": "8b42beef41d385ad1cd442fead4ace928dc9f9c75b2fda88c55fc1b5141d166d" }
+      ]
+    },
+    {
+      "domain": "target-distribution-stream-receipt",
+      "version": "target_distribution_stream_receipt_fixture_v2",
+      "fixtures": [
+        { "path": "target_distribution_stream_receipt_v2.json", "digest": "50c3ae73531c9a2732a5a0dbf9f055d49c7227c89d50d31e17292dd466f756ac" }
+      ]
+    }
+  ]
+}

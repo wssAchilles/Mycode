@@ -1,0 +1,30 @@
+{
+  "fixtureVersion": "target_distribution_stream_receipt_fixture_v2",
+  "sourceFixturePath": "target_policy_distribution_stream_v1.json",
+  "expectedReceipt": {
+    "contractVersion": "target_distribution_stream_verification_receipt_v2",
+    "verifierVersion": "telegram_recommendation_policy_offline_stream_verifier_v2",
+    "verifierBuildFingerprintSha256": "ee224003968ea24f7c9a8685bcd971da741acf4dd320b59d5285854e58603434",
+    "ioMode": "bounded_stream_v1",
+    "status": "verified",
+    "sourceDecisionNdjsonSha256": "2f023d4708f5fd80ada5c1a9bafcc065333c9813219adf8fb70c16cbebdbfd05",
+    "sourceDatasetManifestSha256": "d4bee8212cba678c1b58fcb3e97f437330a23b1cc8f52b26a267e65b1ec30218",
+    "policyConfigSha256": "b5733bd95b7db416eb2371f29e56285f7b48453fc454c98e0150982a3604a800",
+    "policyConfigRawSha256": "d14bee790680aaa95a15760b96195241163de0c82ff358c5cf0592584f4173a9",
+    "distributionNdjsonSha256": "a8cb11c2bf625722ef529012ecc4d72afd15debeb0105620567493a66d797396",
+    "targetManifestSha256": "11bbc300a1dea8ab1d5b26b5fbf1159cff774620ea83e185955f5ee2cf5abc3c",
+    "verifiedDecisionCount": 1,
+    "verifiedStepCount": 2,
+    "verifiedActionProbabilityCount": 5,
+    "verifiedPhysicalRecordCount": 9,
+    "highWaterDiagnostics": {
+      "maxSourceLineBytes": 2469,
+      "maxDistributionLineBytes": 755,
+      "maxCandidateCount": 4,
+      "maxStepActionCount": 3,
+      "maxPrefixActionCount": 1
+    },
+    "verificationReceiptSha256": "ff62bcbebee1e2f3805ccbeae811d3192c18689c5909b88ac0945de4fa189bfc",
+    "servable": false
+  }
+}

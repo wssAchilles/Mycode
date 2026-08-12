@@ -80,6 +80,9 @@ pub fn compute_full_distribution(
             if !plackett_luce.is_finite() || !mixed.is_finite() {
                 return Err(EpsilonPlackettLuceError::NonFiniteArithmetic);
             }
+            if plackett_luce <= 0.0 || mixed <= 0.0 {
+                return Err(EpsilonPlackettLuceError::ProbabilityUnderflow);
+            }
             Ok((plackett_luce, mixed))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -159,6 +162,10 @@ mod tests {
         );
         assert_eq!(
             compute_full_distribution(&[1000.0, 0.0], 1.0, 1.0),
+            Err(EpsilonPlackettLuceError::ProbabilityUnderflow)
+        );
+        assert_eq!(
+            compute_full_distribution(&[0.0, 0.0], f64::from_bits(1), 1.0),
             Err(EpsilonPlackettLuceError::ProbabilityUnderflow)
         );
     }
