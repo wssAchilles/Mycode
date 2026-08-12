@@ -1,6 +1,6 @@
 pub const WEIGHTED_SCORER_POLICY_VERSION: &str = "weighted_scorer_policy_v1";
 
-pub const POSITIVE_WEIGHT_SUM: f64 = 30.15;
+pub const POSITIVE_WEIGHT_SUM: f64 = 30.55;
 pub const NEGATIVE_WEIGHT_SUM: f64 = 27.0;
 pub const NEGATIVE_SCORES_OFFSET: f64 = 0.1;
 
@@ -100,7 +100,83 @@ pub struct WeightedScoreSummary {
     pub heuristic_fallback_used: bool,
 }
 
+trait FiniteOrDefault {
+    fn finite_or_default(self) -> Self;
+}
+
+impl FiniteOrDefault for f64 {
+    fn finite_or_default(self) -> Self {
+        if self.is_finite() { self } else { 0.0 }
+    }
+}
+
+impl FiniteOrDefault for PhoenixWeightedScoreInput {
+    fn finite_or_default(self) -> Self {
+        Self {
+            like: self.like.finite_or_default(),
+            reply: self.reply.finite_or_default(),
+            repost: self.repost.finite_or_default(),
+            quote: self.quote.finite_or_default(),
+            photo_expand: self.photo_expand.finite_or_default(),
+            click: self.click.finite_or_default(),
+            quoted_click: self.quoted_click.finite_or_default(),
+            profile_click: self.profile_click.finite_or_default(),
+            video_quality_view: self.video_quality_view.finite_or_default(),
+            share: self.share.finite_or_default(),
+            share_via_dm: self.share_via_dm.finite_or_default(),
+            share_via_copy_link: self.share_via_copy_link.finite_or_default(),
+            dwell: self.dwell.finite_or_default(),
+            dwell_time: self.dwell_time.finite_or_default(),
+            follow_author: self.follow_author.finite_or_default(),
+            not_interested: self.not_interested.finite_or_default(),
+            dismiss: self.dismiss.finite_or_default(),
+            block_author: self.block_author.finite_or_default(),
+            block: self.block.finite_or_default(),
+            mute_author: self.mute_author.finite_or_default(),
+            report: self.report.finite_or_default(),
+        }
+    }
+}
+
+impl FiniteOrDefault for ActionWeightedScoreInput {
+    fn finite_or_default(self) -> Self {
+        Self {
+            like: self.like.finite_or_default(),
+            reply: self.reply.finite_or_default(),
+            repost: self.repost.finite_or_default(),
+            click: self.click.finite_or_default(),
+            dwell: self.dwell.finite_or_default(),
+            negative: self.negative.finite_or_default(),
+        }
+    }
+}
+
+impl FiniteOrDefault for HeuristicWeightedScoreInput {
+    fn finite_or_default(self) -> Self {
+        Self {
+            engagement_rate: self.engagement_rate.finite_or_default(),
+            reply_proxy: self.reply_proxy.finite_or_default(),
+            repost_proxy: self.repost_proxy.finite_or_default(),
+            click_proxy: self.click_proxy.finite_or_default(),
+            content_proxy: self.content_proxy.finite_or_default(),
+            follow_proxy: self.follow_proxy.finite_or_default(),
+            retrieval_support: self.retrieval_support.finite_or_default(),
+        }
+    }
+}
+
+fn finite_or_zero(value: f64) -> f64 {
+    value.finite_or_default()
+}
+
 pub fn compute_weighted_score_summary(input: WeightedScoreInput) -> WeightedScoreSummary {
+    let input = WeightedScoreInput {
+        phoenix_scores: input.phoenix_scores.map(FiniteOrDefault::finite_or_default),
+        action_scores: input.action_scores.map(FiniteOrDefault::finite_or_default),
+        heuristic_scores: input.heuristic_scores.finite_or_default(),
+        evidence_prior: finite_or_zero(input.evidence_prior),
+        signal_prior: finite_or_zero(input.signal_prior),
+    };
     let (positive_score, negative_score, action_scores_used, heuristic_fallback_used) =
         if let Some(scores) = input.phoenix_scores {
             (
@@ -154,16 +230,20 @@ pub fn compute_weighted_score_summary(input: WeightedScoreInput) -> WeightedScor
             )
         };
 
-    let base_raw_score = positive_score - negative_score;
+    let positive_score = finite_or_zero(positive_score);
+    let negative_score = finite_or_zero(negative_score);
+    let base_raw_score = finite_or_zero(positive_score - negative_score);
     let evidence_score = if base_raw_score > 0.0 {
-        input.evidence_prior * WEIGHTED_EVIDENCE_PRIOR_WEIGHT
-            + input.signal_prior * WEIGHTED_SIGNAL_PRIOR_WEIGHT
+        finite_or_zero(
+            input.evidence_prior * WEIGHTED_EVIDENCE_PRIOR_WEIGHT
+                + input.signal_prior * WEIGHTED_SIGNAL_PRIOR_WEIGHT,
+        )
     } else {
         0.0
     };
 
     WeightedScoreSummary {
-        raw_score: base_raw_score + evidence_score,
+        raw_score: finite_or_zero(base_raw_score + evidence_score),
         base_raw_score,
         positive_score,
         negative_score,
@@ -176,6 +256,7 @@ pub fn compute_weighted_score_summary(input: WeightedScoreInput) -> WeightedScor
 }
 
 pub fn normalize_weighted_score(raw_score: f64) -> f64 {
+    let raw_score = finite_or_zero(raw_score);
     if raw_score < 0.0 {
         (((raw_score + NEGATIVE_WEIGHT_SUM) / POSITIVE_WEIGHT_SUM) * NEGATIVE_SCORES_OFFSET)
             .max(0.0)
@@ -238,10 +319,47 @@ mod tests {
 
     #[test]
     fn normalizes_positive_and_negative_raw_scores() {
-        assert_eq!(POSITIVE_WEIGHT_SUM, 30.15);
+        assert_eq!(POSITIVE_WEIGHT_SUM, 30.55);
         assert_eq!(NEGATIVE_WEIGHT_SUM, 27.0);
         assert_eq!(NEGATIVE_SCORES_OFFSET, 0.1);
         assert!(normalize_weighted_score(1.0) > NEGATIVE_SCORES_OFFSET);
         assert!(normalize_weighted_score(-1.0) < NEGATIVE_SCORES_OFFSET);
+    }
+
+    #[test]
+    fn sanitizes_non_finite_weighted_score_inputs() {
+        let summary = compute_weighted_score_summary(WeightedScoreInput {
+            phoenix_scores: Some(PhoenixWeightedScoreInput {
+                like: f64::NAN,
+                reply: f64::INFINITY,
+                click: 0.2,
+                dismiss: f64::NEG_INFINITY,
+                ..PhoenixWeightedScoreInput::default()
+            }),
+            evidence_prior: f64::NAN,
+            signal_prior: f64::INFINITY,
+            ..WeightedScoreInput::default()
+        });
+
+        assert_eq!(summary.positive_score, 0.1);
+        assert_eq!(summary.negative_score, 0.0);
+        assert_eq!(summary.evidence_score, 0.0);
+        assert!(summary.raw_score.is_finite());
+        assert!(normalize_weighted_score(summary.raw_score).is_finite());
+        assert!(normalize_weighted_score(f64::NAN).is_finite());
+        assert!(normalize_weighted_score(f64::INFINITY).is_finite());
+
+        let overflow = compute_weighted_score_summary(WeightedScoreInput {
+            phoenix_scores: Some(PhoenixWeightedScoreInput {
+                like: f64::MAX,
+                reply: f64::MAX,
+                ..PhoenixWeightedScoreInput::default()
+            }),
+            evidence_prior: 1.0,
+            ..WeightedScoreInput::default()
+        });
+        assert_eq!(overflow.base_raw_score, 0.0);
+        assert_eq!(overflow.evidence_score, 0.0);
+        assert_eq!(overflow.raw_score, 0.0);
     }
 }

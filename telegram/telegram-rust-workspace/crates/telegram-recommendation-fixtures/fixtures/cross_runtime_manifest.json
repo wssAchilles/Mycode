@@ -5,7 +5,7 @@
       "domain": "replay-cases",
       "version": "recommendation_replay_v1",
       "fixtures": [
-        { "path": "replay_warm_user.json", "digest": "41815beb749b19b876620bd682409cec2c486be879500ef66d4dbbfcc34a8601" },
+        { "path": "replay_warm_user.json", "digest": "07dc2d916910ca00d44b4f11b45b18f672da282a788e70947d94d5b08ab5a55b" },
         { "path": "replay_user_state_matrix.json", "digest": "9e1ef8054e689e232567878c53bafc58ca11937eb94410bf07ca7e768d045cd7" }
       ]
     },
@@ -27,7 +27,7 @@
       "domain": "weighted-score",
       "version": "recommendation_weighted_score_golden_v1",
       "fixtures": [
-        { "path": "weighted_score_golden.json", "digest": "bedd4840c4f15c27be147214fda21610c19a4704df9df03cf1e7531f46a47a60" }
+        { "path": "weighted_score_golden.json", "digest": "f9a8c3b4248f8b982ffb9ff1921e53a366961010803c288371729eeb58956559" }
       ]
     },
     {

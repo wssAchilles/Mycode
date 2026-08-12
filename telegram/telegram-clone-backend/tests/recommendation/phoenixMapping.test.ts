@@ -7,6 +7,46 @@ import { PhoenixScorer } from '../../src/services/recommendation/scorers/Phoenix
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
 describe('PhoenixScorer mapping', () => {
+    it('keeps legacy negative targets separate from canonical targets', async () => {
+        const fakeClient = {
+            predict: async () => [{
+                postId: 'N-LEGACY',
+                like: 0,
+                reply: 0,
+                repost: 0,
+                click: 0,
+                profileClick: 0,
+                share: 0,
+                dwell: 0,
+                dismiss: 0.2,
+                block: 0.3,
+            }],
+        } as any;
+        const scorer = new PhoenixScorer(fakeClient);
+        const query = createFeedQuery('user', 20);
+        query.modelUserActionSequence = [];
+        const candidate = {
+            postId: oid('507f191e810c19729de88000'),
+            authorId: 'news_bot_official',
+            content: 'legacy target news',
+            createdAt: new Date('2026-02-01T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+            isNews: true,
+            newsMetadata: { externalId: 'N-LEGACY' },
+            inNetwork: false,
+        } as any;
+
+        const [result] = await scorer.score(query, [candidate]);
+
+        expect(result.candidate.phoenixScores).toMatchObject({
+            dismissScore: 0.2,
+            blockScore: 0.3,
+        });
+        expect(result.candidate.phoenixScores.notInterestedScore).toBeUndefined();
+        expect(result.candidate.phoenixScores.blockAuthorScore).toBeUndefined();
+    });
+
     it('maps predictions by prediction.postId (externalId), not by array index', async () => {
         const fakeClient = {
             predict: async () => {
