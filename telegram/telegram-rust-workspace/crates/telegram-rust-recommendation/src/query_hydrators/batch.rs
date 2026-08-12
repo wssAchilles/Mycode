@@ -25,12 +25,18 @@ pub(crate) async fn hydrate_query_patches_batch_or_fallback(
         .await
     {
         Ok(response) => {
-            let mut items_by_name = response
-                .payload
-                .items
-                .into_iter()
-                .map(|item| {
-                    (
+            let mut items_by_name = HashMap::with_capacity(response.payload.items.len());
+            let mut contract_error = None;
+            for item in response.payload.items {
+                if item.stage.name != item.hydrator_name {
+                    contract_error = Some(format!(
+                        "query_hydrator_batch_stage_mismatch:{}:{}",
+                        item.hydrator_name, item.stage.name,
+                    ));
+                    break;
+                }
+                if items_by_name
+                    .insert(
                         item.hydrator_name.clone(),
                         (
                             item.stage,
@@ -39,8 +45,34 @@ pub(crate) async fn hydrate_query_patches_batch_or_fallback(
                             item.error_class,
                         ),
                     )
-                })
-                .collect::<HashMap<_, _>>();
+                    .is_some()
+                {
+                    contract_error = Some(format!(
+                        "query_hydrator_batch_duplicate:{}",
+                        item.hydrator_name,
+                    ));
+                    break;
+                }
+            }
+            if contract_error.is_none()
+                && (items_by_name.len() != hydrator_names.len()
+                    || hydrator_names
+                        .iter()
+                        .any(|hydrator_name| !items_by_name.contains_key(hydrator_name)))
+            {
+                contract_error = Some("query_hydrator_batch_catalog_mismatch".to_string());
+            }
+            if let Some(error) = contract_error {
+                return hydrate_query_fallback(
+                    backend_client,
+                    hydrator_names,
+                    concurrency,
+                    query,
+                    batch_started_at,
+                    error,
+                )
+                .await;
+            }
             let ordered_results = hydrator_names
                 .iter()
                 .map(|hydrator_name| items_by_name.remove(hydrator_name))
@@ -63,41 +95,56 @@ pub(crate) async fn hydrate_query_patches_batch_or_fallback(
             )
         }
         Err(error) => {
-            let batch_latency_ms = batch_started_at.elapsed().as_millis() as u64;
-            let fallback_started_at = Instant::now();
-            let mut output = hydrate_query_parallel_bounded_fallback(
+            hydrate_query_fallback(
                 backend_client,
                 hydrator_names,
                 concurrency,
                 query,
+                batch_started_at,
+                error.to_string(),
             )
-            .await;
-            let fallback_latency_ms = fallback_started_at.elapsed().as_millis() as u64;
-            output
-                .degraded_reasons
-                .push(format!("query:query_hydrators_batch_failed:{error}"));
-            record_provider_call(
-                &mut output.provider_calls,
-                PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
-            );
-            record_provider_latency(
-                &mut output.provider_latency_ms,
-                PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
-                batch_latency_ms,
-            );
-            record_provider_call(
-                &mut output.provider_calls,
-                PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
-            );
-            record_provider_latency(
-                &mut output.provider_latency_ms,
-                PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
-                fallback_latency_ms,
-            );
-            dedup_strings(&mut output.degraded_reasons);
-            output
+            .await
         }
     }
+}
+
+async fn hydrate_query_fallback(
+    backend_client: &BackendRecommendationClient,
+    hydrator_names: &[String],
+    concurrency: usize,
+    query: &RecommendationQueryPayload,
+    batch_started_at: Instant,
+    error: String,
+) -> QueryHydrationOutput {
+    let batch_latency_ms = batch_started_at.elapsed().as_millis() as u64;
+    let fallback_started_at = Instant::now();
+    let mut output =
+        hydrate_query_parallel_bounded_fallback(backend_client, hydrator_names, concurrency, query)
+            .await;
+    let fallback_latency_ms = fallback_started_at.elapsed().as_millis() as u64;
+    output
+        .degraded_reasons
+        .push(format!("query:query_hydrators_batch_failed:{error}"));
+    record_provider_call(
+        &mut output.provider_calls,
+        PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
+    );
+    record_provider_latency(
+        &mut output.provider_latency_ms,
+        PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
+        batch_latency_ms,
+    );
+    record_provider_call(
+        &mut output.provider_calls,
+        PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
+    );
+    record_provider_latency(
+        &mut output.provider_latency_ms,
+        PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
+        fallback_latency_ms,
+    );
+    dedup_strings(&mut output.degraded_reasons);
+    output
 }
 
 #[cfg(test)]
@@ -254,6 +301,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn invalid_batch_identity_falls_back_in_requested_order() {
+        let observations = Observations::default();
+        let (base_url, server) = spawn_invalid_batch_server(observations).await;
+        let client = BackendRecommendationClient::new(&fixture_config(base_url))
+            .expect("build backend client");
+        let hydrator_names =
+            ["UserFeaturesQueryHydrator", "UserEmbeddingQueryHydrator"].map(str::to_string);
+
+        let output =
+            hydrate_query_patches_batch_or_fallback(&client, &hydrator_names, 1, &fixture_query())
+                .await;
+        server.abort();
+
+        assert_eq!(
+            output
+                .stages
+                .iter()
+                .map(|stage| stage.name.as_str())
+                .collect::<Vec<_>>(),
+            ["UserFeaturesQueryHydrator", "UserEmbeddingQueryHydrator"],
+        );
+        assert!(output.degraded_reasons.iter().any(|reason| {
+            reason.contains("query_hydrator_batch_stage_mismatch:UserFeaturesQueryHydrator:wrong")
+        }));
+        assert_eq!(
+            output
+                .provider_calls
+                .get(PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK),
+            Some(&1),
+        );
+    }
+
     async fn contract_catalog_batch_handler(
         Json(request): Json<QueryHydratorBatchRequest>,
     ) -> Response {
@@ -398,6 +478,40 @@ mod tests {
                 post(query_hydrator_handler),
             )
             .with_state(Observations::default());
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind query hydrator provider");
+        let address = listener.local_addr().expect("query hydrator provider addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve query hydrator provider");
+        });
+        (format!("http://{address}"), handle)
+    }
+
+    async fn spawn_invalid_batch_server(observations: Observations) -> (String, JoinHandle<()>) {
+        let app = Router::new()
+            .route(
+                "/query-hydrators/batch",
+                post(|| async {
+                    Json(SuccessEnvelope::ok(QueryHydratorBatchResponse {
+                        items: vec![QueryHydratorPatchResponse {
+                            hydrator_name: "UserFeaturesQueryHydrator".to_string(),
+                            query_patch: RecommendationQueryPatchPayload::default(),
+                            stage: stage("wrong"),
+                            provider_calls: HashMap::new(),
+                            error_class: None,
+                        }],
+                        provider_calls: HashMap::new(),
+                    }))
+                }),
+            )
+            .route(
+                "/query-hydrators/{hydrator_name}",
+                post(query_hydrator_handler),
+            )
+            .with_state(observations);
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind query hydrator provider");

@@ -7,96 +7,101 @@ pub(crate) fn apply_query_patch(
     patch: &RecommendationQueryPatchPayload,
     seen_fields: &mut HashSet<&'static str>,
 ) -> std::result::Result<(), String> {
+    let mut next_query = query.clone();
+    let mut next_seen_fields = seen_fields.clone();
+
     if let Some(user_features) = patch.user_features.clone() {
-        if !seen_fields.insert("userFeatures") {
+        if !next_seen_fields.insert("userFeatures") {
             return Err("query_patch_field_conflict:userFeatures".to_string());
         }
-        query.user_features = Some(user_features);
+        next_query.user_features = Some(user_features);
     }
     if let Some(embedding_context) = patch.embedding_context.clone() {
-        if !seen_fields.insert("embeddingContext") {
+        if !next_seen_fields.insert("embeddingContext") {
             return Err("query_patch_field_conflict:embeddingContext".to_string());
         }
-        query.embedding_context = Some(embedding_context);
+        next_query.embedding_context = Some(embedding_context);
     }
     if let Some(user_state_context) = patch.user_state_context.clone() {
-        if !seen_fields.insert("userStateContext") {
+        if !next_seen_fields.insert("userStateContext") {
             return Err("query_patch_field_conflict:userStateContext".to_string());
         }
-        query.user_state_context = Some(user_state_context);
+        next_query.user_state_context = Some(user_state_context);
     }
     if let Some(user_action_sequence) = patch.user_action_sequence.clone() {
-        if !seen_fields.insert("userActionSequence") {
+        if !next_seen_fields.insert("userActionSequence") {
             return Err("query_patch_field_conflict:userActionSequence".to_string());
         }
-        query.user_action_sequence = Some(user_action_sequence);
+        next_query.user_action_sequence = Some(user_action_sequence);
     }
     if let Some(news_history_external_ids) = patch.news_history_external_ids.clone() {
-        if !seen_fields.insert("newsHistoryExternalIds") {
+        if !next_seen_fields.insert("newsHistoryExternalIds") {
             return Err("query_patch_field_conflict:newsHistoryExternalIds".to_string());
         }
-        query.news_history_external_ids = Some(news_history_external_ids);
+        next_query.news_history_external_ids = Some(news_history_external_ids);
     }
     if let Some(model_user_action_sequence) = patch.model_user_action_sequence.clone() {
-        if !seen_fields.insert("modelUserActionSequence") {
+        if !next_seen_fields.insert("modelUserActionSequence") {
             return Err("query_patch_field_conflict:modelUserActionSequence".to_string());
         }
-        query.model_user_action_sequence = Some(model_user_action_sequence);
+        next_query.model_user_action_sequence = Some(model_user_action_sequence);
     }
     if let Some(experiment_context) = patch.experiment_context.clone() {
-        if !seen_fields.insert("experimentContext") {
+        if !next_seen_fields.insert("experimentContext") {
             return Err("query_patch_field_conflict:experimentContext".to_string());
         }
-        query.experiment_context = Some(experiment_context);
+        next_query.experiment_context = Some(experiment_context);
     }
     if let Some(ranking_policy) = patch.ranking_policy.clone() {
-        if !seen_fields.insert("rankingPolicy") {
+        if !next_seen_fields.insert("rankingPolicy") {
             return Err("query_patch_field_conflict:rankingPolicy".to_string());
         }
-        query.ranking_policy = Some(ranking_policy);
+        next_query.ranking_policy = Some(ranking_policy);
     }
     if let Some(user_signal_features) = patch.user_signal_features.clone() {
-        if !seen_fields.insert("userSignalFeatures") {
+        if !next_seen_fields.insert("userSignalFeatures") {
             return Err("query_patch_field_conflict:userSignalFeatures".to_string());
         }
-        query.user_signal_features = Some(user_signal_features);
+        next_query.user_signal_features = Some(user_signal_features);
     }
     if let Some(interested_topics) = patch.interested_topics.clone() {
-        if !seen_fields.insert("interestedTopics") {
+        if !next_seen_fields.insert("interestedTopics") {
             return Err("query_patch_field_conflict:interestedTopics".to_string());
         }
-        query.interested_topics = Some(interested_topics);
+        next_query.interested_topics = Some(interested_topics);
     }
     if let Some(mutual_follow_ids) = patch.mutual_follow_ids.clone() {
-        if !seen_fields.insert("mutualFollowIds") {
+        if !next_seen_fields.insert("mutualFollowIds") {
             return Err("query_patch_field_conflict:mutualFollowIds".to_string());
         }
-        query.mutual_follow_ids = Some(mutual_follow_ids);
+        next_query.mutual_follow_ids = Some(mutual_follow_ids);
     }
     if let Some(demographics) = patch.demographics.clone() {
-        if !seen_fields.insert("demographics") {
+        if !next_seen_fields.insert("demographics") {
             return Err("query_patch_field_conflict:demographics".to_string());
         }
-        query.demographics = Some(demographics);
+        next_query.demographics = Some(demographics);
     }
     if let Some(past_request_timestamps) = patch.past_request_timestamps.clone() {
-        if !seen_fields.insert("pastRequestTimestamps") {
+        if !next_seen_fields.insert("pastRequestTimestamps") {
             return Err("query_patch_field_conflict:pastRequestTimestamps".to_string());
         }
-        query.past_request_timestamps = past_request_timestamps;
+        next_query.past_request_timestamps = past_request_timestamps;
     }
     if let Some(impressed_post_ids) = patch.impressed_post_ids.clone() {
-        if !seen_fields.insert("impressedPostIds") {
+        if !next_seen_fields.insert("impressedPostIds") {
             return Err("query_patch_field_conflict:impressedPostIds".to_string());
         }
-        query.impressed_post_ids = impressed_post_ids;
+        next_query.impressed_post_ids = impressed_post_ids;
     }
     if let Some(subscribed_user_ids) = patch.subscribed_user_ids.clone() {
-        if !seen_fields.insert("subscribedUserIds") {
+        if !next_seen_fields.insert("subscribedUserIds") {
             return Err("query_patch_field_conflict:subscribedUserIds".to_string());
         }
-        query.subscribed_user_ids = subscribed_user_ids;
+        next_query.subscribed_user_ids = subscribed_user_ids;
     }
+    *query = next_query;
+    *seen_fields = next_seen_fields;
     Ok(())
 }
 
@@ -176,6 +181,7 @@ mod tests {
                 user_id: "viewer-1".to_string(),
                 assignments: Vec::new(),
             }),
+            ranking_policy: Some(Default::default()),
             subscribed_user_ids: Some(vec!["author-2".to_string()]),
             ..RecommendationQueryPatchPayload::default()
         };
@@ -188,10 +194,22 @@ mod tests {
                 .map(|value| value.user_id.as_str()),
             Some("viewer-1")
         );
+        assert!(query.ranking_policy.is_some());
         assert_eq!(query.subscribed_user_ids, vec!["author-2"]);
 
         let conflict = apply_query_patch(&mut query, &user_features_patch, &mut seen_fields)
             .expect_err("second writer to userFeatures should be rejected");
         assert_eq!(conflict, "query_patch_field_conflict:userFeatures");
+
+        let mixed_conflict = RecommendationQueryPatchPayload {
+            user_action_sequence: Some(Vec::new()),
+            experiment_context: experiment_patch.experiment_context,
+            ..RecommendationQueryPatchPayload::default()
+        };
+        let conflict = apply_query_patch(&mut query, &mixed_conflict, &mut seen_fields)
+            .expect_err("mixed patch must be rejected atomically");
+        assert_eq!(conflict, "query_patch_field_conflict:experimentContext");
+        assert!(query.user_action_sequence.is_none());
+        assert!(!seen_fields.contains("userActionSequence"));
     }
 }
