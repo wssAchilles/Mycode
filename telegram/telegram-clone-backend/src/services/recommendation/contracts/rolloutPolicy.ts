@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 
 export interface RecommendationRolloutPolicy {
   version: string;
+  servingVersion: string;
   windowHours: number;
   minimumPrimarySamples: number;
   maximumFallbackRatio: number;
@@ -55,6 +56,7 @@ export function loadRecommendationRolloutPolicy(
     ok: true,
     policy: {
       version: activeVersion,
+      servingVersion: rawPolicy.servingVersion,
       windowHours: rawPolicy.windowHours,
       minimumPrimarySamples: rawPolicy.minimumPrimarySamples,
       maximumFallbackRatio: rawPolicy.maximumFallbackRatio,
@@ -77,6 +79,8 @@ export async function loadRecommendationRolloutPolicyFile(): Promise<Recommendat
 
 function isValidPolicy(value: unknown): value is Omit<RecommendationRolloutPolicy, 'version'> {
   return isRecord(value)
+    && typeof value.servingVersion === 'string'
+    && Boolean(value.servingVersion.trim())
     && isPositiveInteger(value.windowHours)
     && isPositiveInteger(value.minimumPrimarySamples)
     && typeof value.maximumFallbackRatio === 'number'

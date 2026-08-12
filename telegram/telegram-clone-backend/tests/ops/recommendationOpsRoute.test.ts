@@ -177,6 +177,7 @@ describe('recommendation ops route', () => {
                 approvedVersions: ['phase6a-v1'],
                 policies: {
                     'phase6a-v1': {
+                        servingVersion: 'rust_serving_v1',
                         windowHours: 2,
                         minimumPrimarySamples: 4,
                         maximumFallbackRatio: 0.5,
@@ -296,6 +297,7 @@ describe('recommendation ops route', () => {
             primarySamples: 4,
             validPrimarySamples: 4,
             fallbackSamples: 2,
+            servingVersionMismatchCount: 0,
             invalidTraceCount: 0,
         }]);
     });
@@ -381,6 +383,7 @@ describe('recommendation ops route', () => {
         const payload = await response.json();
         expect(payload.data.rolloutEvidence).toMatchObject({
             policyVersion: 'phase6a-v1',
+            servingVersion: 'rust_serving_v1',
             primarySamples: 4,
             fallbackSamples: 2,
             fallbackRatio: 0.5,

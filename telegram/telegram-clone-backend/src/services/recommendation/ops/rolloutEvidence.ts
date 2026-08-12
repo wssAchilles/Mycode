@@ -15,17 +15,20 @@ export interface RecommendationRolloutTrace {
   runtimeMode?: string;
   servingOwner?: string;
   fallbackReason?: string;
+  serving?: { servingVersion?: string };
   createdAt: Date | string;
 }
 
 export interface RecommendationRolloutEvidence {
   policyVersion?: string;
+  servingVersion?: string;
   windowHours?: number;
   minimumPrimarySamples?: number;
   maximumFallbackRatio?: number;
   primarySamples: number;
   validPrimarySamples: number;
   fallbackSamples: number;
+  servingVersionMismatchCount: number;
   invalidTraceCount: number;
   fallbackRatio: number | null;
   status: 'ready' | 'blocked';
@@ -45,7 +48,12 @@ export function buildRecommendationRolloutEvidence(
       && createdAt <= now.getTime()
       && trace.runtimeMode === 'primary';
   });
-  const validPrimaryTraces = primaryTraces.filter(hasValidPrimaryTraceContract);
+  const validPrimaryTraces = primaryTraces.filter((trace) =>
+    hasValidPrimaryTraceContract(trace, policy.servingVersion),
+  );
+  const servingVersionMismatchCount = primaryTraces.filter(
+    (trace) => trace.serving?.servingVersion !== policy.servingVersion,
+  ).length;
   const fallbackSamples = validPrimaryTraces.filter((trace) =>
     trace.servingOwner === 'node'
     && PRIMARY_FALLBACK_REASON_SET.has(String(trace.fallbackReason || '')),
@@ -55,15 +63,19 @@ export function buildRecommendationRolloutEvidence(
     primarySamples: primaryTraces.length,
     validPrimarySamples: validPrimaryTraces.length,
     fallbackSamples,
+    servingVersionMismatchCount,
     invalidTraceCount: primaryTraces.length - validPrimaryTraces.length,
   });
 }
 
-function hasValidPrimaryTraceContract(trace: RecommendationRolloutTrace): boolean {
-  return trace.servingOwner === 'rust'
+function hasValidPrimaryTraceContract(
+  trace: RecommendationRolloutTrace,
+  servingVersion: string,
+): boolean {
+  return trace.serving?.servingVersion === servingVersion && (trace.servingOwner === 'rust'
     ? trace.fallbackReason == null
     : trace.servingOwner === 'node'
-      && PRIMARY_FALLBACK_REASON_SET.has(String(trace.fallbackReason || ''));
+      && PRIMARY_FALLBACK_REASON_SET.has(String(trace.fallbackReason || '')));
 }
 
 function buildEvidenceFromCounts(
@@ -72,6 +84,7 @@ function buildEvidenceFromCounts(
     primarySamples: number;
     validPrimarySamples: number;
     fallbackSamples: number;
+    servingVersionMismatchCount: number;
     invalidTraceCount: number;
   },
 ): RecommendationRolloutEvidence {
@@ -85,18 +98,23 @@ function buildEvidenceFromCounts(
   if (counts.invalidTraceCount > 0) {
     blockers.push('recommendation_rollout_trace_contract_invalid');
   }
+  if (counts.servingVersionMismatchCount > 0) {
+    blockers.push('recommendation_rollout_serving_version_mismatch');
+  }
   if (fallbackRatio > policy.maximumFallbackRatio) {
     blockers.push('recommendation_rollout_fallback_ratio_high');
   }
 
   return {
     policyVersion: policy.version,
+    servingVersion: policy.servingVersion,
     windowHours: policy.windowHours,
     minimumPrimarySamples: policy.minimumPrimarySamples,
     maximumFallbackRatio: policy.maximumFallbackRatio,
     primarySamples: counts.primarySamples,
     validPrimarySamples: counts.validPrimarySamples,
     fallbackSamples: counts.fallbackSamples,
+    servingVersionMismatchCount: counts.servingVersionMismatchCount,
     invalidTraceCount: counts.invalidTraceCount,
     fallbackRatio,
     status: blockers.length === 0 ? 'ready' : 'blocked',
@@ -116,6 +134,7 @@ export async function readRecommendationRolloutEvidence(
       primarySamples: 0,
       validPrimarySamples: 0,
       fallbackSamples: 0,
+      servingVersionMismatchCount: 0,
       invalidTraceCount: 0,
       fallbackRatio: null,
       status: 'blocked',
@@ -128,6 +147,7 @@ export async function readRecommendationRolloutEvidence(
     primarySamples?: number;
     validPrimarySamples?: number;
     fallbackSamples?: number;
+    servingVersionMismatchCount?: number;
     invalidTraceCount?: number;
   }>([
     {
@@ -144,17 +164,22 @@ export async function readRecommendationRolloutEvidence(
           $sum: {
             $cond: [
               {
-                $or: [
+                $and: [
+                  { $eq: ['$serving.servingVersion', loaded.policy.servingVersion] },
                   {
-                    $and: [
-                      { $eq: ['$servingOwner', 'rust'] },
-                      { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
-                    ],
-                  },
-                  {
-                    $and: [
-                      { $eq: ['$servingOwner', 'node'] },
-                      { $in: ['$fallbackReason', [...PRIMARY_FALLBACK_REASONS]] },
+                    $or: [
+                      {
+                        $and: [
+                          { $eq: ['$servingOwner', 'rust'] },
+                          { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
+                        ],
+                      },
+                      {
+                        $and: [
+                          { $eq: ['$servingOwner', 'node'] },
+                          { $in: ['$fallbackReason', [...PRIMARY_FALLBACK_REASONS]] },
+                        ],
+                      },
                     ],
                   },
                 ],
@@ -169,10 +194,20 @@ export async function readRecommendationRolloutEvidence(
             $cond: [
               {
                 $and: [
+                  { $eq: ['$serving.servingVersion', loaded.policy.servingVersion] },
                   { $eq: ['$servingOwner', 'node'] },
                   { $in: ['$fallbackReason', [...PRIMARY_FALLBACK_REASONS]] },
                 ],
               },
+              1,
+              0,
+            ],
+          },
+        },
+        servingVersionMismatchCount: {
+          $sum: {
+            $cond: [
+              { $ne: ['$serving.servingVersion', loaded.policy.servingVersion] },
               1,
               0,
             ],
@@ -183,17 +218,22 @@ export async function readRecommendationRolloutEvidence(
             $cond: [
               {
                 $not: [{
-                  $or: [
+                  $and: [
+                    { $eq: ['$serving.servingVersion', loaded.policy.servingVersion] },
                     {
-                      $and: [
-                        { $eq: ['$servingOwner', 'rust'] },
-                        { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
-                      ],
-                    },
-                    {
-                      $and: [
-                        { $eq: ['$servingOwner', 'node'] },
-                        { $in: ['$fallbackReason', [...PRIMARY_FALLBACK_REASONS]] },
+                      $or: [
+                        {
+                          $and: [
+                            { $eq: ['$servingOwner', 'rust'] },
+                            { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
+                          ],
+                        },
+                        {
+                          $and: [
+                            { $eq: ['$servingOwner', 'node'] },
+                            { $in: ['$fallbackReason', [...PRIMARY_FALLBACK_REASONS]] },
+                          ],
+                        },
                       ],
                     },
                   ],
@@ -212,6 +252,7 @@ export async function readRecommendationRolloutEvidence(
     primarySamples: readCount(counts?.primarySamples),
     validPrimarySamples: readCount(counts?.validPrimarySamples),
     fallbackSamples: readCount(counts?.fallbackSamples),
+    servingVersionMismatchCount: readCount(counts?.servingVersionMismatchCount),
     invalidTraceCount: readCount(counts?.invalidTraceCount),
   });
 }
