@@ -241,7 +241,10 @@ interface UserFeatureVectorStatics {
      * 批量获取用户嵌入
      * 复刻 SimClusters 的 InterestedInStore.multiGet()
      */
-    getUserEmbeddingsBatch(userIds: string[]): Promise<Map<string, IUserFeatureVector>>;
+    getUserEmbeddingsBatch(
+        userIds: string[],
+        signal?: AbortSignal,
+    ): Promise<Map<string, IUserFeatureVector>>;
 
     /**
      * 更新或创建用户嵌入
@@ -250,7 +253,8 @@ interface UserFeatureVectorStatics {
     upsertEmbedding(
         userId: string,
         embeddings: Partial<IUserFeatureVector>,
-        version: number
+        version: number,
+        signal?: AbortSignal,
     ): Promise<IUserFeatureVector>;
 
     /**
@@ -278,12 +282,14 @@ UserFeatureVectorSchema.statics.getUserEmbedding = async function (
 
 // 批量获取
 UserFeatureVectorSchema.statics.getUserEmbeddingsBatch = async function (
-    userIds: string[]
+    userIds: string[],
+    signal?: AbortSignal,
 ): Promise<Map<string, IUserFeatureVector>> {
     const docs = await this.find({
         userId: { $in: userIds },
         expiresAt: { $gt: new Date() }
-    });
+    }).setOptions({ signal });
+    signal?.throwIfAborted();
 
     const result = new Map<string, IUserFeatureVector>();
     for (const doc of docs) {
@@ -335,8 +341,10 @@ function assertDenseEmbeddingWrite(
 UserFeatureVectorSchema.statics.upsertEmbedding = async function (
     userId: string,
     embeddings: Partial<IUserFeatureVector>,
-    version: number
+    version: number,
+    signal?: AbortSignal,
 ): Promise<IUserFeatureVector> {
+    signal?.throwIfAborted();
     if (hasOwn(embeddings, 'embeddingContract')) {
         throw new Error('legacy_embedding_contract_not_writable');
     }
@@ -361,8 +369,9 @@ UserFeatureVectorSchema.statics.upsertEmbedding = async function (
     const doc = await this.findOneAndUpdate(
         { userId },
         { $set },
-        { upsert: true, new: true, runValidators: true }
+        { upsert: true, new: true, runValidators: true, signal }
     );
+    signal?.throwIfAborted();
 
     return doc;
 };

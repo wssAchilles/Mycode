@@ -104,6 +104,267 @@ describe('embedding provenance', () => {
     expect(out[0]._scoreBreakdown).toMatchObject({
       retrievalPoolKeywordFallback: 1,
     });
+    expect(source.stageDetail(query as any, out)).toMatchObject({
+      servedPath: 'keyword_fallback',
+      annObservation: {
+        mode: 'observe_only',
+        reason: 'request_contract_mismatch',
+        validatedCount: 0,
+        hydratedCount: 0,
+      },
+    });
+  });
+
+  it('hydrates TwoTower ANN candidates only for observation and never serves them', async () => {
+    const query = createFeedQuery('viewer-observe', 20);
+    query.embeddingContext = {
+      interestedInClusters: [{ clusterId: 101, score: 0.8 }],
+      producerEmbedding: [],
+      qualityScore: 0.9,
+      embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+      usable: true,
+      stale: false,
+    };
+    query.experimentContext = {
+      getConfig: (_experimentId: string, key: string, defaultValue: unknown) => {
+        if (key === 'enable_embedding_retrieval') return false;
+        return defaultValue;
+      },
+    } as any;
+    const localPost = {
+      _id: oid('507f191e810c19729de8b010'),
+      authorId: 'author-local',
+      content: 'local market rally',
+      keywords: ['market'],
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      isNews: false,
+      stats: { likeCount: 2, commentCount: 0, repostCount: 0, viewCount: 10 },
+      media: [],
+      isNsfw: false,
+      isPinned: false,
+    };
+    const annPost = {
+      ...localPost,
+      _id: oid('507f191e810c19729de8b011'),
+      authorId: 'author-ann-only',
+      content: 'ANN-only post',
+    };
+    const annClient = {
+      retrieve: vi.fn().mockResolvedValue({
+        outcome: 'success',
+        requestedK: 200,
+        returnedK: 1,
+        latencyMs: 1,
+        candidates: [{ postId: annPost._id.toString(), score: 0.99 }],
+        responseEvidence: {
+          embeddingSpace: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.embeddingSpace,
+          retrievalEmbeddingDim: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
+          modelVersion: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.modelVersion,
+          artifactVersion: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.artifactVersion,
+          idNamespace: 'mongo_object_id',
+          indexVersion: 'two-tower-index-v1',
+        },
+      }),
+    };
+    const source = new TwoTowerSource(annClient as any);
+    vi.spyOn(source as any, 'loadCandidatePools').mockResolvedValue([
+      {
+        entries: [{ post: localPost }],
+        poolKind: 'legacy_pool',
+        priorityScore: 0,
+      },
+    ]);
+    vi.spyOn(Post as any, 'find').mockReturnValue({
+      lean: vi.fn().mockResolvedValue([annPost]),
+    } as any);
+
+    const out = await source.getCandidates(query as any);
+
+    expect(annClient.retrieve).toHaveBeenCalledWith(
+      expect.objectContaining({ topK: 200 }),
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
+    );
+    expect(out.map((candidate) => candidate.postId.toString())).toEqual([localPost._id.toString()]);
+    expect(out.some((candidate) => candidate.postId.toString() === annPost._id.toString())).toBe(false);
+    expect(source.stageDetail(query as any, out)).toMatchObject({
+      servedPath: 'keyword_fallback',
+      annObservation: {
+        mode: 'observe_only',
+        attempt: { outcome: 'success', requestedK: 200, returnedK: 1 },
+        validatedCount: 1,
+        hydratedCount: 1,
+        comparison: {
+          status: 'skipped',
+          reason: 'exact_baseline_unavailable',
+          evaluationKs: [20, 80, 200],
+        },
+      },
+    });
+  });
+
+  it('keeps serving TwoTower local fallback when ANN context lookup fails', async () => {
+    const query = createFeedQuery('viewer-observation-failure', 20);
+    query.embeddingContext = {
+      interestedInClusters: [{ clusterId: 101, score: 0.8 }],
+      producerEmbedding: [],
+      embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+      usable: true,
+      stale: false,
+    };
+    query.userActionSequence = [{
+      targetPostId: '507f191e810c19729de8b020',
+    }] as any;
+    query.experimentContext = {
+      getConfig: (_experimentId: string, key: string, defaultValue: unknown) => {
+        if (key === 'enable_embedding_retrieval') return false;
+        return defaultValue;
+      },
+    } as any;
+    const localPost = {
+      _id: oid('507f191e810c19729de8b021'),
+      authorId: 'author-local',
+      content: 'local fallback',
+      keywords: ['local'],
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      isNews: false,
+      stats: { likeCount: 1, commentCount: 0, repostCount: 0, viewCount: 1 },
+      media: [],
+      isNsfw: false,
+      isPinned: false,
+    };
+    const source = new TwoTowerSource({ retrieve: vi.fn() } as any);
+    vi.spyOn(source as any, 'loadCandidatePools').mockResolvedValue([
+      { entries: [{ post: localPost }], poolKind: 'legacy_pool', priorityScore: 0 },
+    ]);
+    vi.spyOn(Post as any, 'find').mockImplementation(() => {
+      throw new Error('history lookup unavailable');
+    });
+
+    const out = await source.getCandidates(query as any);
+    const detail = source.stageDetail(query as any, out);
+
+    expect(out.map((candidate) => candidate.postId.toString())).toEqual([localPost._id.toString()]);
+    expect(detail).toMatchObject({
+      servedPath: 'keyword_fallback',
+      annObservation: {
+        mode: 'observe_only',
+        reason: 'observation_failed',
+        validatedCount: 0,
+        hydratedCount: 0,
+      },
+    });
+    expect(detail).not.toHaveProperty('error');
+    expect(detail).not.toHaveProperty('timedOut');
+  });
+
+  it('bounds a hanging TwoTower history lookup by the whole observation deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const query = createFeedQuery('viewer-hanging-history', 20);
+      query.rankingPolicy = { sourceBatchTimeoutMs: 50 };
+      query.embeddingContext = {
+        interestedInClusters: [{ clusterId: 101, score: 0.8 }],
+        producerEmbedding: [],
+        embeddingContract: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+        usable: true,
+        stale: false,
+      };
+      query.userActionSequence = [{
+        targetPostId: '507f191e810c19729de8b030',
+      }] as any;
+      query.experimentContext = {
+        getConfig: (_experimentId: string, key: string, defaultValue: unknown) => {
+          if (key === 'enable_embedding_retrieval') return false;
+          return defaultValue;
+        },
+      } as any;
+      const localPost = {
+        _id: oid('507f191e810c19729de8b031'),
+        authorId: 'author-local',
+        content: 'local deadline fallback',
+        keywords: ['local'],
+        createdAt: new Date('2026-03-01T00:00:00.000Z'),
+        isReply: false,
+        isRepost: false,
+        isNews: false,
+        stats: { likeCount: 1, commentCount: 0, repostCount: 0, viewCount: 1 },
+        media: [],
+        isNsfw: false,
+        isPinned: false,
+      };
+      let resolveHistory!: (posts: unknown[]) => void;
+      const annClient = {
+        retrieve: vi.fn().mockResolvedValue({
+          outcome: 'empty',
+          requestedK: 200,
+          returnedK: 0,
+          latencyMs: 1,
+          candidates: [],
+          responseEvidence: {
+            embeddingSpace: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.embeddingSpace,
+            retrievalEmbeddingDim: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.retrievalEmbeddingDim,
+            modelVersion: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.modelVersion,
+            artifactVersion: DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT.artifactVersion,
+            idNamespace: 'mongo_object_id',
+            indexVersion: 'two-tower-index-v1',
+          },
+        }),
+      };
+      const source = new TwoTowerSource(annClient as any);
+      vi.spyOn(source as any, 'loadCandidatePools').mockResolvedValue([
+        { entries: [{ post: localPost }], poolKind: 'legacy_pool', priorityScore: 0 },
+      ]);
+      vi.spyOn(Post as any, 'find').mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          lean: vi.fn(() => new Promise((resolve) => {
+            resolveHistory = resolve;
+          })),
+        }),
+      } as any);
+
+      const pending = source.getCandidates(query as any);
+      const observed = Promise.race([
+        pending,
+        new Promise<'test_timeout'>((resolve) => setTimeout(() => resolve('test_timeout'), 60)),
+      ]);
+      await vi.advanceTimersByTimeAsync(60);
+      const result = await observed;
+
+      resolveHistory([]);
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(result).not.toBe('test_timeout');
+      const out = result as Awaited<ReturnType<typeof source.getCandidates>>;
+      const detail = source.stageDetail(query as any, out);
+      expect(annClient.retrieve).not.toHaveBeenCalled();
+      expect(out.map((candidate) => candidate.postId.toString())).toEqual([localPost._id.toString()]);
+      expect(detail).toMatchObject({
+        servedPath: 'keyword_fallback',
+        annObservation: {
+          mode: 'observe_only',
+          attempt: {
+            outcome: 'timeout',
+            requestedK: 200,
+            returnedK: 0,
+            candidates: [],
+          },
+          validatedCount: 0,
+          hydratedCount: 0,
+          comparison: {
+            status: 'skipped',
+            reason: 'exact_baseline_unavailable',
+          },
+        },
+      });
+      expect(source.stageDetail(query as any, out)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('falls back to recent news when News ANN semantic provenance is not enabled', async () => {
@@ -137,6 +398,13 @@ describe('embedding provenance', () => {
     expect(out).toHaveLength(1);
     expect(out[0].newsMetadata?.externalId).toBe('N1');
     expect(out[0]._scoreBreakdown).toMatchObject({ annFallbackRecency: 1 });
+    expect(source.stageDetail(query as any, out)).toMatchObject({
+      servedPath: 'recency_fallback',
+      annObservation: {
+        mode: 'observe_only',
+        reason: 'request_contract_mismatch',
+      },
+    });
   });
 
   it('requires complete semantic provenance before storing external news embeddings', () => {

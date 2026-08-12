@@ -10,7 +10,15 @@ import { Source } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
-import { AnnClient, HttpAnnClient } from '../clients/ANNClient';
+import {
+    AnnAttempt,
+    AnnClient,
+    AnnComparison,
+    HttpAnnClient,
+    buildAnnEvaluationKs,
+    compareAnnAgainstExact,
+    retrieveAnnWithinBudget,
+} from '../clients/ANNClient';
 import {
     CRAWLER_TFIDF_EMBEDDING_CONTRACT,
     buildEmbeddingContract,
@@ -18,8 +26,6 @@ import {
     type EmbeddingContract,
 } from '../contracts/embeddingContract';
 
-const ANN_MIN_TOPK = 200;
-const ANN_MAX_TOPK = 1000;
 const FALLBACK_MAX_RESULTS = 80;
 const NEWS_ANN_TIMEOUT_MS = Math.max(
     50,
@@ -44,9 +50,19 @@ const REQUIRED_NEWS_ANN_CONTRACT: EmbeddingContract = {
     semantic: true,
 };
 
+type AnnObservation = {
+    mode: 'observe_only';
+    reason?: 'client_not_configured' | 'request_contract_mismatch' | 'id_namespace_mismatch' | 'observation_failed';
+    attempt?: AnnAttempt;
+    validatedCount: number;
+    hydratedCount: number;
+    comparison: AnnComparison;
+};
+
 export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'NewsAnnSource';
     private annClient?: AnnClient;
+    private readonly stageDetails = new Map<string, Record<string, unknown>>();
 
     constructor(annClient?: AnnClient) {
         if (annClient) {
@@ -65,88 +81,167 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
         return !query.inNetworkOnly;
     }
 
+    stageDetail(query: FeedQuery, _candidates?: FeedCandidate[]): Record<string, unknown> | undefined {
+        const detail = this.stageDetails.get(query.requestId);
+        this.stageDetails.delete(query.requestId);
+        return detail;
+    }
+
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
-        // 1) Prefer ANN retrieval
-        const runtimeContract = getNewsAnnRuntimeContract();
-        if (this.annClient && isEmbeddingContractCompatible(runtimeContract, REQUIRED_NEWS_ANN_CONTRACT)) {
-            try {
-                const historyExternalIds = (query.newsHistoryExternalIds || []).map(String).filter(Boolean);
-                const topK = Math.min(
-                    ANN_MAX_TOPK,
-                    Math.max(ANN_MIN_TOPK, Math.max(0, (query.limit || 0)) * 10)
-                );
+        const annObservationPromise = this.observeAnnWithinDeadline(query);
+        const [annObservation, candidates] = await Promise.all([
+            annObservationPromise,
+            this.getRecencyFallback(query),
+        ]);
+        this.stageDetails.set(query.requestId, {
+            servedPath: candidates.length > 0 ? 'recency_fallback' : 'empty',
+            annObservation,
+        });
+        return candidates;
+    }
 
-                const ann = await this.retrieveAnnWithinBudget({
-                    userId: query.userId,
-                    keywords: [],
-                    historyPostIds: historyExternalIds,
-                    topK,
-                    corpusContract: runtimeContract,
-                });
+    private async observeAnnWithinDeadline(query: FeedQuery): Promise<AnnObservation> {
+        const startedAt = Date.now();
+        const budgetMs = Math.max(1, resolveAnnBudgetMs(query, NEWS_ANN_TIMEOUT_MS));
+        const deadline = startedAt + budgetMs;
+        let timer: NodeJS.Timeout | undefined;
+        const observation = this.observeAnn(query, deadline, startedAt)
+            .catch(() => (
+                Date.now() >= deadline
+                    ? timedOutAnnObservation(query, startedAt)
+                    : failedAnnObservation(query)
+            ));
+        const timeout = new Promise<AnnObservation>((resolve) => {
+            timer = setTimeout(
+                () => resolve(timedOutAnnObservation(query, startedAt)),
+                Math.max(0, deadline - Date.now()),
+            );
+        });
 
-                const annByExternalId = new Map(
-                    ann
-                        .map((candidate, index) => [String(candidate.postId || ''), { candidate, rank: index + 1 }] as const)
-                        .filter(([externalId]) => Boolean(externalId)),
-                );
-                const externalIds = Array.from(annByExternalId.keys());
-                if (externalIds.length > 0) {
-                    const posts = await Post.find(
-                        {
-                            isNews: true,
-                            deletedAt: null,
-                            'newsMetadata.externalId': { $in: externalIds },
-                        },
-                        {
-                            // minimal fields for candidate creation
-                            authorId: 1,
-                            content: 1,
-                            createdAt: 1,
-                            isReply: 1,
-                            replyToPostId: 1,
-                            isRepost: 1,
-                            originalPostId: 1,
-                            conversationId: 1,
-                            media: 1,
-                            stats: 1,
-                            isNsfw: 1,
-                            isPinned: 1,
-                            isNews: 1,
-                            newsMetadata: 1,
-                        }
-                    ).lean();
+        try {
+            return await Promise.race([observation, timeout]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
 
-                    const map = new Map<string, any>();
-                    for (const p of posts as any[]) {
-                        const ext = p?.newsMetadata?.externalId ? String(p.newsMetadata.externalId) : '';
-                        if (ext) map.set(ext, p);
-                    }
-
-                    const ordered = externalIds
-                        .map((ext) => map.get(ext))
-                        .filter(Boolean) as any[];
-
-                    return ordered.map((p) => {
-                        const ext = String(p.newsMetadata?.externalId || '');
-                        const annHit = annByExternalId.get(ext);
-                        return {
-                            ...createFeedCandidate(p as unknown as Parameters<typeof createFeedCandidate>[0]),
-                            inNetwork: false,
-                            recallSource: this.name,
-                            _scoreBreakdown: {
-                                annRetrievalScore: annHit?.candidate.score || 0,
-                                annRetrievalRank: annHit?.rank || 0,
-                                annRetrievalTopK: topK,
-                            },
-                        };
-                    });
-                }
-            } catch (err) {
-                console.error('[NewsAnnSource] ANN retrieve failed, fallback recency:', err);
-            }
+    private async observeAnn(
+        query: FeedQuery,
+        deadline: number,
+        startedAt: number,
+    ): Promise<AnnObservation> {
+        const evaluationKs = buildAnnEvaluationKs(query.limit);
+        const comparison = compareAnnAgainstExact({ evaluationKs, annIds: [] });
+        if (!this.annClient) {
+            return {
+                mode: 'observe_only',
+                reason: 'client_not_configured',
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison,
+            };
         }
 
-        // 2) Minimal degrade: most recent news (externalId preferred but not required)
+        const runtimeContract = getNewsAnnRuntimeContract();
+        if (!isEmbeddingContractCompatible(runtimeContract, REQUIRED_NEWS_ANN_CONTRACT)) {
+            return {
+                mode: 'observe_only',
+                reason: 'request_contract_mismatch',
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison,
+            };
+        }
+
+        const requestedK = evaluationKs[evaluationKs.length - 1] || 200;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+            return timedOutAnnObservation(query, startedAt);
+        }
+        const attempt = await retrieveAnnWithinBudget(
+            this.annClient,
+            {
+                userId: query.userId,
+                keywords: [],
+                historyPostIds: (query.newsHistoryExternalIds || []).map(String).filter(Boolean),
+                topK: requestedK,
+                corpusContract: runtimeContract,
+                expectedEvidence: {
+                    embeddingSpace: runtimeContract.embeddingSpace,
+                    retrievalEmbeddingDim: runtimeContract.retrievalEmbeddingDim,
+                    modelVersion: runtimeContract.modelVersion,
+                    artifactVersion: runtimeContract.artifactVersion,
+                    idNamespace: 'news_external_id',
+                },
+            },
+            remainingMs,
+        );
+        if (Date.now() >= deadline) {
+            return timedOutAnnObservation(query, startedAt);
+        }
+        const observedComparison = compareAnnAgainstExact({
+            evaluationKs,
+            annIds: attempt.candidates.map((candidate) => candidate.postId),
+            annEvidence: attempt.responseEvidence,
+        });
+        if (attempt.outcome !== 'success') {
+            return {
+                mode: 'observe_only',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+        if (attempt.responseEvidence?.idNamespace !== 'news_external_id') {
+            return {
+                mode: 'observe_only',
+                reason: 'id_namespace_mismatch',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+
+        const externalIds = Array.from(new Set(
+            attempt.candidates.map((candidate) => candidate.postId.trim()).filter(Boolean),
+        ));
+        if (externalIds.length === 0) {
+            return {
+                mode: 'observe_only',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+        const posts = await Post.find(
+            {
+                isNews: true,
+                deletedAt: null,
+                'newsMetadata.externalId': { $in: externalIds },
+            },
+            { 'newsMetadata.externalId': 1 },
+        ).lean();
+        if (Date.now() >= deadline) {
+            return timedOutAnnObservation(query, startedAt);
+        }
+        const hydratedIds = new Set(
+            (posts as any[])
+                .map((post) => String(post?.newsMetadata?.externalId || ''))
+                .filter((externalId) => externalIds.includes(externalId)),
+        );
+        return {
+            mode: 'observe_only',
+            attempt,
+            validatedCount: externalIds.length,
+            hydratedCount: hydratedIds.size,
+            comparison: observedComparison,
+        };
+    }
+
+    private async getRecencyFallback(query: FeedQuery): Promise<FeedCandidate[]> {
         const mongoQuery: Record<string, unknown> = {
             isNews: true,
             deletedAt: null,
@@ -168,26 +263,6 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                 annFallbackRecency: 1,
             },
         }));
-    }
-
-    private async retrieveAnnWithinBudget(request: Parameters<AnnClient['retrieve']>[0]) {
-        if (!this.annClient) return [];
-
-        let timer: NodeJS.Timeout | undefined;
-        const annPromise = this.annClient.retrieve(request).catch((err) => {
-            console.error('[NewsAnnSource] ANN retrieve failed, fallback recency:', err);
-            return [];
-        });
-        const timeoutPromise = new Promise<Awaited<ReturnType<AnnClient['retrieve']>>>((resolve) => {
-            timer = setTimeout(() => resolve([]), NEWS_ANN_TIMEOUT_MS);
-            if (typeof timer?.unref === 'function') timer.unref();
-        });
-
-        try {
-            return await Promise.race([annPromise, timeoutPromise]);
-        } finally {
-            if (timer) clearTimeout(timer);
-        }
     }
 }
 
@@ -211,4 +286,40 @@ function getNewsAnnRuntimeContract(): EmbeddingContract {
     }
 
     return buildEmbeddingContract(CRAWLER_TFIDF_EMBEDDING_CONTRACT, dimensions);
+}
+
+function resolveAnnBudgetMs(query: FeedQuery, fallbackMs: number): number {
+    const policyBudget = Number(query.rankingPolicy?.sourceBatchTimeoutMs);
+    return Number.isFinite(policyBudget) && policyBudget > 0
+        ? Math.round(policyBudget)
+        : fallbackMs;
+}
+
+function failedAnnObservation(query: FeedQuery): AnnObservation {
+    const evaluationKs = buildAnnEvaluationKs(query.limit);
+    return {
+        mode: 'observe_only',
+        reason: 'observation_failed',
+        validatedCount: 0,
+        hydratedCount: 0,
+        comparison: compareAnnAgainstExact({ evaluationKs, annIds: [] }),
+    };
+}
+
+function timedOutAnnObservation(query: FeedQuery, startedAt: number): AnnObservation {
+    const evaluationKs = buildAnnEvaluationKs(query.limit);
+    const requestedK = evaluationKs[evaluationKs.length - 1] || 200;
+    return {
+        mode: 'observe_only',
+        attempt: {
+            outcome: 'timeout',
+            requestedK,
+            returnedK: 0,
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            candidates: [],
+        },
+        validatedCount: 0,
+        hydratedCount: 0,
+        comparison: compareAnnAgainstExact({ evaluationKs, annIds: [] }),
+    };
 }
