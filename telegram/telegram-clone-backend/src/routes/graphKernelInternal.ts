@@ -4,6 +4,15 @@ import {
   GraphKernelSnapshotVersionMismatchError,
   graphKernelSnapshotService,
 } from '../services/graphKernel/snapshotService';
+import {
+  generationPageRequestSchema,
+  generationReleaseRequestSchema,
+} from '../services/graphKernel/generation/contracts';
+import {
+  GenerationLeaseError,
+  GenerationUnavailableError,
+  graphKernelGenerationService,
+} from '../services/graphKernel/generation/service';
 
 const router = Router();
 
@@ -93,6 +102,55 @@ router.post('/snapshot', async (req, res) => {
     }
     if (error instanceof Error && error.message === 'invalid_graph_snapshot_cursor') {
       return sendError(res, ErrorCode.BAD_REQUEST, 'invalid graph snapshot cursor');
+    }
+    throw error;
+  }
+});
+
+router.post('/snapshot/generation/page', async (req, res) => {
+  const parsed = generationPageRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendError(
+      res,
+      ErrorCode.VALIDATION_ERROR,
+      'invalid graph generation page request',
+      parsed.error.issues,
+    );
+  }
+
+  try {
+    return sendSuccess(res, await graphKernelGenerationService.pageGeneration(parsed.data));
+  } catch (error) {
+    if (error instanceof GenerationLeaseError) {
+      return sendError(res, ErrorCode.CONFLICT, error.message);
+    }
+    if (error instanceof GenerationUnavailableError) {
+      return sendError(res, ErrorCode.SERVICE_UNAVAILABLE, error.message);
+    }
+    throw error;
+  }
+});
+
+router.post('/snapshot/generation/release', async (req, res) => {
+  const parsed = generationReleaseRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendError(
+      res,
+      ErrorCode.VALIDATION_ERROR,
+      'invalid graph generation release request',
+      parsed.error.issues,
+    );
+  }
+
+  try {
+    await graphKernelGenerationService.releaseGenerationLease(
+      parsed.data.generationId,
+      parsed.data.leaseId,
+    );
+    return sendSuccess(res, { ...parsed.data, released: true });
+  } catch (error) {
+    if (error instanceof GenerationLeaseError) {
+      return sendError(res, ErrorCode.CONFLICT, error.message);
     }
     throw error;
   }

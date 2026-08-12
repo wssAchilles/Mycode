@@ -324,7 +324,11 @@ interface RealGraphEdgeStatics {
      * 获取用户 Top-N 亲密关系
      * 复刻 real-graph 的 getTopConnections()
      */
-    getTopConnections(userId: string, limit: number): Promise<IRealGraphEdge[]>;
+    getTopConnections(
+        userId: string,
+        limit: number,
+        signal?: AbortSignal,
+    ): Promise<IRealGraphEdge[]>;
 
     /**
      * 获取双向关系分数 (A->B + B->A)
@@ -335,7 +339,7 @@ interface RealGraphEdgeStatics {
      * 应用每日衰减 (定时任务调用)
      * 复刻 real-graph 的 rollup job
      */
-    applyDailyDecay(batchSize?: number): Promise<number>;
+    applyDailyDecay(batchSize?: number, signal?: AbortSignal): Promise<number>;
 
     /**
      * 计算衰减分数
@@ -427,11 +431,13 @@ RealGraphEdgeSchema.statics.getEdgeScore = async function (
 // 获取 Top-N 亲密关系
 RealGraphEdgeSchema.statics.getTopConnections = async function (
     userId: string,
-    limit: number = 50
+    limit: number = 50,
+    signal?: AbortSignal,
 ): Promise<IRealGraphEdge[]> {
     return this.find({ sourceUserId: userId, decayedSum: { $gt: 0 } })
         .sort({ decayedSum: -1 })
-        .limit(limit);
+        .limit(limit)
+        .setOptions({ signal });
 };
 
 // 获取双向分数
@@ -448,8 +454,10 @@ RealGraphEdgeSchema.statics.getMutualScore = async function (
 
 // 应用每日衰减
 RealGraphEdgeSchema.statics.applyDailyDecay = async function (
-    batchSize: number = 1000
+    batchSize: number = 1000,
+    signal?: AbortSignal,
 ): Promise<number> {
+    signal?.throwIfAborted();
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
 
@@ -457,11 +465,15 @@ RealGraphEdgeSchema.statics.applyDailyDecay = async function (
     const edges = await this.find({
         lastDecayAppliedAt: { $lt: yesterday },
         decayedSum: { $gt: DECAY_CONFIG.minRetainScore },
-    }).limit(batchSize);
+    })
+        .limit(batchSize)
+        .setOptions({ signal });
+    signal?.throwIfAborted();
 
     let processedCount = 0;
 
     for (const edge of edges) {
+        signal?.throwIfAborted();
         // 计算自上次衰减以来的天数
         const daysSinceDecay = Math.floor(
             (Date.now() - edge.lastDecayAppliedAt.getTime()) / (24 * 60 * 60 * 1000)
@@ -495,7 +507,19 @@ RealGraphEdgeSchema.statics.applyDailyDecay = async function (
             // 重置每日计数
             edge.dailyCounts = { ...DEFAULT_COUNTS };
 
-            await edge.save();
+            await this.updateOne(
+                { _id: edge._id },
+                {
+                    $set: {
+                        rollupCounts: counts,
+                        decayedSum: edge.decayedSum,
+                        lastDecayAppliedAt: edge.lastDecayAppliedAt,
+                        dailyCounts: edge.dailyCounts,
+                    },
+                },
+                { signal },
+            );
+            signal?.throwIfAborted();
             processedCount++;
         }
     }
