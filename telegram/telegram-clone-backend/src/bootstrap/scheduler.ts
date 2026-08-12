@@ -3,6 +3,7 @@ import { spaceService } from '../services/spaceService';
 import { newsService } from '../services/newsService';
 import { simClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { realGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
+import { utcDailyRepairEpoch } from '../services/jobs/coordination/repairLease';
 import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
 import { newsMaterializationService } from '../services/recommendation/newsMaterialization';
 import { createChildLogger } from '../utils/logger';
@@ -141,7 +142,10 @@ export function registerCronJobs(): void {
     cron.schedule(simClustersRepairJob.cron, async () => {
       log.info('Starting SimClusters repair job...');
       try {
-        const result = await simClustersBatchJob.run({ trigger: 'cron' });
+        const result = await simClustersBatchJob.run({
+          trigger: 'cron',
+          epoch: utcDailyRepairEpoch(),
+        });
         log.info({ success: result.success, durationMs: result.durationMs }, 'SimClusters repair completed');
       } catch (error) {
         log.error({ err: error }, 'SimClusters repair job failed');
@@ -157,7 +161,10 @@ export function registerCronJobs(): void {
     cron.schedule(realGraphRepairJob.cron, async () => {
       log.info('Starting RealGraph decay repair job...');
       try {
-        const result = await realGraphDecayJob.run({ trigger: 'cron' });
+        const result = await realGraphDecayJob.run({
+          trigger: 'cron',
+          epoch: utcDailyRepairEpoch(),
+        });
         log.info({ decayedEdges: result.decayedEdges, durationMs: result.durationMs }, 'RealGraph decay repair completed');
       } catch (error) {
         log.error({ err: error }, 'RealGraph decay repair failed');

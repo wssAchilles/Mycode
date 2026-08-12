@@ -410,7 +410,7 @@ export class RealGraphService {
      * 2. 重置每日计数
      * 3. 更新预测分数
      */
-    async applyDailyDecay(): Promise<{
+    async applyDailyDecay(signal?: AbortSignal): Promise<{
         totalProcessed: number;
         batches: number;
         errors: number;
@@ -420,10 +420,13 @@ export class RealGraphService {
         let errors = 0;
 
         while (batches < CONFIG.decayJob.maxDailyBatches) {
+            signal?.throwIfAborted();
             try {
                 const processed = await RealGraphEdge.applyDailyDecay(
-                    CONFIG.decayJob.batchSize
+                    CONFIG.decayJob.batchSize,
+                    signal,
                 );
+                signal?.throwIfAborted();
 
                 if (processed === 0) {
                     break; // 没有更多需要处理的边
@@ -435,6 +438,7 @@ export class RealGraphService {
                 console.log(`[RealGraph] Decay batch ${batches}: processed ${processed} edges`);
 
             } catch (error) {
+                signal?.throwIfAborted();
                 console.error('[RealGraph] Decay batch error:', error);
                 errors++;
 
@@ -454,15 +458,18 @@ export class RealGraphService {
      */
     async cleanupStaleEdges(
         minScore: number = DECAY_CONFIG.minRetainScore,
-        daysInactive: number = 90
+        daysInactive: number = 90,
+        signal?: AbortSignal,
     ): Promise<number> {
+        signal?.throwIfAborted();
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - daysInactive);
 
         const result = await RealGraphEdge.deleteMany({
             decayedSum: { $lt: minScore },
             lastInteractionAt: { $lt: cutoffDate },
-        });
+        }, { signal });
+        signal?.throwIfAborted();
 
         console.log(`[RealGraph] Cleaned up ${result.deletedCount} stale edges`);
 

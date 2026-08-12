@@ -238,10 +238,13 @@ export class FeatureCacheService {
     /**
      * 失效用户嵌入缓存
      */
-    async invalidateUserEmbedding(userId: string): Promise<void> {
+    async invalidateUserEmbedding(userId: string, signal?: AbortSignal): Promise<void> {
+        signal?.throwIfAborted();
         const cacheKey = `${CONFIG.l2.keyPrefix}emb:${userId}`;
         this.userEmbeddingL1.delete(cacheKey);
+        signal?.throwIfAborted();
         await redis.del(cacheKey);
+        signal?.throwIfAborted();
     }
 
     // ========== RealGraph 边分数缓存 ==========

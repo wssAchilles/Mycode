@@ -1,8 +1,8 @@
 /**
  * 手动触发机器学习任务脚本
  * 运行: 
- *   npx ts-node src/scripts/triggerJobs.ts --job simclusters
- *   npx ts-node src/scripts/triggerJobs.ts --job realgraph
+ *   npx ts-node src/scripts/triggerJobs.ts --job simclusters --epoch 2026-07-15
+ *   npx ts-node src/scripts/triggerJobs.ts --job realgraph --epoch 2026-07-15
  *   npx ts-node src/scripts/triggerJobs.ts --job daily-recommendation-refresh
  */
 
@@ -21,6 +21,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 // 改进参数解析
 const args = process.argv.slice(2);
 let jobName = '';
+let epoch = '';
 
 // 尝试查找 --job 参数
 const jobArgIndex = args.findIndex(arg => arg.startsWith('--job'));
@@ -38,6 +39,15 @@ if (jobArgIndex !== -1) {
 // 移除可能的前缀
 jobName = jobName ? jobName.replace('--job=', '') : '';
 
+const epochArgIndex = args.findIndex(arg => arg === '--epoch' || arg.startsWith('--epoch='));
+if (epochArgIndex !== -1) {
+    const epochValue = args[epochArgIndex].includes('=')
+        ? args[epochArgIndex].split('=')[1]
+        : args[epochArgIndex + 1];
+    epoch = epochValue?.startsWith('--') ? '' : epochValue;
+}
+epoch = epoch?.trim() || '';
+
 console.log('🛠️  Received args:', args);
 console.log('🛠️  Parsed jobName:', jobName);
 
@@ -48,6 +58,11 @@ async function runJob() {
     if (!jobName || !validJobs.includes(jobName)) {
         console.error(`❌ 请指定有效的任务名称: ${validJobs.join(', ')}`);
         console.error('示例: npm run job:simclusters');
+        process.exit(1);
+    }
+
+    if ((jobName === 'simclusters' || jobName === 'realgraph') && !epoch) {
+        console.error('❌ SimClusters/RealGraph repair 任务必须显式指定非空 --epoch');
         process.exit(1);
     }
 
@@ -70,12 +85,12 @@ async function runJob() {
         if (jobName === 'simclusters') {
             console.log('🔄 开始 SimClustersBatchJob...');
             const job = new SimClustersBatchJob();
-            await job.run();
+            await job.run({ epoch, trigger: 'script' });
             console.log('✅ SimClustersBatchJob 完成');
         } else if (jobName === 'realgraph') {
             console.log('🔄 开始 RealGraphDecayJob...');
             const job = new RealGraphDecayJob();
-            await job.run();
+            await job.run({ epoch, trigger: 'script' });
             console.log('✅ RealGraphDecayJob 完成');
         } else if (jobName === 'feature-export') {
             console.log('🔄 开始 FeatureExportJob...');
