@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -143,5 +144,59 @@ func TestDispatcherFallsBackToReplayWhenPublishFails(t *testing.T) {
 	}
 	if client.replayRecords[0].values["status"] != "failed" {
 		t.Fatalf("expected failed replay status, got %#v", client.replayRecords[0].values)
+	}
+}
+
+func TestDispatcherReplayPublishesStableEventIDOnRedelivery(t *testing.T) {
+	cfg := config.Config{
+		SyncWakeExecutionMode:     "publish",
+		WakePubSubChannel:         "sync:update:wake:v1",
+		PresenceExecutionMode:     "publish",
+		PresenceOnlineChannel:     "user:online",
+		PresenceOfflineChannel:    "user:offline",
+		NotificationExecutionMode: "publish",
+		NotificationChannel:       "notification",
+		PlatformReplayStreamKey:   "platform:events:replay:v1",
+	}
+	for _, test := range []struct {
+		name    string
+		topic   string
+		payload string
+	}{
+		{name: "sync wake", topic: "sync_wake_requested", payload: `{"userId":"user-1","updateId":42,"wakeChannel":"sync:update:wake:v1","source":"test"}`},
+		{name: "presence", topic: "presence_fanout_requested", payload: `{"userId":"user-1","status":"online","target":"broadcast","source":"test"}`},
+		{name: "notification", topic: "notification_dispatch_requested", payload: `{"userId":"user-1","type":"mention","title":"Hi","body":"hello","source":"test"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeTransport{}
+			dispatcher := NewDispatcher(client, cfg)
+			envelope := buscontracts.PlatformEventEnvelope{
+				EventID:      "evt-stable",
+				Topic:        test.topic,
+				PartitionKey: "user-1",
+				Payload:      []byte(test.payload),
+			}
+			for attempt := 2; attempt <= 3; attempt++ {
+				if _, err := dispatcher.DispatchReplay(context.Background(), envelope, attempt); err != nil {
+					t.Fatalf("dispatch replay attempt %d: %v", attempt, err)
+				}
+			}
+			if len(client.publishRecords) != 2 {
+				t.Fatalf("expected two at-least-once publishes, got %#v", client.publishRecords)
+			}
+			for _, record := range client.publishRecords {
+				encoded, ok := record.message.(string)
+				if !ok {
+					t.Fatalf("expected JSON string payload, got %T", record.message)
+				}
+				var body map[string]any
+				if err := json.Unmarshal([]byte(encoded), &body); err != nil {
+					t.Fatalf("decode published payload: %v", err)
+				}
+				if body["eventId"] != envelope.EventID {
+					t.Fatalf("redelivery lost stable event id: %#v", body)
+				}
+			}
+		})
 	}
 }

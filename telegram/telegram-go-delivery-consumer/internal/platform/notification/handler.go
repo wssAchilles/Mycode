@@ -61,11 +61,12 @@ func (h *Handler) Dispatch(
 	}
 
 	encoded, err := json.Marshal(map[string]interface{}{
-		"userId": payload.UserID,
-		"type":   payload.Type,
-		"title":  payload.Title,
-		"body":   payload.Body,
-		"data":   payload.Data,
+		"eventId": envelope.EventID,
+		"userId":  payload.UserID,
+		"type":    payload.Type,
+		"title":   payload.Title,
+		"body":    payload.Body,
+		"data":    payload.Data,
 	})
 	if err != nil {
 		return platformcontracts.DispatchResult{

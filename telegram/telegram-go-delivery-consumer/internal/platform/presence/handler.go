@@ -73,8 +73,9 @@ func (h *Handler) Dispatch(
 	}
 
 	body := map[string]interface{}{
-		"userId": payload.UserID,
-		"status": payload.Status,
+		"eventId": envelope.EventID,
+		"userId":  payload.UserID,
+		"status":  payload.Status,
 	}
 	if payload.LastSeen != nil && *payload.LastSeen != "" {
 		body["lastSeen"] = *payload.LastSeen
