@@ -119,11 +119,34 @@ describe('randomized_slate_simulation_v1', () => {
 
   it('recomputes each selected action from the matching uniform draw', () => {
     const { input, output } = fixture();
-    input.uniformDraws[0] = 1 - Number.EPSILON;
+    input.uniformDraws[0] = 0.5;
 
     expect(verifyRandomizedSlateSimulationV1(input, output)).toMatchObject({
       status: 'rejected',
       blockers: expect.arrayContaining(['uniform_draw_selection_mismatch']),
+    });
+  });
+
+  it('fails closed for draws at a cross-runtime probability boundary', () => {
+    const { input, output } = fixture();
+    input.uniformDraws[0] = 1 - Number.EPSILON;
+
+    expect(verifyRandomizedSlateSimulationV1(input, output)).toMatchObject({
+      status: 'rejected',
+      blockers: expect.arrayContaining(['uniform_draw_boundary_ambiguous']),
+    });
+  });
+
+  it('rejects hostile unknown inputs without letting getters escape', () => {
+    const throwingInput = new Proxy({}, { get: () => { throw new Error('hostile input'); } });
+    const throwingOutput = Object.defineProperty({}, 'contractVersion', {
+      get: () => { throw new Error('hostile output'); },
+    });
+
+    expect(() => verifyRandomizedSlateSimulationV1(throwingInput, throwingOutput)).not.toThrow();
+    expect(verifyRandomizedSlateSimulationV1(throwingInput, throwingOutput)).toEqual({
+      status: 'rejected',
+      blockers: ['invalid_input', 'invalid_output'],
     });
   });
 

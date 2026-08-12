@@ -35,6 +35,10 @@ function reject(blockers: string[]): RandomizedSlateVerificationResult {
   return { status: 'rejected', blockers: [...new Set(blockers)].sort() };
 }
 
+function probabilityMatches(actual: number, expected: number): boolean {
+  return Math.abs(actual - expected) <= RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE;
+}
+
 type EligibleCandidate = RandomizedSlateSimulationInputV1[
   'sourceDecisionLog'
 ]['candidatePool']['candidates'][number];
@@ -158,7 +162,7 @@ function sourceSemanticBlockers(rawInput: unknown): string[] {
   return blockers;
 }
 
-export function verifyRandomizedSlateSimulationV1(
+function verifyRandomizedSlateSimulationV1Unsafe(
   rawInput: unknown,
   rawOutput: unknown,
 ): RandomizedSlateVerificationResult {
@@ -288,26 +292,33 @@ export function verifyRandomizedSlateSimulationV1(
     if (action.selectedWasDeterministicTop !== (selectedIndex === 0)) {
       blockers.push('deterministic_top_binding_mismatch');
     }
-    if (action.plackettLuceProbability !== expectedProbability.plackettLuce) {
+    if (!probabilityMatches(action.plackettLuceProbability, expectedProbability.plackettLuce)) {
       blockers.push('plackett_luce_probability_mismatch');
     }
-    if (action.conditionalSelectionProbability !== expectedProbability.mixed) {
+    if (!probabilityMatches(action.conditionalSelectionProbability, expectedProbability.mixed)) {
       blockers.push('conditional_probability_mismatch');
     }
     const step = output.numericalDiagnostics.steps[index];
     if (step && (
-      step.plackettLuceProbabilityMass !== distribution.plackettLuceMass
-      || step.mixedProbabilityMass !== distribution.mixedMass
-      || step.probabilityMassError !== distribution.probabilityMassError
+      !probabilityMatches(step.plackettLuceProbabilityMass, distribution.plackettLuceMass)
+      || !probabilityMatches(step.mixedProbabilityMass, distribution.mixedMass)
+      || !probabilityMatches(step.probabilityMassError, distribution.probabilityMassError)
     )) {
       blockers.push('numerical_distribution_mismatch');
     }
     let cumulative = 0;
+    let drawBoundaryAmbiguous = false;
     const expectedSelectedIndex = distribution.probabilities.findIndex(({ mixed }) => {
       cumulative += mixed;
+      if (Math.abs(input.uniformDraws[index] - cumulative)
+        <= RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE) {
+        drawBoundaryAmbiguous = true;
+      }
       return input.uniformDraws[index] < cumulative;
     });
-    if ((expectedSelectedIndex === -1
+    if (drawBoundaryAmbiguous) {
+      blockers.push('uniform_draw_boundary_ambiguous');
+    } else if ((expectedSelectedIndex === -1
       ? distribution.probabilities.length - 1
       : expectedSelectedIndex) !== selectedIndex) {
       blockers.push('uniform_draw_selection_mismatch');
@@ -341,4 +352,15 @@ export function verifyRandomizedSlateSimulationV1(
   }
 
   return blockers.length === 0 ? { status: 'verified' } : reject(blockers);
+}
+
+export function verifyRandomizedSlateSimulationV1(
+  rawInput: unknown,
+  rawOutput: unknown,
+): RandomizedSlateVerificationResult {
+  try {
+    return verifyRandomizedSlateSimulationV1Unsafe(rawInput, rawOutput);
+  } catch {
+    return reject(['invalid_input', 'invalid_output']);
+  }
 }
