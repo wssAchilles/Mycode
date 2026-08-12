@@ -18,19 +18,22 @@ redis = { version = "0.27", features = ["tokio-comp"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 telegram-component-primitives = { path = "crates/telegram-component-primitives" }
 telegram-filter-primitives = { path = "crates/telegram-filter-primitives" }
 telegram-pipeline-primitives = { path = "crates/telegram-pipeline-primitives" }
 telegram-ranking-primitives = { path = "crates/telegram-ranking-primitives" }
+telegram-randomized-policy-primitives = { path = "crates/telegram-randomized-policy-primitives" }
 telegram-recommendation-contracts = { path = "crates/telegram-recommendation-contracts" }
 telegram-recommendation-fixtures = { path = "crates/telegram-recommendation-fixtures" }
+telegram-recommendation-policy-offline = { path = "crates/telegram-recommendation-policy-offline" }
 telegram-runtime-primitives = { path = "crates/telegram-runtime-primitives" }
 telegram-rust-http-types = { path = "crates/telegram-rust-http-types" }
 telegram-selector-primitives = { path = "crates/telegram-selector-primitives" }
 telegram-serving-primitives = { path = "crates/telegram-serving-primitives" }
 telegram-source-primitives = { path = "crates/telegram-source-primitives" }
 telegram-thunder-store = { path = "crates/telegram-thunder-store" }
-tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 twox-hash = "2"
 whatlang = "0.16"
 bloomfilter = "1"
