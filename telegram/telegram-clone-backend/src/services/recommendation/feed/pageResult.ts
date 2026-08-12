@@ -4,7 +4,11 @@ import type { SpaceFeedDebugInfo } from './debugInfo';
 import type { RustFeedServingMeta } from './rustFeedRuntime';
 
 export interface SpaceFeedPageResult {
+    requestId: string;
+    decisionId: string;
+    clientRequestId?: string;
     candidates: FeedCandidate[];
+    decisionActionCandidateIds: string[];
     hasMore: boolean;
     nextCursor?: string;
     servedIdsDelta: string[];
@@ -15,7 +19,8 @@ export interface SpaceFeedPageResult {
 export function buildSpaceFeedPageResult(
     candidates: FeedCandidate[],
     limit: number,
-    pageMeta?: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>>,
+    pageMeta: Pick<SpaceFeedPageResult, 'requestId' | 'decisionId'>
+        & Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta' | 'requestId' | 'decisionId'>>,
 ): SpaceFeedPageResult {
     const servedIdsDelta: string[] = [];
     const servedSeen = new Set<string>();
@@ -42,7 +47,11 @@ export function buildSpaceFeedPageResult(
             : undefined;
 
     return {
+        requestId: pageMeta.requestId,
+        decisionId: pageMeta.decisionId,
+        clientRequestId: pageMeta.clientRequestId,
         candidates,
+        decisionActionCandidateIds: pageMeta.decisionActionCandidateIds ?? [],
         hasMore: pageMeta?.hasMore ?? candidates.length >= limit,
         nextCursor: pageMeta?.nextCursor ?? derivedNextCursor,
         servedIdsDelta,

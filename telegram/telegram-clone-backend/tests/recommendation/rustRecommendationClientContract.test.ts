@@ -2,12 +2,30 @@ import { describe, expect, it } from 'vitest';
 
 import { normalizeRustRecommendationPayload } from '../../src/services/recommendation/clients/RustRecommendationClient';
 import {
+  deserializeRecommendationQuery,
+  recommendationQueryPayloadSchema,
   recommendationResultPayloadSchema,
   serializeRecommendationQuery,
 } from '../../src/services/recommendation/rust/contracts';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
 describe('RustRecommendationClient contract normalization', () => {
+  it('preserves the server decision ID across the Node/Rust query boundary', () => {
+    const query = createFeedQuery('viewer-identity', 20, false, {
+      requestId: '0563d721-b38c-44a2-afc6-f0a52ebde0fa',
+      decisionId: 'd7778f92-ab47-47f5-a262-f470c3a98156',
+      clientRequestId: 'client-correlation-only',
+    });
+
+    const payload = recommendationQueryPayloadSchema.parse(serializeRecommendationQuery(query));
+    const roundTrip = deserializeRecommendationQuery(payload);
+
+    expect(payload.decisionId).toBe(query.decisionId);
+    expect(payload).not.toHaveProperty('clientRequestId');
+    expect(roundTrip.decisionId).toBe(query.decisionId);
+    expect(roundTrip.clientRequestId).toBeUndefined();
+  });
+
   it('treats Rust Option null fields as absent optional fields', () => {
     const normalized = normalizeRustRecommendationPayload({
       requestId: 'req-1',

@@ -148,6 +148,12 @@ export interface FeedQuery {
     /** 请求 ID（用于日志/追踪，对齐 x-algorithm request_id） */
     requestId: string;
 
+    /** 服务端生成的不可变决策 ID。 */
+    decisionId: string;
+
+    /** 客户端传入的旧 request_id，仅用于调用链关联。 */
+    clientRequestId?: string;
+
     /** 请求用户 ID */
     userId: string;
 
@@ -238,10 +244,12 @@ export function createFeedQuery(
     userId: string,
     limit: number = 20,
     inNetworkOnly: boolean = false,
-    options?: Partial<Pick<FeedQuery, 'cursor' | 'seenIds' | 'servedIds' | 'isBottomRequest' | 'clientAppId' | 'countryCode' | 'languageCode' | 'requestId'>>
+    options?: Partial<Pick<FeedQuery, 'cursor' | 'seenIds' | 'servedIds' | 'isBottomRequest' | 'clientAppId' | 'countryCode' | 'languageCode' | 'requestId' | 'decisionId' | 'clientRequestId'>>
 ): FeedQuery {
     return {
         requestId: options?.requestId ?? uuidv4(),
+        decisionId: options?.decisionId ?? uuidv4(),
+        clientRequestId: options?.clientRequestId,
         userId,
         limit,
         inNetworkOnly,

@@ -4,6 +4,7 @@
  */
 
 import mongoose from 'mongoose';
+import type { CandidateNamespace } from '../events/actionIdentity';
 
 /**
  * Phoenix 评分结构
@@ -100,6 +101,11 @@ export interface RecommendationExplain {
 
 export interface RecommendationContext {
     requestId?: string;
+    decisionId?: string;
+    candidateNamespace?: CandidateNamespace;
+    candidateId?: string;
+    servedPosition?: number;
+    positionContractVersion?: 'served_position_1_based_v1';
     rank?: number;
     primarySource?: string;
     secondarySources: string[];

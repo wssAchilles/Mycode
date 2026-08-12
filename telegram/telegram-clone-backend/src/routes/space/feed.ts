@@ -33,16 +33,31 @@ router.get('/feed', async (req: Request, res: Response) => {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const result = await spaceService.getFeedPage(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
+        const requestId = uuidv4();
+        const result = await spaceService.getFeedPage(userId, limit, safeCursor, includeSelf, {
+            requestId,
+            inNetworkOnly,
+        });
 
         const responseOptions = buildFeedResponseAdapterOptions();
+        const decisionActionCandidateIds = new Set(result.decisionActionCandidateIds ?? []);
         const transformedPosts = result.candidates.map((candidate, index) =>
-            transformFeedCandidateToResponse(candidate, responseOptions, {
-                requestId: result.debug?.requestId,
-                rank: index + 1,
-            }),
+            transformFeedCandidateToResponse(
+                candidate,
+                responseOptions,
+                decisionActionCandidateIds.has(candidate.postId.toString())
+                    ? {
+                        requestId: result.requestId,
+                        decisionId: result.decisionId,
+                        rank: index + 1,
+                        servedPosition: index + 1,
+                    }
+                    : {},
+            ),
         );
         const responsePayload: Record<string, unknown> = {
+            request_id: result.requestId,
+            decision_id: result.decisionId,
             posts: transformedPosts,
             hasMore: result.hasMore,
             nextCursor: result.nextCursor,
@@ -79,7 +94,8 @@ router.post('/feed', async (req: Request, res: Response) => {
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
         const includeSelf = parsed.data.includeSelf ?? true;
         const inNetworkOnly = parsed.data.in_network_only ?? false;
-        const requestId = parsed.data.request_id ?? uuidv4();
+        const requestId = uuidv4();
+        const clientRequestId = parsed.data.request_id;
 
         const seenIds = (parsed.data.seen_ids ?? []).map(String).filter(Boolean).slice(-200);
         const servedIds = (parsed.data.served_ids ?? []).map(String).filter(Boolean).slice(-200);
@@ -97,18 +113,29 @@ router.post('/feed', async (req: Request, res: Response) => {
             limit,
             safeCursor,
             includeSelf,
-            { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId, inNetworkOnly },
+            { requestId, clientRequestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId, inNetworkOnly },
         );
 
         const responseOptions = buildFeedResponseAdapterOptions();
+        const decisionActionCandidateIds = new Set(result.decisionActionCandidateIds ?? []);
         const transformedPosts = result.candidates.map((candidate, index) =>
-            transformFeedCandidateToResponse(candidate, responseOptions, {
-                requestId,
-                rank: index + 1,
-            }),
+            transformFeedCandidateToResponse(
+                candidate,
+                responseOptions,
+                decisionActionCandidateIds.has(candidate.postId.toString())
+                    ? {
+                        requestId: result.requestId,
+                        decisionId: result.decisionId,
+                        rank: index + 1,
+                        servedPosition: index + 1,
+                    }
+                    : {},
+            ),
         );
         const responsePayload: Record<string, unknown> = {
-            request_id: requestId,
+            request_id: result.requestId,
+            decision_id: result.decisionId,
+            ...(result.clientRequestId ? { client_request_id: result.clientRequestId } : {}),
             posts: transformedPosts,
             hasMore: result.hasMore,
             nextCursor: result.nextCursor,

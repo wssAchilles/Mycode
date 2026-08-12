@@ -7,6 +7,7 @@ import {
     pickFeedSignalGroup,
     readFeedSignalValue,
 } from '../signals/feedSignalSemantics';
+import { SERVED_POSITION_CONTRACT_VERSION } from '../events/positionContract';
 
 type NormalizeMediaUrl = (value?: string | null) => string | null | undefined;
 
@@ -20,7 +21,9 @@ export interface SpaceFeedResponseAdapterOptions {
 
 export interface SpaceFeedResponseAdapterContext {
     requestId?: string;
+    decisionId?: string;
     rank?: number;
+    servedPosition?: number;
 }
 
 /**
@@ -66,6 +69,7 @@ export function transformFeedCandidateToResponse(
         isNews,
         newsMetadata: candidate.newsMetadata ?? undefined,
         _recommendationRequestId: context.requestId,
+        _recommendationDecisionId: context.decisionId,
         _recommendationRank: context.rank,
         _recommendationScore: candidate.score,
         _weightedScore: candidate.weightedScore,
@@ -98,8 +102,16 @@ function buildRecommendationContext(
     servingAttribution: ReturnType<typeof buildServingAttribution>,
     context: SpaceFeedResponseAdapterContext,
 ): RecommendationContext {
+    const servedPosition = context.servedPosition ?? context.rank;
     return {
         requestId: context.requestId,
+        decisionId: context.decisionId,
+        candidateNamespace: 'serving_post_id',
+        candidateId: String(candidate.postId),
+        servedPosition,
+        positionContractVersion: servedPosition === undefined
+            ? undefined
+            : SERVED_POSITION_CONTRACT_VERSION,
         rank: context.rank,
         primarySource: servingAttribution.recallSource,
         secondarySources: candidate.secondaryRecallSources ?? [],

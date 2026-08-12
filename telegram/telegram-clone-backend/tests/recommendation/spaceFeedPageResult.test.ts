@@ -32,8 +32,13 @@ describe('buildSpaceFeedPageResult', () => {
                 }),
             ],
             20,
+            {
+                requestId: '3bcd1f9b-9800-4bb6-8592-4338d56bf4ae',
+                decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
+            },
         );
 
+        expect(page.decisionId).toBe('fd3b9c5a-4208-4181-8f02-a1c20f141625');
         expect(page.candidates).toHaveLength(1);
         expect(page.hasMore).toBe(false);
         expect(page.nextCursor).toBe('2026-05-04T00:00:00.000Z');

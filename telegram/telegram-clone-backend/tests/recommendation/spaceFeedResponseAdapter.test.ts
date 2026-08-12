@@ -68,11 +68,13 @@ function options(
 describe('space feed response adapter', () => {
     it('omits heavy recommendation signals from the default feed response', () => {
         const response = transformFeedCandidateToResponse(candidate(), options(), {
-            requestId: 'req-serving-1',
+            requestId: '3bcd1f9b-9800-4bb6-8592-4338d56bf4ae',
+            decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
             rank: 3,
+            servedPosition: 3,
         }) as any;
 
-        expect(response._recommendationRequestId).toBe('req-serving-1');
+        expect(response._recommendationRequestId).toBe('3bcd1f9b-9800-4bb6-8592-4338d56bf4ae');
         expect(response._recommendationRank).toBe(3);
         expect(response._recommendationScore).toBe(1.2);
         expect(response._weightedScore).toBe(1.0);
@@ -80,7 +82,12 @@ describe('space feed response adapter', () => {
         expect(response._selectionPool).toBe('primary');
         expect(response._selectionReason).toBe('graph_primary');
         expect(response._recommendationContext).toEqual({
-            requestId: 'req-serving-1',
+            requestId: '3bcd1f9b-9800-4bb6-8592-4338d56bf4ae',
+            decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
+            candidateNamespace: 'serving_post_id',
+            candidateId: '65f000000000000000000001',
+            servedPosition: 3,
+            positionContractVersion: 'served_position_1_based_v1',
             rank: 3,
             primarySource: 'GraphSource',
             secondarySources: ['TwoTowerSource'],

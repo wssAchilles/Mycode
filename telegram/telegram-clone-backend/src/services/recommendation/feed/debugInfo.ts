@@ -1,10 +1,21 @@
 import type { FeedCandidate } from '../types/FeedCandidate';
 import type { RecommendationShadowComparison } from '../rust/runtimeMetrics';
+import type {
+    RecommendationPrimaryFallbackReason,
+    RecommendationRuntimeMode,
+    RecommendationRuntimeOwner,
+} from '../contracts/runtimeOwnership';
 
 export interface SpaceFeedDebugInfo {
     requestId?: string;
     pipeline: string;
-    owner?: string;
+    runtimeMode: RecommendationRuntimeMode;
+    configuredServingOwner: RecommendationRuntimeOwner;
+    servingOwner: RecommendationRuntimeOwner;
+    evaluatedOwner?: 'rust';
+    fallbackOwner?: 'node';
+    fallbackReason?: RecommendationPrimaryFallbackReason;
+    owner: RecommendationRuntimeOwner;
     fallbackMode?: string;
     selectedSourceCounts: Record<string, number>;
     inNetworkCount: number;
@@ -36,7 +47,12 @@ export function buildSpaceFeedDebugInfo(
     options: {
         requestId?: string;
         pipeline: string;
-        owner?: string;
+        runtimeMode: RecommendationRuntimeMode;
+        configuredServingOwner: RecommendationRuntimeOwner;
+        servingOwner: RecommendationRuntimeOwner;
+        evaluatedOwner?: 'rust';
+        fallbackOwner?: 'node';
+        fallbackReason?: RecommendationPrimaryFallbackReason;
         fallbackMode?: string;
         degradedReasons?: string[];
         shadowComparison?: RecommendationShadowComparison;
@@ -46,7 +62,13 @@ export function buildSpaceFeedDebugInfo(
     return {
         requestId: options.requestId,
         pipeline: options.pipeline,
-        owner: options.owner,
+        runtimeMode: options.runtimeMode,
+        configuredServingOwner: options.configuredServingOwner,
+        servingOwner: options.servingOwner,
+        evaluatedOwner: options.evaluatedOwner,
+        fallbackOwner: options.fallbackOwner,
+        fallbackReason: options.fallbackReason,
+        owner: options.servingOwner,
         fallbackMode: options.fallbackMode,
         selectedSourceCounts: summarizeSelectedSourceCounts(candidates),
         inNetworkCount,

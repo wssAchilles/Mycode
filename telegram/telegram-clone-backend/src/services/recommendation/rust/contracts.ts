@@ -53,6 +53,7 @@ export interface RecommendationExperimentContextPayload {
 
 export interface RecommendationQueryPayload {
   requestId: string;
+  decisionId: string;
   userId: string;
   limit: number;
   cursor?: string;
@@ -508,6 +509,7 @@ const rankingPolicySchema = z.object({
 
 export const recommendationQueryPayloadSchema = z.object({
   requestId: z.string().min(1),
+  decisionId: z.string().uuid(),
   userId: z.string().min(1),
   limit: z.number().int().min(1).max(100),
   cursor: z.string().optional(),
@@ -934,6 +936,7 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
 
   return {
     requestId: query.requestId,
+    decisionId: query.decisionId,
     userId: query.userId,
     limit: query.limit,
     cursor: query.cursor?.toISOString(),
@@ -1204,6 +1207,7 @@ export function deserializeRecommendationQuery(
 ): FeedQuery {
   return {
     requestId: payload.requestId,
+    decisionId: payload.decisionId,
     userId: payload.userId,
     limit: payload.limit,
     cursor: payload.cursor ? new Date(payload.cursor) : undefined,
