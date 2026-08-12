@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -35,13 +37,16 @@ func (l *operationLog) snapshot() []string {
 }
 
 type fakeWorkerClient struct {
-	log             *operationLog
-	fail            string
-	completed       bool
-	completedFields []string
-	auditKinds      []string
-	claimed         []redis.XMessage
-	reads           []redis.XStream
+	log              *operationLog
+	fail             string
+	completed        bool
+	completedByField map[string]bool
+	completedFields  []string
+	completionValues []interface{}
+	auditKinds       []string
+	auditRunIDs      []string
+	claimed          []redis.XMessage
+	reads            []redis.XStream
 }
 
 type scriptedGroupClient struct {
@@ -133,9 +138,14 @@ func (f *fakeWorkerClient) XAck(context.Context, string, string, ...string) *red
 }
 
 func (f *fakeWorkerClient) XAdd(_ context.Context, args *redis.XAddArgs) *redis.StringCmd {
-	f.log.add("audit")
+	operation := "audit"
+	if strings.Contains(args.Stream, ":dlq:") {
+		operation = "dlq"
+	}
+	f.log.add(operation)
 	if values, ok := args.Values.(map[string]interface{}); ok {
 		f.auditKinds = append(f.auditKinds, fmt.Sprint(values["replay_kind"]))
+		f.auditRunIDs = append(f.auditRunIDs, fmt.Sprint(values["run_id"]))
 	}
 	cmd := redis.NewStringCmd(context.Background())
 	if f.fail == "audit" {
@@ -153,13 +163,18 @@ func (f *fakeWorkerClient) HExists(_ context.Context, _ string, field string) *r
 	if f.fail == "completed" {
 		cmd.SetErr(errors.New("completed lookup unavailable"))
 	} else {
-		cmd.SetVal(f.completed)
+		completed := f.completed
+		if f.completedByField != nil {
+			completed = f.completedByField[field]
+		}
+		cmd.SetVal(completed)
 	}
 	return cmd
 }
 
-func (f *fakeWorkerClient) HSet(context.Context, string, ...interface{}) *redis.IntCmd {
+func (f *fakeWorkerClient) HSet(_ context.Context, _ string, values ...interface{}) *redis.IntCmd {
 	f.log.add("persist")
+	f.completionValues = append(f.completionValues, values...)
 	cmd := redis.NewIntCmd(context.Background())
 	if f.fail == "persist" {
 		cmd.SetErr(errors.New("completion unavailable"))
@@ -170,8 +185,9 @@ func (f *fakeWorkerClient) HSet(context.Context, string, ...interface{}) *redis.
 }
 
 type fakeReplayDispatcher struct {
-	log  *operationLog
-	fail bool
+	log    *operationLog
+	fail   bool
+	called chan struct{}
 }
 
 func (f *fakeReplayDispatcher) DispatchReplay(
@@ -180,6 +196,12 @@ func (f *fakeReplayDispatcher) DispatchReplay(
 	int,
 ) (platformcontracts.DispatchResult, error) {
 	f.log.add("side_effect")
+	if f.called != nil {
+		select {
+		case f.called <- struct{}{}:
+		default:
+		}
+	}
 	if f.fail {
 		return platformcontracts.DispatchResult{}, errors.New("side effect unavailable")
 	}
@@ -187,10 +209,14 @@ func (f *fakeReplayDispatcher) DispatchReplay(
 }
 
 func replayTestMessage(id string, eventID string) redis.XMessage {
+	return replayTestMessageForTopic(id, eventID, "presence_fanout_requested")
+}
+
+func replayTestMessageForTopic(id string, eventID string, topic string) redis.XMessage {
 	return redis.XMessage{
 		ID: id,
 		Values: map[string]interface{}{
-			"event":   `{"specVersion":"platform.event.v1","producer":"test","eventId":"` + eventID + `","topic":"presence_fanout_requested","emittedAt":"2026-04-19T00:00:00Z","partitionKey":"user-1","payload":{"userId":"u1","status":"online","target":"broadcast","source":"test"}}`,
+			"event":   `{"specVersion":"platform.event.v1","producer":"test","eventId":"` + eventID + `","topic":"` + topic + `","emittedAt":"2026-04-19T00:00:00Z","partitionKey":"user-1","payload":{"userId":"u1","status":"online","target":"broadcast","source":"test"}}`,
 			"attempt": 1,
 		},
 	}
@@ -208,6 +234,7 @@ func newTestWorker(client WorkerClient, dispatcher *fakeReplayDispatcher) *Worke
 		PendingClaimInterval:     time.Minute,
 		PendingReclaimMaxBatches: 4,
 		ReclaimCursorMode:        "resume",
+		DeadLetterStreamKey:      "platform:events:dlq:v1",
 	}, dispatcher, log.New(io.Discard, "", 0))
 }
 
@@ -263,6 +290,9 @@ func TestWorkerProcessesReplayInCommitOrderAndNeverAcksAfterFailure(t *testing.T
 	if got, want := client.auditKinds, []string{platformcontracts.ReplayKindAutomaticFallback}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("continuous replay audit kind: got %#v want %#v", got, want)
 	}
+	if got, want := client.completionValues, []interface{}{"presence_fanout_requested:evt-1", platformcontracts.ReplayStatusCompleted}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy completion contract drifted: got %#v want %#v", got, want)
+	}
 }
 
 func TestWorkerAcksCompletedEventIDWithoutRepeatingSideEffect(t *testing.T) {
@@ -276,8 +306,29 @@ func TestWorkerAcksCompletedEventIDWithoutRepeatingSideEffect(t *testing.T) {
 	if got, want := operations.snapshot(), []string{"completed", "ack"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("completed event repeated work: got %#v want %#v", got, want)
 	}
-	if got, want := client.completedFields, []string{"evt-stable"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("completion lookup must use stable event_id: got %#v want %#v", got, want)
+	if got, want := client.completedFields, []string{"presence_fanout_requested:evt-stable"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("completion lookup must preserve legacy topic:event_id scope: got %#v want %#v", got, want)
+	}
+}
+
+func TestWorkerCompletionDoesNotCollideAcrossTopics(t *testing.T) {
+	operations := &operationLog{}
+	client := &fakeWorkerClient{
+		log: operations,
+		completedByField: map[string]bool{
+			"presence_fanout_requested:evt-shared": true,
+		},
+	}
+	worker := newTestWorker(client, &fakeReplayDispatcher{log: operations})
+
+	if err := worker.processMessage(context.Background(), replayTestMessageForTopic("2-0", "evt-shared", "notification_dispatch_requested")); err != nil {
+		t.Fatalf("process same event id for another topic: %v", err)
+	}
+	if got, want := client.completedFields, []string{"notification_dispatch_requested:evt-shared"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("completion field collided across topics: got %#v want %#v", got, want)
+	}
+	if got := operations.snapshot(); !slices.Contains(got, "side_effect") {
+		t.Fatalf("other topic side effect was incorrectly skipped: %#v", got)
 	}
 }
 
@@ -288,13 +339,76 @@ func TestWorkerCycleUsesReclaimScannerBeforeReadingNewMessages(t *testing.T) {
 		claimed: []redis.XMessage{replayTestMessage("1-0", "evt-reclaimed")},
 	}
 	worker := newTestWorker(client, &fakeReplayDispatcher{log: operations})
+	worker.scheduler.MarkRun(time.Now())
 
-	if err := worker.runCycle(context.Background(), cycleRequest{limit: 1, manual: true}); err != nil {
+	if err := worker.runCycle(context.Background(), cycleRequest{limit: 1, manual: true, runID: "manual-1"}); err != nil {
 		t.Fatalf("run replay cycle: %v", err)
 	}
 	want := []string{"xautoclaim", "completed", "side_effect", "audit", "persist", "ack"}
 	if got := operations.snapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected reclaimed message before new read: got %#v want %#v", got, want)
+	}
+	if got, want := client.auditKinds, []string{platformcontracts.ReplayKindManualDrain}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual replay audit kind: got %#v want %#v", got, want)
+	}
+	if got, want := client.auditRunIDs, []string{"manual-1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual replay run id: got %#v want %#v", got, want)
+	}
+}
+
+func TestWorkerCyclePropagatesMessageFailureToHealthBoundary(t *testing.T) {
+	operations := &operationLog{}
+	client := &fakeWorkerClient{log: operations, reads: []redis.XStream{{Messages: []redis.XMessage{replayTestMessage("3-0", "evt-fail")}}}}
+	dispatcher := &fakeReplayDispatcher{log: operations, fail: true, called: make(chan struct{}, 1)}
+	worker := newTestWorker(client, dispatcher)
+	worker.scheduler.MarkRun(time.Now())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	waitSignal(t, dispatcher.called, "failed replay dispatch")
+	deadline := time.Now().Add(time.Second)
+	for {
+		if err := worker.Ready(context.Background()); errors.Is(err, ErrWorkerUnavailable) {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("message failure was swallowed as a healthy cycle")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stop replay worker: %v", err)
+	}
+}
+
+func TestWorkerDeadLettersMalformedReplayBeforeAck(t *testing.T) {
+	malformed := redis.XMessage{ID: "4-0", Values: map[string]interface{}{"event": "{"}}
+	tests := []struct {
+		name    string
+		fail    string
+		wantErr bool
+		want    []string
+	}{
+		{name: "success", want: []string{"dlq", "ack"}},
+		{name: "DLQ failure", fail: "audit", wantErr: true, want: []string{"dlq"}},
+		{name: "ACK failure", fail: "ack", wantErr: true, want: []string{"dlq", "ack"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			operations := &operationLog{}
+			client := &fakeWorkerClient{log: operations, fail: tt.fail}
+			worker := newTestWorker(client, &fakeReplayDispatcher{log: operations})
+			err := worker.processMessage(context.Background(), malformed)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("unexpected malformed replay error: %v", err)
+			}
+			if got := operations.snapshot(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("malformed replay lifecycle: got %#v want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -360,6 +474,12 @@ func TestWorkerFailsClosedWhenStartupOrReadinessPingFails(t *testing.T) {
 	}
 	if got, want := operations.snapshot(), []string{"ping"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("startup continued after failed ping: got %#v want %#v", got, want)
+	}
+	client.fail = ""
+	retryCtx, cancelRetry := context.WithCancel(context.Background())
+	cancelRetry()
+	if err := worker.Run(retryCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("startup failure permanently latched worker: %v", err)
 	}
 
 	operations = &operationLog{}

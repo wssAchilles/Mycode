@@ -57,6 +57,7 @@ func NewReplayWorker(client replay.WorkerClient, cfg config.Config, dispatcher *
 		PendingClaimInterval:     cfg.PendingClaimInterval,
 		PendingReclaimMaxBatches: cfg.PendingReclaimMaxBatches,
 		ReclaimCursorMode:        cfg.ReclaimCursorMode,
+		DeadLetterStreamKey:      cfg.PlatformDLQStreamKey,
 	}, dispatcher, logger)
 }
 

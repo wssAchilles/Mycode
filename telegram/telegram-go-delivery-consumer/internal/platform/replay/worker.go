@@ -14,6 +14,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	buscontracts "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/dlq"
 	platformcontracts "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
@@ -60,6 +61,7 @@ type WorkerConfig struct {
 	PendingClaimInterval     time.Duration
 	PendingReclaimMaxBatches int
 	ReclaimCursorMode        string
+	DeadLetterStreamKey      string
 }
 
 type Summary struct {
@@ -97,6 +99,7 @@ type Worker struct {
 	client        WorkerClient
 	dispatcher    ReplayDispatcher
 	writer        *Writer
+	deadLetter    *dlq.Writer
 	logger        *log.Logger
 	cfg           WorkerConfig
 	streamKey     string
@@ -110,6 +113,7 @@ type Worker struct {
 	cycleHealthy  atomic.Bool
 	started       atomic.Bool
 	runSequence   atomic.Uint64
+	deadLetters   atomic.Int64
 	stateMu       sync.RWMutex
 	lastError     string
 }
@@ -118,7 +122,8 @@ func NewWorker(client WorkerClient, cfg WorkerConfig, dispatcher ReplayDispatche
 	cfg.StreamKey = strings.TrimSpace(cfg.StreamKey)
 	cfg.ConsumerGroup = strings.TrimSpace(cfg.ConsumerGroup)
 	cfg.ConsumerName = strings.TrimSpace(cfg.ConsumerName)
-	if client == nil || dispatcher == nil || cfg.StreamKey == "" || cfg.ConsumerGroup == "" || cfg.ConsumerName == "" {
+	cfg.DeadLetterStreamKey = strings.TrimSpace(cfg.DeadLetterStreamKey)
+	if client == nil || dispatcher == nil || cfg.StreamKey == "" || cfg.ConsumerGroup == "" || cfg.ConsumerName == "" || cfg.DeadLetterStreamKey == "" {
 		return nil
 	}
 	if cfg.ReadCount <= 0 {
@@ -147,6 +152,7 @@ func NewWorker(client WorkerClient, cfg WorkerConfig, dispatcher ReplayDispatche
 		client:        client,
 		dispatcher:    dispatcher,
 		writer:        New(client, cfg.StreamKey),
+		deadLetter:    dlq.New(client, cfg.DeadLetterStreamKey),
 		logger:        logger,
 		cfg:           cfg,
 		streamKey:     cfg.StreamKey,
@@ -172,6 +178,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w == nil || !w.started.CompareAndSwap(false, true) {
 		return ErrWorkerUnavailable
 	}
+	defer w.started.Store(false)
 	if err := w.ping(ctx); err != nil {
 		return err
 	}
@@ -258,7 +265,7 @@ func (w *Worker) runCycle(ctx context.Context, request cycleRequest) error {
 		limit = int(w.cfg.ReadCount)
 	}
 	remaining := limit
-	if w.scheduler.Due(time.Now()) {
+	if request.manual || w.scheduler.Due(time.Now()) {
 		recorder := &cycleRecorder{worker: w}
 		claimCount := w.cfg.PendingClaimCount
 		maxBatches := w.cfg.PendingReclaimMaxBatches
@@ -271,7 +278,7 @@ func (w *Worker) runCycle(ctx context.Context, request cycleRequest) error {
 		scanner := reclaim.Scanner{
 			Client: w.client,
 			Handler: func(ctx context.Context, _ string, message redis.XMessage) error {
-				return w.processMessage(ctx, message)
+				return w.processMessageForCycle(ctx, message, request)
 			},
 			Recorder: recorder,
 			Cursors:  w.cursors,
@@ -290,6 +297,9 @@ func (w *Worker) runCycle(ctx context.Context, request cycleRequest) error {
 		}
 		if recorder.noGroupError != nil {
 			return recorder.noGroupError
+		}
+		if recorder.cycleError != nil {
+			return recorder.cycleError
 		}
 		w.scheduler.MarkRun(time.Now())
 		if request.manual {
@@ -316,14 +326,8 @@ func (w *Worker) runCycle(ctx context.Context, request cycleRequest) error {
 	}
 	for _, stream := range streams {
 		for _, message := range stream.Messages {
-			if err := w.processMessage(ctx, message); err != nil {
-				if isNoGroup(err) {
-					return err
-				}
-				w.recordError(err)
-				if w.logger != nil {
-					w.logger.Printf("process platform replay message %s failed: %v", message.ID, err)
-				}
+			if err := w.processMessageForCycle(ctx, message, request); err != nil {
+				return fmt.Errorf("process platform replay message %s: %w", message.ID, err)
 			}
 		}
 	}
@@ -331,11 +335,20 @@ func (w *Worker) runCycle(ctx context.Context, request cycleRequest) error {
 }
 
 func (w *Worker) processMessage(ctx context.Context, message redis.XMessage) error {
+	return w.processMessageForCycle(ctx, message, cycleRequest{})
+}
+
+func (w *Worker) processMessageForCycle(ctx context.Context, message redis.XMessage, request cycleRequest) error {
 	entry, err := decodeReplayEntry(message)
 	if err != nil {
-		return err
+		if writeErr := w.deadLetter.Write(ctx, message, err.Error()); writeErr != nil {
+			return fmt.Errorf("dead-letter malformed platform replay entry %s: %w", message.ID, writeErr)
+		}
+		w.deadLetters.Add(1)
+		return w.ack(ctx, message.ID)
 	}
-	completed, err := w.client.HExists(ctx, w.completedKey, entry.Envelope.EventID).Result()
+	completionField := entry.Envelope.Topic + ":" + entry.Envelope.EventID
+	completed, err := w.client.HExists(ctx, w.completedKey, completionField).Result()
 	if err != nil {
 		return fmt.Errorf("read replay completion for %s: %w", entry.Envelope.EventID, err)
 	}
@@ -352,15 +365,18 @@ func (w *Worker) processMessage(ctx context.Context, message redis.XMessage) err
 	result.PartitionKey = entry.Envelope.PartitionKey
 	result.Attempt = attempt
 	result.ReplayKind = platformcontracts.ReplayKindAutomaticFallback
+	if request.manual {
+		result.ReplayKind = platformcontracts.ReplayKindManualDrain
+	}
 	result.LagMillis = entry.LagMillis
 	result.Status = platformcontracts.ReplayStatusForResult(result)
 	if result.Status != platformcontracts.ReplayStatusCompleted {
 		return fmt.Errorf("dispatch replay side effect for %s incomplete: %s", entry.Envelope.EventID, result.Status)
 	}
-	if _, err := w.writer.Write(ctx, entry.Envelope, result); err != nil {
+	if _, err := w.writer.WriteWithRunID(ctx, entry.Envelope, result, request.runID); err != nil {
 		return fmt.Errorf("append replay audit for %s: %w", entry.Envelope.EventID, err)
 	}
-	if err := w.client.HSet(ctx, w.completedKey, entry.Envelope.EventID, time.Now().UTC().Format(time.RFC3339Nano)).Err(); err != nil {
+	if err := w.client.HSet(ctx, w.completedKey, completionField, platformcontracts.ReplayStatusCompleted).Err(); err != nil {
 		return fmt.Errorf("persist replay completion for %s: %w", entry.Envelope.EventID, err)
 	}
 	return w.ack(ctx, message.ID)
@@ -473,14 +489,17 @@ type cycleRecorder struct {
 	worker       *Worker
 	claimed      int
 	noGroupError error
+	cycleError   error
 }
 
-func (r *cycleRecorder) DeadLetterCount() int { return 0 }
+func (r *cycleRecorder) DeadLetterCount() int { return int(r.worker.deadLetters.Load()) }
 
 func (r *cycleRecorder) RecordError(message string) {
 	err := errors.New(message)
 	if isNoGroup(err) {
 		r.noGroupError = err
+	} else if r.cycleError == nil {
+		r.cycleError = err
 	}
 	r.worker.recordError(err)
 }

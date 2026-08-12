@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -110,11 +112,13 @@ func main() {
 		}
 	}()
 
+	var replayWorkerDone <-chan error
 	if replayWorker != nil {
+		done := make(chan error, 1)
+		replayWorkerDone = done
 		go func() {
-			if err := replayWorker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Printf("platform replay worker stopped with error: %v", err)
-			}
+			done <- replayWorker.Run(ctx)
+			close(done)
 		}()
 	}
 
@@ -133,6 +137,9 @@ func main() {
 	}
 
 	<-ctx.Done()
+	if err := waitForReplayWorker(replayWorkerDone, cfg.BlockDuration); err != nil && !errors.Is(err, context.Canceled) {
+		logger.Printf("platform replay worker stopped with error: %v", err)
+	}
 
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
 	consumer.Drain(drainCtx)
@@ -145,6 +152,20 @@ func main() {
 	}
 	if err := profilingServer.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("pprof shutdown error: %v", err)
+	}
+}
+
+func waitForReplayWorker(done <-chan error, timeout time.Duration) error {
+	if done == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("wait for platform replay worker: %w", ctx.Err())
 	}
 }
 

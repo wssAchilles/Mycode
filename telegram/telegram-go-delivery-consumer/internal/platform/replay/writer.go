@@ -36,26 +36,39 @@ func (w *Writer) Write(
 	envelope buscontracts.PlatformEventEnvelope,
 	result platformcontracts.DispatchResult,
 ) (platformcontracts.ReplayRecord, error) {
+	return w.WriteWithRunID(ctx, envelope, result, "")
+}
+
+func (w *Writer) WriteWithRunID(
+	ctx context.Context,
+	envelope buscontracts.PlatformEventEnvelope,
+	result platformcontracts.DispatchResult,
+	runID string,
+) (platformcontracts.ReplayRecord, error) {
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		return platformcontracts.ReplayRecord{}, fmt.Errorf("marshal platform replay envelope: %w", err)
 	}
 
+	values := map[string]interface{}{
+		"event_id":     envelope.EventID,
+		"topic":        envelope.Topic,
+		"status":       replayStatus(result),
+		"reason":       result.Reason,
+		"channel":      result.Channel,
+		"lag_ms":       result.LagMillis,
+		"attempt":      replayAttempt(result),
+		"replay_kind":  replayKind(result),
+		"event":        string(body),
+		"recorded_at":  time.Now().UTC().Format(time.RFC3339Nano),
+		"partitionKey": envelope.PartitionKey,
+	}
+	if runID != "" {
+		values["run_id"] = runID
+	}
 	id, err := w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamKey,
-		Values: map[string]interface{}{
-			"event_id":     envelope.EventID,
-			"topic":        envelope.Topic,
-			"status":       replayStatus(result),
-			"reason":       result.Reason,
-			"channel":      result.Channel,
-			"lag_ms":       result.LagMillis,
-			"attempt":      replayAttempt(result),
-			"replay_kind":  replayKind(result),
-			"event":        string(body),
-			"recorded_at":  time.Now().UTC().Format(time.RFC3339Nano),
-			"partitionKey": envelope.PartitionKey,
-		},
+		Values: values,
 	}).Result()
 	if err != nil {
 		return platformcontracts.ReplayRecord{}, fmt.Errorf("write platform replay entry: %w", err)
