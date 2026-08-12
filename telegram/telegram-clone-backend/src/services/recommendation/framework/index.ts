@@ -4,4 +4,5 @@
  */
 
 export * from './interfaces';
+export * from './queryHydrationStages';
 export { RecommendationPipeline } from './Pipeline';

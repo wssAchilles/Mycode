@@ -18,7 +18,10 @@ import {
     FilterResult,
     ComponentMetric,
     CircuitBreakerConfig,
+    PipelineSideEffectContext,
+    SourceCandidateMerger,
 } from './interfaces';
+import { runStagedQueryHydrators } from './queryHydrationStages';
 import { v4 as uuidv4 } from 'uuid';
 import { createChildLogger } from '../../../utils/logger';
 
@@ -165,6 +168,8 @@ export class RecommendationPipeline<Q, C> {
     private scorers: Scorer<Q, C>[] = [];
     private selector: Selector<Q, C> | null = null;
     private sideEffects: SideEffect<Q, C>[] = [];
+    private sourceMerger?: SourceCandidateMerger<Q, C>;
+    private queryHydratorStage: (hydrator: QueryHydrator<Q>) => number = () => 0;
     private componentMetrics: ComponentMetric[] = [];
     private circuitBreaker: CircuitBreaker;
     private pipelineTimedOut = false;
@@ -203,8 +208,20 @@ export class RecommendationPipeline<Q, C> {
         return this;
     }
 
+    withQueryHydratorStageResolver(
+        resolver: (hydrator: QueryHydrator<Q>) => number,
+    ): this {
+        this.queryHydratorStage = resolver;
+        return this;
+    }
+
     withSource(source: Source<Q, C>): this {
         this.sources.push(source);
+        return this;
+    }
+
+    withSourceMerger(merger: SourceCandidateMerger<Q, C>): this {
+        this.sourceMerger = merger;
         return this;
     }
 
@@ -401,6 +418,8 @@ export class RecommendationPipeline<Q, C> {
                 allRemoved.push(...postRemoved);
             }
 
+            const preSelectorCandidates = this.buildPreSelectorTraceCandidates(postFilteredCandidates);
+
             // 7. Selection
             if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
             const selectStart = Date.now();
@@ -452,7 +471,9 @@ export class RecommendationPipeline<Q, C> {
             }
 
             // 8. Side Effects (异步，不等待)
-            this.runSideEffects(hydratedQuery, finalCandidates, ctx);
+            this.runSideEffects(hydratedQuery, finalCandidates, ctx, {
+                preSelectorCandidates,
+            });
 
             timing.total = Date.now() - ctx.startTime;
 
@@ -545,27 +566,28 @@ export class RecommendationPipeline<Q, C> {
      * 复刻 hydrate_query()
      */
     private async hydrateQuery(query: Q, _ctx: PipelineContext): Promise<Q> {
-        const enabledHydrators = this.queryHydrators.filter((h) => h.enable(query));
-
-        // 并行执行所有 QueryHydrator
-        const results = await Promise.all(
-            enabledHydrators.map(async (hydrator) => {
-                return this.runComponent('QueryHydrator', hydrator.name, () =>
-                    hydrator.hydrate(query)
+        const result = await runStagedQueryHydrators(
+            query,
+            this.queryHydrators,
+            this.queryHydratorStage,
+            async (hydrator, stageQuery) => {
+                if (!hydrator.enable(stageQuery)) {
+                    return { enabled: false, hydrated: stageQuery };
+                }
+                const hydrated = await this.runComponent('QueryHydrator', hydrator.name, () =>
+                    hydrator.hydrate(stageQuery)
                 ).catch((error) => {
                     log.error(`[QueryHydrator ${hydrator.name}] Error: ${error}`);
-                    return query;
+                    return stageQuery;
                 });
-            })
+                return { enabled: true, hydrated };
+            },
+            (current, hydrator, execution) => execution.enabled
+                ? hydrator.update(current, execution.hydrated)
+                : current,
         );
 
-        // 合并所有结果到原 query
-        let mergedQuery = query;
-        for (let i = 0; i < enabledHydrators.length; i++) {
-            mergedQuery = enabledHydrators[i].update(mergedQuery, results[i]);
-        }
-
-        return mergedQuery;
+        return result.query;
     }
 
     /**
@@ -604,8 +626,14 @@ export class RecommendationPipeline<Q, C> {
             })
         );
 
-        // 合并所有来源的候选集
-        return results.flat();
+        const sourceBatches = results.map((candidates, index) => ({
+            sourceName: enabledSources[index].name,
+            candidates,
+        }));
+        const sourceOrder = enabledSources.map(({ name }) => name);
+        return this.sourceMerger
+            ? this.sourceMerger(query, sourceBatches, sourceOrder)
+            : results.flat();
     }
 
     /**
@@ -819,6 +847,32 @@ export class RecommendationPipeline<Q, C> {
         return selected;
     }
 
+    private buildPreSelectorTraceCandidates(scoredCandidates: ScoredCandidate<C>[]): C[] {
+        return scoredCandidates.map(({ candidate, score, scoreBreakdown }) => {
+            if (!candidate || typeof candidate !== 'object') {
+                return candidate;
+            }
+
+            const candidateRecord = candidate as Record<string, unknown>;
+            const existingBreakdown = candidateRecord._scoreBreakdown;
+            const mergedBreakdown = {
+                ...(existingBreakdown && typeof existingBreakdown === 'object'
+                    ? existingBreakdown as Record<string, number>
+                    : {}),
+                ...(scoreBreakdown || {}),
+            };
+            const traceCandidate: Record<string, unknown> = {
+                ...candidateRecord,
+                score,
+                _pipelineScore: score,
+            };
+            if (Object.keys(mergedBreakdown).length > 0) {
+                traceCandidate._scoreBreakdown = mergedBreakdown;
+            }
+            return traceCandidate as C;
+        });
+    }
+
     /**
      * 7. Side Effects - 异步执行副作用
      * 复刻 run_side_effects()
@@ -826,13 +880,14 @@ export class RecommendationPipeline<Q, C> {
     private runSideEffects(
         query: Q,
         selectedCandidates: C[],
-        _ctx: PipelineContext
+        _ctx: PipelineContext,
+        context: PipelineSideEffectContext<C>,
     ): void {
         for (const sideEffect of this.sideEffects) {
             if (!sideEffect.enable(query)) continue;
 
             // 异步执行，不等待
-            sideEffect.run(query, selectedCandidates).catch((error) => {
+            sideEffect.run(query, selectedCandidates, context).catch((error) => {
                 log.error(`[SideEffect ${sideEffect.name}] Error: ${error}`);
             });
         }

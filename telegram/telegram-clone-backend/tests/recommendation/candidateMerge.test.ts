@@ -57,11 +57,23 @@ describe('candidate source merge', () => {
     expect(result.detail.duplicateRecallHits).toBe(2);
     expect(result.detail.crossLaneRecallEdges).toBeGreaterThanOrEqual(1);
     expect(result.candidates[0].secondaryRecallSources).toContain('FollowingSource');
+    expect(result.candidates[0].inNetwork).toBe(true);
     expect(result.candidates[0]._scoreBreakdown).toMatchObject({
       retrievalSecondarySourceCount: 2,
       retrievalCrossLaneSourceCount: 2,
       retrievalDenseVectorScore: 0.8,
       retrievalGraphScore: 0.6,
     });
+    expect(result.candidates[0].recallEvidence).toMatchObject({
+      primarySource: result.candidates[0].recallSource,
+      primaryLane: result.candidates[0].retrievalLane,
+      sourceCount: 3,
+      sameLaneSourceCount: 0,
+      crossLaneSourceCount: 2,
+    });
+    expect(result.candidates[0].recallEvidence?.sourceRank).toBeTypeOf('number');
+    expect(result.candidates[0].recallEvidence?.sourceRankScore).toBeTypeOf('number');
+    expect(result.candidates[0].recallEvidence?.sourceScore).toBeTypeOf('number');
+    expect(result.candidates[0].recallEvidence?.confidence).toBeGreaterThan(0);
   });
 });

@@ -21,7 +21,9 @@ import {
     buildRecommendationScorers,
     buildRecommendationSelector,
     buildRecommendationSources,
+    recommendationQueryHydratorStage,
 } from './internal/componentCatalog';
+import { mergeSourceCandidates } from './internal/merge/candidateMerge';
 import { ImpressionLogger, MetricsCollector, RecommendationTraceLogger, ServeCacheSideEffect } from './sideeffects';
 
 // Experiment
@@ -74,7 +76,13 @@ export class SpaceFeedMixer {
             onMetrics: (m) => reportPipelineMetrics('recsys.pipeline', m),
             componentTimeoutMs: 1500,
             captureComponentMetrics: true,
-        });
+        })
+            .withQueryHydratorStageResolver((hydrator) =>
+                recommendationQueryHydratorStage(hydrator.name)
+            )
+            .withSourceMerger((query, sourceBatches, sourceOrder) =>
+                mergeSourceCandidates(query, sourceBatches, sourceOrder).candidates
+            );
 
         for (const hydrator of buildRecommendationQueryHydrators({
             includeExperimentQueryHydrator: this.config.experimentsEnabled,
@@ -119,7 +127,7 @@ export class SpaceFeedMixer {
         limit: number = 20,
         cursor?: Date,
         inNetworkOnly: boolean = false,
-        options?: Partial<Pick<FeedQuery, 'seenIds' | 'servedIds' | 'isBottomRequest' | 'clientAppId' | 'countryCode' | 'languageCode' | 'requestId'>>
+        options?: Partial<Pick<FeedQuery, 'seenIds' | 'servedIds' | 'isBottomRequest' | 'clientAppId' | 'countryCode' | 'languageCode' | 'requestId' | 'decisionId' | 'clientRequestId'>>
     ): Promise<FeedCandidate[]> {
         const query = createFeedQuery(userId, limit, inNetworkOnly, {
             cursor,

@@ -1,11 +1,9 @@
-import type { FeedCandidate } from '../../types/FeedCandidate';
+import type { FeedCandidate, RecallEvidence } from '../../types/FeedCandidate';
 import type { FeedQuery } from '../../types/FeedQuery';
+import type { SourceCandidateBatch as PipelineSourceCandidateBatch } from '../../framework';
 import { getSourceMixingMultiplier } from '../../utils/sourceMixing';
 
-export interface SourceCandidateBatch {
-  sourceName: string;
-  candidates: FeedCandidate[];
-}
+export type SourceCandidateBatch = PipelineSourceCandidateBatch<FeedCandidate>;
 
 export interface CandidateMergeResult {
   candidates: FeedCandidate[];
@@ -18,7 +16,7 @@ export function mergeSourceCandidates(
   sourceBatches: SourceCandidateBatch[],
   sourceOrder: string[],
 ): CandidateMergeResult {
-  const sourceRank = new Map(sourceOrder.map((sourceName, index) => [sourceName, index]));
+  const sourceOrderRank = new Map(sourceOrder.map((sourceName, index) => [sourceName, index]));
   const merged: FeedCandidate[] = [];
   const indexByKey = new Map<string, number>();
   let duplicateRecallHits = 0;
@@ -27,8 +25,13 @@ export function mergeSourceCandidates(
   let crossLaneRecallEdges = 0;
 
   for (const batch of sourceBatches) {
-    for (const rawCandidate of batch.candidates) {
-      const candidate = normalizeCandidateSource(rawCandidate, batch.sourceName);
+    for (const [candidateRank, rawCandidate] of batch.candidates.entries()) {
+      const candidate = normalizeCandidateSource(
+        rawCandidate,
+        batch.sourceName,
+        candidateRank,
+        batch.candidates.length,
+      );
       const key = candidateMergeKey(candidate);
       const existingIndex = indexByKey.get(key);
       if (existingIndex === undefined) {
@@ -45,8 +48,8 @@ export function mergeSourceCandidates(
         query,
         incomingSource,
         existingSource,
-        sourceRank.get(incomingSource) ?? Number.MAX_SAFE_INTEGER,
-        sourceRank.get(existingSource) ?? Number.MAX_SAFE_INTEGER,
+        sourceOrderRank.get(incomingSource) ?? Number.MAX_SAFE_INTEGER,
+        sourceOrderRank.get(existingSource) ?? Number.MAX_SAFE_INTEGER,
       );
 
       if (promoteIncoming) {
@@ -91,17 +94,29 @@ export function mergeSourceCandidates(
   };
 }
 
-function normalizeCandidateSource(candidate: FeedCandidate, sourceName: string): FeedCandidate {
+function normalizeCandidateSource(
+  candidate: FeedCandidate,
+  sourceName: string,
+  sourceRank: number,
+  sourceCandidateCount: number,
+): FeedCandidate {
   const recallSource = candidate.recallSource || sourceName;
-  return {
+  const normalized = {
     ...candidate,
     recallSource,
     retrievalLane: candidate.retrievalLane || sourceRetrievalLane(recallSource),
     _scoreBreakdown: candidate._scoreBreakdown ? { ...candidate._scoreBreakdown } : undefined,
+    recallEvidence: candidate.recallEvidence ? { ...candidate.recallEvidence } : undefined,
     secondaryRecallSources: candidate.secondaryRecallSources
       ? [...candidate.secondaryRecallSources]
       : undefined,
   };
+  normalized.recallEvidence = buildSourceRecallEvidence(
+    normalized,
+    sourceRank,
+    sourceCandidateCount,
+  );
+  return normalized;
 }
 
 function candidateMergeKey(candidate: FeedCandidate): string {
@@ -154,6 +169,7 @@ function fillMissingCandidateFields(target: FeedCandidate, source: FeedCandidate
   targetWithGraph.graphScore ??= sourceWithGraph.graphScore;
   targetWithGraph.graphPath ??= sourceWithGraph.graphPath;
   targetWithGraph.graphRecallType ??= sourceWithGraph.graphRecallType;
+  target.inNetwork = target.inNetwork === true || source.inNetwork === true;
   target.authorAffinityScore ??= source.authorAffinityScore;
   target._scoreBreakdown = mergeScoreBreakdown(target._scoreBreakdown, source._scoreBreakdown);
 }
@@ -197,20 +213,94 @@ function applyMultiSourceEvidence(candidate: FeedCandidate): {
   }
 
   const secondaryCount = secondarySources.length;
-  if (secondaryCount > 0) {
-    const multiSourceBonus = Math.min(0.14, sameLaneCount * 0.02 + crossLaneCount * 0.045);
-    candidate._scoreBreakdown = {
-      ...(candidate._scoreBreakdown || {}),
-      retrievalSecondarySourceCount: secondaryCount,
-      retrievalSameLaneSourceCount: sameLaneCount,
-      retrievalCrossLaneSourceCount: crossLaneCount,
-      retrievalCrossLaneBonus: Math.min(0.12, crossLaneCount * 0.045),
-      retrievalMultiSourceBonus: multiSourceBonus,
-      retrievalEvidenceConfidence: Math.min(1, 0.5 + secondaryCount * 0.1 + crossLaneCount * 0.12),
-    };
-  }
+  const existing = candidate.recallEvidence || buildSourceRecallEvidence(candidate, 0, 1);
+  const sourceRankScore = finiteNumber(existing.sourceRankScore) ?? 0;
+  const sourceScore = finiteNumber(existing.sourceScore) ?? primaryCandidateScore(candidate);
+  const sourceCount = 1 + secondaryCount;
+  const effectiveSourceCount = Math.min(
+    1 + secondaryCount,
+    1 + Math.min(sameLaneCount, 2) * 0.55 + Math.min(crossLaneCount, 3) * 0.9,
+  );
+  const sourceDiversityScore = secondaryCount === 0
+    ? 0
+    : Math.min(1, (crossLaneCount / secondaryCount) * 0.82 + Math.min(sameLaneCount, 2) * 0.12);
+  const confidence = Math.min(
+    1,
+    Math.max(finiteNumber(existing.confidence) ?? 0, 0.38)
+      + sourceRankScore * 0.08
+      + normalizeSourceScore(sourceScore) * 0.06
+      + Math.max(0, effectiveSourceCount - 1) * 0.05
+      + sourceDiversityScore * 0.08,
+  );
+  const multiSourceBonus = Math.min(0.14, sameLaneCount * 0.02 + crossLaneCount * 0.045);
+
+  candidate.recallEvidence = {
+    ...existing,
+    primarySource: candidate.recallSource || existing.primarySource,
+    primaryLane,
+    sourceRank: finiteNumber(existing.sourceRank),
+    sourceRankScore,
+    sourceScore,
+    sourceCount,
+    sameLaneSourceCount: sameLaneCount,
+    crossLaneSourceCount: crossLaneCount,
+    confidence,
+  };
+  candidate._scoreBreakdown = {
+    ...(candidate._scoreBreakdown || {}),
+    retrievalSourceCount: sourceCount,
+    retrievalSourceRankScore: sourceRankScore,
+    retrievalSourceScore: sourceScore,
+    retrievalSecondarySourceCount: secondaryCount,
+    retrievalSameLaneSourceCount: sameLaneCount,
+    retrievalCrossLaneSourceCount: crossLaneCount,
+    retrievalCrossLaneBonus: Math.min(0.12, crossLaneCount * 0.045),
+    retrievalMultiSourceBonus: multiSourceBonus,
+    retrievalEvidenceConfidence: confidence,
+  };
 
   return { secondaryCount, sameLaneCount, crossLaneCount };
+}
+
+function buildSourceRecallEvidence(
+  candidate: FeedCandidate,
+  sourceRank: number,
+  sourceCandidateCount: number,
+): RecallEvidence {
+  const existing = candidate.recallEvidence;
+  const rank = finiteNumber(existing?.sourceRank) ?? sourceRank;
+  const rankScore = finiteNumber(existing?.sourceRankScore)
+    ?? (sourceCandidateCount <= 1 ? 1 : 1 - sourceRank / (sourceCandidateCount - 1));
+  const sourceScore = finiteNumber(existing?.sourceScore) ?? primaryCandidateScore(candidate);
+  return {
+    ...existing,
+    primarySource: candidate.recallSource || existing?.primarySource,
+    primaryLane: candidate.retrievalLane || existing?.primaryLane,
+    sourceRank: rank,
+    sourceRankScore: rankScore,
+    sourceScore,
+    sourceCount: finiteNumber(existing?.sourceCount) ?? 1,
+    sameLaneSourceCount: finiteNumber(existing?.sameLaneSourceCount) ?? 0,
+    crossLaneSourceCount: finiteNumber(existing?.crossLaneSourceCount) ?? 0,
+    confidence: finiteNumber(existing?.confidence)
+      ?? Math.min(1, 0.42 + rankScore * 0.24 + normalizeSourceScore(sourceScore) * 0.18),
+  };
+}
+
+function primaryCandidateScore(candidate: FeedCandidate): number {
+  return finiteNumber(candidate.score)
+    ?? finiteNumber(candidate._pipelineScore)
+    ?? finiteNumber(candidate.weightedScore)
+    ?? 0;
+}
+
+function normalizeSourceScore(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value <= 1 ? value : value / (1 + value);
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function sourceRetrievalLane(sourceName: string): string {
