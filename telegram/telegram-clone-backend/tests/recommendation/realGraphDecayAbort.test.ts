@@ -129,5 +129,10 @@ describe('RealGraph daily decay cancellation', () => {
 
     await expect(execution).rejects.toThrow('Abort requested');
     expect(completed).not.toHaveBeenCalled();
+    expect(mocks.jobRunUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'running' }),
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'failed' }) }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });
