@@ -589,7 +589,7 @@ async function scanSourceEdges(session: ClientSession): Promise<GenerationEdge[]
   const edges: GenerationEdge[] = [];
   let cursor: { sourceUserId: string; targetUserId: string; edgeId: Types.ObjectId } | null = null;
   while (true) {
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { decayedSum: { $gte: 0 } };
     if (cursor) {
       filter.$or = [
         { sourceUserId: { $gt: cursor.sourceUserId } },

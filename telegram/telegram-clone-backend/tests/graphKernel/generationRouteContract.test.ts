@@ -164,6 +164,18 @@ describe('graph generation route contract', () => {
     expect((await response.json()).success).toBe(false);
   });
 
+  it('forwards unexpected generation failures to Express error handling', async () => {
+    mocks.generationPage.mockRejectedValueOnce(new Error('generation_storage_failed'));
+
+    const response = await post('/snapshot/generation/page', { limit: 1 });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: { message: 'generation_storage_failed' },
+    });
+  });
+
   it('strictly releases the named generation lease', async () => {
     const response = await post('/snapshot/generation/release', {
       generationId: pagePayload.generationId,
@@ -193,7 +205,7 @@ describe('graph generation route contract', () => {
 
     await expect(new MongoGenerationRepository().readSourceSnapshotEdges()).resolves.toEqual([]);
 
-    expect(find).toHaveBeenCalledWith({});
+    expect(find).toHaveBeenCalledWith({ decayedSum: { $gte: 0 } });
     expect(query.sort).toHaveBeenCalledWith({ sourceUserId: 1, targetUserId: 1, _id: 1 });
     expect(query.collation).toHaveBeenCalledWith({ locale: 'simple' });
     expect(query.session).toHaveBeenCalledWith(session);

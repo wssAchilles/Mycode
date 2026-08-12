@@ -98,6 +98,15 @@ describe('graph generation canonical NDJSON contract', () => {
         dailySignalCounts: { ...counts, likeCount: Number.POSITIVE_INFINITY },
       },
     ])).toThrow('generation_edge_daily_signal_counts_like_count_non_finite');
+    expect(() => canonicalizeGenerationEdges([
+      { ...edge('a', 'edge-a'), decayedSum: -1 },
+    ])).toThrow('generation_edge_decayed_sum_negative');
+    expect(() => canonicalizeGenerationEdges([
+      { ...edge('a', 'edge-a'), updatedAtMs: 1.5 },
+    ])).toThrow('generation_edge_updated_at_ms_invalid_epoch_ms');
+    expect(() => canonicalizeGenerationEdges([
+      { ...edge('a', 'edge-a'), lastInteractionAtMs: -1 },
+    ])).toThrow('generation_edge_last_interaction_at_ms_invalid_epoch_ms');
   });
 
   it('defaults only missing count fields and rejects invalid containers or explicit null', () => {

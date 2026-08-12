@@ -150,26 +150,53 @@ describe('graph generation migration dry-run contract', () => {
     );
     const writeJson = vi.fn();
     const writeError = vi.fn();
+    const loadIndexSnapshot = vi.fn().mockResolvedValue(currentIndexSnapshot());
 
-    await expect(runGraphGenerationMigrationCli([], { writeJson, writeError })).resolves.toBe(0);
+    await expect(runGraphGenerationMigrationCli([], {
+      writeJson,
+      writeError,
+      loadIndexSnapshot,
+    })).resolves.toBe(0);
+    expect(loadIndexSnapshot).toHaveBeenCalledOnce();
     expect(writeError).not.toHaveBeenCalled();
     expect(writeJson).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'dry-run',
       productionApplyAuthorized: false,
       writesPlanned: 0,
+      indexVerification: expect.objectContaining({
+        result: expect.objectContaining({ status: 'ok' }),
+      }),
     }));
 
     const writeVerifiedJson = vi.fn();
+    const unusedLoader = vi.fn();
     await expect(runGraphGenerationMigrationCli([], {
       writeJson: writeVerifiedJson,
       writeError,
+      loadIndexSnapshot: unusedLoader,
       indexSnapshot: currentIndexSnapshot(),
     })).resolves.toBe(0);
+    expect(unusedLoader).not.toHaveBeenCalled();
     expect(writeVerifiedJson).toHaveBeenCalledWith(expect.objectContaining({
       indexVerification: expect.objectContaining({
         result: expect.objectContaining({ status: 'ok' }),
       }),
     }));
 
+    const writeMismatchJson = vi.fn();
+    const writeMismatchError = vi.fn();
+    await expect(runGraphGenerationMigrationCli([], {
+      writeJson: writeMismatchJson,
+      writeError: writeMismatchError,
+      indexSnapshot: {},
+    })).resolves.toBe(3);
+    expect(writeMismatchJson).toHaveBeenCalledWith(expect.objectContaining({
+      indexVerification: expect.objectContaining({
+        result: expect.objectContaining({ status: 'mismatch' }),
+      }),
+    }));
+    expect(writeMismatchError).toHaveBeenCalledWith(
+      '[GraphGenerationMigration] failed: graph_generation_index_mismatch',
+    );
   });
 });

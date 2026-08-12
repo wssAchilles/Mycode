@@ -13,6 +13,7 @@ import {
   GenerationUnavailableError,
   graphKernelGenerationService,
 } from '../services/graphKernel/generation/service';
+import { catchAsync } from '../middleware/errorHandler';
 
 const router = Router();
 
@@ -107,7 +108,7 @@ router.post('/snapshot', async (req, res) => {
   }
 });
 
-router.post('/snapshot/generation/page', async (req, res) => {
+router.post('/snapshot/generation/page', catchAsync(async (req, res) => {
   const parsed = generationPageRequestSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendError(
@@ -129,9 +130,9 @@ router.post('/snapshot/generation/page', async (req, res) => {
     }
     throw error;
   }
-});
+}));
 
-router.post('/snapshot/generation/release', async (req, res) => {
+router.post('/snapshot/generation/release', catchAsync(async (req, res) => {
   const parsed = generationReleaseRequestSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendError(
@@ -154,6 +155,6 @@ router.post('/snapshot/generation/release', async (req, res) => {
     }
     throw error;
   }
-});
+}));
 
 export default router;

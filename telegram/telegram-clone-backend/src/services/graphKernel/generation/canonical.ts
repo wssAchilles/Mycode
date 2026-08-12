@@ -76,7 +76,12 @@ function normalizeCounts(
 }
 
 function normalizeTime(value: number | null | undefined, field: string): number | null {
-  return value == null ? null : requireFinite(value, field);
+  if (value == null) return null;
+  const milliseconds = requireFinite(value, field);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    throw new Error(`generation_edge_${field}_invalid_epoch_ms`);
+  }
+  return milliseconds;
 }
 
 function normalizeEdge(edge: GenerationEdge): GenerationEdge & {
@@ -87,11 +92,13 @@ function normalizeEdge(edge: GenerationEdge): GenerationEdge & {
 } {
   const edgeKinds = edge.edgeKinds.map((kind) => requireIdentifier(kind, 'edge_kind'));
   edgeKinds.sort(compareUtf8);
+  const decayedSum = requireFinite(edge.decayedSum, 'decayed_sum');
+  if (decayedSum < 0) throw new Error('generation_edge_decayed_sum_negative');
   return {
     sourceUserId: requireIdentifier(edge.sourceUserId, 'source_user_id'),
     targetUserId: requireIdentifier(edge.targetUserId, 'target_user_id'),
     edgeId: requireIdentifier(edge.edgeId, 'edge_id'),
-    decayedSum: requireFinite(edge.decayedSum, 'decayed_sum'),
+    decayedSum,
     interactionProbability: requireFinite(
       edge.interactionProbability,
       'interaction_probability',
