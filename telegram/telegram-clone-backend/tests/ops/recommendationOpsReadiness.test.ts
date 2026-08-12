@@ -2,25 +2,326 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
+  aggregate: vi.fn(),
 }));
 
 vi.mock('../../src/models/RecommendationTrace', () => ({
   default: {
     find: mocks.find,
+    aggregate: mocks.aggregate,
   },
 }));
 
 import { buildRecommendationOpsSummary } from '../../src/services/ops/recommendation/buildRecommendationOps';
 import { buildRecommendationTraceSummary } from '../../src/services/recommendation/ops';
+import { loadRecommendationRolloutPolicy } from '../../src/services/recommendation/contracts/rolloutPolicy';
+import {
+  buildRecommendationRolloutEvidence,
+  readRecommendationRolloutEvidence,
+} from '../../src/services/recommendation/ops/rolloutEvidence';
+
+const now = new Date('2026-07-15T12:00:00.000Z');
+const rolloutPolicy = {
+  version: 'phase6a-v1',
+  windowHours: 2,
+  minimumPrimarySamples: 4,
+  maximumFallbackRatio: 0.5,
+} as const;
+
+const approvedPolicyConfig = {
+  activeVersion: 'phase6a-v1',
+  approvedVersions: ['phase6a-v1'],
+  policies: {
+    'phase6a-v1': {
+      windowHours: 2,
+      minimumPrimarySamples: 4,
+      maximumFallbackRatio: 0.5,
+    },
+  },
+};
 
 describe('recommendation ops readiness', () => {
   beforeEach(() => {
     mocks.find.mockReset();
+    mocks.aggregate.mockReset();
   });
 
-  it('surfaces rollout blockers for Rust primary, graph diagnostics, replay readiness, and embedding contracts', () => {
+  it('loads an explicitly approved versioned rollout policy', () => {
+    expect(loadRecommendationRolloutPolicy(approvedPolicyConfig)).toEqual({
+      ok: true,
+      policy: rolloutPolicy,
+    });
+  });
+
+  it.each([
+    ['missing', undefined, 'recommendation_rollout_policy_missing'],
+    ['unknown', {
+      ...approvedPolicyConfig,
+      activeVersion: 'phase6a-v2',
+      approvedVersions: ['phase6a-v2'],
+    }, 'recommendation_rollout_policy_unknown'],
+    ['invalid', {
+      ...approvedPolicyConfig,
+      policies: {
+        'phase6a-v1': {
+          windowHours: 2,
+          minimumPrimarySamples: 0,
+          maximumFallbackRatio: 0.5,
+        },
+      },
+    }, 'recommendation_rollout_policy_invalid'],
+    ['unapproved', {
+      ...approvedPolicyConfig,
+      approvedVersions: [],
+    }, 'recommendation_rollout_policy_unapproved'],
+  ] as const)('fails closed for a %s rollout policy', (_case, config, blocker) => {
+    expect(loadRecommendationRolloutPolicy(config)).toMatchObject({
+      ok: false,
+      blocker,
+    });
+  });
+
+  it('aggregates only new primary traces inside the policy window and passes at the ratio boundary', () => {
+    const evidence = buildRecommendationRolloutEvidence(
+      [
+        primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+        primaryTrace('rust', undefined, '2026-07-15T11:40:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:30:00.000Z'),
+        primaryTrace('node', 'rust_primary_error_fallback_node', '2026-07-15T10:00:00.000Z'),
+        { owner: 'node', fallbackMode: 'rust_primary_failed', createdAt: '2026-07-15T11:00:00.000Z' },
+        { runtimeMode: 'shadow', servingOwner: 'node', fallbackReason: 'rust_primary_error_fallback_node', createdAt: '2026-07-15T11:00:00.000Z' },
+        { runtimeMode: 'off', servingOwner: 'node', fallbackReason: 'rust_primary_empty_fallback_node', createdAt: '2026-07-15T11:00:00.000Z' },
+        primaryTrace('node', 'rust_primary_error_fallback_node', '2026-07-15T09:59:59.999Z'),
+        primaryTrace('node', 'rust_primary_error_fallback_node', '2026-07-15T12:00:00.001Z'),
+      ],
+      rolloutPolicy,
+      now,
+    );
+
+    expect(evidence).toMatchObject({
+      policyVersion: 'phase6a-v1',
+      windowHours: 2,
+      minimumPrimarySamples: 4,
+      maximumFallbackRatio: 0.5,
+      primarySamples: 4,
+      fallbackSamples: 2,
+      fallbackRatio: 0.5,
+      status: 'ready',
+      blockers: [],
+    });
+  });
+
+  it('blocks when primary samples are below the injected policy minimum', () => {
+    const evidence = buildRecommendationRolloutEvidence(
+      [
+        primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:40:00.000Z'),
+        primaryTrace('rust', undefined, '2026-07-15T11:30:00.000Z'),
+      ],
+      rolloutPolicy,
+      now,
+    );
+
+    expect(evidence.blockers).toContain('recommendation_rollout_primary_samples_insufficient');
+    expect(evidence.status).toBe('blocked');
+  });
+
+  it('blocks only when the primary fallback ratio exceeds the injected maximum', () => {
+    const evidence = buildRecommendationRolloutEvidence(
+      [
+        primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:40:00.000Z'),
+        primaryTrace('node', 'rust_primary_error_fallback_node', '2026-07-15T11:30:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:20:00.000Z'),
+      ],
+      rolloutPolicy,
+      now,
+    );
+
+    expect(evidence.fallbackRatio).toBe(0.75);
+    expect(evidence.blockers).toContain('recommendation_rollout_fallback_ratio_high');
+    expect(evidence.status).toBe('blocked');
+  });
+
+  it('blocks new primary Node traces with missing or unknown fallback reasons', () => {
+    const evidence = buildRecommendationRolloutEvidence(
+      [
+        primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:45:00.000Z'),
+        primaryTrace('node', undefined, '2026-07-15T11:40:00.000Z'),
+        primaryTrace('node', 'unexpected_node_reason', '2026-07-15T11:30:00.000Z'),
+        { owner: 'node', fallbackMode: 'rust_primary_failed', createdAt: '2026-07-15T11:20:00.000Z' },
+      ],
+      { ...rolloutPolicy, minimumPrimarySamples: 2, maximumFallbackRatio: 0.5 },
+      now,
+    );
+
+    expect(evidence).toMatchObject({
+      primarySamples: 4,
+      validPrimarySamples: 2,
+      fallbackSamples: 1,
+      fallbackRatio: 0.5,
+      invalidTraceCount: 2,
+      blockers: ['recommendation_rollout_trace_contract_invalid'],
+      status: 'blocked',
+    });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['unknown', 'python'],
+  ] as const)('blocks a new primary trace with a %s serving owner', (_case, servingOwner) => {
+    const evidence = buildRecommendationRolloutEvidence(
+      [
+        primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+        primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:40:00.000Z'),
+        {
+          runtimeMode: 'primary',
+          servingOwner,
+          createdAt: '2026-07-15T11:30:00.000Z',
+        },
+      ],
+      { ...rolloutPolicy, minimumPrimarySamples: 2 },
+      now,
+    );
+
+    expect(evidence).toMatchObject({
+      primarySamples: 3,
+      validPrimarySamples: 2,
+      fallbackSamples: 1,
+      invalidTraceCount: 1,
+      fallbackRatio: 0.5,
+      status: 'blocked',
+      blockers: ['recommendation_rollout_trace_contract_invalid'],
+    });
+  });
+
+  it('aggregates policy-window counts in Mongo without limit or legacy env influence', async () => {
+    const originalThreshold = process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD;
+    process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD = '0';
+    mocks.aggregate.mockResolvedValue([{
+      primarySamples: 4,
+      validPrimarySamples: 4,
+      fallbackSamples: 2,
+      invalidTraceCount: 0,
+    }]);
+
+    try {
+      const evidence = await readRecommendationRolloutEvidence(approvedPolicyConfig, now);
+
+      expect(mocks.aggregate).toHaveBeenCalledWith([
+        {
+          $match: {
+            createdAt: {
+              $gte: new Date('2026-07-15T10:00:00.000Z'),
+              $lte: now,
+            },
+            runtimeMode: 'primary',
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            primarySamples: { $sum: 1 },
+            validPrimarySamples: {
+              $sum: {
+                $cond: [
+                  {
+                    $or: [
+                      {
+                        $and: [
+                          { $eq: ['$servingOwner', 'rust'] },
+                          { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
+                        ],
+                      },
+                      {
+                        $and: [
+                          { $eq: ['$servingOwner', 'node'] },
+                          { $in: ['$fallbackReason', [
+                            'rust_primary_empty_fallback_node',
+                            'rust_primary_error_fallback_node',
+                          ]] },
+                        ],
+                      },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            fallbackSamples: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$servingOwner', 'node'] },
+                      { $in: ['$fallbackReason', [
+                        'rust_primary_empty_fallback_node',
+                        'rust_primary_error_fallback_node',
+                      ]] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            invalidTraceCount: {
+              $sum: {
+                $cond: [
+                  {
+                    $not: [{
+                      $or: [
+                        {
+                          $and: [
+                            { $eq: ['$servingOwner', 'rust'] },
+                            { $eq: [{ $ifNull: ['$fallbackReason', null] }, null] },
+                          ],
+                        },
+                        {
+                          $and: [
+                            { $eq: ['$servingOwner', 'node'] },
+                            { $in: ['$fallbackReason', [
+                              'rust_primary_empty_fallback_node',
+                              'rust_primary_error_fallback_node',
+                            ]] },
+                          ],
+                        },
+                      ],
+                    }],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]);
+      expect(evidence.primarySamples).toBe(4);
+      expect(evidence.validPrimarySamples).toBe(4);
+      expect(evidence.fallbackRatio).toBe(0.5);
+      expect(evidence.invalidTraceCount).toBe(0);
+      expect(evidence.blockers).toEqual([]);
+    } finally {
+      process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD = originalThreshold;
+    }
+  });
+
+  it('surfaces versioned rollout, graph diagnostics, replay readiness, and embedding blockers', () => {
     const summary = buildRecommendationOpsSummary({
       rustPrimaryFallbackRate: 0.12,
+      recommendationRollout: buildRecommendationRolloutEvidence(
+        [
+          primaryTrace('rust', undefined, '2026-07-15T11:50:00.000Z'),
+          primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:40:00.000Z'),
+          primaryTrace('node', 'rust_primary_error_fallback_node', '2026-07-15T11:30:00.000Z'),
+          primaryTrace('node', 'rust_primary_empty_fallback_node', '2026-07-15T11:20:00.000Z'),
+        ],
+        rolloutPolicy,
+        now,
+      ),
       graphKernelMissingDiagnosticsRate: 0.05,
       replayLoggingReadiness: {
         totalRequests: 10,
@@ -33,7 +334,8 @@ describe('recommendation ops readiness', () => {
       embeddingContractIncompatibleCount: 1,
     });
 
-    expect(summary.blockers).toContain('rust_primary_fallback_rate_high');
+    expect(summary.blockers).toContain('recommendation_rollout_fallback_ratio_high');
+    expect(summary.blockers).not.toContain('rust_primary_fallback_rate_high');
     expect(summary.blockers).toContain('graph_kernel_diagnostics_missing');
     expect(summary.blockers).toContain('replay_logging_readiness_incomplete');
     expect(summary.blockers).toContain('embedding_contract_incompatible');
@@ -302,4 +604,17 @@ function mockTraceFind(traces: any[]) {
   };
   mocks.find.mockReturnValue(chain);
   return chain;
+}
+
+function primaryTrace(
+  servingOwner: 'node' | 'rust',
+  fallbackReason: string | undefined,
+  createdAt: string,
+) {
+  return {
+    runtimeMode: 'primary',
+    servingOwner,
+    fallbackReason,
+    createdAt,
+  };
 }

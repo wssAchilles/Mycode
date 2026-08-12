@@ -4,8 +4,16 @@ import {
   getRustRecommendationTimeoutMs,
 } from '../../recommendation/clients/RustRecommendationClient';
 import { buildRecommendationTraceSummary } from '../../recommendation/ops';
+import {
+  RANKING_PROMOTION_FIXED_BLOCKERS,
+  RANKING_PROMOTION_POLICY_VERSION,
+} from '../../recommendation/promotion/contracts';
 import { readRustRecommendationOpsSummary } from '../../recommendation/rust/ops';
 import { recommendationRuntimeMetrics } from '../../recommendation/rust/runtimeMetrics';
+import {
+  readRecommendationRolloutEvidence,
+  type RecommendationRolloutEvidence,
+} from '../../recommendation/ops/rolloutEvidence';
 import { readGraphKernelOpsSummary } from '../../graphKernel/ops';
 import { getCapabilityRecord } from '../shared/capabilityRecord';
 import { readOptionalInt, readOptionalNumber, readOptionalString } from '../shared/queryParsing';
@@ -24,12 +32,16 @@ export interface RecommendationOpsSummaryInput {
   graphKernelMissingDiagnosticsRate?: number;
   replayLoggingReadiness?: RecommendationOpsReplayLoggingReadiness;
   embeddingContractIncompatibleCount?: number | null;
+  recommendationRollout?: RecommendationRolloutEvidence;
   baseBlockers?: string[];
 }
 
-export async function buildRecommendationOps(query: Record<string, unknown>) {
+export async function buildRecommendationOps(
+  query: Record<string, unknown>,
+  rolloutPolicyConfig?: unknown,
+) {
   const mode = getRustRecommendationMode();
-  const [rustRecommendation, graphKernel, traceSummary] = await Promise.all([
+  const [rustRecommendation, graphKernel, traceSummary, rolloutEvidence] = await Promise.all([
     readRustRecommendationOpsSummary(),
     readGraphKernelOpsSummary(),
     buildRecommendationTraceSummary({
@@ -38,18 +50,26 @@ export async function buildRecommendationOps(query: Record<string, unknown>) {
       surface: readOptionalString(query.surface),
       shadowLowOverlapThreshold: readOptionalNumber(query.shadowLowOverlapThreshold),
     }),
+    readRecommendationRolloutEvidence(rolloutPolicyConfig),
   ]);
   const capabilities = buildNodeCapabilityOwnershipSummary({ graphKernel });
   const readiness = await buildRecommendationReadiness({
     rustRecommendation,
     graphKernel,
     traceSummary,
+    rolloutEvidence,
     mode,
   });
 
   return {
     runtime: recommendationRuntimeMetrics.snapshot(mode),
     readiness,
+    rankingPromotion: {
+      contractVersion: RANKING_PROMOTION_POLICY_VERSION,
+      verdict: 'blocked',
+      blockers: [...RANKING_PROMOTION_FIXED_BLOCKERS],
+      evidenceStatus: 'not_loaded',
+    },
     ownership: {
       recommendation: getCapabilityRecord(capabilities, 'recommendation'),
       graph: getCapabilityRecord(capabilities, 'graph'),
@@ -57,6 +77,7 @@ export async function buildRecommendationOps(query: Record<string, unknown>) {
     rustRecommendation,
     graphKernel,
     traceSummary,
+    rolloutEvidence,
     config: {
       mode,
       url: String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200'),
@@ -81,6 +102,7 @@ async function buildRecommendationReadiness(input: {
   rustRecommendation: Awaited<ReturnType<typeof readRustRecommendationOpsSummary>>;
   graphKernel: Awaited<ReturnType<typeof readGraphKernelOpsSummary>>;
   traceSummary: Awaited<ReturnType<typeof buildRecommendationTraceSummary>>;
+  rolloutEvidence: RecommendationRolloutEvidence;
   mode: string;
 }) {
   const blockers: string[] = [];
@@ -97,15 +119,12 @@ async function buildRecommendationReadiness(input: {
   }
 
   const traceSummary = input.traceSummary as any;
-  const fallbackCount = rustPrimaryFallbackCount(traceSummary);
-  if (fallbackCount > 0) {
-    blockers.push(`rust_primary_error_fallback_node:${fallbackCount}`);
-  }
   const opsSummary = buildRecommendationOpsSummary({
-    rustPrimaryFallbackRate: rustPrimaryFallbackRate(traceSummary),
+    rustPrimaryFallbackRate: input.rolloutEvidence.fallbackRatio ?? undefined,
     graphKernelMissingDiagnosticsRate: graphKernelMissingDiagnosticsRate(input.graphKernel),
     replayLoggingReadiness: traceSummary?.replayLoggingReadiness,
     embeddingContractIncompatibleCount: traceSummary?.embeddingContractIncompatibleCount,
+    recommendationRollout: input.rolloutEvidence,
     baseBlockers: blockers,
   });
 
@@ -134,10 +153,6 @@ async function buildRecommendationReadiness(input: {
 
 export function buildRecommendationOpsSummary(input: RecommendationOpsSummaryInput) {
   const thresholds = {
-    rustPrimaryFallbackRate: readRateThreshold(
-      process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD,
-      0.01,
-    ),
     graphKernelMissingDiagnosticsRate: readRateThreshold(
       process.env.RECOMMENDATION_GRAPH_KERNEL_MISSING_DIAGNOSTICS_RATE_THRESHOLD,
       0.01,
@@ -146,6 +161,14 @@ export function buildRecommendationOpsSummary(input: RecommendationOpsSummaryInp
       process.env.RECOMMENDATION_EMBEDDING_CONTRACT_INCOMPATIBLE_THRESHOLD,
       0,
     ),
+    recommendationRollout: input.recommendationRollout
+      ? {
+        policyVersion: input.recommendationRollout.policyVersion,
+        windowHours: input.recommendationRollout.windowHours,
+        minimumPrimarySamples: input.recommendationRollout.minimumPrimarySamples,
+        maximumFallbackRatio: input.recommendationRollout.maximumFallbackRatio,
+      }
+      : null,
   };
   const evidence = {
     rustPrimaryFallbackRate: finiteRate(input.rustPrimaryFallbackRate),
@@ -154,14 +177,15 @@ export function buildRecommendationOpsSummary(input: RecommendationOpsSummaryInp
     embeddingContractIncompatibleCount: isNonNegativeInteger(input.embeddingContractIncompatibleCount)
       ? input.embeddingContractIncompatibleCount
       : null,
+    recommendationRollout: input.recommendationRollout,
   };
-  const blockers = [...(input.baseBlockers || [])];
+  const blockers = [
+    ...(input.baseBlockers || []),
+    ...(input.recommendationRollout?.blockers || []),
+  ];
   const replayLoggingReadinessMissing = input.replayLoggingReadiness === undefined;
   const embeddingContractEvidenceMissing = evidence.embeddingContractIncompatibleCount === null;
 
-  if (evidence.rustPrimaryFallbackRate > thresholds.rustPrimaryFallbackRate) {
-    blockers.push('rust_primary_fallback_rate_high');
-  }
   if (evidence.graphKernelMissingDiagnosticsRate > thresholds.graphKernelMissingDiagnosticsRate) {
     blockers.push('graph_kernel_diagnostics_missing');
   }
@@ -212,28 +236,6 @@ async function probeNodeAdapterHealth(): Promise<{ available: boolean; url: stri
   } finally {
     clearTimeout(timeout);
   }
-}
-
-function rustPrimaryFallbackRate(traceSummary: any): number {
-  const requests = finiteCount(traceSummary?.requests);
-  if (requests === 0) return 0;
-  return rustPrimaryFallbackCount(traceSummary) / requests;
-}
-
-function rustPrimaryFallbackCount(traceSummary: any): number {
-  const legacyCount = finiteCount(traceSummary?.byFallbackReason?.rust_primary_error_fallback_node);
-  if (legacyCount > 0) return legacyCount;
-
-  const fallbackModes = Array.isArray(traceSummary?.fallbackModes)
-    ? traceSummary.fallbackModes
-    : [];
-  return fallbackModes.reduce((sum: number, row: any) => {
-    const value = String(row?.value || '').trim().toLowerCase();
-    if (!value || value === '__none__' || value === 'none' || value === 'shadow_compare_only') {
-      return sum;
-    }
-    return sum + finiteCount(row?.count);
-  }, 0);
 }
 
 function graphKernelMissingDiagnosticsRate(
