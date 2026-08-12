@@ -308,10 +308,10 @@ function verifyRandomizedSlateSimulationV1Unsafe(
     }
     let cumulative = 0;
     let drawBoundaryAmbiguous = false;
-    const expectedSelectedIndex = distribution.probabilities.findIndex(({ mixed }) => {
-      cumulative += mixed;
-      if (Math.abs(input.uniformDraws[index] - cumulative)
-        <= RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE) {
+    const expectedSelectedIndex = distribution.probabilities.findIndex(({ mixed }, candidateIndex) => {
+      const terminal = candidateIndex + 1 === distribution.probabilities.length;
+      cumulative = terminal ? 1 : cumulative + mixed;
+      if (!terminal && probabilityMatches(input.uniformDraws[index], cumulative)) {
         drawBoundaryAmbiguous = true;
       }
       return input.uniformDraws[index] < cumulative;

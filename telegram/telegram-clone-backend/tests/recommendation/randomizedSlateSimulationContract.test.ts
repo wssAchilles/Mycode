@@ -13,6 +13,7 @@ import {
 import {
   MAX_CANDIDATE_POOL_SIZE,
   MAX_SLATE_SIZE,
+  RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE,
   randomizedSlateSimulationInputSchema,
   randomizedSlateSimulationSchema,
   type RandomizedSlateSimulationV1,
@@ -127,27 +128,35 @@ describe('randomized_slate_simulation_v1', () => {
     });
   });
 
-  it('fails closed for draws at a cross-runtime probability boundary', () => {
-    const { input, output } = fixture();
-    input.uniformDraws[0] = 1 - Number.EPSILON;
+  it('fails closed only for ambiguous internal cross-runtime probability boundaries', () => {
+    const ambiguous = fixture();
+    ambiguous.input.uniformDraws[0] = 0.8180061146340761
+      + RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE / 2;
 
-    expect(verifyRandomizedSlateSimulationV1(input, output)).toMatchObject({
+    expect(verifyRandomizedSlateSimulationV1(ambiguous.input, ambiguous.output)).toMatchObject({
       status: 'rejected',
       blockers: expect.arrayContaining(['uniform_draw_boundary_ambiguous']),
     });
+
+    const terminal = fixture();
+    terminal.input.uniformDraws[2] = 1 - Number.EPSILON;
+    expect(verifyRandomizedSlateSimulationV1(terminal.input, terminal.output))
+      .toEqual({ status: 'verified' });
   });
 
   it('rejects hostile unknown inputs without letting getters escape', () => {
+    const { input, output } = fixture();
     const throwingInput = new Proxy({}, { get: () => { throw new Error('hostile input'); } });
     const throwingOutput = Object.defineProperty({}, 'contractVersion', {
       get: () => { throw new Error('hostile output'); },
     });
 
-    expect(() => verifyRandomizedSlateSimulationV1(throwingInput, throwingOutput)).not.toThrow();
-    expect(verifyRandomizedSlateSimulationV1(throwingInput, throwingOutput)).toEqual({
-      status: 'rejected',
-      blockers: ['invalid_input', 'invalid_output'],
-    });
+    for (const [rawInput, rawOutput] of [[throwingInput, output], [input, throwingOutput]]) {
+      expect(verifyRandomizedSlateSimulationV1(rawInput, rawOutput)).toEqual({
+        status: 'rejected',
+        blockers: ['invalid_input', 'invalid_output'],
+      });
+    }
   });
 
   it('locks policy and evidence literals and rejects closed uniform draw boundaries', () => {
