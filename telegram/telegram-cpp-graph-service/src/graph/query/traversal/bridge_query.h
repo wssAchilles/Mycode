@@ -13,6 +13,7 @@ template <typename QueryCandidates>
 QueryCandidates bridge_candidates_from_multi_hop(
     const std::vector<contracts::MultiHopCandidate>& candidates,
     const std::size_t limit,
+    const std::size_t scanned_count,
     const std::size_t visited_count,
     const bool budget_exhausted) {
   std::vector<contracts::BridgeCandidate> result;
@@ -32,6 +33,7 @@ QueryCandidates bridge_candidates_from_multi_hop(
   return rank_bridge_candidates<QueryCandidates>(
       std::move(result),
       limit,
+      scanned_count,
       visited_count,
       budget_exhausted);
 }

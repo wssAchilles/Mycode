@@ -106,6 +106,9 @@ ServiceConfig load_from_env() {
       .backend_timeout_ms = read_u64_env("GRAPH_KERNEL_BACKEND_TIMEOUT_MS", 4000),
       .snapshot_refresh_secs = read_u64_env("GRAPH_KERNEL_SNAPSHOT_REFRESH_SECS", 300),
       .snapshot_page_size = read_size_env("GRAPH_KERNEL_SNAPSHOT_PAGE_SIZE", 1000),
+      .snapshot_generation_v2_enabled = read_bool_env(
+          "GRAPH_KERNEL_SNAPSHOT_GENERATION_V2_ENABLED",
+          false),
       .min_edge_score = read_double_env("GRAPH_KERNEL_MIN_EDGE_SCORE", 0.05),
       .max_neighbors_per_user = read_size_env("GRAPH_KERNEL_MAX_NEIGHBORS_PER_USER", 128),
       .max_branching_factor = read_size_env("GRAPH_KERNEL_MAX_BRANCHING_FACTOR", 32),

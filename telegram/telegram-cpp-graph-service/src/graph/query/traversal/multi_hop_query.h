@@ -48,6 +48,7 @@ MultiHopBuildResult build_multi_hop_candidates(
       .max_visited_nodes = options.max_visited_nodes,
       .max_candidates = options.max_candidates,
   });
+  std::size_t scanned_count = direct_neighbors.size();
   std::size_t pruned_count = 0;
 
   while (!frontier.empty()) {
@@ -65,6 +66,7 @@ MultiHopBuildResult build_multi_hop_candidates(
     const auto next_neighbors = read_ranked_neighbors(node.current_user_id);
     const auto branching_limit = std::min(next_neighbors.size(), options.max_branching_factor);
     for (std::size_t index = 0; index < branching_limit; index += 1) {
+      scanned_count += 1;
       const auto& ref = next_neighbors[index];
 
       // Prefetch upcoming neighbor data to hide pointer-chasing latency.
@@ -103,6 +105,7 @@ MultiHopBuildResult build_multi_hop_candidates(
 
   return MultiHopBuildResult{
       .candidates = materialize_multi_hop_candidates(aggregate, resolve_user_id),
+      .scanned_count = scanned_count,
       .visited_count = budget_tracker.visited_count(),
       .pruned_count = pruned_count,
       .frontier_max_size = frontier.max_size(),

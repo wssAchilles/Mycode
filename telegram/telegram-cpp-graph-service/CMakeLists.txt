@@ -28,6 +28,7 @@ endif()
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 
 add_library(telegram-cpp-graph-core
@@ -41,6 +42,7 @@ add_library(telegram-cpp-graph-core
   src/ops/summaries/kernel_summary.cpp
   src/ops/summaries/snapshot_summary.cpp
   src/snapshot/backend_snapshot_client.cpp
+  src/snapshot/generation_protocol.cpp
   src/snapshot/snapshot_loader.cpp
 )
 
@@ -50,6 +52,7 @@ target_link_libraries(telegram-cpp-graph-core
   PUBLIC
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
     Threads::Threads
 )
 
@@ -118,6 +121,16 @@ target_include_directories(graph-store-tests BEFORE PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/_deps/googletest-src/googletest/include"
 )
 add_test(NAME graph-store-tests COMMAND graph-store-tests)
+
+add_executable(snapshot-generation-tests
+  tests/snapshot_generation_tests.cpp
+)
+target_link_libraries(snapshot-generation-tests PRIVATE telegram-cpp-graph-core GTest::gtest_main)
+target_compile_options(snapshot-generation-tests PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(snapshot-generation-tests BEFORE PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/_deps/googletest-src/googletest/include"
+)
+add_test(NAME snapshot-generation-tests COMMAND snapshot-generation-tests)
 
 add_executable(graph-store-bench EXCLUDE_FROM_ALL
   tests/graph_store_bench.cpp
