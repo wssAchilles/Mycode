@@ -35,6 +35,63 @@ function reject(blockers: string[]): RandomizedSlateVerificationResult {
   return { status: 'rejected', blockers: [...new Set(blockers)].sort() };
 }
 
+type EligibleCandidate = RandomizedSlateSimulationInputV1[
+  'sourceDecisionLog'
+]['candidatePool']['candidates'][number];
+
+function compareBaseline(left: EligibleCandidate, right: EligibleCandidate): number {
+  return left.poolRank - right.poolRank
+    || Buffer.compare(Buffer.from(left.candidateNamespace), Buffer.from(right.candidateNamespace))
+    || Buffer.compare(Buffer.from(left.candidateId), Buffer.from(right.candidateId));
+}
+
+function computeDistribution(
+  candidates: EligibleCandidate[],
+  epsilon: number,
+  temperature: number,
+): {
+  probabilities: Array<{ plackettLuce: number; mixed: number }>;
+  plackettLuceMass: number;
+  mixedMass: number;
+  probabilityMassError: number;
+} | null {
+  const scores = candidates.map((candidate) => candidate.score);
+  if (scores.length === 0 || scores.some((score) => score === null || !Number.isFinite(score))) {
+    return null;
+  }
+  const finiteScores = scores.filter((score): score is number => score !== null);
+  const maxScore = Math.max(...finiteScores);
+  const weights = finiteScores.map((score) => Math.exp((score - maxScore) / temperature));
+  if (weights.some((weight) => weight === 0 || !Number.isFinite(weight))) return null;
+  const denominator = weights.reduce((sum, weight) => sum + weight, 0);
+  if (!Number.isFinite(denominator) || denominator <= 0) return null;
+
+  const probabilities = weights.map((weight, index) => {
+    const plackettLuce = weight / denominator;
+    const mixed = (index === 0 ? 1 - epsilon : 0) + epsilon * plackettLuce;
+    return { plackettLuce, mixed };
+  });
+  if (probabilities.some(({ plackettLuce, mixed }) => (
+    !Number.isFinite(plackettLuce)
+    || !Number.isFinite(mixed)
+    || plackettLuce <= 0
+    || mixed <= 0
+  ))) return null;
+
+  const plackettLuceMass = probabilities.reduce((sum, value) => sum + value.plackettLuce, 0);
+  const mixedMass = probabilities.reduce((sum, value) => sum + value.mixed, 0);
+  const probabilityMassError = Math.max(
+    Math.abs(plackettLuceMass - 1),
+    Math.abs(mixedMass - 1),
+  );
+  if (
+    !Number.isFinite(plackettLuceMass)
+    || !Number.isFinite(mixedMass)
+    || probabilityMassError > RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE
+  ) return null;
+  return { probabilities, plackettLuceMass, mixedMass, probabilityMassError };
+}
+
 function sourceBehaviorIsNotDeterministic(rawInput: unknown): boolean {
   if (!rawInput || typeof rawInput !== 'object') return false;
   const source = (rawInput as Record<string, unknown>).sourceDecisionLog;
@@ -200,26 +257,62 @@ export function verifyRandomizedSlateSimulationV1(
     blockers.push('numerical_step_count_mismatch');
   }
 
-  const remainingEligible = new Set(eligible.map((candidate) => actionIdentity(candidate)));
+  const remainingEligible = [...eligible];
   const selectedIdentities = new Set<string>();
   for (const [index, action] of output.orderedActions.entries()) {
+    remainingEligible.sort(compareBaseline);
     const identity = actionIdentity(action.actionKey);
     if (action.actionKey.servedPosition !== index + 1) {
       blockers.push('action_position_mismatch');
     }
     if (selectedIdentities.has(identity)) blockers.push('action_duplicate');
     selectedIdentities.add(identity);
-    if (!remainingEligible.delete(identity)) blockers.push('action_ineligible_or_missing');
+    const selectedIndex = remainingEligible.findIndex(
+      (candidate) => actionIdentity(candidate) === identity,
+    );
+    if (selectedIndex === -1) {
+      blockers.push('action_ineligible_or_missing');
+      continue;
+    }
 
-    const expectedProbability = (
-      action.selectedWasDeterministicTop ? 1 - output.policy.epsilon : 0
-    ) + output.policy.epsilon * action.plackettLuceProbability;
-    if (
-      Math.abs(action.conditionalSelectionProbability - expectedProbability)
-      > RANDOMIZED_SLATE_PROBABILITY_MASS_TOLERANCE
-    ) {
+    const distribution = computeDistribution(
+      remainingEligible,
+      input.config.epsilon,
+      input.config.temperature,
+    );
+    if (!distribution) {
+      blockers.push('randomized_policy_recompute_failed');
+      continue;
+    }
+    const expectedProbability = distribution.probabilities[selectedIndex];
+    if (action.selectedWasDeterministicTop !== (selectedIndex === 0)) {
+      blockers.push('deterministic_top_binding_mismatch');
+    }
+    if (action.plackettLuceProbability !== expectedProbability.plackettLuce) {
+      blockers.push('plackett_luce_probability_mismatch');
+    }
+    if (action.conditionalSelectionProbability !== expectedProbability.mixed) {
       blockers.push('conditional_probability_mismatch');
     }
+    const step = output.numericalDiagnostics.steps[index];
+    if (step && (
+      step.plackettLuceProbabilityMass !== distribution.plackettLuceMass
+      || step.mixedProbabilityMass !== distribution.mixedMass
+      || step.probabilityMassError !== distribution.probabilityMassError
+    )) {
+      blockers.push('numerical_distribution_mismatch');
+    }
+    let cumulative = 0;
+    const expectedSelectedIndex = distribution.probabilities.findIndex(({ mixed }) => {
+      cumulative += mixed;
+      return input.uniformDraws[index] < cumulative;
+    });
+    if ((expectedSelectedIndex === -1
+      ? distribution.probabilities.length - 1
+      : expectedSelectedIndex) !== selectedIndex) {
+      blockers.push('uniform_draw_selection_mismatch');
+    }
+    remainingEligible.splice(selectedIndex, 1);
   }
 
   let expectedMaxError = 0;
