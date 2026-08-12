@@ -24,6 +24,7 @@ use super::{build_selector_stage_detail, select_candidates, select_candidates_wi
 fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
     RecommendationQueryPayload {
         request_id: "selector-query".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit,
         cursor: None,

@@ -30,6 +30,7 @@ fn builds_live_result_and_records_selection_degradation() {
     let definition = build_pipeline_definition(&config);
     let query = RecommendationQueryPayload {
         request_id: "req-response".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 2,
         cursor: None,

@@ -298,6 +298,7 @@ mod tests {
         store.record("u1", &[candidate("p1"), candidate("p2")]);
         let query = RecommendationQueryPayload {
             request_id: "req-1".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "u2".to_string(),
             limit: 10,
             cursor: None,
@@ -338,6 +339,7 @@ mod tests {
         store.record("u1", &[candidate("p1"), candidate("p2"), candidate("p3")]);
         let query = RecommendationQueryPayload {
             request_id: "req-1".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "u9".to_string(),
             limit: 10,
             cursor: None,

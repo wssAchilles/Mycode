@@ -15,6 +15,7 @@ use crate::runtime::versions::{FALLBACK_MODE, PIPELINE_VERSION};
 fn query() -> crate::contracts::RecommendationQueryPayload {
     crate::contracts::RecommendationQueryPayload {
         request_id: "req-1".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 10,
         cursor: Some(Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap()),
@@ -230,6 +231,7 @@ fn fingerprint_normalizes_array_order_and_case() {
     let first = query();
     let mut second = query();
     second.request_id = "req-2".to_string();
+    second.decision_id = "00000000-0000-4000-8000-0000000000fe".to_string();
     second.seen_ids = vec!["a".to_string(), "b".to_string()];
     second.served_ids = vec!["post-1".to_string(), "post-2".to_string()];
     second.country_code = Some("CN".to_string());

@@ -106,6 +106,7 @@ fn candidate_with_score(
 fn suppresses_cross_page_duplicates_from_served_state() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-1".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 10,
         cursor: None,
@@ -163,6 +164,7 @@ fn suppresses_cross_page_duplicates_from_served_state() {
 fn backfills_author_soft_cap_when_page_would_underfill() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-2".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 3,
         cursor: None,
@@ -214,6 +216,7 @@ fn backfills_author_soft_cap_when_page_would_underfill() {
 fn backfills_deferred_candidates_by_priority_and_score() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-score-backfill".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 3,
         cursor: None,
@@ -271,6 +274,7 @@ fn backfills_deferred_candidates_by_priority_and_score() {
 fn preserves_selector_order_and_score_fields_when_no_serving_suppression_applies() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-serving-order".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 3,
         cursor: None,
@@ -325,6 +329,7 @@ fn preserves_selector_order_and_score_fields_when_no_serving_suppression_applies
 fn reports_remaining_candidates_when_page_has_more_after_truncation() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-3".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 2,
         cursor: None,
@@ -370,6 +375,7 @@ fn reports_remaining_candidates_when_page_has_more_after_truncation() {
 fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-4".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 1,
         cursor: None,
@@ -422,6 +428,7 @@ fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
 fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-near-duplicate".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 2,
         cursor: None,
@@ -493,6 +500,7 @@ fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
 fn backfills_near_duplicate_content_when_page_would_underfill() {
     let query = crate::contracts::RecommendationQueryPayload {
         request_id: "req-near-duplicate-backfill".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 2,
         cursor: None,

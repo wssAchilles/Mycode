@@ -11,6 +11,7 @@ pub fn build_query_fingerprint(query: &RecommendationQueryPayload) -> String {
     let mut payload = serde_json::to_value(query).unwrap_or(Value::Null);
     if let Value::Object(map) = &mut payload {
         map.remove("requestId");
+        map.remove("decisionId");
         normalize_string_array(map, "seenIds");
         normalize_string_array(map, "servedIds");
         normalize_case(map, "countryCode", |value| value.to_ascii_uppercase());

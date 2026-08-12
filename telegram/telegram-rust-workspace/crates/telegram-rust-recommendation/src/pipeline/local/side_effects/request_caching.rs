@@ -283,6 +283,7 @@ mod tests {
             candidates: Vec::new(),
             query: RecommendationQueryPayload {
                 request_id: "req-test".to_string(),
+                decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
                 user_id: user_id.to_string(),
                 limit: 20,
                 cursor: None,

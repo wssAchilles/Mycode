@@ -155,6 +155,7 @@ pub fn build_pipeline_definition(
 
 #[cfg(test)]
 mod tests {
+    use telegram_component_primitives::query_hydrators::configured_query_hydrators;
     use telegram_pipeline_primitives::{
         RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
@@ -258,23 +259,7 @@ mod tests {
             definition.post_selection_hydrator_concurrency,
             POST_SELECTION_HYDRATOR_CONCURRENCY
         );
-        assert_eq!(
-            definition.query_hydrators,
-            vec![
-                "UserFeaturesQueryHydrator",
-                "UserEmbeddingQueryHydrator",
-                "UserActionSeqQueryHydrator",
-                "UserStateQueryHydrator",
-                "NewsModelContextQueryHydrator",
-                "ExperimentQueryHydrator",
-                "MutualFollowQueryHydrator",
-                "DemographicsQueryHydrator",
-                "SubscribedUserIdsQueryHydrator",
-                "PastRequestTimestampsQueryHydrator",
-                "ImpressedPostsQueryHydrator",
-                "IpQueryHydrator",
-            ]
-        );
+        assert_eq!(definition.query_hydrators, configured_query_hydrators());
         assert_eq!(
             definition.sources,
             vec![

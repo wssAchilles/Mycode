@@ -21,6 +21,7 @@ impl RecommendationPipeline {
             Arc::clone(&self.recent_store),
             self.serve_cache.clone(),
             hydrated_query.user_id.clone(),
+            hydrated_query.decision_id.clone(),
             query_fingerprint,
             result,
             cache_store_policy.cacheable,

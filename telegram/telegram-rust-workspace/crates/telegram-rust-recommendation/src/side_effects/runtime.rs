@@ -21,6 +21,7 @@ pub fn dispatch_post_response_side_effects(
     recent_store: Arc<RecentHotStore>,
     serve_cache: ServeCache,
     user_id: String,
+    decision_id: String,
     query_fingerprint: String,
     result: &RecommendationResultPayload,
     cacheable: bool,
@@ -80,6 +81,7 @@ pub fn dispatch_post_response_side_effects(
                 candidates: diversity_candidates,
                 query: crate::contracts::RecommendationQueryPayload {
                     request_id: query_fingerprint.clone(),
+                    decision_id,
                     user_id: user_id.clone(),
                     limit: 0,
                     cursor: None,

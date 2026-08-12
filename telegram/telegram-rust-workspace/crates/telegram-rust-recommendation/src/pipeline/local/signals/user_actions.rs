@@ -849,6 +849,7 @@ mod tests {
     fn profile_matches_author_cluster_source_and_keywords() {
         let query = RecommendationQueryPayload {
             request_id: "req".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer".to_string(),
             limit: 10,
             cursor: None,
@@ -899,6 +900,7 @@ mod tests {
     fn negative_author_feedback_carries_to_candidate() {
         let query = RecommendationQueryPayload {
             request_id: "req".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer".to_string(),
             limit: 10,
             cursor: None,
@@ -943,6 +945,7 @@ mod tests {
         let now = Utc::now();
         let query = RecommendationQueryPayload {
             request_id: "req".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer".to_string(),
             limit: 10,
             cursor: None,
@@ -1011,6 +1014,7 @@ mod tests {
         let stale_timestamp = Utc::now() - Duration::days(14);
         let build_query = |timestamp: chrono::DateTime<Utc>| RecommendationQueryPayload {
             request_id: "req".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer".to_string(),
             limit: 10,
             cursor: None,
