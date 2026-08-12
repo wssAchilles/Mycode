@@ -480,7 +480,7 @@ fn decision_log_fixture_has_cross_runtime_canonical_digests() {
         .as_array()
         .expect("candidate array")
         .iter()
-        .map(|candidate| canonical_decision_json(candidate))
+        .map(canonical_decision_json)
         .collect::<Vec<_>>();
     let candidate_ndjson = format!("{}\n", candidate_lines.join("\n"));
 
