@@ -9,7 +9,7 @@ import { FeedCandidate } from '../types/FeedCandidate';
 
 import { getRedis } from '../utils/redisClient';
 import { extractExperimentKeys } from '../utils/experimentKeys';
-import { recordRecommendationEvents } from '../events';
+import { recordRecommendationEvents, SERVED_POSITION_CONTRACT_VERSION } from '../events';
 
 // 简单内存缓存作为回退
 const servedCache = new Map<string, Set<string>>();
@@ -110,7 +110,8 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                     eventType: 'delivery' as const,
                     targetId: c.postId,
                     targetAuthorId: c.authorId,
-                    position: idx + 1,
+                    servedPosition: idx + 1,
+                    positionContractVersion: SERVED_POSITION_CONTRACT_VERSION,
                     score: this.toFiniteNumber(c.score),
                     weightedScore: this.toFiniteNumber(c.weightedScore),
                     inNetwork: c.inNetwork === true,

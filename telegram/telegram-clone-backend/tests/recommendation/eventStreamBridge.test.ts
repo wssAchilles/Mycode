@@ -23,7 +23,8 @@ describe('EventStreamService recommendation bridge', () => {
                 timestamp: new Date('2026-06-06T00:00:00.000Z'),
                 metadata: {
                     requestId: 'req-small-batch',
-                    position: 0,
+                    servedPosition: 1,
+                    positionContractVersion: 'served_position_1_based_v1',
                     recommendationScore: 0.42,
                     source: 'ColdStartSource',
                     selectionPool: 'primary',
@@ -52,7 +53,11 @@ describe('EventStreamService recommendation bridge', () => {
                 timestamp: new Date('2026-06-06T00:00:00.000Z'),
                 metadata: {
                     requestId: 'req-feed-1',
-                    position: 2,
+                    decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
+                    candidateNamespace: 'serving_post_id',
+                    candidateId: '65f000000000000000000001',
+                    servedPosition: 3,
+                    positionContractVersion: 'served_position_1_based_v1',
                     recommendationScore: 0.42,
                     source: 'ColdStartSource',
                     selectionPool: 'exploration',
@@ -68,7 +73,11 @@ describe('EventStreamService recommendation bridge', () => {
                 timestamp: new Date('2026-06-06T00:00:03.000Z'),
                 metadata: {
                     requestId: 'req-feed-1',
-                    position: 3,
+                    decisionId: 'not-a-uuid',
+                    candidateNamespace: 'serving_post_id',
+                    candidateId: '65f000000000000000000002',
+                    servedPosition: 4,
+                    positionContractVersion: 'served_position_1_based_v1',
                     recommendationScore: 0.31,
                     source: 'GraphSource',
                     dwellTime: 3500,
@@ -91,6 +100,12 @@ describe('EventStreamService recommendation bridge', () => {
             selectionReason: 'bandit_or_novelty_exploration',
             productSurface: ProductSurface.SPACE_FEED,
             experimentKeys: ['exp-recsys:treatment'],
+            metadata: {
+                positionContractVersion: 'served_position_1_based_v1',
+                decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
+                candidateNamespace: 'serving_post_id',
+                candidateId: '65f000000000000000000001',
+            },
         });
         expect(String(actions[0].targetPostId)).toBe('65f000000000000000000001');
         expect(actions[1]).toMatchObject({
@@ -101,6 +116,7 @@ describe('EventStreamService recommendation bridge', () => {
             recallSource: 'GraphSource',
             dwellTimeMs: 3500,
             productSurface: ProductSurface.SPACE_FEED,
+            metadata: expect.not.objectContaining({ decisionId: expect.anything() }),
         });
         expect(String(actions[1].targetPostId)).toBe('65f000000000000000000002');
 
@@ -114,6 +130,10 @@ describe('EventStreamService recommendation bridge', () => {
             requestId: 'req-feed-1',
             metadata: {
                 recommendationPosition: 3,
+                positionContractVersion: 'served_position_1_based_v1',
+                decisionId: 'fd3b9c5a-4208-4181-8f02-a1c20f141625',
+                candidateNamespace: 'serving_post_id',
+                candidateId: '65f000000000000000000001',
                 recommendationSource: 'ColdStartSource',
                 recommendationScore: 0.42,
                 selectionPool: 'exploration',
@@ -135,7 +155,8 @@ describe('EventStreamService recommendation bridge', () => {
                 timestamp: new Date('2026-06-06T00:00:00.000Z'),
                 metadata: {
                     requestId: 'req-feed-2',
-                    position: 0,
+                    servedPosition: 1,
+                    positionContractVersion: 'served_position_1_based_v1',
                     source: 'NewsAnnSource',
                 },
             },
@@ -202,7 +223,8 @@ describe('EventStreamService recommendation bridge', () => {
                 metadata: {
                     authorId: 'author-profile-1',
                     requestId: 'req-intent-1',
-                    position: 1,
+                    servedPosition: 2,
+                    positionContractVersion: 'served_position_1_based_v1',
                 },
             },
             {

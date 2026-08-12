@@ -6,7 +6,12 @@
 import { Redis } from 'ioredis';
 import mongoose from 'mongoose';
 import { ProductSurface, TargetType } from '../models/UserSignal';
-import { recordRecommendationEvents } from './recommendation/events';
+import { recordRecommendationEvents, type RecommendationEventInput } from './recommendation/events';
+import { normalizeRecommendationActionIdentity } from './recommendation/events/actionIdentity';
+import {
+    normalizeServedPosition,
+    SERVED_POSITION_CONTRACT_VERSION,
+} from './recommendation/events/positionContract';
 import { createChildLogger } from '../utils/logger';
 const log = createChildLogger('services:eventStreamService');
 
@@ -41,8 +46,12 @@ export interface UserBehaviorEvent {
     timestamp: Date;
     metadata?: {
         source?: string;
-        position?: number;
+        servedPosition?: number;
+        positionContractVersion?: typeof SERVED_POSITION_CONTRACT_VERSION;
         requestId?: string;
+        decisionId?: string;
+        candidateNamespace?: 'serving_post_id' | 'model_post_id';
+        candidateId?: string;
         recommendationScore?: number;
         selectionPool?: string;
         selectionReason?: string;
@@ -353,7 +362,7 @@ export class EventStreamService {
      * 将 UserBehaviorEvent 映射为 UserSignal + UserAction 记录
      */
     private async bridgeToRecommendationPipeline(events: UserBehaviorEvent[]): Promise<void> {
-        const recommendationEvents = [];
+        const recommendationEvents: RecommendationEventInput[] = [];
 
         for (const event of events) {
             if (!this.isValidRecommendationEvent(event)) {
@@ -362,9 +371,12 @@ export class EventStreamService {
             const targetAuthorId = this.resolveTargetAuthorId(event);
             const targetPostId = this.resolveTargetPostId(event);
             const target = this.resolveRecommendationTarget(event, targetPostId, targetAuthorId);
-            const rank = this.toPositiveInteger(event.metadata?.position);
+            const servedPosition = event.metadata?.positionContractVersion === SERVED_POSITION_CONTRACT_VERSION
+                ? normalizeServedPosition(event.metadata.servedPosition)
+                : undefined;
             const score = this.toFiniteNumber(event.metadata?.recommendationScore);
             const requestId = this.trimmedString(event.metadata?.requestId);
+            const actionIdentity = normalizeRecommendationActionIdentity(event.metadata);
             const recallSource = this.trimmedString(event.metadata?.source);
             const selectionPool = this.trimmedString(event.metadata?.selectionPool);
             const selectionReason = this.trimmedString(event.metadata?.selectionReason);
@@ -383,8 +395,12 @@ export class EventStreamService {
                 targetType: target.targetType,
                 targetAuthorId,
                 requestId,
+                ...actionIdentity,
                 productSurface: this.resolveProductSurface(event),
-                position: rank,
+                servedPosition,
+                positionContractVersion: servedPosition === undefined
+                    ? undefined
+                    : SERVED_POSITION_CONTRACT_VERSION,
                 recommendationSource: recallSource,
                 dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
                 score,
@@ -400,7 +416,7 @@ export class EventStreamService {
         }
 
         if (recommendationEvents.length > 0) {
-            await recordRecommendationEvents(recommendationEvents as any).catch((err) =>
+            await recordRecommendationEvents(recommendationEvents).catch((err) =>
                 log.error({ data: err.message }, '[EventStream] Failed to bridge recommendation events')
             );
         }
@@ -517,12 +533,6 @@ export class EventStreamService {
         if (!trimmed) return undefined;
         if (!/^https?:\/\//i.test(trimmed)) return undefined;
         return trimmed.slice(0, 2048);
-    }
-
-    private toPositiveInteger(value: unknown): number | undefined {
-        if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-        const normalized = Math.floor(value);
-        return normalized >= 0 ? normalized + 1 : undefined;
     }
 
     private toFiniteNumber(value: unknown): number | undefined {

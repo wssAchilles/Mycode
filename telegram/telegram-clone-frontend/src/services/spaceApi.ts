@@ -64,6 +64,7 @@ interface PostResponse {
     _recommendationDetail?: string;
     _recommendationExplain?: RecommendationExplainResponse;
     _recommendationRequestId?: string;
+    _recommendationDecisionId?: string;
     _selectionPool?: string;
     _selectionReason?: string;
     _inNetwork?: boolean;
@@ -79,6 +80,11 @@ interface PostResponse {
 
 interface RecommendationContextResponse {
     requestId?: string;
+    decisionId?: string;
+    candidateNamespace?: 'serving_post_id' | 'model_post_id';
+    candidateId?: string;
+    servedPosition?: number;
+    positionContractVersion?: 'served_position_1_based_v1';
     rank?: number;
     primarySource?: string;
     secondarySources?: string[];
@@ -382,6 +388,13 @@ export const transformPost = (post: PostResponse): PostData => {
         recommendationDetail: post._recommendationDetail,
         recommendationExplain: post._recommendationExplain,
         recommendationRequestId: recommendationContext?.requestId ?? post._recommendationRequestId,
+        recommendationDecisionId: recommendationContext
+            ? recommendationContext.decisionId
+            : post._recommendationDecisionId,
+        candidateNamespace: recommendationContext?.candidateNamespace,
+        candidateId: recommendationContext?.candidateId,
+        servedPosition: recommendationContext?.servedPosition,
+        positionContractVersion: recommendationContext?.positionContractVersion,
         recommendationRank: recommendationContext?.rank ?? post._recommendationRank,
         recommendationScore: recommendationContext?.score ?? post._recommendationScore,
         weightedScore: recommendationContext?.weightedScore ?? post._weightedScore,
@@ -393,10 +406,14 @@ export const transformPost = (post: PostResponse): PostData => {
 
 const attachRecommendationRequestContext = (
     posts: PostResponse[],
-    requestId?: string
+    identity: { requestId?: string },
 ): PostResponse[] => posts.map((post) => ({
     ...post,
-    _recommendationRequestId: requestId,
+    _recommendationRequestId: post._recommendationRequestId ?? identity.requestId,
+    _recommendationContext: {
+        ...post._recommendationContext,
+        requestId: post._recommendationContext?.requestId ?? identity.requestId,
+    },
 }));
 
 const transformComment = (comment: CommentData): CommentData => ({
@@ -423,13 +440,15 @@ export const spaceAPI = {
             isBottomRequest?: boolean;
             inNetworkOnly?: boolean;
         }
-    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[]; requestId?: string }> => {
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[]; requestId?: string; decisionId?: string; clientRequestId?: string }> => {
         try {
             const response = await apiClient.post<{
                 posts: PostResponse[];
                 hasMore?: boolean;
                 nextCursor?: string;
                 request_id?: string;
+                decision_id?: string;
+                client_request_id?: string;
                 served_ids_delta?: string[];
             }>(
                 `/api/space/feed`,
@@ -452,11 +471,15 @@ export const spaceAPI = {
                 : posts.map((p) => String(p._id || p.id)).filter(Boolean);
 
             return {
-                posts: attachRecommendationRequestContext(posts, response.data.request_id).map(transformPost),
+                posts: attachRecommendationRequestContext(posts, {
+                    requestId: response.data.request_id,
+                }).map(transformPost),
                 hasMore: response.data.hasMore ?? (posts.length >= limit),
                 nextCursor: response.data.nextCursor,
                 servedIdsDelta,
                 requestId: response.data.request_id,
+                decisionId: response.data.decision_id,
+                clientRequestId: response.data.client_request_id,
             };
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '获取动态失败'));
@@ -760,6 +783,7 @@ export const spaceAPI = {
                 hasMore?: boolean;
                 nextCursor?: string;
                 request_id?: string;
+                decision_id?: string;
                 served_ids_delta?: string[];
             }>(
                 `/api/space/feed`,
@@ -777,7 +801,9 @@ export const spaceAPI = {
             const isMLEnhanced = posts.some((p) => typeof p._recommendationScore === 'number' || typeof p?._inNetwork === 'boolean');
 
             return {
-                posts: attachRecommendationRequestContext(posts, response.data.request_id).map(transformPost),
+                posts: attachRecommendationRequestContext(posts, {
+                    requestId: response.data.request_id,
+                }).map(transformPost),
                 hasMore: response.data.hasMore ?? (posts.length >= limit),
                 isMLEnhanced,
             };

@@ -76,6 +76,11 @@ export interface PostData {
     recommendationDetail?: string;
     recommendationExplain?: RecommendationExplain;
     recommendationRequestId?: string;
+    recommendationDecisionId?: string;
+    candidateNamespace?: 'serving_post_id' | 'model_post_id';
+    candidateId?: string;
+    servedPosition?: number;
+    positionContractVersion?: 'served_position_1_based_v1';
     recommendationRank?: number;
     recommendationScore?: number;
     weightedScore?: number;
@@ -211,17 +216,34 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const moreMenuRef = useRef<HTMLDivElement>(null);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
     const analytics = useAnalytics({ source: post.recallSource });
-    const recommendationPosition = typeof post.recommendationRank === 'number'
-        ? Math.max(0, post.recommendationRank - 1)
-        : feedPosition;
+    const hasActionIdentity = post.positionContractVersion === 'served_position_1_based_v1'
+        && Number.isSafeInteger(post.servedPosition)
+        && (post.servedPosition ?? 0) > 0
+        && Boolean(post.recommendationDecisionId)
+        && Boolean(post.candidateNamespace)
+        && Boolean(post.candidateId);
+    const recommendationPosition = hasActionIdentity
+        ? (post.servedPosition as number) - 1
+        : typeof post.recommendationRank === 'number'
+            ? Math.max(0, post.recommendationRank - 1)
+            : feedPosition;
     const recommendationEventContext = useMemo(() => ({
         position: recommendationPosition,
         requestId: post.recommendationRequestId,
+        ...(hasActionIdentity ? {
+            decisionId: post.recommendationDecisionId,
+            candidateNamespace: post.candidateNamespace,
+            candidateId: post.candidateId,
+        } : {}),
         recommendationScore: post.recommendationScore,
         selectionPool: post.selectionPool ?? post.recommendationExplain?.selectionPool,
         selectionReason: post.selectionReason ?? post.recommendationExplain?.selectionReason,
     }), [
         recommendationPosition,
+        hasActionIdentity,
+        post.candidateId,
+        post.candidateNamespace,
+        post.recommendationDecisionId,
         post.recommendationExplain?.selectionPool,
         post.recommendationExplain?.selectionReason,
         post.recommendationRequestId,

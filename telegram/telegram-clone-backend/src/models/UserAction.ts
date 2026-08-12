@@ -69,6 +69,9 @@ export interface IUserAction extends Document {
     metadata?: {
         clientEventId?: string;
         recommendationEventKey?: string;
+        decisionId?: string;
+        candidateNamespace?: 'serving_post_id' | 'model_post_id';
+        candidateId?: string;
         [key: string]: unknown;
     };
 

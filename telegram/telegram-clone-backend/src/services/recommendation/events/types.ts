@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 
 import { ProductSurface, TargetType } from '../../../models/UserSignal';
+import { SERVED_POSITION_CONTRACT_VERSION } from './positionContract';
+import type { CandidateNamespace } from './actionIdentity';
 
 export type RecommendationEventType =
     | 'delivery'
@@ -35,8 +37,12 @@ export interface RecommendationEventInput {
     targetCommentId?: string | mongoose.Types.ObjectId;
     targetAuthorId?: string;
     requestId?: string;
+    decisionId?: string;
+    candidateNamespace?: CandidateNamespace;
+    candidateId?: string;
     productSurface?: ProductSurface | string;
-    position?: number;
+    servedPosition?: number;
+    positionContractVersion?: typeof SERVED_POSITION_CONTRACT_VERSION;
     recommendationSource?: string;
     secondaryRecallSources?: string[];
     dwellTimeMs?: number;

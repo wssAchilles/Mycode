@@ -14,6 +14,11 @@ import {
     type RecommendationEventBatchResult,
     type RecommendationEventInput,
 } from './types';
+import {
+    normalizeServedPosition,
+    SERVED_POSITION_CONTRACT_VERSION,
+} from './positionContract';
+import { normalizeRecommendationActionIdentity } from './actionIdentity';
 
 const userSignalService = UserSignalService.getInstance();
 
@@ -42,18 +47,27 @@ export async function recordRecommendationEvents(
         const occurredAt = event.occurredAt || new Date();
         const actionType = mapEventToActionType(event.eventType);
         const signalType = mapEventToSignalType(event.eventType);
+        const servedPosition = event.positionContractVersion === SERVED_POSITION_CONTRACT_VERSION
+            ? normalizeServedPosition(event.servedPosition)
+            : undefined;
+        const positionContractVersion = servedPosition === undefined
+            ? undefined
+            : SERVED_POSITION_CONTRACT_VERSION;
+        const actionIdentity = normalizeRecommendationActionIdentity(event);
         const eventKey = buildRecommendationEventKey({
             clientEventId: event.clientEventId,
             userId: event.userId,
             eventType: event.eventType,
             targetId,
             requestId: event.requestId,
-            rank: event.position,
+            rank: servedPosition,
             occurredAt,
         });
         const metadata = {
             clientEventId: event.clientEventId,
             recommendationEventKey: eventKey,
+            positionContractVersion,
+            ...actionIdentity,
         };
 
         if (actionType) {
@@ -71,7 +85,7 @@ export async function recordRecommendationEvents(
                 targetAuthorId: event.targetAuthorId,
                 requestId: event.requestId,
                 dwellTimeMs: event.dwellTimeMs,
-                rank: event.position,
+                rank: servedPosition,
                 score: toFiniteNumber(event.score),
                 weightedScore: toFiniteNumber(event.weightedScore),
                 inNetwork: event.inNetwork,
@@ -102,7 +116,9 @@ export async function recordRecommendationEvents(
                 requestId: event.requestId,
                 metadata: {
                     dwellTimeMs: event.dwellTimeMs,
-                    recommendationPosition: event.position,
+                    recommendationPosition: servedPosition,
+                    positionContractVersion,
+                    ...actionIdentity,
                     recommendationSource: event.recommendationSource,
                     secondaryRecallSources: normalizeStringArray(event.secondaryRecallSources),
                     recommendationScore: toFiniteNumber(event.score),

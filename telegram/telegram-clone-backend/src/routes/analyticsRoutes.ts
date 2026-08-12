@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { getEventStreamService } from '../services/eventStreamService';
 import { getExperimentService } from '../services/experiment';
+import { normalizeAnalyticsPositionMetadata } from '../services/recommendation/events/positionContract';
 import { createChildLogger } from '../utils/logger';
 const log = createChildLogger('routes:analyticsRoutes');
 
@@ -143,15 +144,18 @@ router.post('/experiments/:id/:action', async (req: Request, res: Response) => {
 router.post('/events', async (req: Request, res: Response) => {
     try {
         const event = req.body;
+        const userId = String(req.userId || req.user?.id || '').trim();
 
         // 验证必填字段
-        if (!event.type || !event.postId || !event.userId) {
+        if (!event.type || !event.postId || !userId) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         const eventStream = getEventStreamService();
         await eventStream.logEvent({
             ...event,
+            userId,
+            metadata: normalizeAnalyticsPositionMetadata(event.metadata),
             timestamp: new Date(event.timestamp || Date.now()),
         });
 
@@ -166,8 +170,9 @@ router.post('/events', async (req: Request, res: Response) => {
 router.post('/events/batch', async (req: Request, res: Response) => {
     try {
         const { events } = req.body;
+        const userId = String(req.userId || req.user?.id || '').trim();
 
-        if (!Array.isArray(events) || events.length === 0) {
+        if (!Array.isArray(events) || events.length === 0 || !userId) {
             return res.status(400).json({ error: 'Invalid events array' });
         }
 
@@ -175,6 +180,8 @@ router.post('/events/batch', async (req: Request, res: Response) => {
         await eventStream.logBatch(
             events.map((e: any) => ({
                 ...e,
+                userId,
+                metadata: normalizeAnalyticsPositionMetadata(e.metadata),
                 timestamp: new Date(e.timestamp || Date.now()),
             }))
         );

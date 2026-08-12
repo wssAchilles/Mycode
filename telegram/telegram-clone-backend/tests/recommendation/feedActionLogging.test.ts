@@ -91,7 +91,7 @@ describe('Feed action logging contract', () => {
         const actions = spy.mock.calls[0][0] as any[];
         expect(actions).toHaveLength(2);
         expect(actions[0]).toMatchObject({
-            action: ActionType.IMPRESSION,
+            action: ActionType.DELIVERY,
             requestId: 'req-impression-contract',
             rank: 1,
             score: 2.3,
@@ -105,7 +105,7 @@ describe('Feed action logging contract', () => {
             productSurface: 'space_feed',
         });
         expect(actions[1]).toMatchObject({
-            action: ActionType.IMPRESSION,
+            action: ActionType.DELIVERY,
             requestId: 'req-impression-contract',
             rank: 2,
             score: 0.9,
