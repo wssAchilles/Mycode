@@ -33,6 +33,7 @@ mod tests {
     fn make_query(timestamps: Vec<DateTime<Utc>>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-ts-test".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "user-1".to_string(),
             limit: 20,
             past_request_timestamps: timestamps,

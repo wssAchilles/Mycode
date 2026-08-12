@@ -1,0 +1,16 @@
+{
+  "contractVersion": "recommendation_query_hydrator_contract_v1",
+  "hydrators": [
+    { "name": "UserFeaturesQueryHydrator", "stage": "base" },
+    { "name": "MutualFollowQueryHydrator", "stage": "dependent" },
+    { "name": "InterestedTopicsQueryHydrator", "stage": "base" },
+    { "name": "DemographicsQueryHydrator", "stage": "base" },
+    { "name": "UserEmbeddingQueryHydrator", "stage": "base" },
+    { "name": "UserActionSeqQueryHydrator", "stage": "base" },
+    { "name": "UserStateQueryHydrator", "stage": "dependent" },
+    { "name": "NewsModelContextQueryHydrator", "stage": "base" },
+    { "name": "UserSignalQueryHydrator", "stage": "base" },
+    { "name": "PastRequestTimestampsQueryHydrator", "stage": "base" },
+    { "name": "ExperimentQueryHydrator", "stage": "dependent" }
+  ]
+}

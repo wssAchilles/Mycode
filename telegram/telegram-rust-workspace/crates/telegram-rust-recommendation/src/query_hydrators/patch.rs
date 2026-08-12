@@ -49,6 +49,12 @@ pub(crate) fn apply_query_patch(
         }
         query.experiment_context = Some(experiment_context);
     }
+    if let Some(ranking_policy) = patch.ranking_policy.clone() {
+        if !seen_fields.insert("rankingPolicy") {
+            return Err("query_patch_field_conflict:rankingPolicy".to_string());
+        }
+        query.ranking_policy = Some(ranking_policy);
+    }
     if let Some(user_signal_features) = patch.user_signal_features.clone() {
         if !seen_fields.insert("userSignalFeatures") {
             return Err("query_patch_field_conflict:userSignalFeatures".to_string());
@@ -85,6 +91,12 @@ pub(crate) fn apply_query_patch(
         }
         query.impressed_post_ids = impressed_post_ids;
     }
+    if let Some(subscribed_user_ids) = patch.subscribed_user_ids.clone() {
+        if !seen_fields.insert("subscribedUserIds") {
+            return Err("query_patch_field_conflict:subscribedUserIds".to_string());
+        }
+        query.subscribed_user_ids = subscribed_user_ids;
+    }
     Ok(())
 }
 
@@ -103,6 +115,7 @@ mod tests {
     fn applies_disjoint_query_patches_and_rejects_conflicts() {
         let mut query = RecommendationQueryPayload {
             request_id: "req-query-patch".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer-1".to_string(),
             limit: 20,
             cursor: None,
@@ -163,6 +176,7 @@ mod tests {
                 user_id: "viewer-1".to_string(),
                 assignments: Vec::new(),
             }),
+            subscribed_user_ids: Some(vec!["author-2".to_string()]),
             ..RecommendationQueryPatchPayload::default()
         };
         apply_query_patch(&mut query, &experiment_patch, &mut seen_fields)
@@ -174,6 +188,7 @@ mod tests {
                 .map(|value| value.user_id.as_str()),
             Some("viewer-1")
         );
+        assert_eq!(query.subscribed_user_ids, vec!["author-2"]);
 
         let conflict = apply_query_patch(&mut query, &user_features_patch, &mut seen_fields)
             .expect_err("second writer to userFeatures should be rejected");
