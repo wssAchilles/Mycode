@@ -16,13 +16,17 @@ pub use telegram_component_primitives::side_effects::{
 };
 pub use telegram_serving_primitives::ASYNC_SIDE_EFFECT_MODE;
 
+pub struct PostResponseQueryIdentity {
+    pub user_id: String,
+    pub decision_id: String,
+    pub query_fingerprint: String,
+}
+
 pub fn dispatch_post_response_side_effects(
     metrics: Arc<Mutex<RecommendationMetrics>>,
     recent_store: Arc<RecentHotStore>,
     serve_cache: ServeCache,
-    user_id: String,
-    decision_id: String,
-    query_fingerprint: String,
+    query_identity: PostResponseQueryIdentity,
     result: &RecommendationResultPayload,
     cacheable: bool,
 ) {
@@ -45,6 +49,11 @@ pub fn dispatch_post_response_side_effects(
     };
 
     tokio::spawn(async move {
+        let PostResponseQueryIdentity {
+            user_id,
+            decision_id,
+            query_fingerprint,
+        } = query_identity;
         {
             let mut metrics = metrics.lock().await;
             metrics.record_side_effect_dispatch(&names);

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 use crate::serving::policy::evaluate_store_policy;
-use crate::side_effects::runtime::dispatch_post_response_side_effects;
+use crate::side_effects::runtime::{
+    PostResponseQueryIdentity, dispatch_post_response_side_effects,
+};
 
 use super::RecommendationPipeline;
 
@@ -20,9 +22,11 @@ impl RecommendationPipeline {
             Arc::clone(&self.metrics),
             Arc::clone(&self.recent_store),
             self.serve_cache.clone(),
-            hydrated_query.user_id.clone(),
-            hydrated_query.decision_id.clone(),
-            query_fingerprint,
+            PostResponseQueryIdentity {
+                user_id: hydrated_query.user_id.clone(),
+                decision_id: hydrated_query.decision_id.clone(),
+                query_fingerprint,
+            },
             result,
             cache_store_policy.cacheable,
         );
