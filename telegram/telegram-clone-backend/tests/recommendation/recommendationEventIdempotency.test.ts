@@ -196,7 +196,8 @@ describe('recommendation event idempotency', () => {
             targetId: '65f000000000000000000001',
             productSurface: 'space_feed',
             requestId: 'req_1',
-            position: 1,
+            servedPosition: 1,
+            positionContractVersion: 'served_position_1_based_v1',
             score: 0.5,
             recommendationSource: 'GraphSource',
             occurredAt: new Date('2026-07-06T00:00:00.000Z'),
@@ -271,11 +272,41 @@ describe('recommendation event idempotency', () => {
             targetAuthorId: 'author_1',
             productSurface: 'space_feed',
             requestId: 'req_1',
-            position: 1,
+            servedPosition: 1,
+            positionContractVersion: 'served_position_1_based_v1',
             occurredAt: new Date('2026-07-06T00:00:00.000Z'),
         }]);
 
         expect(mocks.userSignalBulkWrite).toHaveBeenCalledTimes(1);
         expect(mocks.realGraphRecordInteractionsBatch).not.toHaveBeenCalled();
+    });
+
+    it('persists an internal 1-based position without converting it again', async () => {
+        await recordRecommendationEvents([{
+            userId: 'user_1',
+            eventType: 'impression',
+            targetType: 'post',
+            targetId: '65f000000000000000000001',
+            productSurface: 'space_feed',
+            requestId: 'req_position_1',
+            servedPosition: 1,
+            positionContractVersion: 'served_position_1_based_v1',
+            occurredAt: new Date('2026-07-06T00:00:00.000Z'),
+        }]);
+
+        const action = mocks.userActionBulkWrite.mock.calls[0][0][0].updateOne.update.$setOnInsert;
+        const signal = mocks.userSignalBulkWrite.mock.calls[0][0][0].updateOne.update.$setOnInsert;
+        expect(action).toMatchObject({
+            rank: 1,
+            metadata: {
+                recommendationEventKey: 'user_1:impression:65f000000000000000000001:req_position_1:1',
+                positionContractVersion: 'served_position_1_based_v1',
+            },
+        });
+        expect(signal.metadata).toMatchObject({
+            recommendationPosition: 1,
+            recommendationEventKey: 'user_1:impression:65f000000000000000000001:req_position_1:1',
+            positionContractVersion: 'served_position_1_based_v1',
+        });
     });
 });
