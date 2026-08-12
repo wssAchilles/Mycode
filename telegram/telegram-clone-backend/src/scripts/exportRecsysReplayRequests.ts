@@ -12,11 +12,19 @@ import path from 'path';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
-import { connectMongoDB } from '../config/db';
 import RecommendationTrace from '../models/RecommendationTrace';
-import UserAction from '../models/UserAction';
-import { LABEL_ACTION_TYPES, summarizeActionsInWindow } from '../services/recommendation/utils/actionLabels';
+import UserAction, { ActionType } from '../models/UserAction';
+import {
+    type RecommendationDecisionLogV1,
+    recommendationDecisionLogSchema,
+} from '../services/recommendation/decisionLog/contracts';
+import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
 import type { ReplayCandidateLabelSummary, ReplayRequestSnapshot } from '../services/recommendation/replay/contracts';
+import {
+    connectReadOnlyMongo,
+    disconnectReadOnlyMongo,
+} from '../services/recommendation/training/readOnlyMongo';
+import { LABEL_ACTION_TYPES } from '../services/recommendation/utils/actionLabels';
 
 dotenv.config();
 
@@ -60,20 +68,32 @@ function idToString(id: any): string {
     return '';
 }
 
-function mapKey(userId: string, postId: string): string {
-    return `${userId}:${postId}`;
-}
-
 function normalizeStringArray(value?: string[]): string[] {
     return Array.isArray(value)
         ? value.map((entry) => entry.trim()).filter(Boolean)
         : [];
 }
 
-function feedbackLabel(labels: ReturnType<typeof summarizeActionsInWindow>): 'positive' | 'negative' | null {
+function feedbackLabel(labels: ReplayCandidateLabelSummary): 'positive' | 'negative' | null {
     if (labels.negative) return 'negative';
     if (labels.engagement || labels.click || labels.dwellTimeMs > 0) return 'positive';
     return null;
+}
+
+type DecisionAction = RecommendationDecisionLogV1['actions'][number];
+
+function candidateMatchesAction(candidate: any, action: DecisionAction): boolean {
+    return action.actionKey.candidateNamespace === 'serving_post_id'
+        ? idToString(candidate.postId) === action.actionKey.candidateId
+        : candidate.modelPostId === action.actionKey.candidateId;
+}
+
+function actionKey(action: DecisionAction): string {
+    return [
+        action.actionKey.candidateNamespace,
+        action.actionKey.candidateId,
+        action.actionKey.servedPosition,
+    ].join(':');
 }
 
 async function main() {
@@ -82,10 +102,13 @@ async function main() {
     const since = new Date(now.getTime() - args.days * 24 * 60 * 60 * 1000);
     const windowMs = args.windowHours * 60 * 60 * 1000;
 
-    await connectMongoDB();
+    await connectReadOnlyMongo();
 
     const traceQuery: Record<string, unknown> = {
-        createdAt: { $gte: since, $lte: now },
+        'decisionLogV1.decisionAt': {
+            $gte: since.toISOString(),
+            $lte: now.toISOString(),
+        },
     };
     if (args.surface) traceQuery.productSurface = args.surface;
     if (args.experimentKey) traceQuery.experimentKeys = args.experimentKey;
@@ -93,55 +116,46 @@ async function main() {
 
     const traceCursor = RecommendationTrace.find(traceQuery)
         .select(
-            'requestId userId productSurface pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore experimentKeys userState embeddingQualityScore shadowComparison candidates replayPool createdAt',
+            'requestId userId productSurface decisionLogV1 pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore experimentKeys userState embeddingQualityScore shadowComparison candidates replayPool',
         )
-        .sort({ createdAt: -1 });
+        .sort({ 'decisionLogV1.decisionAt': -1 });
     if (args.limit > 0) {
         traceCursor.limit(args.limit);
     }
 
-    const traceDocs = await traceCursor.lean();
-    const traces = traceDocs.slice().reverse();
+    const traceDocs = (await traceCursor.lean()).slice().reverse();
+    const traces = traceDocs.flatMap((trace: any) => {
+        const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
+        if (!parsed.success) return [];
+        const decisionAtMs = Date.parse(parsed.data.decisionAt);
+        if (decisionAtMs < since.getTime() || decisionAtMs > now.getTime()) return [];
+        return [{ trace, decision: parsed.data }];
+    });
 
     if (traces.length === 0) {
         console.log('[ExportRecsysReplay] no traces found for filters');
         return;
     }
 
-    const postIds = Array.from(new Set(
-        traces
-            .flatMap((trace: any) => (trace.replayPool?.candidates || trace.candidates || []))
-            .map((candidate: any) => idToString(candidate.postId))
-            .filter(Boolean),
-    ))
-        .filter((id) => mongoose.isValidObjectId(id))
-        .map((id) => new mongoose.Types.ObjectId(id));
-    const userIds = Array.from(new Set(traces.map((trace: any) => trace.userId).filter(Boolean)));
-    const minTraceAt = new Date(traces[0].createdAt);
-    const maxTraceAt = new Date(traces[traces.length - 1].createdAt);
-    const followupUntil = new Date(maxTraceAt.getTime() + windowMs);
-
-    const followups = await UserAction.find({
-        action: { $in: LABEL_ACTION_TYPES },
-        userId: { $in: userIds },
-        targetPostId: { $in: postIds },
-        timestamp: { $gte: minTraceAt, $lte: followupUntil },
+    const decisionIds = traces.map(({ decision }) => decision.decisionId).sort();
+    const minDecisionAt = new Date(Math.min(
+        ...traces.map(({ decision }) => Date.parse(decision.decisionAt)),
+    ));
+    const outcomeActions = await UserAction.find({
+        'metadata.decisionId': { $in: decisionIds },
+        action: { $in: [ActionType.IMPRESSION, ...LABEL_ACTION_TYPES] },
+        timestamp: { $gte: minDecisionAt, $lte: now },
     })
-        .select('userId targetPostId action timestamp dwellTimeMs')
+        .select('metadata rank requestId userId action timestamp dwellTimeMs')
         .lean();
 
-    const followupsByKey = new Map<string, Array<Record<string, any>>>();
-    for (const action of followups) {
-        const postId = idToString(action.targetPostId);
-        if (!postId) continue;
-        const key = mapKey(action.userId, postId);
-        const bucket = followupsByKey.get(key) || [];
+    const actionsByDecisionId = new Map<string, Array<Record<string, any>>>();
+    for (const action of outcomeActions) {
+        const decisionId = action.metadata?.decisionId;
+        if (!decisionId) continue;
+        const bucket = actionsByDecisionId.get(decisionId) || [];
         bucket.push(action);
-        followupsByKey.set(key, bucket);
-    }
-
-    for (const bucket of followupsByKey.values()) {
-        bucket.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+        actionsByDecisionId.set(decisionId, bucket);
     }
 
     const outputPath = path.resolve(process.cwd(), args.output);
@@ -151,22 +165,34 @@ async function main() {
     let exportedRequests = 0;
     let exportedCandidates = 0;
 
-    for (const trace of traces as any[]) {
-        const requestAt = new Date(trace.createdAt);
+    for (const { trace, decision } of traces) {
         const traceCandidates = (trace.replayPool?.candidates || trace.candidates || []) as any[];
+        const outcomesByActionKey = new Map(decision.actions.map((servedAction) => [
+            actionKey(servedAction),
+            attributeOutcomeV1({
+                decisionLog: decision,
+                servedAction,
+                traceUserId: trace.userId,
+                events: actionsByDecisionId.get(decision.decisionId) || [],
+                observedThrough: now,
+                horizonMs: windowMs,
+            }),
+        ]));
         const replayCandidates = traceCandidates.reduce<ReplayRequestSnapshot['candidates']>(
             (acc, candidate: any) => {
                 const postId = idToString(candidate.postId);
                 if (!postId) return acc;
-                const candidateFollowups =
-                    (followupsByKey.get(mapKey(trace.userId, postId)) || []) as Array<{
-                        action: string;
-                        timestamp: Date;
-                        dwellTimeMs?: number;
-                    }>;
-                const labels = summarizeActionsInWindow(requestAt, candidateFollowups, windowMs);
+                const servedAction = decision.actions.find((action) => (
+                    candidateMatchesAction(candidate, action)
+                ));
+                const outcomeContractV1 = servedAction
+                    ? outcomesByActionKey.get(actionKey(servedAction))
+                    : undefined;
+                const labels = outcomeContractV1?.status === 'observed'
+                    ? outcomeContractV1.labels
+                    : undefined;
                 const replayCandidate = {
-                    requestId: trace.requestId || '',
+                    requestId: decision.requestId,
                     postId,
                     modelPostId: candidate.modelPostId || '',
                     authorId: candidate.authorId,
@@ -182,7 +208,6 @@ async function main() {
                     weightedScore: candidate.weightedScore ?? null,
                     experimentKeys: normalizeStringArray(candidate.experimentKeys || trace.experimentKeys),
                     productSurface: trace.productSurface || 'space_feed',
-                    feedbackLabel: feedbackLabel(labels),
                     pipelineScore: candidate.pipelineScore ?? null,
                     scoreBreakdown: candidate.scoreBreakdown || undefined,
                     recommendationDetail: candidate.recommendationDetail || undefined,
@@ -192,7 +217,11 @@ async function main() {
                     createdAt: candidate.createdAt
                         ? new Date(candidate.createdAt).toISOString()
                         : undefined,
-                    labels: toReplayLabels(labels),
+                    ...(outcomeContractV1 ? { outcomeContractV1 } : {}),
+                    ...(labels ? {
+                        feedbackLabel: feedbackLabel(labels),
+                        labels,
+                    } : {}),
                 };
                 acc.push(replayCandidate);
                 return acc;
@@ -200,9 +229,10 @@ async function main() {
             [],
         );
         const replayRequest: ReplayRequestSnapshot = {
-            requestId: trace.requestId,
+            requestId: decision.requestId,
+            decisionId: decision.decisionId,
             userId: trace.userId,
-            requestAt: requestAt.toISOString(),
+            requestAt: decision.decisionAt,
             productSurface: trace.productSurface || 'space_feed',
             pipeline: trace.pipeline || undefined,
             pipelineVersion: trace.pipelineVersion || undefined,
@@ -245,23 +275,6 @@ function finiteNumberOrMissing(value: unknown): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN;
 }
 
-function toReplayLabels(labels: ReturnType<typeof summarizeActionsInWindow>): ReplayCandidateLabelSummary {
-    return {
-        click: labels.click,
-        like: labels.like,
-        reply: labels.reply,
-        repost: labels.repost,
-        quote: labels.quote,
-        share: labels.share,
-        dismiss: labels.dismiss,
-        blockAuthor: labels.blockAuthor,
-        report: labels.report,
-        engagement: labels.engagement,
-        negative: labels.negative,
-        dwellTimeMs: labels.dwellTimeMs,
-    };
-}
-
 main()
     .catch((error) => {
         console.error('[ExportRecsysReplay] failed:', error);
@@ -269,7 +282,7 @@ main()
     })
     .finally(async () => {
         try {
-            await mongoose.disconnect();
+            await disconnectReadOnlyMongo();
         } catch {
             // ignore
         }

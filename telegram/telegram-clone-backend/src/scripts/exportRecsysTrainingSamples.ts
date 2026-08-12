@@ -1,37 +1,48 @@
 /**
- * 导出推荐训练样本（基于 impression + action window）
+ * Export point-in-time-safe partial recommendation samples.
  *
- * 用法：
- *   npx ts-node src/scripts/exportRecsysTrainingSamples.ts --days 30 --windowHours 24 --output ./tmp/recsys_samples.ndjson
- *   npx ts-node src/scripts/exportRecsysTrainingSamples.ts --experimentKey space_feed_recsys_alignment:treatment --limit 5000
+ * Usage:
+ *   npx ts-node src/scripts/exportRecsysTrainingSamples.ts --days 30 --windowHours 24 --cutoff 2026-05-01T00:00:00.000Z --output ./tmp/recsys_samples.ndjson
+ *   npx ts-node src/scripts/exportRecsysTrainingSamples.ts --cutoff 2026-05-01T00:00:00.000Z --approvalConfig ./dataset-acceptance.json
  */
 
 import fs from 'fs';
 import path from 'path';
 
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { Op } from 'sequelize';
 
-import { connectMongoDB } from '../config/db';
 import { sequelize } from '../config/sequelize';
 import Contact, { ContactStatus } from '../models/Contact';
+import RecommendationTrace from '../models/RecommendationTrace';
 import User from '../models/User';
 import UserAction, { ActionType } from '../models/UserAction';
 import UserFeatureVector from '../models/UserFeatureVector';
-import RecommendationTrace from '../models/RecommendationTrace';
 import { postFeatureSnapshotService } from '../services/recommendation/contentFeatures';
-import { buildSocialPhoenixFeatureMap } from '../services/recommendation/socialPhoenix';
 import {
-    computeEmbeddingRecallSignalsFromSnapshot,
-    prepareEmbeddingRetrievalContext,
-    type PreparedEmbeddingRetrievalContext,
-} from '../services/recommendation/utils/embeddingRetrieval';
-import { buildUserStateContext } from '../services/recommendation/utils/userState';
+    type RecommendationDecisionLogV1,
+    recommendationDecisionLogSchema,
+} from '../services/recommendation/decisionLog/contracts';
+import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
+import { buildVersionedTrainingArtifacts } from '../services/recommendation/training/artifacts/build';
+import type {
+    DatasetAcceptanceApprovalConfigV1,
+    TrainingArtifactIdentityInput,
+} from '../services/recommendation/training/artifacts/contracts';
 import {
-    LABEL_ACTION_TYPES,
-    summarizeActionsInWindow,
-} from '../services/recommendation/utils/actionLabels';
+    buildPitSafePartialArtifacts,
+    buildPitSafePartialSample,
+    parseRequiredCutoff,
+    projectPitSafeSnapshotMap,
+    type PitSafeAction,
+    type PitSafePartialCandidate,
+} from '../services/recommendation/training/pitSafePartialExport';
+import {
+    connectReadOnlyMongo,
+    disconnectReadOnlyMongo,
+} from '../services/recommendation/training/readOnlyMongo';
+import { LABEL_ACTION_TYPES } from '../services/recommendation/utils/actionLabels';
 
 dotenv.config();
 
@@ -42,35 +53,42 @@ type Args = {
     experimentKey?: string;
     recallSource?: string;
     output: string;
+    cutoff?: string;
+    approvalConfig?: string;
     limit: number;
 };
 
-type ImpressionRecord = {
+type OutcomeActionRecord = PitSafeAction & {
     userId: string;
-    targetPostId?: any;
-    targetAuthorId?: string;
     requestId?: string;
     rank?: number;
-    timestamp: Date;
+    dwellTimeMs?: number;
+    metadata?: {
+        decisionId?: string;
+        candidateNamespace?: string;
+        candidateId?: string;
+        positionContractVersion?: string;
+    };
+};
+
+type TraceCandidateRecord = {
+    postId?: unknown;
+    modelPostId?: string;
+    authorId?: string;
+    rank?: number;
     inNetwork?: boolean;
     isNews?: boolean;
     score?: number;
     weightedScore?: number;
     selectionPool?: string;
     selectionReason?: string;
-    modelPostId?: string;
     recallSource?: string;
     secondaryRecallSources?: string[];
-    experimentKeys?: string[];
-    productSurface?: string;
 };
 
-type FollowUpRecord = {
+type HistoryActionRecord = PitSafeAction & {
     userId: string;
-    targetPostId?: any;
-    action: ActionType | string;
-    timestamp: Date;
-    dwellTimeMs?: number;
+    targetPostId?: unknown;
 };
 
 type UserContextRecord = {
@@ -85,6 +103,11 @@ type ContactRecord = {
 
 type TraceRecord = {
     requestId: string;
+    userId: string;
+    productSurface: string;
+    experimentKeys?: string[];
+    decisionLogV1?: unknown;
+    candidates?: TraceCandidateRecord[];
     pipeline?: string;
     pipelineVersion?: string;
     traceVersion?: string;
@@ -105,177 +128,238 @@ type TraceRecord = {
         oldestAgeSeconds?: number;
         timeRangeSeconds?: number;
     };
-    userState?: string;
-    embeddingQualityScore?: number;
     shadowComparison?: {
-        overlapCount?: number;
         overlapRatio?: number;
         selectedCount?: number;
         baselineCount?: number;
     };
 };
 
+type DecisionActionKey = RecommendationDecisionLogV1['actions'][number]['actionKey'];
+
+function traceCandidateForAction(
+    trace: TraceRecord,
+    actionKey: DecisionActionKey,
+): TraceCandidateRecord | undefined {
+    return trace.candidates?.find((candidate) => (
+        candidate.rank === actionKey.servedPosition
+        && (
+            actionKey.candidateNamespace === 'serving_post_id'
+                ? idToString(candidate.postId) === actionKey.candidateId
+                : candidate.modelPostId === actionKey.candidateId
+        )
+    ));
+}
+
 function parseArgs(): Args {
     const args = process.argv.slice(2);
     const kv: Record<string, string> = {};
-    for (let i = 0; i < args.length; i++) {
-        const a = args[i];
-        if (!a.startsWith('--')) continue;
-        const key = a.slice(2);
-        const val = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : 'true';
-        kv[key] = val;
+    for (let index = 0; index < args.length; index += 1) {
+        const argument = args[index];
+        if (!argument.startsWith('--')) continue;
+        const key = argument.slice(2);
+        kv[key] = args[index + 1] && !args[index + 1].startsWith('--')
+            ? args[index + 1]
+            : 'true';
     }
 
-    const days = Math.max(1, parseInt(kv.days || '30', 10) || 30);
-    const windowHours = Math.max(1, parseInt(kv.windowHours || '24', 10) || 24);
-    const limit = Math.max(0, parseInt(kv.limit || '0', 10) || 0);
-
     return {
-        days,
-        windowHours,
+        days: Math.max(1, parseInt(kv.days || '30', 10) || 30),
+        windowHours: Math.max(1, parseInt(kv.windowHours || '24', 10) || 24),
         surface: kv.surface || 'space_feed',
         experimentKey: kv.experimentKey || undefined,
         recallSource: kv.recallSource || undefined,
         output: kv.output || './tmp/recsys_samples.ndjson',
-        limit,
+        cutoff: kv.cutoff || undefined,
+        approvalConfig: kv.approvalConfig || undefined,
+        limit: Math.max(0, parseInt(kv.limit || '0', 10) || 0),
     };
 }
 
-function idToString(id: any): string {
+function idToString(id: unknown): string {
     if (!id) return '';
     if (typeof id === 'string') return id;
     if (id instanceof mongoose.Types.ObjectId) return id.toString();
-    if (typeof id.toString === 'function') return id.toString();
+    if (typeof (id as { toString?: unknown }).toString === 'function') return String(id);
     return '';
 }
 
-function mapKey(userId: string, postId: string): string {
-    return `${userId}:${postId}`;
-}
-
-function normalizeEmbeddingContext(embedding?: any) {
-    if (!embedding) return undefined;
-    const interestedInClusters = normalizeSparseEntries(embedding.interestedInClusters);
-    const producerEmbedding = normalizeSparseEntries(embedding.producerEmbedding);
-    const computedAt = embedding.computedAt ? new Date(embedding.computedAt) : undefined;
-    const stale = computedAt
-        ? Date.now() - computedAt.getTime() > 30 * 24 * 60 * 60 * 1000
-        : true;
-    const qualityScore = typeof embedding.qualityScore === 'number' ? embedding.qualityScore : 0;
-
+function outputPaths(output: string) {
+    const resolved = path.resolve(process.cwd(), output);
+    const extension = path.extname(resolved).toLowerCase();
+    const base = extension === '.ndjson' || extension === '.jsonl'
+        ? resolved.slice(0, -extension.length)
+        : resolved;
     return {
-        interestedInClusters,
-        producerEmbedding,
-        knownForCluster: embedding.knownForCluster,
-        knownForScore: embedding.knownForScore,
-        qualityScore,
-        computedAt,
-        version: embedding.version,
-        usable: !stale && qualityScore >= 0.04 && interestedInClusters.length > 0,
-        stale,
+        validPath: `${base}.valid.ndjson`,
+        quarantinePath: `${base}.quarantine.ndjson`,
+        manifestPath: `${base}.pit-safe-partial.manifest.json`,
+        versionedValidPath: `${base}.recommendation-training-example-v1.valid.ndjson`,
+        versionedQuarantinePath: `${base}.recommendation-training-example-v1.quarantine.ndjson`,
+        annManifestPath: `${base}.ann-artifact.manifest.json`,
+        datasetAcceptancePath: `${base}.dataset-acceptance.json`,
     };
 }
 
-function normalizeSparseEntries(entries: Array<{ clusterId: number; score: number }> | undefined) {
-    if (!Array.isArray(entries)) return [];
-    return entries
-        .filter((entry) => Number.isFinite(entry?.clusterId) && Number.isFinite(entry?.score))
-        .sort((left, right) => right.score - left.score)
-        .slice(0, 12)
-        .map((entry) => ({
-            clusterId: entry.clusterId,
-            score: entry.score,
-        }));
+function readApprovalConfig(
+    approvalConfig: string | undefined,
+): DatasetAcceptanceApprovalConfigV1 | undefined {
+    if (!approvalConfig) return undefined;
+    return JSON.parse(fs.readFileSync(
+        path.resolve(process.cwd(), approvalConfig),
+        'utf8',
+    )) as DatasetAcceptanceApprovalConfigV1;
 }
 
-function engagementBucketPrior(bucket?: string | null): number {
-    switch (bucket) {
-        case 'viral':
-            return 0.85;
-        case 'high':
-            return 0.6;
-        case 'medium':
-            return 0.35;
-        case 'low':
-            return 0.12;
-        default:
-            return 0;
-    }
-}
+const DIAGNOSTIC_ARTIFACT_IDENTITY: TrainingArtifactIdentityInput = {
+    servingIdNamespace: '',
+    modelIdNamespace: '',
+    pipelineVersion: '',
+    graphVersion: '',
+    model: { id: '', version: '' },
+    artifact: { id: '' },
+    index: { namespace: '', id: '' },
+};
 
-function normalizeStringArray(value?: string[]): string[] {
-    return Array.isArray(value)
-        ? value.map((entry) => entry.trim()).filter(Boolean)
-        : [];
-}
-
-function feedbackLabel(labels: ReturnType<typeof summarizeActionsInWindow>): 'positive' | 'negative' | null {
-    if (labels.negative) return 'negative';
-    if (labels.engagement || labels.click || labels.dwellTimeMs > 0) return 'positive';
-    return null;
+function writeArtifacts(
+    candidates: PitSafePartialCandidate[],
+    cutoff: Date,
+    output: string,
+    approvalConfig?: string,
+) {
+    const {
+        validPath,
+        quarantinePath,
+        manifestPath,
+        versionedValidPath,
+        versionedQuarantinePath,
+        annManifestPath,
+        datasetAcceptancePath,
+    } = outputPaths(output);
+    const artifacts = buildPitSafePartialArtifacts({
+        candidates,
+        cutoff,
+        validFile: path.basename(validPath),
+        quarantineFile: path.basename(quarantinePath),
+    });
+    const versioned = buildVersionedTrainingArtifacts({
+        phase3Artifacts: artifacts,
+        identity: DIAGNOSTIC_ARTIFACT_IDENTITY,
+        annArtifact: {
+            built: false,
+            bytes: '',
+            metric: 'none',
+            normalization: 'none',
+            dimension: 0,
+            count: 0,
+        },
+        approvalConfig: readApprovalConfig(approvalConfig),
+    });
+    fs.mkdirSync(path.dirname(validPath), { recursive: true });
+    fs.writeFileSync(validPath, artifacts.validNdjson, 'utf8');
+    fs.writeFileSync(quarantinePath, artifacts.quarantineNdjson, 'utf8');
+    fs.writeFileSync(manifestPath, artifacts.manifestJson, 'utf8');
+    fs.writeFileSync(versionedValidPath, versioned.validNdjson, 'utf8');
+    fs.writeFileSync(versionedQuarantinePath, versioned.quarantineNdjson, 'utf8');
+    fs.writeFileSync(annManifestPath, versioned.annManifestJson, 'utf8');
+    fs.writeFileSync(datasetAcceptancePath, versioned.datasetAcceptanceJson, 'utf8');
+    console.log(
+        `[ExportRecsysSamples] valid=${artifacts.manifest.counts.valid}`
+        + ` quarantine=${artifacts.manifest.counts.quarantine}`,
+    );
+    console.log(`[ExportRecsysSamples] reasonCounts=${JSON.stringify(artifacts.manifest.reasonCounts)}`);
+    console.log(`[ExportRecsysSamples] wrote ${validPath}`);
+    console.log(`[ExportRecsysSamples] wrote ${quarantinePath}`);
+    console.log(`[ExportRecsysSamples] wrote ${manifestPath}`);
+    console.log(`[ExportRecsysSamples] wrote ${versionedValidPath}`);
+    console.log(`[ExportRecsysSamples] wrote ${versionedQuarantinePath}`);
+    console.log(`[ExportRecsysSamples] wrote ${annManifestPath}`);
+    console.log(`[ExportRecsysSamples] wrote ${datasetAcceptancePath}`);
 }
 
 async function main() {
     const args = parseArgs();
-    const now = new Date();
-    const since = new Date(now.getTime() - args.days * 24 * 60 * 60 * 1000);
+    const cutoff = parseRequiredCutoff(args.cutoff);
+    const since = new Date(cutoff.getTime() - args.days * 24 * 60 * 60 * 1000);
     const windowMs = args.windowHours * 60 * 60 * 1000;
 
-    await connectMongoDB();
+    await connectReadOnlyMongo();
     await sequelize.authenticate();
 
-    const impressionQuery: Record<string, any> = {
-        action: ActionType.IMPRESSION,
-        timestamp: { $gte: since, $lte: now },
+    const traceQuery: Record<string, unknown> = {
+        'decisionLogV1.decisionAt': {
+            $gte: since.toISOString(),
+            $lte: cutoff.toISOString(),
+        },
     };
-    if (args.surface) impressionQuery.productSurface = args.surface;
-    if (args.experimentKey) impressionQuery.experimentKeys = args.experimentKey;
-    if (args.recallSource) impressionQuery.recallSource = args.recallSource;
+    if (args.surface) traceQuery.productSurface = args.surface;
+    if (args.experimentKey) traceQuery.experimentKeys = args.experimentKey;
+    if (args.recallSource) traceQuery['sourceCounts.source'] = args.recallSource;
 
-    const impressionCursor = UserAction.find(impressionQuery)
+    const traceCursor = RecommendationTrace.find(traceQuery)
         .select(
-            'userId targetPostId targetAuthorId requestId rank timestamp inNetwork isNews score weightedScore modelPostId recallSource secondaryRecallSources experimentKeys'
-            + ' productSurface selectionPool selectionReason'
+            'requestId userId productSurface experimentKeys decisionLogV1 candidates pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness shadowComparison',
         )
-        .sort({ timestamp: -1 });
+        .sort({ 'decisionLogV1.decisionAt': -1, _id: -1 });
+    if (args.limit > 0) traceCursor.limit(args.limit);
 
-    if (args.limit > 0) {
-        impressionCursor.limit(args.limit);
+    const traceDocs = ((await traceCursor.lean()) as TraceRecord[]).slice().reverse();
+    const canonicalTraces: Array<{
+        trace: TraceRecord;
+        decision: RecommendationDecisionLogV1;
+    }> = [];
+    for (const trace of traceDocs) {
+        const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
+        if (!parsed.success) continue;
+        const decisionAtMs = Date.parse(parsed.data.decisionAt);
+        if (decisionAtMs < since.getTime() || decisionAtMs > cutoff.getTime()) continue;
+        canonicalTraces.push({ trace, decision: parsed.data });
     }
-
-    const impressionDocs = (await impressionCursor.lean()) as ImpressionRecord[];
-    const impressions = impressionDocs.slice().reverse();
-
-    if (impressions.length === 0) {
-        console.log('[ExportRecsysSamples] no impressions found for filters');
+    if (canonicalTraces.length === 0) {
+        writeArtifacts([], cutoff, args.output, args.approvalConfig);
         return;
     }
 
-    const postIds = Array.from(
-        new Set(
-            impressions.map((i) => idToString(i.targetPostId)).filter(Boolean)
-        )
-    )
+    const servedSamples = canonicalTraces.flatMap(({ trace, decision }) => (
+        decision.actions.flatMap((servedAction) => {
+            const traceCandidate = traceCandidateForAction(trace, servedAction.actionKey);
+            if (args.recallSource && traceCandidate?.recallSource !== args.recallSource) return [];
+            return [{ trace, decision, servedAction, traceCandidate }];
+        })
+    ));
+    if (servedSamples.length === 0) {
+        writeArtifacts([], cutoff, args.output, args.approvalConfig);
+        return;
+    }
+
+    const postIds = Array.from(new Set(
+        servedSamples.map(({ servedAction, traceCandidate }) => (
+            idToString(traceCandidate?.postId)
+            || servedAction.actionKey.candidateId
+        )),
+    ))
         .filter((id) => mongoose.isValidObjectId(id))
+        .sort()
         .map((id) => new mongoose.Types.ObjectId(id));
-    const userIds = Array.from(new Set(impressions.map((i) => i.userId)));
+    const userIds = Array.from(new Set(
+        servedSamples.map(({ trace }) => trace.userId),
+    )).sort();
+    const decisionTimes = canonicalTraces.map(({ decision }) => Date.parse(decision.decisionAt));
+    const minDecisionAt = new Date(Math.min(...decisionTimes));
+    const maxDecisionAt = new Date(Math.max(...decisionTimes));
+    const historySince = new Date(minDecisionAt.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const decisionIds = canonicalTraces.map(({ decision }) => decision.decisionId).sort();
 
-    const minImpressionAt = impressions[0].timestamp;
-    const maxImpressionAt = impressions[impressions.length - 1].timestamp;
-    const followupUntil = new Date(maxImpressionAt.getTime() + windowMs);
-
-    const followups = (await UserAction.find({
-        action: { $in: LABEL_ACTION_TYPES },
-        userId: { $in: userIds },
-        targetPostId: { $in: postIds },
-        timestamp: { $gte: minImpressionAt, $lte: followupUntil },
+    const outcomeActions = (await UserAction.find({
+        'metadata.decisionId': { $in: decisionIds },
+        action: { $in: [ActionType.IMPRESSION, ...LABEL_ACTION_TYPES] },
+        timestamp: { $gte: minDecisionAt, $lte: cutoff },
     })
-        .select('userId targetPostId action timestamp dwellTimeMs')
-        .lean()) as FollowUpRecord[];
-
-    const recentStateActions = (await UserAction.find({
+        .select('metadata rank requestId userId action timestamp dwellTimeMs')
+        .lean()) as OutcomeActionRecord[];
+    const historyActions = (await UserAction.find({
         userId: { $in: userIds },
-        timestamp: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), $lte: now },
+        timestamp: { $gte: historySince, $lte: maxDecisionAt },
         action: {
             $in: [
                 ActionType.IMPRESSION,
@@ -285,6 +369,9 @@ async function main() {
                 ActionType.REPOST,
                 ActionType.QUOTE,
                 ActionType.SHARE,
+                ActionType.PROFILE_CLICK,
+                ActionType.DWELL,
+                ActionType.VIDEO_QUALITY_VIEW,
                 ActionType.DISMISS,
                 ActionType.BLOCK_AUTHOR,
                 ActionType.REPORT,
@@ -292,7 +379,7 @@ async function main() {
         },
     })
         .select('userId action timestamp targetPostId')
-        .lean()) as Array<Record<string, any>>;
+        .lean()) as HistoryActionRecord[];
 
     const userRecords = (await User.findAll({
         where: { id: { [Op.in]: userIds } },
@@ -307,42 +394,29 @@ async function main() {
         attributes: ['userId', 'contactId'],
         raw: true,
     })) as ContactRecord[];
-    const userEmbeddings = await UserFeatureVector.getUserEmbeddingsBatch(userIds);
-    const snapshots = await postFeatureSnapshotService.ensureSnapshotsByPostIds(postIds);
-    const requestIds = Array.from(new Set(impressions.map((imp) => imp.requestId).filter(Boolean))) as string[];
-    const traceDocs = requestIds.length > 0
-        ? (await RecommendationTrace.find({ requestId: { $in: requestIds } })
-            .select(
-                'requestId pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness userState embeddingQualityScore shadowComparison',
-            )
-            .lean()) as TraceRecord[]
-        : [];
-    const tracesByRequestId = new Map(traceDocs.map((trace) => [trace.requestId, trace]));
+    const embeddingDocs = (await UserFeatureVector.find({
+        userId: { $in: userIds },
+    })
+        .select('userId interestedInClusters producerEmbedding knownForCluster knownForScore qualityScore computedAt version')
+        .lean()) as Array<Record<string, unknown> & { userId: string }>;
+    const snapshots = projectPitSafeSnapshotMap(
+        await postFeatureSnapshotService.getSnapshotsByPostIds(postIds),
+    );
 
-    const followupsByKey = new Map<string, FollowUpRecord[]>();
-    for (const action of followups) {
-        const postId = idToString(action.targetPostId);
-        if (!postId) continue;
-        const key = mapKey(action.userId, postId);
-        const arr = followupsByKey.get(key) || [];
-        arr.push(action);
-        followupsByKey.set(key, arr);
-    }
-
-    for (const arr of followupsByKey.values()) {
-        arr.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    }
-
-    const recentActionsByUser = new Map<string, Array<Record<string, any>>>();
-    for (const action of recentStateActions) {
-        const bucket = recentActionsByUser.get(action.userId) || [];
+    const outcomeActionsByDecisionId = new Map<string, OutcomeActionRecord[]>();
+    for (const action of outcomeActions) {
+        const decisionId = action.metadata?.decisionId;
+        if (!decisionId) continue;
+        const bucket = outcomeActionsByDecisionId.get(decisionId) || [];
         bucket.push(action);
-        recentActionsByUser.set(action.userId, bucket);
+        outcomeActionsByDecisionId.set(decisionId, bucket);
     }
-    for (const actions of recentActionsByUser.values()) {
-        actions.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+    const historyByUser = new Map<string, HistoryActionRecord[]>();
+    for (const action of historyActions) {
+        const bucket = historyByUser.get(action.userId) || [];
+        bucket.push(action);
+        historyByUser.set(action.userId, bucket);
     }
-
     const usersById = new Map(userRecords.map((record) => [record.id, record]));
     const followedByUser = new Map<string, string[]>();
     for (const contact of contactRecords) {
@@ -350,182 +424,75 @@ async function main() {
         bucket.push(contact.contactId);
         followedByUser.set(contact.userId, bucket);
     }
+    const embeddingsByUser = new Map(embeddingDocs.map((record) => [record.userId, record]));
 
-    const outputPath = path.resolve(process.cwd(), args.output);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    const out = fs.createWriteStream(outputPath, { encoding: 'utf8' });
+    const candidates: PitSafePartialCandidate[] = [];
+    for (const { trace, decision, servedAction, traceCandidate } of servedSamples) {
+        const postId = idToString(traceCandidate?.postId)
+            || servedAction.actionKey.candidateId;
+        const sampleId = [
+            decision.decisionId,
+            servedAction.actionKey.candidateNamespace,
+            servedAction.actionKey.candidateId,
+            servedAction.actionKey.servedPosition,
+        ].join(':');
+        const outcomeContractV1 = attributeOutcomeV1({
+            decisionLog: decision,
+            servedAction,
+            traceUserId: trace.userId,
+            events: outcomeActionsByDecisionId.get(decision.decisionId) || [],
+            observedThrough: cutoff,
+            horizonMs: windowMs,
+        });
+        const poolCandidate = decision.candidatePool.candidates.find((candidate) => (
+            candidate.candidateNamespace === servedAction.actionKey.candidateNamespace
+            && candidate.candidateId === servedAction.actionKey.candidateId
+            && candidate.servedPosition === servedAction.actionKey.servedPosition
+        ));
 
-    let exported = 0;
-    let positiveCount = 0;
-    let negativeCount = 0;
-    const retrievalContextByUser = new Map<string, PreparedEmbeddingRetrievalContext | null>();
-
-    for (const imp of impressions) {
-        const postId = idToString(imp.targetPostId);
-        if (!postId) continue;
-
-        const labels = summarizeActionsInWindow(
-            imp.timestamp,
-            (followupsByKey.get(mapKey(imp.userId, postId)) || []).map((a) => ({
-                action: a.action,
-                timestamp: a.timestamp,
-                dwellTimeMs: a.dwellTimeMs,
-            })),
-            windowMs
-        );
-        const userEmbedding = normalizeEmbeddingContext(userEmbeddings.get(imp.userId));
-        const userRecord = usersById.get(imp.userId);
-        const userState = buildUserStateContext({
-            userFeatures: {
-                followedUserIds: followedByUser.get(imp.userId) || [],
-                blockedUserIds: [],
-                mutedKeywords: [],
-                seenPostIds: [],
-                accountCreatedAt: userRecord?.createdAt ? new Date(userRecord.createdAt) : undefined,
+        candidates.push(buildPitSafePartialSample({
+            impression: {
+                sampleId,
+                userId: trace.userId,
+                postId,
+                targetAuthorId: traceCandidate?.authorId,
+                requestId: decision.requestId,
+                rank: servedAction.actionKey.servedPosition,
+                timestamp: decision.decisionAt,
+                inNetwork: traceCandidate?.inNetwork,
+                isNews: traceCandidate?.isNews,
+                score: traceCandidate?.score ?? poolCandidate?.score ?? undefined,
+                weightedScore: traceCandidate?.weightedScore,
+                selectionPool: traceCandidate?.selectionPool,
+                selectionReason: traceCandidate?.selectionReason,
+                modelPostId: traceCandidate?.modelPostId
+                    || (servedAction.actionKey.candidateNamespace === 'model_post_id'
+                        ? servedAction.actionKey.candidateId
+                        : undefined),
+                recallSource: traceCandidate?.recallSource,
+                secondaryRecallSources: traceCandidate?.secondaryRecallSources,
+                experimentKeys: trace.experimentKeys,
+                productSurface: trace.productSurface,
             },
-            embeddingContext: userEmbedding,
-            userActionSequence: recentActionsByUser.get(imp.userId) as any,
-        });
-        const snapshot = snapshots.get(postId);
-        let retrievalContext = retrievalContextByUser.get(imp.userId);
-        if (typeof retrievalContext === 'undefined') {
-            retrievalContext = userEmbedding
-                ? await prepareEmbeddingRetrievalContext({
-                    requestId: `export-${imp.userId}`,
-                    userId: imp.userId,
-                    limit: 20,
-                    inNetworkOnly: false,
-                    seenIds: [],
-                    servedIds: [],
-                    isBottomRequest: false,
-                    userFeatures: {
-                        followedUserIds: followedByUser.get(imp.userId) || [],
-                        blockedUserIds: [],
-                        mutedKeywords: [],
-                        seenPostIds: [],
-                    },
-                    embeddingContext: userEmbedding,
-                } as any)
-                : null;
-            retrievalContextByUser.set(imp.userId, retrievalContext);
-        }
-        const retrievalSignals = snapshot && retrievalContext
-            ? computeEmbeddingRecallSignalsFromSnapshot(snapshot as any, retrievalContext)
-            : {
-                authorScore: 0,
-                clusterScore: 0,
-                keywordScore: 0,
-                denseVectorScore: 0,
-            };
-        const trace = imp.requestId ? tracesByRequestId.get(imp.requestId) : undefined;
-        const trainingFeatures = buildSocialPhoenixFeatureMap({
-            userState: userState.state,
-            embeddingQualityScore: userEmbedding?.qualityScore ?? 0,
-            recallSource: imp.recallSource || 'unknown',
-            inNetwork: imp.inNetwork === true,
-            retrievalEmbeddingScore: typeof imp.weightedScore === 'number'
-                ? imp.weightedScore
-                : (imp.score ?? 0),
-            retrievalDenseVectorScore: retrievalSignals.denseVectorScore,
-            retrievalAuthorClusterScore: retrievalSignals.authorScore,
-            retrievalCandidateClusterScore: retrievalSignals.clusterScore,
-            retrievalKeywordScore: retrievalSignals.keywordScore,
-            retrievalEngagementPrior: engagementBucketPrior(snapshot?.engagementBucket || null),
-            retrievalSnapshotQuality: snapshot?.qualityScore ?? 0,
-            createdAt: snapshot?.postCreatedAt,
-            hasImage: Boolean(snapshot?.mediaTypes?.includes('image')),
-            hasVideo: Boolean(snapshot?.mediaTypes?.includes('video')),
-        });
-
-        const row = {
-            userId: imp.userId,
-            requestId: imp.requestId || '',
-            postId,
-            targetAuthorId: imp.targetAuthorId || '',
-            impressionAt: new Date(imp.timestamp).toISOString(),
-            rank: imp.rank ?? null,
-            inNetwork: imp.inNetwork === true,
-            isNews: imp.isNews === true,
-            score: imp.score ?? null,
-            weightedScore: imp.weightedScore ?? null,
-            secondaryRecallSources: normalizeStringArray(imp.secondaryRecallSources),
-            selectionPool: imp.selectionPool || '',
-            selectionReason: imp.selectionReason || '',
-            modelPostId: imp.modelPostId || '',
-            recallSource: imp.recallSource || null,
-            experimentKeys: imp.experimentKeys || [],
-            productSurface: imp.productSurface || args.surface || null,
-            feedbackLabel: feedbackLabel(labels),
-            windowHours: args.windowHours,
-            labelClick: labels.click ? 1 : 0,
-            labelLike: labels.like ? 1 : 0,
-            labelReply: labels.reply ? 1 : 0,
-            labelRepost: labels.repost ? 1 : 0,
-            labelQuote: labels.quote ? 1 : 0,
-            labelShare: labels.share ? 1 : 0,
-            labelDismiss: labels.dismiss ? 1 : 0,
-            labelBlockAuthor: labels.blockAuthor ? 1 : 0,
-            labelReport: labels.report ? 1 : 0,
-            labelEngagement: labels.engagement ? 1 : 0,
-            labelNegative: labels.negative ? 1 : 0,
-            labelDwellTimeMs: labels.dwellTimeMs,
-            userState: userState.state,
-            userStateReason: userState.reason,
-            userFollowedCount: userState.followedCount,
-            userRecentActionCount: userState.recentActionCount,
-            userRecentPositiveActionCount: userState.recentPositiveActionCount,
-            embeddingUsable: userState.usableEmbedding,
-            embeddingQualityScore: userEmbedding?.qualityScore ?? null,
-            embeddingInterestedClusters: userEmbedding?.interestedInClusters || [],
-            embeddingProducerClusters: userEmbedding?.producerEmbedding || [],
-            snapshotDominantClusters: snapshot?.dominantClusterIds || [],
-            snapshotClusterScores: snapshot?.clusterScores || [],
-            snapshotKeywords: snapshot?.keywords || [],
-            snapshotKeywordScores: snapshot?.keywordScores || [],
-            snapshotEngagementBucket: snapshot?.engagementBucket || null,
-            snapshotFreshnessBucket: snapshot?.freshnessBucket || null,
-            snapshotQualityScore: snapshot?.qualityScore ?? null,
-            snapshotAuthorKnownForCluster: snapshot?.authorKnownForCluster ?? null,
-            retrievalAuthorClusterScore: retrievalSignals.authorScore,
-            retrievalCandidateClusterScore: retrievalSignals.clusterScore,
-            retrievalKeywordScore: retrievalSignals.keywordScore,
-            retrievalDenseVectorScore: retrievalSignals.denseVectorScore,
-            trainingFeatures,
-            requestSelectedCount: trace?.selectedCount ?? null,
-            requestPipeline: trace?.pipeline || '',
-            requestPipelineVersion: trace?.pipelineVersion || '',
-            requestTraceVersion: trace?.traceVersion || '',
-            requestOwner: trace?.owner || '',
-            requestFallbackMode: trace?.fallbackMode || '',
-            requestDegradedReasons: trace?.degradedReasons || [],
-            requestInNetworkCount: trace?.inNetworkCount ?? null,
-            requestOutOfNetworkCount: trace?.outOfNetworkCount ?? null,
-            requestSourceCounts: trace?.sourceCounts || [],
-            requestAuthorDiversity: trace?.authorDiversity ?? null,
-            requestReplyRatio: trace?.replyRatio ?? null,
-            requestAverageScore: trace?.averageScore ?? null,
-            requestTopScore: trace?.topScore ?? null,
-            requestBottomScore: trace?.bottomScore ?? null,
-            requestNewestAgeSeconds: trace?.freshness?.newestAgeSeconds ?? null,
-            requestOldestAgeSeconds: trace?.freshness?.oldestAgeSeconds ?? null,
-            requestTimeRangeSeconds: trace?.freshness?.timeRangeSeconds ?? null,
-            requestShadowOverlapRatio: trace?.shadowComparison?.overlapRatio ?? null,
-            requestShadowSelectedCount: trace?.shadowComparison?.selectedCount ?? null,
-            requestShadowBaselineCount: trace?.shadowComparison?.baselineCount ?? null,
-        };
-
-        out.write(`${JSON.stringify(row)}\n`);
-        exported += 1;
-        if (labels.engagement) positiveCount += 1;
-        if (labels.negative) negativeCount += 1;
+            decisionAt: decision.decisionAt,
+            outcomeContractV1,
+            historyActions: historyByUser.get(trace.userId) || [],
+            labelActions: [],
+            labelObservedThrough: cutoff,
+            windowMs,
+            surface: args.surface,
+            user: usersById.get(trace.userId),
+            contacts: {
+                followedUserIds: followedByUser.get(trace.userId) || [],
+                evidence: undefined,
+            },
+            embedding: embeddingsByUser.get(trace.userId),
+            snapshot: snapshots.get(postId) as unknown as Record<string, unknown> | undefined,
+            trace,
+        }));
     }
 
-    out.end();
-
-    console.log(`[ExportRecsysSamples] exported=${exported}`);
-    console.log(`[ExportRecsysSamples] engagementRate=${((positiveCount / Math.max(1, exported)) * 100).toFixed(2)}%`);
-    console.log(`[ExportRecsysSamples] negativeRate=${((negativeCount / Math.max(1, exported)) * 100).toFixed(2)}%`);
-    console.log(`[ExportRecsysSamples] wrote ${outputPath}`);
+    writeArtifacts(candidates, cutoff, args.output, args.approvalConfig);
 }
 
 main()
@@ -535,7 +502,7 @@ main()
     })
     .finally(async () => {
         try {
-            await mongoose.disconnect();
+            await disconnectReadOnlyMongo();
         } catch {
             // ignore
         }

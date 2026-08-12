@@ -13,6 +13,7 @@ import type {
 import { rerankReplayCandidates } from './variantScorer';
 
 type RankingSummary = {
+    hasCompleteAttribution: boolean;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -34,6 +35,7 @@ type BucketAccumulator = {
 };
 
 type MetricAccumulator = {
+    feedbackRequests: number;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -141,36 +143,38 @@ export function evaluateReplayRequests(
 
         overlapAtKSum += overlapAtK(baselineRanking, variantRanking, topK);
 
-        const engagedLift = rankLift(
-            request.candidates.filter((candidate) => candidate.labels.engagement),
-            baselineRanking,
-            variantRanking,
-        );
-        if (engagedLift.count > 0) {
-            engagedRankLiftSum += engagedLift.totalLift / engagedLift.count;
-            engagedRankLiftCount += 1;
-        }
+        if (baselineSummary.hasCompleteAttribution && variantSummary.hasCompleteAttribution) {
+            const engagedLift = rankLift(
+                request.candidates.filter((candidate) => attributedLabels(candidate)?.engagement),
+                baselineRanking,
+                variantRanking,
+            );
+            if (engagedLift.count > 0) {
+                engagedRankLiftSum += engagedLift.totalLift / engagedLift.count;
+                engagedRankLiftCount += 1;
+            }
 
-        const clickedLift = rankLift(
-            request.candidates.filter((candidate) => candidate.labels.click),
-            baselineRanking,
-            variantRanking,
-        );
-        if (clickedLift.count > 0) {
-            clickedRankLiftSum += clickedLift.totalLift / clickedLift.count;
-            clickedRankLiftCount += 1;
-        }
+            const clickedLift = rankLift(
+                request.candidates.filter((candidate) => attributedLabels(candidate)?.click),
+                baselineRanking,
+                variantRanking,
+            );
+            if (clickedLift.count > 0) {
+                clickedRankLiftSum += clickedLift.totalLift / clickedLift.count;
+                clickedRankLiftCount += 1;
+            }
 
-        requestDiffs.push({
-            requestId: request.requestId,
-            userState: request.userState,
-            pipeline: pipelineKey,
-            baselineNdcgAtK: baselineSummary.ndcgAtK,
-            variantNdcgAtK: variantSummary.ndcgAtK,
-            deltaNdcgAtK: variantSummary.ndcgAtK - baselineSummary.ndcgAtK,
-            baselineRecallAtK: baselineSummary.recallAtK,
-            variantRecallAtK: variantSummary.recallAtK,
-        });
+            requestDiffs.push({
+                requestId: request.requestId,
+                userState: request.userState,
+                pipeline: pipelineKey,
+                baselineNdcgAtK: baselineSummary.ndcgAtK,
+                variantNdcgAtK: variantSummary.ndcgAtK,
+                deltaNdcgAtK: variantSummary.ndcgAtK - baselineSummary.ndcgAtK,
+                baselineRecallAtK: baselineSummary.recallAtK,
+                variantRecallAtK: variantSummary.recallAtK,
+            });
+        }
     }
 
     const baseline = finalizeMetrics(baselineTotals, requestCount);
@@ -285,17 +289,27 @@ function hasFeedbackJoinKey(candidate: ReplayCandidateSnapshot): boolean {
     );
 }
 
+function attributedLabels(candidate: ReplayCandidateSnapshot) {
+    if (!candidate.outcomeContractV1) return candidate.labels;
+    return candidate.outcomeContractV1.status === 'observed'
+        ? candidate.outcomeContractV1.labels
+        : undefined;
+}
+
 function candidateHasFeedback(candidate: ReplayCandidateSnapshot): boolean {
-    return candidate.labels.click
-        || candidate.labels.like
-        || candidate.labels.reply
-        || candidate.labels.repost
-        || candidate.labels.quote
-        || candidate.labels.share
-        || candidate.labels.dismiss
-        || candidate.labels.blockAuthor
-        || candidate.labels.report
-        || candidate.labels.dwellTimeMs > 0;
+    const labels = attributedLabels(candidate);
+    return Boolean(labels && (
+        labels.click
+        || labels.like
+        || labels.reply
+        || labels.repost
+        || labels.quote
+        || labels.share
+        || labels.dismiss
+        || labels.blockAuthor
+        || labels.report
+        || labels.dwellTimeMs > 0
+    ));
 }
 
 function summarizeRanking(
@@ -304,31 +318,40 @@ function summarizeRanking(
     topK: number,
 ): RankingSummary {
     const rows = ranking.slice(0, topK);
+    const hasCompleteAttribution = allCandidates.length > 0
+        && allCandidates.every((candidate) => attributedLabels(candidate) !== undefined);
+    const feedbackCandidates = hasCompleteAttribution ? allCandidates : [];
+    const feedbackRows = hasCompleteAttribution ? rows : [];
     const uniqueAuthors = new Set(rows.map((candidate) => candidate.authorId).filter(Boolean));
     const sourceCounts = rows.reduce<Record<string, number>>((acc, candidate) => {
         acc[candidate.recallSource] = (acc[candidate.recallSource] || 0) + 1;
         return acc;
     }, {});
-    const totalRelevant = allCandidates.filter((candidate) => candidate.labels.engagement).length;
-    const engagedRanks = rows
-        .filter((candidate) => candidate.labels.engagement)
+    const totalRelevant = feedbackCandidates.filter((candidate) => (
+        attributedLabels(candidate)?.engagement
+    )).length;
+    const engagedRanks = feedbackRows
+        .filter((candidate) => attributedLabels(candidate)?.engagement)
         .map((candidate) => candidate.replayRank);
-    const clickedRanks = rows
-        .filter((candidate) => candidate.labels.click)
+    const clickedRanks = feedbackRows
+        .filter((candidate) => attributedLabels(candidate)?.click)
         .map((candidate) => candidate.replayRank);
 
     return {
-        clickHit: rows.some((candidate) => candidate.labels.click) ? 1 : 0,
-        engagementHit: rows.some((candidate) => candidate.labels.engagement) ? 1 : 0,
-        negativeHit: rows.some((candidate) => candidate.labels.negative) ? 1 : 0,
+        hasCompleteAttribution,
+        clickHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.click) ? 1 : 0,
+        engagementHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.engagement) ? 1 : 0,
+        negativeHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.negative) ? 1 : 0,
         authorDiversity: uniqueAuthors.size / Math.max(1, rows.length),
         oonRatio: rows.filter((candidate) => candidate.inNetwork === false).length / Math.max(1, rows.length),
-        ndcgAtK: ndcgAtK(rows, allCandidates, topK),
-        mrrAtK: mrrAtK(rows),
+        ndcgAtK: ndcgAtK(feedbackRows, feedbackCandidates, topK),
+        mrrAtK: mrrAtK(feedbackRows),
         recallAtK: totalRelevant > 0
-            ? rows.filter((candidate) => candidate.labels.engagement).length / totalRelevant
+            ? feedbackRows.filter((candidate) => attributedLabels(candidate)?.engagement).length / totalRelevant
             : 0,
-        negativeRateAtK: rows.filter((candidate) => candidate.labels.negative).length / Math.max(1, rows.length),
+        negativeRateAtK: feedbackRows.filter((candidate) => (
+            attributedLabels(candidate)?.negative
+        )).length / Math.max(1, feedbackRows.length),
         sourceCounts,
         engagedAverageRank: averageRank(engagedRanks),
         clickedAverageRank: averageRank(clickedRanks),
@@ -357,13 +380,14 @@ function discountedGain(rows: ReplayCandidateSnapshot[]): number {
 }
 
 function relevance(candidate: ReplayCandidateSnapshot): number {
-    if (candidate.labels.engagement) return 1;
-    if (candidate.labels.click) return 0.35;
+    const labels = attributedLabels(candidate);
+    if (labels?.engagement) return 1;
+    if (labels?.click) return 0.35;
     return 0;
 }
 
 function mrrAtK(rows: ReplayCandidateSnapshot[]): number {
-    const firstRelevantIndex = rows.findIndex((row) => row.labels.engagement);
+    const firstRelevantIndex = rows.findIndex((row) => attributedLabels(row)?.engagement);
     return firstRelevantIndex >= 0 ? 1 / (firstRelevantIndex + 1) : 0;
 }
 
@@ -409,6 +433,7 @@ function rankLift(
 
 function createMetricAccumulator(): MetricAccumulator {
     return {
+        feedbackRequests: 0,
         clickHit: 0,
         engagementHit: 0,
         negativeHit: 0,
@@ -422,31 +447,35 @@ function createMetricAccumulator(): MetricAccumulator {
 }
 
 function addRankingSummary(target: MetricAccumulator, summary: RankingSummary): void {
-    target.clickHit += summary.clickHit;
-    target.engagementHit += summary.engagementHit;
-    target.negativeHit += summary.negativeHit;
     target.authorDiversity += summary.authorDiversity;
     target.oonRatio += summary.oonRatio;
-    target.ndcgAtK += summary.ndcgAtK;
-    target.mrrAtK += summary.mrrAtK;
-    target.recallAtK += summary.recallAtK;
-    target.negativeRateAtK += summary.negativeRateAtK;
+    if (summary.hasCompleteAttribution) {
+        target.feedbackRequests += 1;
+        target.clickHit += summary.clickHit;
+        target.engagementHit += summary.engagementHit;
+        target.negativeHit += summary.negativeHit;
+        target.ndcgAtK += summary.ndcgAtK;
+        target.mrrAtK += summary.mrrAtK;
+        target.recallAtK += summary.recallAtK;
+        target.negativeRateAtK += summary.negativeRateAtK;
+    }
 }
 
 function finalizeMetrics(
     totals: MetricAccumulator,
     requests: number,
 ): ReplayRankingMetrics {
+    const feedbackRequests = Math.max(1, totals.feedbackRequests);
     return {
-        clickHitRateAtK: totals.clickHit / Math.max(1, requests),
-        engagementHitRateAtK: totals.engagementHit / Math.max(1, requests),
-        negativeHitRateAtK: totals.negativeHit / Math.max(1, requests),
+        clickHitRateAtK: totals.clickHit / feedbackRequests,
+        engagementHitRateAtK: totals.engagementHit / feedbackRequests,
+        negativeHitRateAtK: totals.negativeHit / feedbackRequests,
         averageAuthorDiversityAtK: totals.authorDiversity / Math.max(1, requests),
         averageOonRatioAtK: totals.oonRatio / Math.max(1, requests),
-        averageNdcgAtK: totals.ndcgAtK / Math.max(1, requests),
-        averageMrrAtK: totals.mrrAtK / Math.max(1, requests),
-        averageRecallAtK: totals.recallAtK / Math.max(1, requests),
-        averageNegativeRateAtK: totals.negativeRateAtK / Math.max(1, requests),
+        averageNdcgAtK: totals.ndcgAtK / feedbackRequests,
+        averageMrrAtK: totals.mrrAtK / feedbackRequests,
+        averageRecallAtK: totals.recallAtK / feedbackRequests,
+        averageNegativeRateAtK: totals.negativeRateAtK / feedbackRequests,
     };
 }
 

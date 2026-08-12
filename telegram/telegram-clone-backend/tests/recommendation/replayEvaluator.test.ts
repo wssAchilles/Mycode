@@ -265,4 +265,168 @@ describe('recommendation replay evaluator', () => {
             attributedFeedbackRate: 1,
         });
     });
+
+    it('excludes strict non-observed rows from feedback metrics while retaining legacy labels', () => {
+        const legacy = buildRequest();
+        const strict = buildRequest({
+            requestId: 'req-strict-censored',
+            candidates: [{
+                ...buildRequest().candidates[0],
+                labels: undefined,
+                outcomeContractV1: {
+                    contractVersion: 'outcome_contract_v1',
+                    decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                    actionKey: {
+                        candidateNamespace: 'serving_post_id',
+                        candidateId: '507f191e810c19729de87071',
+                        servedPosition: 1,
+                    },
+                    decisionAt: '2026-05-01T12:00:00.000Z',
+                    impressionAt: '2026-05-01T12:00:05.000Z',
+                    horizonMs: 60_000,
+                    observedThrough: '2026-05-01T12:00:30.000Z',
+                    labelAvailability: {
+                        follow: 'unavailable_in_v1',
+                        mute: 'unavailable_in_v1',
+                    },
+                    status: 'censored',
+                    reason: 'observation_window_incomplete',
+                },
+            }],
+        });
+
+        const legacySummary = evaluateReplayRequests(
+            [legacy],
+            2,
+            'baseline_rank_v1',
+        );
+        const summary = evaluateReplayRequests(
+            [legacy, strict],
+            2,
+            'baseline_rank_v1',
+        );
+
+        expect(summary.requests).toBe(2);
+        expect(summary.baseline.clickHitRateAtK).toBe(
+            legacySummary.baseline.clickHitRateAtK,
+        );
+        expect(summary.baseline.engagementHitRateAtK).toBe(
+            legacySummary.baseline.engagementHitRateAtK,
+        );
+        expect(summary.baseline.averageNdcgAtK).toBe(
+            legacySummary.baseline.averageNdcgAtK,
+        );
+    });
+
+    it('does not compact strict feedback ranks when attribution support is incomplete', () => {
+        const base = buildRequest();
+        const request = buildRequest({
+            requestId: 'req-incomplete-strict-support',
+            candidates: [
+                {
+                    ...base.candidates[0],
+                    labels: undefined,
+                    outcomeContractV1: {
+                        contractVersion: 'outcome_contract_v1',
+                        decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                        actionKey: {
+                            candidateNamespace: 'serving_post_id',
+                            candidateId: base.candidates[0].postId,
+                            servedPosition: 1,
+                        },
+                        decisionAt: '2026-05-01T12:00:00.000Z',
+                        impressionAt: '2026-05-01T12:00:05.000Z',
+                        horizonMs: 60_000,
+                        observedThrough: '2026-05-01T12:00:30.000Z',
+                        labelAvailability: {
+                            follow: 'unavailable_in_v1',
+                            mute: 'unavailable_in_v1',
+                        },
+                        status: 'censored',
+                        reason: 'observation_window_incomplete',
+                    },
+                },
+                {
+                    ...base.candidates[1],
+                    labels: undefined,
+                    outcomeContractV1: {
+                        contractVersion: 'outcome_contract_v1',
+                        decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                        actionKey: {
+                            candidateNamespace: 'serving_post_id',
+                            candidateId: base.candidates[1].postId,
+                            servedPosition: 2,
+                        },
+                        decisionAt: '2026-05-01T12:00:00.000Z',
+                        impressionAt: '2026-05-01T12:00:05.000Z',
+                        horizonMs: 60_000,
+                        observedThrough: '2026-05-01T12:01:05.000Z',
+                        labelAvailability: {
+                            follow: 'unavailable_in_v1',
+                            mute: 'unavailable_in_v1',
+                        },
+                        status: 'observed',
+                        labels: {
+                            ...base.candidates[1].labels!,
+                            click: true,
+                            engagement: true,
+                        },
+                    },
+                },
+            ],
+        });
+
+        const summary = evaluateReplayRequests([request], 1, 'baseline_rank_v1');
+
+        expect(summary.baseline.clickHitRateAtK).toBe(0);
+        expect(summary.baseline.averageNdcgAtK).toBe(0);
+        expect(summary.averageClickedRankLift).toBe(0);
+        expect(summary.requestDiffLeaders).toEqual({ improved: [], regressed: [] });
+        expect(summary.baseline.averageAuthorDiversityAtK).toBe(1);
+    });
+
+    it('uses observed outcome labels instead of contradictory legacy labels', () => {
+        const base = buildRequest();
+        const candidate = base.candidates[0];
+        const request = buildRequest({
+            requestId: 'req-strict-label-authority',
+            candidates: [{
+                ...candidate,
+                labels: {
+                    ...candidate.labels!,
+                    click: false,
+                    engagement: false,
+                },
+                outcomeContractV1: {
+                    contractVersion: 'outcome_contract_v1',
+                    decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                    actionKey: {
+                        candidateNamespace: 'serving_post_id',
+                        candidateId: candidate.postId,
+                        servedPosition: 1,
+                    },
+                    decisionAt: '2026-05-01T12:00:00.000Z',
+                    impressionAt: '2026-05-01T12:00:05.000Z',
+                    horizonMs: 60_000,
+                    observedThrough: '2026-05-01T12:01:05.000Z',
+                    labelAvailability: {
+                        follow: 'unavailable_in_v1',
+                        mute: 'unavailable_in_v1',
+                    },
+                    status: 'observed',
+                    labels: {
+                        ...base.candidates[1].labels!,
+                        click: true,
+                        engagement: true,
+                    },
+                },
+            }],
+        });
+
+        const summary = evaluateReplayRequests([request], 1, 'baseline_rank_v1');
+
+        expect(summary.baseline.clickHitRateAtK).toBe(1);
+        expect(summary.baseline.engagementHitRateAtK).toBe(1);
+        expect(summary.baseline.averageNdcgAtK).toBe(1);
+    });
 });

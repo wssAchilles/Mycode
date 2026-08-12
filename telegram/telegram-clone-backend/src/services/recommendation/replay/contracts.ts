@@ -1,3 +1,5 @@
+import type { OutcomeContractV1 } from '../outcomes/outcomeContractV1';
+
 export type ReplayVariantName =
     | 'baseline_rank_v1'
     | 'trace_final_score_v1'
@@ -45,11 +47,13 @@ export interface ReplayCandidateSnapshot {
     evidence?: string[];
     explainSignals?: Record<string, number>;
     createdAt?: string;
-    labels: ReplayCandidateLabelSummary;
+    outcomeContractV1?: OutcomeContractV1;
+    labels?: ReplayCandidateLabelSummary;
 }
 
 export interface ReplayRequestSnapshot {
     requestId: string;
+    decisionId?: string;
     userId: string;
     requestAt: string;
     productSurface: string;
