@@ -84,6 +84,9 @@ export function verifyDecisionContextEvidenceV1(
       return { status: 'not_evaluable', blocker: 'decision_context_decision_log_invalid' };
     }
     const decision = decisionResult.data;
+    if (decision.behaviorPolicyKind === 'logged_randomized') {
+      return { status: 'not_evaluable', blocker: 'randomized_decision_log_unverified' };
+    }
     if (decisionIds.has(decision.decisionId)) {
       return { status: 'not_evaluable', blocker: 'decision_context_decision_duplicate' };
     }

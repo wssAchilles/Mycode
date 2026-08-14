@@ -117,6 +117,10 @@ export async function persistRecommendationDecisionLogV1(
   value: RecommendationDecisionLogV1,
 ): Promise<void> {
   const decision = recommendationDecisionLogSchema.parse(value);
+  if (decision.behaviorPolicyKind === 'logged_randomized') {
+    const code = 'decision_log_randomized_evidence_unverified' as const;
+    throw Object.assign(new Error(code), { code });
+  }
   const digest = decisionLogSha256(decision);
   const result = await RecommendationTrace.updateOne(
     {

@@ -561,6 +561,34 @@ describe('verified_decision_context_evidence_v1', () => {
         });
     });
 
+    it('does not brand plain randomized propensity as verified context evidence', () => {
+        const randomizedDecision = structuredClone(decision);
+        randomizedDecision.behaviorPolicyKind = 'logged_randomized';
+        randomizedDecision.actions = randomizedDecision.actions.map((action) => ({
+            ...action,
+            behaviorPropensity: {
+                status: 'logged_randomized' as const,
+                selectionProbability: 0.5,
+            },
+        }));
+
+        expect(verifyDecisionContextEvidenceV1({
+            datasetVersion: 'outcome-dataset-v1',
+            crossUserDependence: { status: 'none_observed_in_verified_source_v1' },
+            decisions: [{
+                ...contextEntry,
+                decisionLog: randomizedDecision,
+                subject: { kind: 'viewer', viewerAccountPseudonym: userId },
+                inferenceClusterId: 'opaque-viewer-cluster',
+                clusterUnitVersion: 'viewer_account_pseudonym_v1',
+                realDatasetEligible: true,
+            }],
+        })).toEqual({
+            status: 'not_evaluable',
+            blocker: 'randomized_decision_log_unverified',
+        });
+    });
+
     it('enforces a one-to-one viewer pseudonym to opaque inference cluster mapping', () => {
         const secondDecision = recommendationDecisionLogSchema.parse({
             ...decision,

@@ -369,6 +369,24 @@ describe('recommendation decision log writer', () => {
         });
     });
 
+    it('does not persist unverified randomized propensity objects', async () => {
+        const decision = structuredClone(nodeDecision());
+        decision.behaviorPolicyKind = 'logged_randomized';
+        decision.actions = decision.actions.map((action) => ({
+            ...action,
+            behaviorPropensity: {
+                status: 'logged_randomized' as const,
+                selectionProbability: 0.5,
+            },
+        }));
+        const updateOne = vi.spyOn(RecommendationTrace, 'updateOne');
+
+        await expect(persistRecommendationDecisionLogV1(decision)).rejects.toMatchObject({
+            code: 'decision_log_randomized_evidence_unverified',
+        });
+        expect(updateOne).not.toHaveBeenCalled();
+    });
+
     it('stores decision identities and the structured log on the existing trace schema', () => {
         const decision = nodeDecision();
         const trace = new RecommendationTrace({
