@@ -1,5 +1,48 @@
 # Phase 25 Randomized Logging Baseline Reconciliation
 
+## Phase 25 closure (2026-08-15)
+
+This document is retained as the read-only audit snapshot anchored at
+`8c854dab`. Its ownership stop condition was subsequently discharged by an
+explicit owner approval covering the complete working tree and the shared
+Cargo, contracts, `SpaceService`, and `RecommendationTrace` hunks.
+
+The approved dependency closures were focused-verified and committed. At the
+re-entry checkpoint `HEAD 11aee61e`, the worktree was clean and
+`baseline_uncommitted` became historical, not an active blocker. Phase 25 then
+completed a private Rust V2 receipt and a fixed-root Node verifier in
+`0dc456e7` and `acdcb844`. The resulting status is deliberately split:
+
+```text
+privateEpsilonPlackettLuceDevelopmentBaseline = go
+offlineTargetDistributionDevelopmentBaseline = go
+developmentCandidatePolicy = eligible_pool_epsilon_plackett_luce_v1
+developmentCandidateSelectionStatus = selected_for_future_authorization
+developmentEvidenceStatus = verified_private_fixture_only
+verifiableLoggingArtifactStatus = development_only_available
+futureAuthorizationHandoff = selected_for_future_authorization
+selectedMethod = diagnostics_only_abstention_v1
+candidateQualificationStatus = not_run
+runtimeActivationStatus = activation_not_authorized
+```
+
+The remaining `NO-GO` applies to a real randomized logger and runtime
+activation, not to the committed development artifact. V2 now binds canonical
+HKDF/ChaCha20/open53 draws, prefix conditionals, ordered joint/log-joint
+propensity, source/config roots, and pre-RNG resource admission. Its commitment
+purpose is explicitly development reveal consistency only: it does not prove
+pre-commit timing, absence of seed grinding, epoch coverage completeness,
+durable publication, or real utility safety. Decision Log remains default-off
+and deterministic; the artifact remains private, synthetic and non-servable;
+there is no production randomized-policy caller.
+
+The next safe phase is privacy, retention, and capture-provenance readiness.
+It may consume the private development evidence but cannot mint real propensity
+or activation capability. No consumerless wrapper, qualification capability,
+runtime activation, Phase 25 randomized shadow/online exploration, Promotion,
+or Task 9 surface is authorized. The original audit follows unchanged for
+traceability.
+
 ## Scope and verdict
 
 This is the second read-only audit of the `baseline_uncommitted` stop condition.

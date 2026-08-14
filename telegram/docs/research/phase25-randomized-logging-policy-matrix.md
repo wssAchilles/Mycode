@@ -1,6 +1,6 @@
 # Phase 25 Randomized Logging Policy Decision Matrix
 
-更新时间：2026-08-10
+更新时间：2026-08-15
 
 ## 范围与结论
 
@@ -8,33 +8,43 @@ Phase 25 研究以下问题：有序无放回 slate 的 randomized logging polic
 逐 prefix 与整条 slate propensity、full support、可验证随机性、资源预检，
 以及 conservative/budgeted exploration 的适用边界。
 
-本阶段的 decision-complete 结论是：
+在 owner 于 2026-08-13 明确接管原工作树、并将依赖闭包验证后分块提交后，
+`baseline_uncommitted` 已解除。当前 decision-complete 结论是：
 
 | 范围 | 判定 |
 |---|---|
 | 代码与调用图审计 | `GO` |
 | 候选算法比较与日志合同研究 | `GO` |
-| Phase 25 工程实现 | `NO-GO / baseline_uncommitted` |
-| Logging policy selection | `no_logging_policy_selected` |
+| private epsilon-PL simulator 与 offline target-distribution development baseline | `GO` |
+| Phase 25 reduced offline implementation | `GO` |
+| Development candidate selection | `selected_for_future_authorization` |
+| Development candidate policy | `eligible_pool_epsilon_plackett_luce_v1` |
+| Verifiable development artifact | `available / private fixture only` |
+| Production logging-policy selection | `NO-GO` |
 | Production Decision Log activation | `UNAUTHORIZED / default-off` |
-| Randomized serving、shadow traffic、production exploration | `NO-GO` |
+| Phase 25 randomized serving、shadow、online exploration | `NO-GO` |
 | Historical real qHat / OPE | `BLOCKED` |
 | Real-data finite-sample inference | `UNAVAILABLE` |
 | Promotion | `NO-GO` |
 | Task 9 | `UNAUTHORIZED` |
 
-这不是对 epsilon-Plackett-Luce、uniform-support mixture 或可验证随机合同的
-理论否定。阻断来自当前工程基线：canonical Rust 实现与 contracts 仍有大量
-未跟踪文件，而 tracked Cargo/module wiring 又混有其他用户改动。继续实现会依赖
-不可复现的数学基线，或复制第二套排序、抽样和 prefix 概率 owner。
+owner-approved baseline 已在 `11aee61e` 之前形成可复现提交。随后 Rust V2 在
+`0dc456e7` 固化 HKDF/ChaCha20/open53、逐 prefix 与 ordered joint/log-joint propensity、
+source/config roots 及 pre-RNG resource receipt；Node V2 在 `acdcb844` 只重放密码学、
+结构和资源证据，不复制 epsilon-PL 数学。固定 fixture 因而可作为 development-only
+verifiable artifact，但仍不是生产 randomized logger。
 
-因此本阶段只提交研究证据与诚实决策，不新增 candidate、machine wrapper、
-seed/root/ledger、runtime switch、route、worker、scheduler、selector 或 Promotion API。
+因此 `eligible_pool_epsilon_plackett_luce_v1` 成为唯一
+`selected_for_future_authorization` development candidate。该选择不证明 production
+commitment 时序、epoch coverage、durable publish、真实 utility 或授权，也不新增没有
+消费者的 `not_ready` wrapper。production randomized serving、Decision Log activation、
+Phase 25 randomized shadow/online exploration、Promotion 与 Task 9 均未获授权。仓库既有
+compare-only Rust shadow 和 deterministic exploration 是 pre-existing boundary，不属于
+本阶段 randomized logger。
 
 ## 当前代码事实
 
-代码事实先通过 `telegram-phase24-current` codebase-memory 图确认，再与当前工作树和
-Git 状态交叉核对。
+代码事实通过 `telegram-phase25-current` codebase-memory 图、当前源码与提交历史交叉核对。
 
 ### Canonical policy path
 
@@ -43,7 +53,9 @@ Git 状态交叉核对。
 | epsilon/PL 概率核 | `telegram-randomized-policy-primitives/src/epsilon_plackett_luce.rs` | `compute_full_distribution` 计算逐 prefix epsilon/PL mixture；拒绝空支持、非有限值、下溢和概率质量漂移。 |
 | 无放回抽样 | `telegram-rust-recommendation/src/serving/policy/randomized_slate/mod.rs` | 每个 slot 对 remaining candidates 排序、重算分布、按 caller-provided draw 选择并删除 action。非测试 inbound caller 为零。 |
 | Rust wire/hash 合同 | `telegram-recommendation-contracts/src/contracts/randomized_slate.rs` | 记录 selected conditional probability、support/digest 和 numerical diagnostics；证据固定为 simulated/non-servable。 |
-| Node verifier | `telegram-clone-backend/src/services/recommendation/randomizedSlate/verify.ts` | 检查 schema、摘要、support、epsilon-mixture 关系和 diagnostics，但不重放 Rust PL 权重、CDF 或 draw selection。 |
+| Node verifier | `telegram-clone-backend/src/services/recommendation/randomizedSlate/verify.ts` | 逐 prefix 重算 distribution、重放 draw，并核对完整 action identity、selected probability、support 与摘要；仍未获得独立 canonical RNG/commit-reveal 证据。 |
+| Rust development receipt V2 | `telegram-recommendation-contracts/src/contracts/randomized_slate/v2.rs` 与 private producer | 从 revealed development seed 重放 canonical RNG 和 epsilon-PL，绑定 selected interval、prefix/support/distribution、joint/log-joint 与资源收据；固定 synthetic/non-servable。 |
+| Node development verifier V2 | `randomizedSlate/v2/verifyDevelopmentFixture.ts` | 固定 raw fixture/source roots，重放 SHA/HKDF/ChaCha20/open53、joint 与资源公式；不重算 softmax、epsilon mixture 或 CDF。仅测试 caller。 |
 | Runtime Decision Log | `telegram-clone-backend/src/services/recommendation/decisionLog/write.ts` | 由 feed path 调用，但只有环境变量严格等于 `true` 才开启；当前只生成 deterministic behavior，propensity 为 not evaluable。 |
 | Synthetic trajectory consumer | `offlinePrediction/streamingV2/trajectory` | 消费 Node randomized-slate verifier；图中无生产 inbound caller。 |
 
@@ -98,8 +110,8 @@ output records/bytes、allocation、concurrency 与 deadline 也没有统一 adm
    分别支持什么 action space 与 estimand？
 4. conservative/budgeted bandit 的安全或预算保证是否必须依赖在线 action feedback、
    baseline evidence 和明确的 activation authorization？
-5. caller-provided draws、部分 Node verification、缺失 joint propensity/resource preflight，
-   加上 `baseline_uncommitted`，是否使所有当前 candidate 都工程不可达？
+5. development V2 即使补齐 canonical draws、joint propensity 与资源 preflight，哪些
+   commitment timing、coverage、durability 和 authorization 证据仍必须由未来真实 logger 提供？
 
 ## Evidence Matrix
 
@@ -141,8 +153,10 @@ maximumCandidateCount
 eligible-support identity/version
 ```
 
-缺少这些证据时，prefix weight 仍可能指数爆炸。当前实现还缺 joint propensity、
-canonical RNG、complete replay 和完整资源 preflight，因此只保留 diagnostic baseline。
+缺少这些 bounds 时，prefix weight 仍可能指数爆炸。V2 已对固定 complete support fixture
+生成 caller-independent canonical draws、逐 prefix 与 joint/log-joint propensity、
+development commitment consistency 和完整资源收据；因此可选为 future authorization 的
+唯一 development candidate。它没有证明真实配置 floor、生产 commitment 时序或 utility。
 
 ### 2. Gumbel-top-k
 
@@ -166,8 +180,9 @@ prefix-wise uniform mixture minimum joint probability = epsilon^K / (N)_K
 ```
 
 uniform component 的 floor 更透明，但仍随 slate 长度组合或指数恶化。whole-slate 与
-prefix-wise mixture 是不同 policy，不能共享同一个 epsilon 解释。它是未来最值得与
-score-aware mixture 对比的 candidate，但当前不能跨过 Git baseline 与 runtime 授权门禁。
+prefix-wise mixture 是不同 policy，不能共享同一个 epsilon 解释。它仍是未来可与
+score-aware mixture 对比的 research option，但 Phase 25 没有真实 utility/support evidence
+证明增加第二套 policy 的收益，因此不选择。
 
 ### 4. Local swap / interleaving
 
@@ -182,7 +197,11 @@ action/outcome feedback、model assumption 或 active support expansion。当前
 deterministic logs 也不识别未选 action。不能把 synthetic regret、调用者布尔值或
 simulated propensity 升级为真实安全证据。
 
-## Git Stop Condition
+## Historical Git Stop Condition (Resolved)
+
+以下内容是 `20bb1f20` 时点的只读审计快照，解释当时为何停止。owner 随后明确接管并
+授权提交全部相关 baseline；依赖闭包已按职责提交，re-entry 检查点 `11aee61e` 工作树干净。
+`baseline_uncommitted` 不再是 active blocker，但保留原记录以维持决策可追溯性。
 
 独立 Git 审计确认以下核心实现不是可复现的 committed baseline：
 
@@ -204,34 +223,53 @@ simulated propensity 升级为真实安全证据。
 
 因此本阶段不创建 vacuous `not_ready` wrapper，也不提交或接管上述文件。
 
-## Future Re-entry Gate
+## Phase 25 Implementation Outcome
 
-只有现有 randomized policy baseline 经独立所有权确认并形成可复现提交后，Phase 25
-implementation 才可重新评估为 `CONDITIONAL GO`。届时最小范围是：
+现有 randomized policy baseline 已完成所有权确认、分块提交与 focused verification，
+因此 development baseline re-entry 为 `GO`。相关提交包括：
+
+```text
+561f5cc4 feat(recommendation): 固化随机策略基础合同
+804e8c4d fix(recommendation): 拒绝混合概率下溢
+5bcedafc feat(recommendation): 接入确定性决策日志
+0c4553c3 fix(recommendation): 严格验证随机 slate 证据
+63224d61 fix(recommendation): 收紧随机 slate 跨运行时验证
+2af446f2 fix(recommendation): 对齐随机 draw 末项边界
+4e31fb60 feat(recommendation): 固化可重放随机字节合同
+0dc456e7 feat(recommendation): 固化可验证随机日志收据
+acdcb844 feat(recommendation): 验证随机日志开发收据
+```
+
+development-only V2 已完成下列闭包：
 
 1. 收口 probability mass tolerance、candidate/slate caps 与 policy semantics 的唯一 owner；
-2. 在 canonical Rust sampling loop 内接入 development-only evidence sink；
-3. 冻结 seed commitment/reveal、HKDF/ChaCha20 byte stream、domain separation 和 draw mapping；
+2. 由 canonical Rust sampling loop 生成 development-only evidence；
+3. 冻结 development seed reveal-consistency、HKDF/ChaCha20 byte stream、domain separation 和 draw mapping；
 4. 记录逐 prefix support/distribution/selected interval，以及 ordered joint log propensity；
-5. 在首次 full parse、allocation、sort、hash 或 RNG 前完成精确 resource admission；
+5. raw bytes 在 parse 前 admission；算法/输出/hash 预算在候选分配、sort、RNG 和 policy 前 admission；
 6. 以 Rust 为 probability owner，Node 只做严格 receipt/replay verification；
 7. 用 immutable cross-runtime vectors 证明 selection、probability、RNG consumption 和摘要稳定；
-8. 保持 `simulated_propensity`、`servable=false`、`realDatasetEligible=false`，无 production caller。
+8. 输出 `selected_for_future_authorization`，但不创建 production activation capability；
+9. 保持 `simulated_propensity`、`servable=false`、`realDatasetEligible=false`，无 production caller。
 
-未来一个阶段最多选择一个 private candidate；在这些 gate 完成前，不预选 epsilon-PL、
-uniform-support 或任何 conservative bandit。
+下一授权阶段仍必须独立解决 pre-commit timing、anti-grinding、epoch coverage ledger、
+durable create-only publication、真实 utility guard 与 explicit activation authorization。
+Phase 25 不为这些未就绪状态创建无消费者 wrapper，也不得以 development artifact 通过替代
+真实授权。
 
 ## Honest Phase Result
 
 `loggingPolicySelectionStatus` 属于 Phase 25 behavior-policy 选择；现有
-`selectedMethod` 属于 finite-sample inference-method 合同。前者没有选出 policy，后者继续
-选择 diagnostics-only abstention，两者不是同一选择面。
+`selectedMethod` 属于 finite-sample inference-method 合同。前者只选出 future authorization
+的 development candidate，后者继续选择 diagnostics-only abstention，两者不是同一选择面。
 
 ```text
 phase25OfflineResearchStatus = completed
-phase25EngineeringStatus = not_run_baseline_uncommitted
-loggingPolicySelectionStatus = no_logging_policy_selected
-developmentEvidenceStatus = not_run
+phase25OfflineDevelopmentStatus = go
+loggingPolicySelectionStatus = selected_for_future_authorization
+developmentCandidatePolicy = eligible_pool_epsilon_plackett_luce_v1
+developmentEvidenceStatus = verified_private_fixture_only
+verifiableLoggingArtifactStatus = development_only_available
 selectedMethod = diagnostics_only_abstention_v1
 candidateQualificationStatus = not_run
 realDatasetEligible = false
@@ -245,12 +283,14 @@ finite_sample_inference_unavailable
 multiplicity_control_unavailable
 ```
 
-Phase 25 另按下列文档级 report reasons 解释停止决定；它们不是新铸造的 machine
-blocker literals：
+Phase 25 另按下列文档级 report reasons 解释 production 分支停止决定；它们不是新铸造的
+machine blocker literals：
 
 ```text
-baseline_uncommitted
-no_logging_policy_selected
+production_epoch_commitment_timing_unavailable
+production_coverage_ledger_unavailable
+durable_logging_publish_unavailable
+real_utility_guard_unavailable
 real_randomized_propensity_evidence_unavailable
 real_full_support_evidence_unavailable
 activation_not_authorized
@@ -261,22 +301,24 @@ Log 默认开关、Promotion、Task 9 和历史 inference 合同均未修改。
 
 ## Verification Record
 
-以下 focused diagnostics 已在当前工作树运行，用于检查被审计草稿的局部行为；它们不证明
-Git ownership，也不能解除 `baseline_uncommitted`：
+owner-approved baseline 分块提交后已记录以下 focused verification evidence：
 
 ```text
-cargo test -p telegram-randomized-policy-primitives
-3 passed
-
-cargo test -p telegram-recommendation-contracts --test randomized_slate_contract
-16 passed
-
-cargo test -p telegram-rust-recommendation randomized_slate
-11 passed; 378 filtered out
-
-vitest: decisionLogContract + randomizedSlateSimulationContract + decisionLogWrite
-3 files; 26 tests passed
+Rust recommendation tests: 391 passed
+Rust recommendation-contracts baseline tests: 55 passed
+Rust recommendation-contracts lib gate: 33 passed
+Rust component primitives: 10 passed
+Phase 25 Node focused gate: 46 passed
+Rust V2 recommendation-contracts tests: 56 passed
+Rust V2 randomized-slate focused tests: 17 passed
+Rust cross-runtime fixture tests: 13 passed
+Node V1/V2/Decision Log focused tests: 32 passed
+TypeScript npx tsc --noEmit: passed
+cargo fmt --check: passed
+strict Clippy gate: passed
+cargo metadata --locked --no-deps: passed
+git diff --check: passed
 ```
 
-研究文档另经代码围栏配对、trailing-whitespace、`git diff --check` 与 staged path 审计。
-未运行 `verify_all.sh`，未修改或测试 `ml-services/**`。
+`Cargo.toml` 与重新生成的 `Cargo.lock` 一致。未运行 `verify_all.sh`，未修改或测试
+`ml-services/**`，未 push 或创建 PR。
