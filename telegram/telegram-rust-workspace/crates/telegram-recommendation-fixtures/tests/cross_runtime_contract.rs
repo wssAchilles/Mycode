@@ -10,10 +10,12 @@ use telegram_ranking_primitives::{
 use telegram_recommendation_contracts::contracts::decision_log::RecommendationDecisionLogV1;
 use telegram_recommendation_contracts::contracts::query::EmbeddingContextPayload;
 use telegram_recommendation_contracts::{
-    RandomizedSlateConfigV1, RandomizedSlateEvidenceKind, RandomizedSlateSimulationInputV1,
-    RandomizedSlateSimulationV1, TargetDistributionStreamVerificationReceiptV2,
-    TargetPolicyDistributionVerificationReceiptV1, candidate_pool_sha256, canonical_json,
-    compute_simulation_sha256, sha256_hex,
+    RandomizedSlateConfigV1, RandomizedSlateDevelopmentInputContractVersionV2,
+    RandomizedSlateDevelopmentInputV2, RandomizedSlateDevelopmentReceiptV2,
+    RandomizedSlateEvidenceKind, RandomizedSlateSimulationInputV1, RandomizedSlateSimulationV1,
+    TargetDistributionStreamVerificationReceiptV2, TargetPolicyDistributionVerificationReceiptV1,
+    candidate_pool_sha256, canonical_json, canonical_wire_json, compute_simulation_sha256,
+    sha256_hex,
 };
 use telegram_recommendation_fixtures::parse_replay_case_fixtures;
 use telegram_recommendation_policy_offline::target_distribution::{
@@ -113,6 +115,19 @@ struct SyntheticBehaviorTrajectoryFixture {
     target_policy_config_sha256: String,
     input: RandomizedSlateSimulationInputV1,
     expected: RandomizedSlateSimulationV1,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RandomizedSlateDevelopmentFixtureV2 {
+    fixture_version: String,
+    source_fixture_path: String,
+    source_fixture_sha256: String,
+    input_sha256: String,
+    epoch_id: String,
+    revealed_development_seed_hex: String,
+    seed_commitment_sha256: String,
+    expected: RandomizedSlateDevelopmentReceiptV2,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,7 +246,7 @@ fn manifest_references_versioned_fixture_files_with_digests() {
         manifest.manifest_version,
         "recommendation_cross_runtime_manifest_v1"
     );
-    assert_eq!(manifest.domains.len(), 9);
+    assert_eq!(manifest.domains.len(), 10);
 
     for domain in manifest.domains {
         assert!(!domain.domain.trim().is_empty());
@@ -299,6 +314,55 @@ fn randomized_slate_fixture_round_trips_and_binds_all_digests() {
     assert_eq!(
         compute_simulation_sha256(&fixture.expected).unwrap(),
         fixture.expected.simulation_sha256
+    );
+}
+
+#[test]
+fn randomized_slate_development_fixture_replays_rng_policy_and_resources() {
+    let fixture_raw = fs::read(fixture_path("randomized_slate_development_v2.json"))
+        .expect("read randomized slate development fixture");
+    let fixture: RandomizedSlateDevelopmentFixtureV2 = serde_json::from_slice(&fixture_raw)
+        .expect("deserialize randomized slate development fixture");
+    assert_eq!(
+        fixture.fixture_version,
+        "randomized_slate_development_fixture_v2"
+    );
+    assert_eq!(
+        fixture.source_fixture_path,
+        "randomized_slate_simulation_v1.json"
+    );
+
+    let source_raw = fs::read(fixture_path(&fixture.source_fixture_path))
+        .expect("read randomized slate source fixture");
+    assert_eq!(sha256_hex(&source_raw), fixture.source_fixture_sha256);
+    let source_fixture: RandomizedSlateFixture =
+        serde_json::from_slice(&source_raw).expect("deserialize randomized slate source fixture");
+    let input = RandomizedSlateDevelopmentInputV2 {
+        contract_version: RandomizedSlateDevelopmentInputContractVersionV2::V2,
+        source_decision_log: source_fixture.input.source_decision_log,
+        source_decision_log_sha256: source_fixture.input.source_decision_log_sha256,
+        config: source_fixture.input.config,
+        epoch_id: fixture.epoch_id,
+        revealed_development_seed_hex: fixture.revealed_development_seed_hex,
+        seed_commitment_sha256: fixture.seed_commitment_sha256,
+    };
+    input
+        .validate()
+        .expect("validate development input and commitment");
+    let input_raw = canonical_wire_json(&input)
+        .expect("serialize development input")
+        .into_bytes();
+    assert_eq!(sha256_hex(&input_raw), fixture.input_sha256);
+    fixture
+        .expected
+        .validate_against_raw(&input_raw)
+        .expect("replay development fixture receipt");
+    assert_eq!(fixture.expected.status, "simulated");
+    assert!(!fixture.expected.servable);
+    assert!(!fixture.expected.real_dataset_eligible);
+    assert_eq!(
+        fixture.expected.transcript_sha256,
+        "e31870c6648d46ffc80a4d67c0c1614936b215fdf8881fedf0108e8859f7097b"
     );
 }
 

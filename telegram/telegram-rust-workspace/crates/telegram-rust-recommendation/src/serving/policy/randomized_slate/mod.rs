@@ -13,6 +13,8 @@ use telegram_recommendation_contracts::{
     compute_simulation_sha256, sha256_hex,
 };
 
+mod v2;
+
 const MAX_CANDIDATE_POOL_SIZE: usize = 2_048;
 const MAX_SLATE_SIZE: usize = 64;
 

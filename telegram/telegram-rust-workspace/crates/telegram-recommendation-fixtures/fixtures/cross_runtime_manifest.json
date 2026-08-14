@@ -53,6 +53,13 @@
       ]
     },
     {
+      "domain": "randomized-slate-development",
+      "version": "randomized_slate_development_fixture_v2",
+      "fixtures": [
+        { "path": "randomized_slate_development_v2.json", "digest": "dafedbbe2c64389e0d8c3b3fa53850526b88691113cdc6afae74e87a97260146" }
+      ]
+    },
+    {
       "domain": "target-policy-distribution-stream",
       "version": "target_policy_distribution_stream_fixture_v1",
       "fixtures": [
@@ -63,7 +70,7 @@
       "domain": "target-distribution-stream-receipt",
       "version": "target_distribution_stream_receipt_fixture_v2",
       "fixtures": [
-        { "path": "target_distribution_stream_receipt_v2.json", "digest": "548dc7ff0684c913b0699d2b7bef2236220d4bc274eae61543e3d181b9d24979" }
+        { "path": "target_distribution_stream_receipt_v2.json", "digest": "a69a9d1f6ddd299114e22609ba7311259b3c0c31253de4f55b67127052e444e2" }
       ]
     }
   ]

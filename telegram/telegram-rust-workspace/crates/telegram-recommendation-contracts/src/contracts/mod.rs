@@ -79,15 +79,17 @@ pub use query::{
     UserFeaturesPayload, UserStateContextPayload,
 };
 #[allow(unused_imports)]
+pub use randomized_slate::v2::*;
+#[allow(unused_imports)]
 pub use randomized_slate::{
-    BaselineOrderVersion, CandidatePoolFingerprint, DecisionFingerprint, NumericalDiagnostics,
-    NumericalDiagnosticsStep, PROBABILITY_MASS_TOLERANCE, ProbabilitySemantics,
-    RandomizedSlateConfigV1, RandomizedSlateEvidenceKind, RandomizedSlateOrderedAction,
-    RandomizedSlatePolicyId, RandomizedSlateSimulationContractVersion,
-    RandomizedSlateSimulationInputContractVersion, RandomizedSlateSimulationInputV1,
-    RandomizedSlateSimulationStatus, RandomizedSlateSimulationV1, SupportDiagnostics,
-    candidate_namespace_wire_tag, compare_decision_pool_baseline, compute_simulation_sha256,
-    verify_simulation_sha256,
+    BaselineOrderVersion, CandidatePoolFingerprint, DecisionFingerprint, MAX_CANDIDATE_POOL_SIZE,
+    MAX_SLATE_SIZE, NumericalDiagnostics, NumericalDiagnosticsStep, PROBABILITY_MASS_TOLERANCE,
+    ProbabilitySemantics, RandomizedSlateConfigV1, RandomizedSlateEvidenceKind,
+    RandomizedSlateOrderedAction, RandomizedSlatePolicyId,
+    RandomizedSlateSimulationContractVersion, RandomizedSlateSimulationInputContractVersion,
+    RandomizedSlateSimulationInputV1, RandomizedSlateSimulationStatus, RandomizedSlateSimulationV1,
+    SupportDiagnostics, candidate_namespace_wire_tag, compare_decision_pool_baseline,
+    compute_simulation_sha256, verify_simulation_sha256,
 };
 #[allow(unused_imports)]
 pub use rescue_provider::{SelfPostRescueRequest, SelfPostRescueResponse};

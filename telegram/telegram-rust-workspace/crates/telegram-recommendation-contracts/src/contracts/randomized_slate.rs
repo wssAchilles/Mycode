@@ -10,9 +10,11 @@ use super::{
     },
 };
 
+pub mod v2;
+
 pub const PROBABILITY_MASS_TOLERANCE: f64 = 1e-12;
-const MAX_CANDIDATE_POOL_SIZE: usize = 2_048;
-const MAX_SLATE_SIZE: usize = 64;
+pub const MAX_CANDIDATE_POOL_SIZE: usize = 2_048;
+pub const MAX_SLATE_SIZE: usize = 64;
 
 pub const fn candidate_namespace_wire_tag(namespace: CandidateNamespace) -> &'static str {
     match namespace {
