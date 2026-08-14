@@ -122,6 +122,49 @@ export const decisionCandidatePoolSchema = z.object({
       path: ['candidatePoolSha256'],
     });
   }
+
+  const identities = new Set<string>();
+  const selectionRanks = new Set<number>();
+  const servedPositions = new Set<number>();
+  for (const [candidateIndex, candidate] of pool.candidates.entries()) {
+    const identity = `${candidate.candidateNamespace}\u0000${candidate.candidateId}`;
+    if (identities.has(identity)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'candidate pool identities must be unique',
+        path: ['candidates', candidateIndex],
+      });
+    }
+    identities.add(identity);
+
+    if (candidate.selectionRank !== null) {
+      if (selectionRanks.has(candidate.selectionRank)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'selection ranks must be unique',
+          path: ['candidates', candidateIndex, 'selectionRank'],
+        });
+      }
+      selectionRanks.add(candidate.selectionRank);
+    }
+    if (candidate.servedPosition !== null) {
+      if (servedPositions.has(candidate.servedPosition)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'served positions must be unique',
+          path: ['candidates', candidateIndex, 'servedPosition'],
+        });
+      }
+      servedPositions.add(candidate.servedPosition);
+    }
+  }
+
+  for (let expected = 1; expected <= selectionRanks.size; expected += 1) {
+    if (!selectionRanks.has(expected)) {
+      context.addIssue({ code: 'custom', message: 'selection ranks must be contiguous and 1-based' });
+      break;
+    }
+  }
 });
 
 export const recommendationDecisionLogSchema = z.object({

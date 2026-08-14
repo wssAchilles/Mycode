@@ -272,7 +272,6 @@ impl RecommendationDecisionLogV1 {
         }
 
         require_contiguous_positions("selection ranks", &selection_ranks)?;
-        require_contiguous_positions("served positions", &served_positions)?;
 
         let mut action_keys = std::collections::HashSet::new();
         for action in &self.actions {

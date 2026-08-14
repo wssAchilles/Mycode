@@ -168,6 +168,67 @@ describe('recommendation decision log writer', () => {
         expect(decisionLogSha256(decision)).toMatch(/^[0-9a-f]{64}$/);
     });
 
+    it.each([
+        {
+            name: 'duplicate candidate identity',
+            expected: 'candidate pool identities must be unique',
+            mutate: (decision: ReturnType<typeof nodeDecision>) => {
+                decision.candidatePool.candidates[1].candidateId =
+                    decision.candidatePool.candidates[0].candidateId;
+            },
+        },
+        {
+            name: 'duplicate selection rank',
+            expected: 'selection ranks must be unique',
+            mutate: (decision: ReturnType<typeof nodeDecision>) => {
+                decision.candidatePool.candidates[1].selectionRank = 1;
+            },
+        },
+        {
+            name: 'duplicate served position',
+            expected: 'served positions must be unique',
+            mutate: (decision: ReturnType<typeof nodeDecision>) => {
+                const duplicate = decision.candidatePool.candidates[1];
+                const servedPosition = decision.candidatePool.candidates[0].servedPosition!;
+                duplicate.served = true;
+                duplicate.servedPosition = servedPosition;
+                decision.actions.push({
+                    actionKey: {
+                        candidateNamespace: duplicate.candidateNamespace,
+                        candidateId: duplicate.candidateId,
+                        servedPosition,
+                    },
+                    selectionRank: duplicate.selectionRank!,
+                    behaviorPropensity: {
+                        status: 'not_evaluable_deterministic',
+                        reason: 'deterministic_top_k_no_logged_probability',
+                    },
+                });
+            },
+        },
+        {
+            name: 'non-contiguous selection rank',
+            expected: 'selection ranks must be contiguous and 1-based',
+            mutate: (decision: ReturnType<typeof nodeDecision>) => {
+                decision.candidatePool.candidates[1].selectionRank = 3;
+            },
+        },
+    ])('rejects $name with Rust contract parity', ({ mutate, expected }) => {
+        const decision = structuredClone(nodeDecision());
+        mutate(decision);
+        decision.candidatePool.candidatePoolSha256 = candidatePoolSha256(
+            decision.candidatePool.candidates,
+        );
+
+        const result = recommendationDecisionLogSchema.safeParse(decision);
+
+        expect(result.success).toBe(false);
+        if (result.success) return;
+        expect(result.error.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ message: expected }),
+        ]));
+    });
+
     it('fails closed when policy candidates contain a duplicate post id', () => {
         const query = createFeedQuery('viewer-1', 2, false, {
             requestId: 'ce65f95a-c904-4c31-a28b-02bb61b14d75',

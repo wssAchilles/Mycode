@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use telegram_randomized_policy_primitives::compute_full_distribution;
 use telegram_recommendation_contracts::{
     CandidateNamespace, RandomizedSlateSimulationInputV1, RandomizedSlateSimulationV1,
-    candidate_pool_sha256, canonical_json, compare_decision_pool_baseline,
-    compute_simulation_sha256, sha256_hex, verify_simulation_sha256,
+    RecommendationDecisionLogV1, candidate_pool_sha256, canonical_json,
+    compare_decision_pool_baseline, compute_simulation_sha256, sha256_hex,
+    verify_simulation_sha256,
 };
 
 fn valid_output_json() -> Value {
@@ -164,6 +165,28 @@ fn candidate_pool_digest_matches_node_fixture_rule() {
         candidate_pool_sha256(candidates).unwrap(),
         fixture["expectedCandidatePoolSha256"].as_str().unwrap()
     );
+}
+
+#[test]
+fn decision_log_allows_sparse_absolute_served_positions() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../telegram-recommendation-fixtures/fixtures/decision_log_v1.json"
+    ))
+    .unwrap();
+    let mut source = fixture["decisionLog"].clone();
+    source["candidatePool"]["candidates"][0]["servedPosition"] = json!(2);
+    source["actions"][0]["actionKey"]["servedPosition"] = json!(2);
+    source["candidatePool"]["candidatePoolSha256"] = json!(
+        candidate_pool_sha256(
+            source["candidatePool"]["candidates"]
+                .as_array()
+                .expect("candidate array")
+        )
+        .unwrap()
+    );
+
+    let decision: RecommendationDecisionLogV1 = serde_json::from_value(source).unwrap();
+    decision.validate().unwrap();
 }
 
 #[test]
