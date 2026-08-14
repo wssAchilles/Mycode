@@ -592,5 +592,4 @@ mod tests {
         );
         assert_eq!(RNG_CONSTRUCTION_COUNT.load(AtomicOrdering::SeqCst), 0);
     }
-
 }
