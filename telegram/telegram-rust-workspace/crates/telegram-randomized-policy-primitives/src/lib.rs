@@ -7,6 +7,6 @@ pub use deterministic_rng::{
     compute_development_rng_context_sha256_v1, compute_development_seed_commitment_sha256_v1,
 };
 pub use epsilon_plackett_luce::{
-    EpsilonPlackettLuceError, FullDistribution, ProbabilityMassDiagnostics,
-    compute_full_distribution,
+    EpsilonPlackettLuceError, FullDistribution, PROBABILITY_MASS_TOLERANCE,
+    ProbabilityMassDiagnostics, compute_full_distribution,
 };
