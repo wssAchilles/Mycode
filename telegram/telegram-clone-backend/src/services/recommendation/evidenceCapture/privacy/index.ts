@@ -41,10 +41,12 @@ type CaptureInputResult = CapturedInput | 'key_invalid' | null;
 export function buildRecommendationViewerPseudonymV1(
   input: unknown,
 ): RecommendationViewerPseudonymBuildResultV1 {
+  let masterKeyCopy: Buffer | null = null;
   try {
     const captured = captureInput(input);
     if (captured === 'key_invalid') return reject('viewer_pseudonym_key_invalid');
     if (!captured) return reject('viewer_pseudonym_input_invalid');
+    masterKeyCopy = captured.masterKey;
     const viewerIdUtf8Bytes = Buffer.byteLength(captured.viewerId, 'utf8');
     if (viewerIdUtf8Bytes > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumViewerIdUtf8Bytes) {
       return reject('viewer_pseudonym_resource_limit_exceeded');
@@ -103,11 +105,14 @@ export function buildRecommendationViewerPseudonymV1(
       publicContext,
       32,
     ));
-    const viewerAccountPseudonym = createHmac('sha256', derivedKey)
-      .update(hmacMessage)
-      .digest('hex');
-    derivedKey.fill(0);
-    captured.masterKey.fill(0);
+    let viewerAccountPseudonym: string;
+    try {
+      viewerAccountPseudonym = createHmac('sha256', derivedKey)
+        .update(hmacMessage)
+        .digest('hex');
+    } finally {
+      derivedKey.fill(0);
+    }
 
     const preimage = preimageFor(
       captured,
@@ -133,6 +138,8 @@ export function buildRecommendationViewerPseudonymV1(
     return { status: 'verified', pseudonym: candidate };
   } catch {
     return reject('viewer_pseudonym_input_invalid');
+  } finally {
+    masterKeyCopy?.fill(0);
   }
 }
 

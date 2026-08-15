@@ -14,6 +14,7 @@ const baseInput = {
 
 describe('Phase 26 viewer pseudonym capture', () => {
     it('derives a deterministic development-only pseudonym without raw identifiers', () => {
+        const callerKeyBefore = Buffer.from(baseInput.masterKey);
         const first = buildRecommendationViewerPseudonymV1(baseInput);
         const second = buildRecommendationViewerPseudonymV1(baseInput);
 
@@ -30,6 +31,7 @@ describe('Phase 26 viewer pseudonym capture', () => {
         );
         expect(JSON.stringify(first.pseudonym)).not.toContain(baseInput.viewerId);
         expect(JSON.stringify(first.pseudonym)).not.toContain(baseInput.masterKey.toString('hex'));
+        expect(baseInput.masterKey).toEqual(callerKeyBefore);
         expect(first.pseudonym.realDatasetEligible).toBe(false);
         expect(first.pseudonym.servable).toBe(false);
     });
