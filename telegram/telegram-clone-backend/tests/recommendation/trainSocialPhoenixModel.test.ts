@@ -4,6 +4,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  truncateSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -101,6 +102,124 @@ describe('Social Phoenix training CLI', () => {
       expect(error).toHaveBeenCalledWith(
         '[TrainSocialPhoenixModel] failed:',
         expect.objectContaining({ message: 'training_row_label_invalid:labelClick' }),
+      );
+      expect(existsSync(outputPath)).toBe(false);
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects over-limit training work before opening the input', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'social-phoenix-limit-'));
+    const inputPath = path.join(directory, 'missing.ndjson');
+    const outputPath = path.join(directory, 'model.json');
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'trainSocialPhoenixModel.ts',
+      '--input',
+      inputPath,
+      '--output',
+      outputPath,
+      '--epochs',
+      '65',
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/trainSocialPhoenixModel');
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[TrainSocialPhoenixModel] failed:',
+        expect.objectContaining({ message: 'training_config_resource_limit_exceeded' }),
+      );
+      expect(existsSync(outputPath)).toBe(false);
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an oversized input before creating a read stream', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'social-phoenix-input-limit-'));
+    const inputPath = path.join(directory, 'samples.ndjson');
+    const outputPath = path.join(directory, 'model.json');
+    writeFileSync(inputPath, '');
+    truncateSync(inputPath, 128 * 1024 * 1024 + 1);
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'trainSocialPhoenixModel.ts',
+      '--input',
+      inputPath,
+      '--output',
+      outputPath,
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/trainSocialPhoenixModel');
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[TrainSocialPhoenixModel] failed:',
+        expect.objectContaining({ message: 'training_input_resource_limit_exceeded' }),
+      );
+      expect(existsSync(outputPath)).toBe(false);
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects computed training work before allocating model weights', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'social-phoenix-work-'));
+    const inputPath = path.join(directory, 'samples.ndjson');
+    const outputPath = path.join(directory, 'model.json');
+    const trainingFeatures = Object.fromEntries(
+      Array.from({ length: 4_096 }, (_, index) => [`feature_${index}`, 1]),
+    );
+    const row = `${JSON.stringify({ trainingFeatures, ...VALID_LABELS })}\n`;
+    writeFileSync(inputPath, row.repeat(24), 'utf8');
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'trainSocialPhoenixModel.ts',
+      '--input',
+      inputPath,
+      '--output',
+      outputPath,
+      '--epochs',
+      '64',
+      '--minFeatureCount',
+      '1',
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/trainSocialPhoenixModel');
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[TrainSocialPhoenixModel] failed:',
+        expect.objectContaining({ message: 'training_work_resource_limit_exceeded' }),
       );
       expect(existsSync(outputPath)).toBe(false);
     } finally {
