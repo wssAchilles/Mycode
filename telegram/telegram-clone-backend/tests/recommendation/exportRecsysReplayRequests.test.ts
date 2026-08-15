@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -51,6 +51,9 @@ function query<T>(rows: T[]) {
 
 describe('strict replay request exporter', () => {
     it('attributes only canonical served actions without datastore writes', async () => {
+        const pseudonymKeyHex = 'ab'.repeat(32);
+        const keyVersion = 'replay-test-key-v1';
+        const captureEpochId = 'replay-test-epoch-v1';
         const fixture = JSON.parse(readFileSync(path.resolve(
             __dirname,
             '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
@@ -153,8 +156,10 @@ describe('strict replay request exporter', () => {
         const output = path.join(outputDirectory, 'requests.ndjson');
         const originalArgv = process.argv;
         const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
         const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = pseudonymKeyHex;
         process.argv = [
             'node',
             'exportRecsysReplayRequests.ts',
@@ -164,6 +169,12 @@ describe('strict replay request exporter', () => {
             '1',
             '--output',
             output,
+            '--limit',
+            '64',
+            '--keyVersion',
+            keyVersion,
+            '--captureEpochId',
+            captureEpochId,
         ];
         process.exitCode = undefined;
 
@@ -182,7 +193,22 @@ describe('strict replay request exporter', () => {
             expect(runtime.userActionFind.mock.calls[0][0]).not.toHaveProperty('targetPostId');
             expect(runtime.userActionFind.mock.calls[0][0]).not.toHaveProperty('userId');
 
-            const request = JSON.parse(readFileSync(output, 'utf8'));
+            const rawOutput = readFileSync(output, 'utf8');
+            const request = JSON.parse(rawOutput);
+            const { buildRecommendationViewerPseudonymV1 } = await import(
+                '../../src/services/recommendation/evidenceCapture/privacy'
+            );
+            const expectedPseudonym = buildRecommendationViewerPseudonymV1({
+                masterKey: Buffer.from(pseudonymKeyHex, 'hex'),
+                viewerId: 'user-1',
+                keyVersion,
+                captureEpochId,
+            });
+            expect(expectedPseudonym.status).toBe('verified');
+            if (expectedPseudonym.status !== 'verified') throw new Error('fixture_invalid');
+            expect(request.userId).toBe(expectedPseudonym.pseudonym.viewerAccountPseudonym);
+            expect(rawOutput).not.toContain('user-1');
+            expect(statSync(output).mode & 0o777).toBe(0o600);
             expect(request.requestAt).toBe(decisionAt);
             expect(request.candidates).toHaveLength(2);
             expect(request.candidates[0]).toMatchObject({
@@ -208,11 +234,109 @@ describe('strict replay request exporter', () => {
             expect(request.candidates[1]).not.toHaveProperty('outcomeContractV1');
             expect(request.candidates[1]).not.toHaveProperty('labels');
             expect(request.candidates[1]).not.toHaveProperty('feedbackLabel');
+            expect(log).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] evidenceStatus=diagnostic_only_unverified_source',
+            );
             expect(error).not.toHaveBeenCalled();
             expect(process.exitCode).toBeUndefined();
         } finally {
             process.argv = originalArgv;
             process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a missing pseudonym key before opening MongoDB', async () => {
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.connectReadOnlyMongo.mockClear();
+        runtime.disconnectReadOnlyMongo.mockClear();
+        delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(process.exitCode).toBe(1));
+            expect(runtime.connectReadOnlyMongo).not.toHaveBeenCalled();
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] failed:',
+                expect.objectContaining({ message: 'replay_export_pseudonym_key_invalid' }),
+            );
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+        }
+    });
+
+    it('does not overwrite an existing target', async () => {
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-existing-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalContent = '{"owner":"existing"}\n';
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.connectReadOnlyMongo.mockClear();
+        runtime.disconnectReadOnlyMongo.mockClear();
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = 'cd'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+        writeFileSync(output, originalContent, { mode: 0o600 });
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(process.exitCode).toBe(1));
+            expect(runtime.connectReadOnlyMongo).not.toHaveBeenCalled();
+            expect(readFileSync(output, 'utf8')).toBe(originalContent);
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] failed:',
+                expect.objectContaining({ message: 'atomic_artifact_target_exists' }),
+            );
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
             error.mockRestore();
             log.mockRestore();
             rmSync(outputDirectory, { recursive: true, force: true });

@@ -2,8 +2,9 @@
  * 导出 request 级 replay 样本（基于 recommendation_traces + 行为窗口）。
  *
  * 用法：
- *   npx ts-node src/scripts/exportRecsysReplayRequests.ts --days 14 --windowHours 24 --output ./tmp/replay_requests.ndjson
- *   npx ts-node src/scripts/exportRecsysReplayRequests.ts --experimentKey space_feed_recsys_alignment:treatment --limit 2000
+ *   RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX=<64-lowercase-hex> npx ts-node src/scripts/exportRecsysReplayRequests.ts \
+ *     --keyVersion local-v1 --captureEpochId 2026-08 --days 14 --windowHours 24 \
+ *     --output ./tmp/replay_requests.ndjson
  */
 
 import fs from 'fs';
@@ -18,6 +19,12 @@ import {
     type RecommendationDecisionLogV1,
     recommendationDecisionLogSchema,
 } from '../services/recommendation/decisionLog/contracts';
+import { buildRecommendationViewerPseudonymV1 } from '../services/recommendation/evidenceCapture/privacy';
+import {
+    createCanonicalSpoolWriterV2,
+    readCanonicalSpoolRecordsV2,
+} from '../services/recommendation/offlinePrediction/predictionV2/spool';
+import { publishAtomicCanonicalNdjsonV1 } from '../services/recommendation/offlinePrediction/snapshotV2/atomicSink';
 import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
 import type { ReplayCandidateLabelSummary, ReplayRequestSnapshot } from '../services/recommendation/replay/contracts';
 import {
@@ -36,7 +43,21 @@ type Args = {
     pipeline?: string;
     output: string;
     limit: number;
+    keyVersion: string;
+    captureEpochId: string;
 };
+
+const DEFAULT_EXPORT_REQUESTS = 2_000;
+const MAX_EXPORT_REQUESTS = 8_192;
+const MAX_CANDIDATES_PER_REQUEST = 2_048;
+const MAX_TOTAL_CANDIDATES = 65_536;
+const MAX_OUTCOME_ACTIONS = 131_072;
+const EXPORT_SPOOL_LIMITS = Object.freeze({
+    maxLineBytes: 1 << 20,
+    maxFileBytes: 32 * 1024 * 1024,
+    maxRecords: MAX_EXPORT_REQUESTS,
+});
+const PSEUDONYM_KEY_HEX = /^[0-9a-f]{64}$/;
 
 function parseArgs(): Args {
     const args = process.argv.slice(2);
@@ -56,8 +77,37 @@ function parseArgs(): Args {
         experimentKey: kv.experimentKey || undefined,
         pipeline: kv.pipeline || undefined,
         output: kv.output || './tmp/replay_requests.ndjson',
-        limit: Math.max(0, parseInt(kv.limit || '0', 10) || 0),
+        limit: boundedPositiveInteger(kv.limit, DEFAULT_EXPORT_REQUESTS, MAX_EXPORT_REQUESTS),
+        keyVersion: kv.keyVersion || '',
+        captureEpochId: kv.captureEpochId || '',
     };
+}
+
+function boundedPositiveInteger(raw: string | undefined, fallback: number, maximum: number): number {
+    const value = raw === undefined ? fallback : Number(raw);
+    if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+        throw new Error('replay_export_argument_invalid');
+    }
+    return value;
+}
+
+function loadPseudonymMasterKey(args: Args): Buffer {
+    const encoded = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX || '';
+    if (!PSEUDONYM_KEY_HEX.test(encoded)) {
+        throw new Error('replay_export_pseudonym_key_invalid');
+    }
+    const masterKey = Buffer.from(encoded, 'hex');
+    const preflight = buildRecommendationViewerPseudonymV1({
+        masterKey,
+        viewerId: 'phase30-export-preflight',
+        keyVersion: args.keyVersion,
+        captureEpochId: args.captureEpochId,
+    });
+    if (preflight.status !== 'verified') {
+        masterKey.fill(0);
+        throw new Error(preflight.blocker);
+    }
+    return masterKey;
 }
 
 function idToString(id: any): string {
@@ -96,12 +146,20 @@ function actionKey(action: DecisionAction): string {
     ].join(':');
 }
 
+let pseudonymMasterKeyForCleanup: Buffer | undefined;
+let spoolWriterForCleanup: { abort: () => Promise<void> } | undefined;
+let spoolForCleanup: { cleanup: () => Promise<void> } | undefined;
+
 async function main() {
     const args = parseArgs();
+    const pseudonymMasterKey = loadPseudonymMasterKey(args);
+    pseudonymMasterKeyForCleanup = pseudonymMasterKey;
+    const outputPath = path.resolve(process.cwd(), args.output);
     const now = new Date();
     const since = new Date(now.getTime() - args.days * 24 * 60 * 60 * 1000);
     const windowMs = args.windowHours * 60 * 60 * 1000;
 
+    if (fs.existsSync(outputPath)) throw new Error('atomic_artifact_target_exists');
     await connectReadOnlyMongo();
 
     const traceQuery: Record<string, unknown> = {
@@ -119,11 +177,9 @@ async function main() {
             'requestId userId productSurface decisionLogV1 pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore experimentKeys userState embeddingQualityScore shadowComparison candidates replayPool',
         )
         .sort({ 'decisionLogV1.decisionAt': -1 });
-    if (args.limit > 0) {
-        traceCursor.limit(args.limit);
-    }
+    traceCursor.limit(args.limit);
 
-    const traceDocs = (await traceCursor.lean()).slice().reverse();
+    const traceDocs = (await traceCursor.lean()).slice(0, args.limit).reverse();
     const traces = traceDocs.flatMap((trace: any) => {
         const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
         if (!parsed.success) return [];
@@ -137,6 +193,18 @@ async function main() {
         return;
     }
 
+    let plannedCandidates = 0;
+    for (const { trace } of traces) {
+        const candidateCount = (trace.replayPool?.candidates || trace.candidates || []).length;
+        if (candidateCount > MAX_CANDIDATES_PER_REQUEST) {
+            throw new Error('replay_export_resource_limit_exceeded');
+        }
+        plannedCandidates += candidateCount;
+        if (plannedCandidates > MAX_TOTAL_CANDIDATES) {
+            throw new Error('replay_export_resource_limit_exceeded');
+        }
+    }
+
     const decisionIds = traces.map(({ decision }) => decision.decisionId).sort();
     const minDecisionAt = new Date(Math.min(
         ...traces.map(({ decision }) => Date.parse(decision.decisionAt)),
@@ -147,7 +215,11 @@ async function main() {
         timestamp: { $gte: minDecisionAt, $lte: now },
     })
         .select('metadata rank requestId userId action timestamp dwellTimeMs')
+        .limit(MAX_OUTCOME_ACTIONS + 1)
         .lean();
+    if (outcomeActions.length > MAX_OUTCOME_ACTIONS) {
+        throw new Error('replay_export_resource_limit_exceeded');
+    }
 
     const actionsByDecisionId = new Map<string, Array<Record<string, any>>>();
     for (const action of outcomeActions) {
@@ -158,9 +230,9 @@ async function main() {
         actionsByDecisionId.set(decisionId, bucket);
     }
 
-    const outputPath = path.resolve(process.cwd(), args.output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    const out = fs.createWriteStream(outputPath, { encoding: 'utf8' });
+    const spoolWriter = await createCanonicalSpoolWriterV2(EXPORT_SPOOL_LIMITS);
+    spoolWriterForCleanup = spoolWriter;
 
     let exportedRequests = 0;
     let exportedCandidates = 0;
@@ -191,24 +263,25 @@ async function main() {
                 const labels = outcomeContractV1?.status === 'observed'
                     ? outcomeContractV1.labels
                     : undefined;
+                const rank = finiteRank(candidate.rank);
                 const replayCandidate = {
                     requestId: decision.requestId,
                     postId,
                     modelPostId: candidate.modelPostId || '',
                     authorId: candidate.authorId,
-                    rank: finiteNumberOrMissing(candidate.rank),
-                    baselineRank: finiteNumberOrMissing(candidate.rank),
+                    rank,
+                    baselineRank: rank,
                     recallSource: candidate.recallSource || '',
                     secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources),
                     selectionPool: candidate.selectionPool || '',
                     selectionReason: candidate.selectionReason || '',
                     inNetwork: candidate.inNetwork === true,
                     isNews: candidate.isNews === true,
-                    score: candidate.score ?? null,
-                    weightedScore: candidate.weightedScore ?? null,
+                    score: finiteNumberOrNull(candidate.score),
+                    weightedScore: finiteNumberOrNull(candidate.weightedScore),
                     experimentKeys: normalizeStringArray(candidate.experimentKeys || trace.experimentKeys),
                     productSurface: trace.productSurface || 'space_feed',
-                    pipelineScore: candidate.pipelineScore ?? null,
+                    pipelineScore: finiteNumberOrNull(candidate.pipelineScore),
                     scoreBreakdown: candidate.scoreBreakdown || undefined,
                     recommendationDetail: candidate.recommendationDetail || undefined,
                     sourceReason: candidate.sourceReason || undefined,
@@ -228,10 +301,17 @@ async function main() {
             },
             [],
         );
+        const pseudonym = buildRecommendationViewerPseudonymV1({
+            masterKey: pseudonymMasterKey,
+            viewerId: trace.userId,
+            keyVersion: args.keyVersion,
+            captureEpochId: args.captureEpochId,
+        });
+        if (pseudonym.status !== 'verified') throw new Error(pseudonym.blocker);
         const replayRequest: ReplayRequestSnapshot = {
             requestId: decision.requestId,
             decisionId: decision.decisionId,
-            userId: trace.userId,
+            userId: pseudonym.pseudonym.viewerAccountPseudonym,
             requestAt: decision.decisionAt,
             productSurface: trace.productSurface || 'space_feed',
             pipeline: trace.pipeline || undefined,
@@ -247,11 +327,11 @@ async function main() {
             authorDiversity: trace.authorDiversity || 0,
             replyRatio: trace.replyRatio || 0,
             averageScore: trace.averageScore || 0,
-            topScore: trace.topScore ?? null,
-            bottomScore: trace.bottomScore ?? null,
+            topScore: finiteNumberOrNull(trace.topScore),
+            bottomScore: finiteNumberOrNull(trace.bottomScore),
             experimentKeys: trace.experimentKeys || [],
             userState: trace.userState || undefined,
-            embeddingQualityScore: trace.embeddingQualityScore ?? null,
+            embeddingQualityScore: finiteNumberOrNull(trace.embeddingQualityScore),
             candidateSetKind: trace.replayPool?.poolKind || 'served_candidates_v1',
             candidateSetTotalCount: trace.replayPool?.totalCount ?? trace.candidates?.length ?? 0,
             candidateSetTruncated: trace.replayPool?.truncated === true,
@@ -259,20 +339,49 @@ async function main() {
             candidates: replayCandidates,
         };
 
-        out.write(`${JSON.stringify(replayRequest)}\n`);
+        await spoolWriter.write(replayRequest);
         exportedRequests += 1;
         exportedCandidates += replayRequest.candidates.length;
     }
 
-    out.end();
+    const completedSpool = await spoolWriter.finish();
+    spoolWriterForCleanup = undefined;
+    spoolForCleanup = completedSpool;
+    const publishResult = await publishAtomicCanonicalNdjsonV1({
+        targetPath: outputPath,
+        records: (async function* () {
+            for await (const record of readCanonicalSpoolRecordsV2(
+                completedSpool.stream,
+                EXPORT_SPOOL_LIMITS,
+            )) {
+                yield record.value;
+            }
+        }()),
+        expectedSha256: completedSpool.sha256,
+        expectedRecordCount: completedSpool.recordCount,
+    });
+    if (publishResult.status === 'published_durability_unconfirmed') {
+        throw new Error(
+            `replay_export_published_durability_unconfirmed_reconciliation_required:${publishResult.reason}`,
+        );
+    }
 
     console.log(`[ExportRecsysReplay] requests=${exportedRequests}`);
     console.log(`[ExportRecsysReplay] candidates=${exportedCandidates}`);
+    console.log('[ExportRecsysReplay] evidenceStatus=diagnostic_only_unverified_source');
+    console.log(`[ExportRecsysReplay] sha256=${publishResult.sha256}`);
     console.log(`[ExportRecsysReplay] wrote ${outputPath}`);
 }
 
-function finiteNumberOrMissing(value: unknown): number {
-    return typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN;
+function finiteRank(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error('replay_export_candidate_rank_invalid');
+    }
+    return value;
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 main()
@@ -281,6 +390,12 @@ main()
         process.exitCode = 1;
     })
     .finally(async () => {
+        pseudonymMasterKeyForCleanup?.fill(0);
+        if (spoolForCleanup) {
+            await spoolForCleanup.cleanup().catch(() => undefined);
+        } else {
+            await spoolWriterForCleanup?.abort().catch(() => undefined);
+        }
         try {
             await disconnectReadOnlyMongo();
         } catch {
