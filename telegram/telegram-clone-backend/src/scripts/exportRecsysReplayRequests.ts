@@ -110,6 +110,30 @@ function loadPseudonymMasterKey(args: Args): Buffer {
     return masterKey;
 }
 
+function pseudonymizeIdentity(
+    domain: 'viewer' | 'author',
+    value: unknown,
+    masterKey: Buffer,
+    args: Pick<Args, 'keyVersion' | 'captureEpochId'>,
+    cache: Map<string, string>,
+): string {
+    if (typeof value !== 'string' || value.length === 0) {
+        throw new Error('replay_export_identity_invalid');
+    }
+    const cacheKey = `${domain}\0${value}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    const result = buildRecommendationViewerPseudonymV1({
+        masterKey,
+        viewerId: `${domain}:${value}`,
+        keyVersion: args.keyVersion,
+        captureEpochId: args.captureEpochId,
+    });
+    if (result.status !== 'verified') throw new Error(result.blocker);
+    cache.set(cacheKey, result.pseudonym.viewerAccountPseudonym);
+    return result.pseudonym.viewerAccountPseudonym;
+}
+
 function idToString(id: any): string {
     if (!id) return '';
     if (typeof id === 'string') return id;
@@ -236,6 +260,7 @@ async function main() {
 
     let exportedRequests = 0;
     let exportedCandidates = 0;
+    const identityPseudonyms = new Map<string, string>();
 
     for (const { trace, decision } of traces) {
         const traceCandidates = (trace.replayPool?.candidates || trace.candidates || []) as any[];
@@ -268,7 +293,13 @@ async function main() {
                     requestId: decision.requestId,
                     postId,
                     modelPostId: candidate.modelPostId || '',
-                    authorId: candidate.authorId,
+                    authorId: pseudonymizeIdentity(
+                        'author',
+                        candidate.authorId,
+                        pseudonymMasterKey,
+                        args,
+                        identityPseudonyms,
+                    ),
                     rank,
                     baselineRank: rank,
                     recallSource: candidate.recallSource || '',
@@ -301,17 +332,16 @@ async function main() {
             },
             [],
         );
-        const pseudonym = buildRecommendationViewerPseudonymV1({
-            masterKey: pseudonymMasterKey,
-            viewerId: trace.userId,
-            keyVersion: args.keyVersion,
-            captureEpochId: args.captureEpochId,
-        });
-        if (pseudonym.status !== 'verified') throw new Error(pseudonym.blocker);
         const replayRequest: ReplayRequestSnapshot = {
             requestId: decision.requestId,
             decisionId: decision.decisionId,
-            userId: pseudonym.pseudonym.viewerAccountPseudonym,
+            userId: pseudonymizeIdentity(
+                'viewer',
+                trace.userId,
+                pseudonymMasterKey,
+                args,
+                identityPseudonyms,
+            ),
             requestAt: decision.decisionAt,
             productSurface: trace.productSurface || 'space_feed',
             pipeline: trace.pipeline || undefined,
@@ -361,6 +391,13 @@ async function main() {
         expectedRecordCount: completedSpool.recordCount,
     });
     if (publishResult.status === 'published_durability_unconfirmed') {
+        console.error('[ExportRecsysReplay] reconciliation_required:', {
+            targetPath: outputPath,
+            finalPathMayBeVisible: true,
+            sha256: publishResult.sha256,
+            recordCount: publishResult.recordCount,
+            reason: publishResult.reason,
+        });
         throw new Error(
             `replay_export_published_durability_unconfirmed_reconciliation_required:${publishResult.reason}`,
         );
@@ -391,10 +428,15 @@ main()
     })
     .finally(async () => {
         pseudonymMasterKeyForCleanup?.fill(0);
-        if (spoolForCleanup) {
-            await spoolForCleanup.cleanup().catch(() => undefined);
-        } else {
-            await spoolWriterForCleanup?.abort().catch(() => undefined);
+        try {
+            if (spoolForCleanup) {
+                await spoolForCleanup.cleanup();
+            } else {
+                await spoolWriterForCleanup?.abort();
+            }
+        } catch (error) {
+            console.error('[ExportRecsysReplay] spool_cleanup_failed:', error);
+            process.exitCode = 1;
         }
         try {
             await disconnectReadOnlyMongo();

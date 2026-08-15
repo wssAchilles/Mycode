@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -47,6 +47,48 @@ function query<T>(rows: T[]) {
     cursor.sort.mockReturnValue(cursor);
     cursor.limit.mockReturnValue(cursor);
     return cursor;
+}
+
+async function minimalTrace(candidateCount: number) {
+    const fixture = JSON.parse(readFileSync(path.resolve(
+        __dirname,
+        '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
+    ), 'utf8'));
+    const decisionAt = new Date(Date.now() - 60_000).toISOString();
+    const servedPostId = '507f191e810c19729de87091';
+    const decisionLogV1 = { ...fixture.decisionLog, decisionAt };
+    decisionLogV1.actions[0].actionKey.candidateId = servedPostId;
+    decisionLogV1.candidatePool.candidates[0].candidateId = servedPostId;
+    const { candidatePoolSha256 } = await import(
+        '../../src/services/recommendation/decisionLog/contracts'
+    );
+    decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(
+        decisionLogV1.candidatePool.candidates,
+    );
+    return {
+        decisionLogV1,
+        trace: {
+            requestId: decisionLogV1.requestId,
+            userId: 'user-minimal',
+            productSurface: 'space_feed',
+            decisionLogV1,
+            experimentKeys: [],
+            replayPool: {
+                poolKind: 'pre_selector_scored_topk_v1',
+                totalCount: candidateCount,
+                truncated: false,
+                candidates: Array.from({ length: candidateCount }, (_, index) => ({
+                    postId: index === 0 ? servedPostId : `pool-post-${index}`,
+                    modelPostId: index === 0 ? servedPostId : `pool-post-${index}`,
+                    authorId: `author-${index}`,
+                    rank: index + 1,
+                    recallSource: 'PopularSource',
+                    inNetwork: false,
+                    isNews: false,
+                })),
+            },
+        },
+    };
 }
 
 describe('strict replay request exporter', () => {
@@ -200,7 +242,7 @@ describe('strict replay request exporter', () => {
             );
             const expectedPseudonym = buildRecommendationViewerPseudonymV1({
                 masterKey: Buffer.from(pseudonymKeyHex, 'hex'),
-                viewerId: 'user-1',
+                viewerId: 'viewer:user-1',
                 keyVersion,
                 captureEpochId,
             });
@@ -208,6 +250,8 @@ describe('strict replay request exporter', () => {
             if (expectedPseudonym.status !== 'verified') throw new Error('fixture_invalid');
             expect(request.userId).toBe(expectedPseudonym.pseudonym.viewerAccountPseudonym);
             expect(rawOutput).not.toContain('user-1');
+            expect(rawOutput).not.toContain('served-author');
+            expect(rawOutput).not.toContain('pool-author');
             expect(statSync(output).mode & 0o777).toBe(0o600);
             expect(request.requestAt).toBe(decisionAt);
             expect(request.candidates).toHaveLength(2);
@@ -330,6 +374,120 @@ describe('strict replay request exporter', () => {
                 expect.objectContaining({ message: 'atomic_artifact_target_exists' }),
             );
         } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects candidate overflow before loading outcomes or publishing', async () => {
+        const { trace } = await minimalTrace(2_049);
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-overflow-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.connectReadOnlyMongo.mockClear();
+        runtime.disconnectReadOnlyMongo.mockClear();
+        runtime.userActionFind.mockClear();
+        runtime.traceFind.mockReturnValue(query([trace]));
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = 'ef'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(process.exitCode).toBe(1));
+            expect(runtime.userActionFind).not.toHaveBeenCalled();
+            expect(existsSync(output)).toBe(false);
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] failed:',
+                expect.objectContaining({ message: 'replay_export_resource_limit_exceeded' }),
+            );
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
+    it('reports reconciliation metadata when publication durability is unconfirmed', async () => {
+        const { trace } = await minimalTrace(1);
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-reconcile-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.connectReadOnlyMongo.mockClear();
+        runtime.disconnectReadOnlyMongo.mockClear();
+        runtime.traceFind.mockReturnValue(query([trace]));
+        runtime.userActionFind.mockReturnValue(query([]));
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = '12'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        vi.resetModules();
+        const { setAtomicSinkTestHooksV1 } = await import(
+            '../../src/services/recommendation/offlinePrediction/snapshotV2/atomicSink'
+        );
+        setAtomicSinkTestHooksV1({
+            syncParentDirectory: () => { throw new Error('forced_parent_sync_failure'); },
+        });
+        try {
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(runtime.disconnectReadOnlyMongo).toHaveBeenCalledOnce());
+            expect(process.exitCode).toBe(1);
+            expect(existsSync(output)).toBe(true);
+            expect(statSync(output).mode & 0o777).toBe(0o600);
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] reconciliation_required:',
+                expect.objectContaining({
+                    targetPath: output,
+                    finalPathMayBeVisible: true,
+                    sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+                    recordCount: 1,
+                    reason: 'parent_directory_sync_failed',
+                }),
+            );
+        } finally {
+            setAtomicSinkTestHooksV1(undefined);
             process.argv = originalArgv;
             process.exitCode = originalExitCode;
             if (originalPseudonymKey === undefined) {
