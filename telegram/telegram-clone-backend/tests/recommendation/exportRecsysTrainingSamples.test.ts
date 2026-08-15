@@ -1,4 +1,11 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -208,6 +215,9 @@ describe('PIT-safe partial training exporter CLI', () => {
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
       expect(readdirSync(outputDirectory)).toHaveLength(7);
+      expect(readdirSync(outputDirectory).map((file) => (
+        statSync(path.join(outputDirectory, file)).mode & 0o777
+      ))).toEqual(Array(7).fill(0o600));
       const row = JSON.parse(readFileSync(
         path.join(outputDirectory, 'samples.quarantine.ndjson'),
         'utf8',
@@ -274,6 +284,81 @@ describe('PIT-safe partial training exporter CLI', () => {
       process.exitCode = originalExitCode;
       error.mockRestore();
       log.mockRestore();
+      rmSync(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite an existing artifact target', async () => {
+    runtime.traceFind.mockReturnValue(query([]));
+    const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-export-existing-'));
+    const outputPath = path.join(outputDirectory, 'samples.ndjson');
+    const existingPath = path.join(outputDirectory, 'samples.valid.ndjson');
+    writeFileSync(existingPath, 'owner-data\n', 'utf8');
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'exportRecsysTrainingSamples.ts',
+      '--cutoff',
+      '2026-05-03T12:00:00.000Z',
+      '--output',
+      outputPath,
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/exportRecsysTrainingSamples');
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[ExportRecsysSamples] failed:',
+        expect.objectContaining({ message: 'training_export_target_exists' }),
+      );
+      expect(readFileSync(existingPath, 'utf8')).toBe('owner-data\n');
+      expect(readdirSync(outputDirectory)).toEqual(['samples.valid.ndjson']);
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      rmSync(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an invalid resource limit before opening MongoDB', async () => {
+    const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-export-limit-'));
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'exportRecsysTrainingSamples.ts',
+      '--cutoff',
+      '2026-05-03T12:00:00.000Z',
+      '--limit',
+      '0',
+      '--output',
+      path.join(outputDirectory, 'samples.ndjson'),
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/exportRecsysTrainingSamples');
+      await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[ExportRecsysSamples] failed:',
+        expect.objectContaining({ message: 'training_export_argument_invalid' }),
+      );
+      expect(runtime.connectMongoDB).not.toHaveBeenCalled();
+      expect(runtime.traceFind).not.toHaveBeenCalled();
+      expect(readdirSync(outputDirectory)).toEqual([]);
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
       rmSync(outputDirectory, { recursive: true, force: true });
     }
   });

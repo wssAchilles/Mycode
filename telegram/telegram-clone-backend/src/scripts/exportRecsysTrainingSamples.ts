@@ -59,6 +59,16 @@ type Args = {
     limit: number;
 };
 
+const DEFAULT_EXPORT_TRACES = 2_000;
+const MAX_EXPORT_TRACES = 8_192;
+const MAX_CANDIDATES_PER_TRACE = 2_048;
+const MAX_SERVED_SAMPLES = 65_536;
+const MAX_OUTCOME_ACTIONS = 131_072;
+const MAX_HISTORY_ACTIONS = 131_072;
+const MAX_CONTACT_RECORDS = 131_072;
+const MAX_OUTPUT_FILE_BYTES = 32 * 1024 * 1024;
+const MAX_TOTAL_OUTPUT_BYTES = 128 * 1024 * 1024;
+
 type OutcomeActionRecord = PitSafeAction & {
     userId: string;
     requestId?: string;
@@ -175,8 +185,16 @@ function parseArgs(): Args {
         output: kv.output || './tmp/recsys_samples.ndjson',
         cutoff: kv.cutoff || undefined,
         approvalConfig: kv.approvalConfig || undefined,
-        limit: Math.max(0, parseInt(kv.limit || '0', 10) || 0),
+        limit: boundedPositiveInteger(kv.limit, DEFAULT_EXPORT_TRACES, MAX_EXPORT_TRACES),
     };
+}
+
+function boundedPositiveInteger(raw: string | undefined, fallback: number, maximum: number): number {
+    const value = raw === undefined ? fallback : Number(raw);
+    if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+        throw new Error('training_export_argument_invalid');
+    }
+    return value;
 }
 
 function idToString(id: unknown): string {
@@ -258,14 +276,34 @@ function writeArtifacts(
         },
         approvalConfig: readApprovalConfig(approvalConfig),
     });
+    const outputs = [
+        [validPath, artifacts.validNdjson],
+        [quarantinePath, artifacts.quarantineNdjson],
+        [manifestPath, artifacts.manifestJson],
+        [versionedValidPath, versioned.validNdjson],
+        [versionedQuarantinePath, versioned.quarantineNdjson],
+        [annManifestPath, versioned.annManifestJson],
+        [datasetAcceptancePath, versioned.datasetAcceptanceJson],
+    ] as const;
+    const outputBytes = outputs.map(([, content]) => Buffer.byteLength(content, 'utf8'));
+    if (
+        outputBytes.some((bytes) => bytes > MAX_OUTPUT_FILE_BYTES)
+        || outputBytes.reduce((sum, bytes) => sum + bytes, 0) > MAX_TOTAL_OUTPUT_BYTES
+    ) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
+    for (const [targetPath] of outputs) {
+        try {
+            fs.lstatSync(targetPath);
+            throw new Error('training_export_target_exists');
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+    }
     fs.mkdirSync(path.dirname(validPath), { recursive: true });
-    fs.writeFileSync(validPath, artifacts.validNdjson, 'utf8');
-    fs.writeFileSync(quarantinePath, artifacts.quarantineNdjson, 'utf8');
-    fs.writeFileSync(manifestPath, artifacts.manifestJson, 'utf8');
-    fs.writeFileSync(versionedValidPath, versioned.validNdjson, 'utf8');
-    fs.writeFileSync(versionedQuarantinePath, versioned.quarantineNdjson, 'utf8');
-    fs.writeFileSync(annManifestPath, versioned.annManifestJson, 'utf8');
-    fs.writeFileSync(datasetAcceptancePath, versioned.datasetAcceptanceJson, 'utf8');
+    for (const [targetPath, content] of outputs) {
+        fs.writeFileSync(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    }
     console.log(
         `[ExportRecsysSamples] valid=${artifacts.manifest.counts.valid}`
         + ` quarantine=${artifacts.manifest.counts.quarantine}`,
@@ -304,13 +342,14 @@ async function main() {
             'requestId decisionId decisionLogV1Sha256 userId productSurface experimentKeys decisionLogV1 candidates pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness shadowComparison',
         )
         .sort({ 'decisionLogV1.decisionAt': -1, _id: -1 });
-    if (args.limit > 0) traceCursor.limit(args.limit);
+    traceCursor.limit(args.limit);
 
     const traceDocs = ((await traceCursor.lean()) as TraceRecord[]).slice().reverse();
     const canonicalTraces: Array<{
         trace: TraceRecord;
         decision: RecommendationDecisionLogV1;
     }> = [];
+    let plannedServedSamples = 0;
     for (const trace of traceDocs) {
         const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
         if (!parsed.success) throw new Error('training_export_source_contract_invalid');
@@ -323,6 +362,16 @@ async function main() {
         }
         const decisionAtMs = Date.parse(parsed.data.decisionAt);
         if (decisionAtMs < since.getTime() || decisionAtMs > cutoff.getTime()) continue;
+        if (
+            (trace.candidates?.length ?? 0) > MAX_CANDIDATES_PER_TRACE
+            || parsed.data.actions.length > MAX_CANDIDATES_PER_TRACE
+        ) {
+            throw new Error('training_export_resource_limit_exceeded');
+        }
+        plannedServedSamples += parsed.data.actions.length;
+        if (plannedServedSamples > MAX_SERVED_SAMPLES) {
+            throw new Error('training_export_resource_limit_exceeded');
+        }
         canonicalTraces.push({ trace, decision: parsed.data });
     }
     if (canonicalTraces.length === 0) {
@@ -366,7 +415,12 @@ async function main() {
         timestamp: { $gte: minDecisionAt, $lte: cutoff },
     })
         .select('metadata rank requestId userId action timestamp dwellTimeMs')
+        .sort({ timestamp: 1, _id: 1 })
+        .limit(MAX_OUTCOME_ACTIONS + 1)
         .lean()) as OutcomeActionRecord[];
+    if (outcomeActions.length > MAX_OUTCOME_ACTIONS) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
     const historyActions = (await UserAction.find({
         userId: { $in: userIds },
         timestamp: { $gte: historySince, $lte: maxDecisionAt },
@@ -389,11 +443,17 @@ async function main() {
         },
     })
         .select('userId action timestamp targetPostId')
+        .sort({ timestamp: 1, _id: 1 })
+        .limit(MAX_HISTORY_ACTIONS + 1)
         .lean()) as HistoryActionRecord[];
+    if (historyActions.length > MAX_HISTORY_ACTIONS) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
 
     const userRecords = (await User.findAll({
         where: { id: { [Op.in]: userIds } },
         attributes: ['id', 'createdAt'],
+        limit: MAX_EXPORT_TRACES + 1,
         raw: true,
     })) as UserContextRecord[];
     const contactRecords = (await Contact.findAll({
@@ -402,16 +462,30 @@ async function main() {
             status: ContactStatus.ACCEPTED,
         },
         attributes: ['userId', 'contactId'],
+        limit: MAX_CONTACT_RECORDS + 1,
         raw: true,
     })) as ContactRecord[];
+    if (
+        userRecords.length > MAX_EXPORT_TRACES
+        || contactRecords.length > MAX_CONTACT_RECORDS
+    ) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
     const embeddingDocs = (await UserFeatureVector.find({
         userId: { $in: userIds },
     })
         .select('userId interestedInClusters producerEmbedding knownForCluster knownForScore qualityScore computedAt version')
+        .limit(MAX_EXPORT_TRACES + 1)
         .lean()) as Array<Record<string, unknown> & { userId: string }>;
+    if (embeddingDocs.length > MAX_EXPORT_TRACES) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
     const snapshots = projectPitSafeSnapshotMap(
         await postFeatureSnapshotService.getSnapshotsByPostIds(postIds),
     );
+    if (snapshots.size > MAX_SERVED_SAMPLES) {
+        throw new Error('training_export_resource_limit_exceeded');
+    }
 
     const outcomeActionsByDecisionId = new Map<string, OutcomeActionRecord[]>();
     for (const action of outcomeActions) {
