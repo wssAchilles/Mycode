@@ -2,12 +2,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'os';
 import path from 'path';
 
-import { describe, expect, it, vi } from 'vitest';
+import mongoose from 'mongoose';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtime = vi.hoisted(() => ({
     connectReadOnlyMongo: vi.fn(),
     disconnectReadOnlyMongo: vi.fn(),
-    traceFind: vi.fn(),
+    startSession: vi.fn(),
+    session: {
+        snapshotEnabled: true,
+        endSession: vi.fn(),
+    },
+    traceAggregate: vi.fn(),
     userActionFind: vi.fn(),
 }));
 
@@ -17,7 +23,7 @@ vi.mock('../../src/services/recommendation/training/readOnlyMongo', () => ({
     disconnectReadOnlyMongo: runtime.disconnectReadOnlyMongo,
 }));
 vi.mock('../../src/models/RecommendationTrace', () => ({
-    default: { find: runtime.traceFind },
+    default: { aggregate: runtime.traceAggregate },
 }));
 vi.mock('../../src/models/UserAction', () => ({
     default: { find: runtime.userActionFind },
@@ -36,39 +42,75 @@ vi.mock('../../src/models/UserAction', () => ({
     },
 }));
 
-function query<T>(rows: T[]) {
+function query<T>(value: T) {
     const cursor = {
         select: vi.fn(),
         sort: vi.fn(),
         limit: vi.fn(),
-        lean: vi.fn().mockResolvedValue(rows),
+        session: vi.fn(),
+        lean: vi.fn().mockResolvedValue(value),
     };
     cursor.select.mockReturnValue(cursor);
     cursor.sort.mockReturnValue(cursor);
     cursor.limit.mockReturnValue(cursor);
+    cursor.session.mockReturnValue(cursor);
     return cursor;
 }
 
+function aggregation<T>(rows: T[]) {
+    const cursor = {
+        close: vi.fn(),
+        async *[Symbol.asyncIterator]() {
+            for (const row of rows) yield row;
+        },
+    };
+    const aggregate = {
+        session: vi.fn(),
+        cursor: vi.fn().mockReturnValue(cursor),
+    };
+    aggregate.session.mockReturnValue(aggregate);
+    return aggregate;
+}
+
+beforeEach(() => {
+    runtime.connectReadOnlyMongo.mockClear();
+    runtime.disconnectReadOnlyMongo.mockClear();
+    runtime.traceAggregate.mockReset();
+    runtime.userActionFind.mockReset();
+    runtime.session.endSession.mockReset();
+    runtime.startSession.mockReset().mockResolvedValue(runtime.session);
+    vi.spyOn(mongoose, 'startSession').mockImplementation(runtime.startSession as never);
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
+
 async function minimalTrace(candidateCount: number) {
-    const fixture = JSON.parse(readFileSync(path.resolve(
-        __dirname,
-        '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
-    ), 'utf8'));
+    const fixture = JSON.parse(
+        readFileSync(
+            path.resolve(
+                __dirname,
+                '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
+            ),
+            'utf8',
+        ),
+    );
     const decisionAt = new Date(Date.now() - 60_000).toISOString();
     const servedPostId = '507f191e810c19729de87091';
     const decisionLogV1 = { ...fixture.decisionLog, decisionAt };
     decisionLogV1.actions[0].actionKey.candidateId = servedPostId;
     decisionLogV1.candidatePool.candidates[0].candidateId = servedPostId;
-    const { candidatePoolSha256 } = await import(
-        '../../src/services/recommendation/decisionLog/contracts'
-    );
-    decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(
-        decisionLogV1.candidatePool.candidates,
-    );
+    const { candidatePoolSha256 } = await import('../../src/services/recommendation/decisionLog/contracts');
+    decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(decisionLogV1.candidatePool.candidates);
     return {
         decisionLogV1,
         trace: {
             requestId: decisionLogV1.requestId,
+            decisionId: decisionLogV1.decisionId,
+            decisionLogV1Sha256: (
+                await import('../../src/services/recommendation/decisionLog/contracts')
+            ).decisionLogSha256(decisionLogV1),
             userId: 'user-minimal',
             productSurface: 'space_feed',
             decisionLogV1,
@@ -96,10 +138,15 @@ describe('strict replay request exporter', () => {
         const pseudonymKeyHex = 'ab'.repeat(32);
         const keyVersion = 'replay-test-key-v1';
         const captureEpochId = 'replay-test-epoch-v1';
-        const fixture = JSON.parse(readFileSync(path.resolve(
-            __dirname,
-            '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
-        ), 'utf8'));
+        const fixture = JSON.parse(
+            readFileSync(
+                path.resolve(
+                    __dirname,
+                    '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
+                ),
+                'utf8',
+            ),
+        );
         const decisionAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
         const impressionAt = new Date(Date.parse(decisionAt) + 5_000);
         const servedPostId = '507f191e810c19729de87081';
@@ -110,62 +157,66 @@ describe('strict replay request exporter', () => {
         };
         decisionLogV1.actions[0].actionKey.candidateId = servedPostId;
         decisionLogV1.candidatePool.candidates[0].candidateId = servedPostId;
-        const { candidatePoolSha256 } = await import(
-            '../../src/services/recommendation/decisionLog/contracts'
-        );
-        decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(
-            decisionLogV1.candidatePool.candidates,
-        );
-        runtime.traceFind.mockReturnValue(query([{
-            requestId: decisionLogV1.requestId,
-            userId: 'user-1',
-            productSurface: 'space_feed',
-            decisionLogV1,
-            createdAt: new Date(Date.parse(decisionAt) - 60_000).toISOString(),
-            selectedCount: 1,
-            inNetworkCount: 1,
-            outOfNetworkCount: 1,
-            sourceCounts: [],
-            authorDiversity: 1,
-            replyRatio: 0,
-            averageScore: 0.5,
-            experimentKeys: [],
-            candidates: [{
-                postId: servedPostId,
-                modelPostId: servedPostId,
-                authorId: 'served-author',
-                rank: 1,
-                recallSource: 'FollowingSource',
-                inNetwork: true,
-                isNews: false,
-            }],
-            replayPool: {
-                poolKind: 'pre_selector_scored_topk_v1',
-                totalCount: 2,
-                truncated: false,
+        const { candidatePoolSha256 } = await import('../../src/services/recommendation/decisionLog/contracts');
+        decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(decisionLogV1.candidatePool.candidates);
+        const { decisionLogSha256 } = await import('../../src/services/recommendation/decisionLog/contracts');
+        const traceAggregation = aggregation([
+            {
+                requestId: decisionLogV1.requestId,
+                decisionId: decisionLogV1.decisionId,
+                decisionLogV1Sha256: decisionLogSha256(decisionLogV1),
+                userId: 'user-1',
+                productSurface: 'space_feed',
+                decisionLogV1,
+                createdAt: new Date(Date.parse(decisionAt) - 60_000).toISOString(),
+                selectedCount: 1,
+                inNetworkCount: 1,
+                outOfNetworkCount: 1,
+                sourceCounts: [],
+                authorDiversity: 1,
+                replyRatio: 0,
+                averageScore: 0.5,
+                experimentKeys: [],
                 candidates: [
                     {
                         postId: servedPostId,
                         modelPostId: servedPostId,
                         authorId: 'served-author',
-                        rank: 2,
+                        rank: 1,
                         recallSource: 'FollowingSource',
                         inNetwork: true,
                         isNews: false,
                     },
-                    {
-                        postId: unservedPostId,
-                        modelPostId: unservedPostId,
-                        authorId: 'pool-author',
-                        rank: 1,
-                        recallSource: 'PopularSource',
-                        inNetwork: false,
-                        isNews: false,
-                    },
                 ],
+                replayPool: {
+                    poolKind: 'pre_selector_scored_topk_v1',
+                    totalCount: 2,
+                    truncated: false,
+                    candidates: [
+                        {
+                            postId: servedPostId,
+                            modelPostId: servedPostId,
+                            authorId: 'served-author',
+                            rank: 2,
+                            recallSource: 'FollowingSource',
+                            inNetwork: true,
+                            isNews: false,
+                        },
+                        {
+                            postId: unservedPostId,
+                            modelPostId: unservedPostId,
+                            authorId: 'pool-author',
+                            rank: 1,
+                            recallSource: 'PopularSource',
+                            inNetwork: false,
+                            isNews: false,
+                        },
+                    ],
+                },
             },
-        }]));
-        runtime.userActionFind.mockReturnValue(query([
+        ]);
+        runtime.traceAggregate.mockReturnValue(traceAggregation);
+        const outcomeQuery = query([
             {
                 userId: 'user-1',
                 requestId: decisionLogV1.requestId,
@@ -192,7 +243,8 @@ describe('strict replay request exporter', () => {
                     positionContractVersion: 'served_position_1_based_v1',
                 },
             },
-        ]));
+        ]);
+        runtime.userActionFind.mockReturnValue(outcomeQuery);
 
         const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-export-'));
         const output = path.join(outputDirectory, 'requests.ndjson');
@@ -225,21 +277,25 @@ describe('strict replay request exporter', () => {
             await vi.waitFor(() => expect(runtime.disconnectReadOnlyMongo).toHaveBeenCalledOnce());
             await vi.waitFor(() => expect(readFileSync(output, 'utf8').trim()).not.toBe(''));
 
-            expect(runtime.traceFind.mock.calls[0][0]).toHaveProperty(
-                'decisionLogV1.decisionAt',
-            );
-            expect(runtime.traceFind.mock.calls[0][0]).not.toHaveProperty('createdAt');
+            expect(runtime.traceAggregate.mock.calls[0][0][0].$match).toHaveProperty('decisionLogV1.decisionAt');
+            expect(runtime.traceAggregate.mock.calls[0][0][0].$match).not.toHaveProperty('createdAt');
+            expect(runtime.startSession).toHaveBeenCalledWith({
+                snapshot: true,
+                causalConsistency: false,
+            });
+            expect(runtime.session.endSession).toHaveBeenCalledOnce();
+            expect(traceAggregation.session).toHaveBeenCalledWith(runtime.session);
+            expect(outcomeQuery.session).toHaveBeenCalledWith(runtime.session);
             expect(runtime.userActionFind.mock.calls[0][0]).toMatchObject({
-                'metadata.decisionId': { $in: [decisionLogV1.decisionId] },
+                'metadata.decisionId': decisionLogV1.decisionId,
             });
             expect(runtime.userActionFind.mock.calls[0][0]).not.toHaveProperty('targetPostId');
             expect(runtime.userActionFind.mock.calls[0][0]).not.toHaveProperty('userId');
 
             const rawOutput = readFileSync(output, 'utf8');
             const request = JSON.parse(rawOutput);
-            const { buildRecommendationViewerPseudonymV1 } = await import(
-                '../../src/services/recommendation/evidenceCapture/privacy'
-            );
+            const { buildRecommendationViewerPseudonymV1 } =
+                await import('../../src/services/recommendation/evidenceCapture/privacy');
             const expectedPseudonym = buildRecommendationViewerPseudonymV1({
                 masterKey: Buffer.from(pseudonymKeyHex, 'hex'),
                 viewerId: 'viewer:user-1',
@@ -278,9 +334,7 @@ describe('strict replay request exporter', () => {
             expect(request.candidates[1]).not.toHaveProperty('outcomeContractV1');
             expect(request.candidates[1]).not.toHaveProperty('labels');
             expect(request.candidates[1]).not.toHaveProperty('feedbackLabel');
-            expect(log).toHaveBeenCalledWith(
-                '[ExportRecsysReplay] evidenceStatus=diagnostic_only_unverified_source',
-            );
+            expect(log).toHaveBeenCalledWith('[ExportRecsysReplay] evidenceStatus=diagnostic_only_unverified_source');
             expect(error).not.toHaveBeenCalled();
             expect(process.exitCode).toBeUndefined();
         } finally {
@@ -323,7 +377,9 @@ describe('strict replay request exporter', () => {
             expect(runtime.connectReadOnlyMongo).not.toHaveBeenCalled();
             expect(error).toHaveBeenCalledWith(
                 '[ExportRecsysReplay] failed:',
-                expect.objectContaining({ message: 'replay_export_pseudonym_key_invalid' }),
+                expect.objectContaining({
+                    message: 'replay_export_pseudonym_key_invalid',
+                }),
             );
         } finally {
             process.argv = originalArgv;
@@ -399,7 +455,7 @@ describe('strict replay request exporter', () => {
         runtime.connectReadOnlyMongo.mockClear();
         runtime.disconnectReadOnlyMongo.mockClear();
         runtime.userActionFind.mockClear();
-        runtime.traceFind.mockReturnValue(query([trace]));
+        runtime.traceAggregate.mockReturnValue(aggregation([trace]));
         process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = 'ef'.repeat(32);
         process.argv = [
             'node',
@@ -418,6 +474,103 @@ describe('strict replay request exporter', () => {
             await import('../../src/scripts/exportRecsysReplayRequests');
             await vi.waitFor(() => expect(process.exitCode).toBe(1));
             expect(runtime.userActionFind).not.toHaveBeenCalled();
+            expect(existsSync(output)).toBe(false);
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] failed:',
+                expect.objectContaining({
+                    message: 'replay_export_resource_limit_exceeded',
+                }),
+            );
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a trace whose persisted decision-log digest does not match', async () => {
+        const { trace } = await minimalTrace(1);
+        trace.decisionLogV1Sha256 = '0'.repeat(64);
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-binding-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.traceAggregate.mockReturnValue(aggregation([trace]));
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = '34'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(process.exitCode).toBe(1));
+            expect(runtime.userActionFind).not.toHaveBeenCalled();
+            expect(existsSync(output)).toBe(false);
+            expect(error).toHaveBeenCalledWith(
+                '[ExportRecsysReplay] failed:',
+                expect.objectContaining({ message: 'replay_export_source_binding_invalid' }),
+            );
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects per-decision outcome overflow before publishing', async () => {
+        const { trace } = await minimalTrace(1);
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-action-overflow-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.traceAggregate.mockReturnValue(aggregation([trace]));
+        runtime.userActionFind.mockReturnValue(query(Array.from({ length: 4_097 }, () => ({}))));
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = '56'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(process.exitCode).toBe(1));
             expect(existsSync(output)).toBe(false);
             expect(error).toHaveBeenCalledWith(
                 '[ExportRecsysReplay] failed:',
@@ -448,7 +601,7 @@ describe('strict replay request exporter', () => {
         const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
         runtime.connectReadOnlyMongo.mockClear();
         runtime.disconnectReadOnlyMongo.mockClear();
-        runtime.traceFind.mockReturnValue(query([trace]));
+        runtime.traceAggregate.mockReturnValue(aggregation([trace]));
         runtime.userActionFind.mockReturnValue(query([]));
         process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = '12'.repeat(32);
         process.argv = [
@@ -464,11 +617,12 @@ describe('strict replay request exporter', () => {
         process.exitCode = undefined;
 
         vi.resetModules();
-        const { setAtomicSinkTestHooksV1 } = await import(
-            '../../src/services/recommendation/offlinePrediction/snapshotV2/atomicSink'
-        );
+        const { setAtomicSinkTestHooksV1 } =
+            await import('../../src/services/recommendation/offlinePrediction/snapshotV2/atomicSink');
         setAtomicSinkTestHooksV1({
-            syncParentDirectory: () => { throw new Error('forced_parent_sync_failure'); },
+            syncParentDirectory: () => {
+                throw new Error('forced_parent_sync_failure');
+            },
         });
         try {
             await import('../../src/scripts/exportRecsysReplayRequests');

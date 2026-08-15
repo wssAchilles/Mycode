@@ -17,6 +17,7 @@ import RecommendationTrace from '../models/RecommendationTrace';
 import UserAction, { ActionType } from '../models/UserAction';
 import {
     type RecommendationDecisionLogV1,
+    decisionLogSha256,
     recommendationDecisionLogSchema,
 } from '../services/recommendation/decisionLog/contracts';
 import { buildRecommendationViewerPseudonymV1 } from '../services/recommendation/evidenceCapture/privacy';
@@ -27,10 +28,7 @@ import {
 import { publishAtomicCanonicalNdjsonV1 } from '../services/recommendation/offlinePrediction/snapshotV2/atomicSink';
 import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
 import type { ReplayCandidateLabelSummary, ReplayRequestSnapshot } from '../services/recommendation/replay/contracts';
-import {
-    connectReadOnlyMongo,
-    disconnectReadOnlyMongo,
-} from '../services/recommendation/training/readOnlyMongo';
+import { connectReadOnlyMongo, disconnectReadOnlyMongo } from '../services/recommendation/training/readOnlyMongo';
 import { LABEL_ACTION_TYPES } from '../services/recommendation/utils/actionLabels';
 
 dotenv.config();
@@ -51,6 +49,7 @@ const DEFAULT_EXPORT_REQUESTS = 2_000;
 const MAX_EXPORT_REQUESTS = 8_192;
 const MAX_CANDIDATES_PER_REQUEST = 2_048;
 const MAX_TOTAL_CANDIDATES = 65_536;
+const MAX_OUTCOME_ACTIONS_PER_REQUEST = 4_096;
 const MAX_OUTCOME_ACTIONS = 131_072;
 const EXPORT_SPOOL_LIMITS = Object.freeze({
     maxLineBytes: 1 << 20,
@@ -58,6 +57,36 @@ const EXPORT_SPOOL_LIMITS = Object.freeze({
     maxRecords: MAX_EXPORT_REQUESTS,
 });
 const PSEUDONYM_KEY_HEX = /^[0-9a-f]{64}$/;
+const TRACE_PROJECTION = Object.freeze({
+    _id: 0,
+    requestId: 1,
+    decisionId: 1,
+    decisionLogV1: 1,
+    decisionLogV1Sha256: 1,
+    userId: 1,
+    productSurface: 1,
+    pipeline: 1,
+    pipelineVersion: 1,
+    traceVersion: 1,
+    owner: 1,
+    fallbackMode: 1,
+    degradedReasons: 1,
+    selectedCount: 1,
+    inNetworkCount: 1,
+    outOfNetworkCount: 1,
+    sourceCounts: 1,
+    authorDiversity: 1,
+    replyRatio: 1,
+    averageScore: 1,
+    topScore: 1,
+    bottomScore: 1,
+    experimentKeys: 1,
+    userState: 1,
+    embeddingQualityScore: 1,
+    shadowComparison: 1,
+    candidates: 1,
+    replayPool: 1,
+});
 
 function parseArgs(): Args {
     const args = process.argv.slice(2);
@@ -93,6 +122,7 @@ function boundedPositiveInteger(raw: string | undefined, fallback: number, maxim
 
 function loadPseudonymMasterKey(args: Args): Buffer {
     const encoded = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX || '';
+    delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
     if (!PSEUDONYM_KEY_HEX.test(encoded)) {
         throw new Error('replay_export_pseudonym_key_invalid');
     }
@@ -143,9 +173,7 @@ function idToString(id: any): string {
 }
 
 function normalizeStringArray(value?: string[]): string[] {
-    return Array.isArray(value)
-        ? value.map((entry) => entry.trim()).filter(Boolean)
-        : [];
+    return Array.isArray(value) ? value.map((entry) => entry.trim()).filter(Boolean) : [];
 }
 
 function feedbackLabel(labels: ReplayCandidateLabelSummary): 'positive' | 'negative' | null {
@@ -163,14 +191,13 @@ function candidateMatchesAction(candidate: any, action: DecisionAction): boolean
 }
 
 function actionKey(action: DecisionAction): string {
-    return [
-        action.actionKey.candidateNamespace,
-        action.actionKey.candidateId,
-        action.actionKey.servedPosition,
-    ].join(':');
+    return [action.actionKey.candidateNamespace, action.actionKey.candidateId, action.actionKey.servedPosition].join(
+        ':',
+    );
 }
 
 let pseudonymMasterKeyForCleanup: Buffer | undefined;
+let snapshotSessionForCleanup: mongoose.ClientSession | undefined;
 let spoolWriterForCleanup: { abort: () => Promise<void> } | undefined;
 let spoolForCleanup: { cleanup: () => Promise<void> } | undefined;
 
@@ -185,7 +212,16 @@ async function main() {
 
     if (fs.existsSync(outputPath)) throw new Error('atomic_artifact_target_exists');
     await connectReadOnlyMongo();
+    const snapshotSession = await mongoose.startSession({
+        snapshot: true,
+        causalConsistency: false,
+    });
+    snapshotSessionForCleanup = snapshotSession;
 
+    let exportedRequests = 0;
+    let exportedCandidates = 0;
+    let observedOutcomeActions = 0;
+    let plannedCandidates = 0;
     const traceQuery: Record<string, unknown> = {
         'decisionLogV1.decisionAt': {
             $gte: since.toISOString(),
@@ -196,152 +232,127 @@ async function main() {
     if (args.experimentKey) traceQuery.experimentKeys = args.experimentKey;
     if (args.pipeline) traceQuery.pipeline = args.pipeline;
 
-    const traceCursor = RecommendationTrace.find(traceQuery)
-        .select(
-            'requestId userId productSurface decisionLogV1 pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore experimentKeys userState embeddingQualityScore shadowComparison candidates replayPool',
-        )
-        .sort({ 'decisionLogV1.decisionAt': -1 });
-    traceCursor.limit(args.limit);
-
-    const traceDocs = (await traceCursor.lean()).slice(0, args.limit).reverse();
-    const traces = traceDocs.flatMap((trace: any) => {
-        const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
-        if (!parsed.success) return [];
-        const decisionAtMs = Date.parse(parsed.data.decisionAt);
-        if (decisionAtMs < since.getTime() || decisionAtMs > now.getTime()) return [];
-        return [{ trace, decision: parsed.data }];
-    });
-
-    if (traces.length === 0) {
-        console.log('[ExportRecsysReplay] no traces found for filters');
-        return;
-    }
-
-    let plannedCandidates = 0;
-    for (const { trace } of traces) {
-        const candidateCount = (trace.replayPool?.candidates || trace.candidates || []).length;
-        if (candidateCount > MAX_CANDIDATES_PER_REQUEST) {
-            throw new Error('replay_export_resource_limit_exceeded');
-        }
-        plannedCandidates += candidateCount;
-        if (plannedCandidates > MAX_TOTAL_CANDIDATES) {
-            throw new Error('replay_export_resource_limit_exceeded');
-        }
-    }
-
-    const decisionIds = traces.map(({ decision }) => decision.decisionId).sort();
-    const minDecisionAt = new Date(Math.min(
-        ...traces.map(({ decision }) => Date.parse(decision.decisionAt)),
-    ));
-    const outcomeActions = await UserAction.find({
-        'metadata.decisionId': { $in: decisionIds },
-        action: { $in: [ActionType.IMPRESSION, ...LABEL_ACTION_TYPES] },
-        timestamp: { $gte: minDecisionAt, $lte: now },
-    })
-        .select('metadata rank requestId userId action timestamp dwellTimeMs')
-        .limit(MAX_OUTCOME_ACTIONS + 1)
-        .lean();
-    if (outcomeActions.length > MAX_OUTCOME_ACTIONS) {
-        throw new Error('replay_export_resource_limit_exceeded');
-    }
-
-    const actionsByDecisionId = new Map<string, Array<Record<string, any>>>();
-    for (const action of outcomeActions) {
-        const decisionId = action.metadata?.decisionId;
-        if (!decisionId) continue;
-        const bucket = actionsByDecisionId.get(decisionId) || [];
-        bucket.push(action);
-        actionsByDecisionId.set(decisionId, bucket);
-    }
+    const traceCursor = RecommendationTrace.aggregate([
+        { $match: traceQuery },
+        { $sort: { 'decisionLogV1.decisionAt': -1, _id: -1 } },
+        { $limit: args.limit },
+        { $sort: { 'decisionLogV1.decisionAt': 1, _id: 1 } },
+        { $project: TRACE_PROJECTION },
+    ])
+        .session(snapshotSession)
+        .cursor({ batchSize: 1 });
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     const spoolWriter = await createCanonicalSpoolWriterV2(EXPORT_SPOOL_LIMITS);
     spoolWriterForCleanup = spoolWriter;
-
-    let exportedRequests = 0;
-    let exportedCandidates = 0;
     const identityPseudonyms = new Map<string, string>();
 
-    for (const { trace, decision } of traces) {
-        const traceCandidates = (trace.replayPool?.candidates || trace.candidates || []) as any[];
-        const outcomesByActionKey = new Map(decision.actions.map((servedAction) => [
-            actionKey(servedAction),
-            attributeOutcomeV1({
-                decisionLog: decision,
-                servedAction,
-                traceUserId: trace.userId,
-                events: actionsByDecisionId.get(decision.decisionId) || [],
-                observedThrough: now,
-                horizonMs: windowMs,
-            }),
-        ]));
-        const replayCandidates = traceCandidates.reduce<ReplayRequestSnapshot['candidates']>(
-            (acc, candidate: any) => {
-                const postId = idToString(candidate.postId);
-                if (!postId) return acc;
-                const servedAction = decision.actions.find((action) => (
-                    candidateMatchesAction(candidate, action)
-                ));
-                const outcomeContractV1 = servedAction
-                    ? outcomesByActionKey.get(actionKey(servedAction))
-                    : undefined;
-                const labels = outcomeContractV1?.status === 'observed'
-                    ? outcomeContractV1.labels
-                    : undefined;
-                const rank = finiteRank(candidate.rank);
-                const replayCandidate = {
-                    requestId: decision.requestId,
-                    postId,
-                    modelPostId: candidate.modelPostId || '',
-                    authorId: pseudonymizeIdentity(
-                        'author',
-                        candidate.authorId,
-                        pseudonymMasterKey,
-                        args,
-                        identityPseudonyms,
-                    ),
-                    rank,
-                    baselineRank: rank,
-                    recallSource: candidate.recallSource || '',
-                    secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources),
-                    selectionPool: candidate.selectionPool || '',
-                    selectionReason: candidate.selectionReason || '',
-                    inNetwork: candidate.inNetwork === true,
-                    isNews: candidate.isNews === true,
-                    score: finiteNumberOrNull(candidate.score),
-                    weightedScore: finiteNumberOrNull(candidate.weightedScore),
-                    experimentKeys: normalizeStringArray(candidate.experimentKeys || trace.experimentKeys),
-                    productSurface: trace.productSurface || 'space_feed',
-                    pipelineScore: finiteNumberOrNull(candidate.pipelineScore),
-                    scoreBreakdown: candidate.scoreBreakdown || undefined,
-                    recommendationDetail: candidate.recommendationDetail || undefined,
-                    sourceReason: candidate.sourceReason || undefined,
-                    evidence: Array.isArray(candidate.evidence) ? candidate.evidence : undefined,
-                    explainSignals: candidate.explainSignals || undefined,
-                    createdAt: candidate.createdAt
-                        ? new Date(candidate.createdAt).toISOString()
-                        : undefined,
-                    ...(outcomeContractV1 ? { outcomeContractV1 } : {}),
-                    ...(labels ? {
-                        feedbackLabel: feedbackLabel(labels),
-                        labels,
-                    } : {}),
-                };
-                acc.push(replayCandidate);
-                return acc;
-            },
-            [],
+    for await (const trace of traceCursor as AsyncIterable<any>) {
+        const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
+        if (!parsed.success) throw new Error('replay_export_source_contract_invalid');
+        const decision = parsed.data;
+        const decisionAtMs = Date.parse(decision.decisionAt);
+        if (
+            decisionAtMs < since.getTime() ||
+            decisionAtMs > now.getTime() ||
+            trace.requestId !== decision.requestId ||
+            trace.decisionId !== decision.decisionId ||
+            trace.decisionLogV1Sha256 !== decisionLogSha256(decision)
+        )
+            throw new Error('replay_export_source_binding_invalid');
+
+        const traceCandidates = trace.replayPool?.candidates ?? trace.candidates;
+        if (!Array.isArray(traceCandidates)) {
+            throw new Error('replay_export_source_contract_invalid');
+        }
+        if (traceCandidates.length > MAX_CANDIDATES_PER_REQUEST) {
+            throw new Error('replay_export_resource_limit_exceeded');
+        }
+        plannedCandidates += traceCandidates.length;
+        if (plannedCandidates > MAX_TOTAL_CANDIDATES) {
+            throw new Error('replay_export_resource_limit_exceeded');
+        }
+
+        const remainingOutcomeActions = MAX_OUTCOME_ACTIONS - observedOutcomeActions;
+        const outcomeActions = await UserAction.find({
+            'metadata.decisionId': decision.decisionId,
+            action: { $in: [ActionType.IMPRESSION, ...LABEL_ACTION_TYPES] },
+            timestamp: { $gte: since, $lte: now },
+        })
+            .select('metadata rank requestId userId action timestamp dwellTimeMs')
+            .sort({ timestamp: 1, _id: 1 })
+            .limit(Math.min(MAX_OUTCOME_ACTIONS_PER_REQUEST, remainingOutcomeActions) + 1)
+            .session(snapshotSession)
+            .lean();
+        if (outcomeActions.length > MAX_OUTCOME_ACTIONS_PER_REQUEST || outcomeActions.length > remainingOutcomeActions)
+            throw new Error('replay_export_resource_limit_exceeded');
+        observedOutcomeActions += outcomeActions.length;
+
+        const outcomesByActionKey = new Map(
+            decision.actions.map((servedAction) => [
+                actionKey(servedAction),
+                attributeOutcomeV1({
+                    decisionLog: decision,
+                    servedAction,
+                    traceUserId: trace.userId,
+                    events: outcomeActions,
+                    observedThrough: now,
+                    horizonMs: windowMs,
+                }),
+            ]),
         );
+        const replayCandidates = traceCandidates.reduce<ReplayRequestSnapshot['candidates']>((acc, candidate: any) => {
+            const postId = idToString(candidate.postId);
+            if (!postId) return acc;
+            const servedAction = decision.actions.find((action) => candidateMatchesAction(candidate, action));
+            const outcomeContractV1 = servedAction ? outcomesByActionKey.get(actionKey(servedAction)) : undefined;
+            const labels = outcomeContractV1?.status === 'observed' ? outcomeContractV1.labels : undefined;
+            const rank = finiteRank(candidate.rank);
+            const replayCandidate = {
+                requestId: decision.requestId,
+                postId,
+                modelPostId: candidate.modelPostId || '',
+                authorId: pseudonymizeIdentity(
+                    'author',
+                    candidate.authorId,
+                    pseudonymMasterKey,
+                    args,
+                    identityPseudonyms,
+                ),
+                rank,
+                baselineRank: rank,
+                recallSource: candidate.recallSource || '',
+                secondaryRecallSources: normalizeStringArray(candidate.secondaryRecallSources),
+                selectionPool: candidate.selectionPool || '',
+                selectionReason: candidate.selectionReason || '',
+                inNetwork: candidate.inNetwork === true,
+                isNews: candidate.isNews === true,
+                score: finiteNumberOrNull(candidate.score),
+                weightedScore: finiteNumberOrNull(candidate.weightedScore),
+                experimentKeys: normalizeStringArray(candidate.experimentKeys || trace.experimentKeys),
+                productSurface: trace.productSurface || 'space_feed',
+                pipelineScore: finiteNumberOrNull(candidate.pipelineScore),
+                scoreBreakdown: candidate.scoreBreakdown || undefined,
+                recommendationDetail: candidate.recommendationDetail || undefined,
+                sourceReason: candidate.sourceReason || undefined,
+                evidence: Array.isArray(candidate.evidence) ? candidate.evidence : undefined,
+                explainSignals: candidate.explainSignals || undefined,
+                createdAt: candidate.createdAt ? new Date(candidate.createdAt).toISOString() : undefined,
+                ...(outcomeContractV1 ? { outcomeContractV1 } : {}),
+                ...(labels
+                    ? {
+                          feedbackLabel: feedbackLabel(labels),
+                          labels,
+                      }
+                    : {}),
+            };
+            acc.push(replayCandidate);
+            return acc;
+        }, []);
         const replayRequest: ReplayRequestSnapshot = {
             requestId: decision.requestId,
             decisionId: decision.decisionId,
-            userId: pseudonymizeIdentity(
-                'viewer',
-                trace.userId,
-                pseudonymMasterKey,
-                args,
-                identityPseudonyms,
-            ),
+            userId: pseudonymizeIdentity('viewer', trace.userId, pseudonymMasterKey, args, identityPseudonyms),
             requestAt: decision.decisionAt,
             productSurface: trace.productSurface || 'space_feed',
             pipeline: trace.pipeline || undefined,
@@ -374,19 +385,22 @@ async function main() {
         exportedCandidates += replayRequest.candidates.length;
     }
 
+    if (exportedRequests === 0) {
+        console.log('[ExportRecsysReplay] no traces found for filters');
+        return;
+    }
     const completedSpool = await spoolWriter.finish();
     spoolWriterForCleanup = undefined;
     spoolForCleanup = completedSpool;
+    await snapshotSession.endSession();
+    snapshotSessionForCleanup = undefined;
     const publishResult = await publishAtomicCanonicalNdjsonV1({
         targetPath: outputPath,
         records: (async function* () {
-            for await (const record of readCanonicalSpoolRecordsV2(
-                completedSpool.stream,
-                EXPORT_SPOOL_LIMITS,
-            )) {
+            for await (const record of readCanonicalSpoolRecordsV2(completedSpool.stream, EXPORT_SPOOL_LIMITS)) {
                 yield record.value;
             }
-        }()),
+        })(),
         expectedSha256: completedSpool.sha256,
         expectedRecordCount: completedSpool.recordCount,
     });
@@ -405,6 +419,8 @@ async function main() {
 
     console.log(`[ExportRecsysReplay] requests=${exportedRequests}`);
     console.log(`[ExportRecsysReplay] candidates=${exportedCandidates}`);
+    console.log(`[ExportRecsysReplay] outcomeActions=${observedOutcomeActions}`);
+    console.log('[ExportRecsysReplay] sourceRead=mongodb_snapshot_session_v1');
     console.log('[ExportRecsysReplay] evidenceStatus=diagnostic_only_unverified_source');
     console.log(`[ExportRecsysReplay] sha256=${publishResult.sha256}`);
     console.log(`[ExportRecsysReplay] wrote ${outputPath}`);
@@ -428,6 +444,12 @@ main()
     })
     .finally(async () => {
         pseudonymMasterKeyForCleanup?.fill(0);
+        try {
+            await snapshotSessionForCleanup?.endSession();
+        } catch (error) {
+            console.error('[ExportRecsysReplay] snapshot_session_cleanup_failed:', error);
+            process.exitCode = 1;
+        }
         try {
             if (spoolForCleanup) {
                 await spoolForCleanup.cleanup();
