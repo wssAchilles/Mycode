@@ -51,9 +51,6 @@ pub(super) fn simulate_development_v2(
     let source = input
         .validate()
         .map_err(|_| DevelopmentV2Blocker::CommitmentInvalid)?;
-    source
-        .validate()
-        .map_err(|_| DevelopmentV2Blocker::SourceInvalid)?;
     if source.behavior_policy_kind != BehaviorPolicyKind::DeterministicTopK
         || !matches!(
             source.candidate_pool.support_evidence,
