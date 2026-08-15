@@ -6,6 +6,7 @@
  *   npx ts-node src/scripts/evaluateRecsysTrainingSamples.ts --model ./tmp/model.json --modelSha256 <sha256>
  */
 
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -44,6 +45,23 @@ type RequestAggregate = {
     rows: SampleRow[];
 };
 
+const EVALUATION_LIMITS = Object.freeze({
+    maximumInputBytes: 128 * 1024 * 1024,
+    maximumLineBytes: 1 * 1024 * 1024,
+    maximumRows: 65_536,
+    maximumRequests: 16_384,
+    maximumRowsPerRequest: 4_096,
+    maximumTopK: 1_000,
+    maximumWorkUnits: 100_000_000,
+});
+
+type SourceSummary = { rows: number; engagementRate: number; clickRate: number };
+type GroupSummary = { requests: number; engagementHitRateAtK: number; averageOonRatioAtK: number };
+
+function mapToRecord<T>(values: Map<string, T>): Record<string, T> {
+    return Object.fromEntries(values.entries());
+}
+
 function parseArgs() {
     const args = process.argv.slice(2);
     const kv: Record<string, string> = {};
@@ -55,9 +73,16 @@ function parseArgs() {
         kv[key] = value;
     }
 
+    const topK = Number(kv.topK || '10');
+    if (
+        !Number.isInteger(topK)
+        || topK < 1
+        || topK > EVALUATION_LIMITS.maximumTopK
+    ) throw new Error('evaluation_config_resource_limit_exceeded');
+
     return {
         input: kv.input || './tmp/recsys_samples.ndjson',
-        topK: Math.max(1, parseInt(kv.topK || '10', 10) || 10),
+        topK,
         model: kv.model || '',
         modelSha256: kv.modelSha256 || '',
     };
@@ -70,25 +95,92 @@ async function main() {
         throw new Error(`input_not_found:${inputPath}`);
     }
 
-    const requests = new Map<string, RequestAggregate>();
     const learnedModel = loadSocialPhoenixDevelopmentModel(
         args.model || undefined,
         args.modelSha256 || undefined,
     );
-    const stream = fs.createReadStream(inputPath, { encoding: 'utf8' });
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-    for await (const line of rl) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const row = JSON.parse(trimmed) as SampleRow;
-        if (!row.requestId) continue;
-        const request = requests.get(row.requestId) || { requestId: row.requestId, rows: [] };
-        request.rows.push(row);
-        requests.set(row.requestId, request);
+    if (args.model && !learnedModel) {
+        throw new Error('social_phoenix_development_model_unavailable');
     }
 
+    const requests = new Map<string, RequestAggregate>();
+    const inputDescriptor = fs.openSync(inputPath, 'r');
+    let inputStat: fs.Stats;
+    try {
+        inputStat = fs.fstatSync(inputDescriptor);
+    } catch (error) {
+        fs.closeSync(inputDescriptor);
+        throw error;
+    }
+    if (
+        !inputStat.isFile()
+        || !Number.isSafeInteger(inputStat.size)
+        || inputStat.size <= 0
+        || inputStat.size > EVALUATION_LIMITS.maximumInputBytes
+    ) {
+        fs.closeSync(inputDescriptor);
+        throw new Error('evaluation_input_resource_limit_exceeded');
+    }
+    const inputHash = crypto.createHash('sha256');
+    const inputStream = fs.createReadStream(inputPath, {
+        autoClose: true,
+        end: inputStat.size - 1,
+        fd: inputDescriptor,
+    });
+    inputStream.on('data', (chunk: string | Buffer) => inputHash.update(chunk));
+    const rl = readline.createInterface({ input: inputStream, crlfDelay: Infinity });
+    let rowsSeen = 0;
+
+    try {
+        for await (const line of rl) {
+            if (Buffer.byteLength(line, 'utf8') > EVALUATION_LIMITS.maximumLineBytes) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (rowsSeen >= EVALUATION_LIMITS.maximumRows) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            rowsSeen += 1;
+            const row = JSON.parse(trimmed) as SampleRow;
+            if (typeof row.requestId !== 'string' || row.requestId.length === 0) continue;
+            let request = requests.get(row.requestId);
+            if (!request) {
+                if (requests.size >= EVALUATION_LIMITS.maximumRequests) {
+                    throw new Error('evaluation_input_resource_limit_exceeded');
+                }
+                request = { requestId: row.requestId, rows: [] };
+                requests.set(row.requestId, request);
+            }
+            if (request.rows.length >= EVALUATION_LIMITS.maximumRowsPerRequest) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            request.rows.push(row);
+        }
+    } finally {
+        rl.close();
+        inputStream.destroy();
+    }
+
+    const modelFeatureCount = learnedModel?.features.length || 0;
+    const evaluationWorkUnits = rowsSeen * (learnedModel ? 8 * modelFeatureCount : 1)
+        + requests.size * args.topK;
+    if (
+        !Number.isSafeInteger(evaluationWorkUnits)
+        || evaluationWorkUnits > EVALUATION_LIMITS.maximumWorkUnits
+    ) throw new Error('evaluation_work_resource_limit_exceeded');
+
+    const bySource = new Map<string, SourceSummary>();
+    const byUserState = new Map<string, GroupSummary>();
+    const byPipeline = new Map<string, GroupSummary>();
+
     const summary = {
+        evaluationScope: 'offline_diagnostic_v1' as const,
+        modelSelectionEligible: false as const,
+        qualificationEvidenceEligible: false as const,
+        realDatasetEligible: false as const,
+        inputSha256: inputHash.digest('hex'),
+        modelSha256: args.model ? args.modelSha256 : null,
         requests: requests.size,
         rows: 0,
         baseline: {
@@ -126,9 +218,9 @@ async function main() {
             shadowRatio: 0,
             averageShadowOverlapRatio: 0,
         },
-        bySource: {} as Record<string, { rows: number; engagementRate: number; clickRate: number }>,
-        byUserState: {} as Record<string, { requests: number; engagementHitRateAtK: number; averageOonRatioAtK: number }>,
-        byPipeline: {} as Record<string, { requests: number; engagementHitRateAtK: number; averageOonRatioAtK: number }>,
+        bySource: {} as Record<string, SourceSummary>,
+        byUserState: {} as Record<string, GroupSummary>,
+        byPipeline: {} as Record<string, GroupSummary>,
     };
 
     let baselineClickHits = 0;
@@ -178,7 +270,7 @@ async function main() {
             }
         }
         const pipelineKey = traceRow?.requestPipeline || rows[0]?.requestPipeline || '__unknown__';
-        const pipelineSummary = summary.byPipeline[pipelineKey] || {
+        const pipelineSummary = byPipeline.get(pipelineKey) || {
             requests: 0,
             engagementHitRateAtK: 0,
             averageOonRatioAtK: 0,
@@ -186,7 +278,7 @@ async function main() {
         pipelineSummary.requests += 1;
         pipelineSummary.engagementHitRateAtK += baselineMetrics.hasEngagement ? 1 : 0;
         pipelineSummary.averageOonRatioAtK += baselineMetrics.oonRatio;
-        summary.byPipeline[pipelineKey] = pipelineSummary;
+        byPipeline.set(pipelineKey, pipelineSummary);
 
         if (baselineMetrics.hasClick) baselineClickHits += 1;
         if (baselineMetrics.hasEngagement) baselineEngagementHits += 1;
@@ -198,7 +290,7 @@ async function main() {
         baselineRecallSum += baselineMetrics.recallAtK;
         baselineNegativeRateSum += baselineMetrics.negativeRateAtK;
 
-        const userStateSummary = summary.byUserState[userState] || {
+        const userStateSummary = byUserState.get(userState) || {
             requests: 0,
             engagementHitRateAtK: 0,
             averageOonRatioAtK: 0,
@@ -206,11 +298,11 @@ async function main() {
         userStateSummary.requests += 1;
         userStateSummary.engagementHitRateAtK += baselineMetrics.hasEngagement ? 1 : 0;
         userStateSummary.averageOonRatioAtK += baselineMetrics.oonRatio;
-        summary.byUserState[userState] = userStateSummary;
+        byUserState.set(userState, userStateSummary);
 
         for (const row of rows) {
             const source = row.recallSource || 'unknown';
-            const sourceSummary = summary.bySource[source] || {
+            const sourceSummary = bySource.get(source) || {
                 rows: 0,
                 engagementRate: 0,
                 clickRate: 0,
@@ -218,7 +310,7 @@ async function main() {
             sourceSummary.rows += 1;
             sourceSummary.engagementRate += Number(row.labelEngagement || 0) > 0 ? 1 : 0;
             sourceSummary.clickRate += Number(row.labelClick || 0) > 0 ? 1 : 0;
-            summary.bySource[source] = sourceSummary;
+            bySource.set(source, sourceSummary);
         }
 
         if (learnedModel) {
@@ -279,30 +371,33 @@ async function main() {
     summary.traceCoverage.averageShadowOverlapRatio =
         traceShadowOverlapSum / Math.max(1, summary.traceCoverage.requestsWithShadow);
 
-    for (const source of Object.keys(summary.bySource)) {
-        summary.bySource[source].engagementRate =
-            summary.bySource[source].engagementRate / Math.max(1, summary.bySource[source].rows);
-        summary.bySource[source].clickRate =
-            summary.bySource[source].clickRate / Math.max(1, summary.bySource[source].rows);
+    for (const source of bySource.keys()) {
+        const sourceSummary = bySource.get(source)!;
+        sourceSummary.engagementRate =
+            sourceSummary.engagementRate / Math.max(1, sourceSummary.rows);
+        sourceSummary.clickRate =
+            sourceSummary.clickRate / Math.max(1, sourceSummary.rows);
     }
 
-    for (const state of Object.keys(summary.byUserState)) {
-        summary.byUserState[state].engagementHitRateAtK =
-            summary.byUserState[state].engagementHitRateAtK /
-            Math.max(1, summary.byUserState[state].requests);
-        summary.byUserState[state].averageOonRatioAtK =
-            summary.byUserState[state].averageOonRatioAtK /
-            Math.max(1, summary.byUserState[state].requests);
+    for (const state of byUserState.keys()) {
+        const stateSummary = byUserState.get(state)!;
+        stateSummary.engagementHitRateAtK =
+            stateSummary.engagementHitRateAtK / Math.max(1, stateSummary.requests);
+        stateSummary.averageOonRatioAtK =
+            stateSummary.averageOonRatioAtK / Math.max(1, stateSummary.requests);
     }
 
-    for (const pipeline of Object.keys(summary.byPipeline)) {
-        summary.byPipeline[pipeline].engagementHitRateAtK =
-            summary.byPipeline[pipeline].engagementHitRateAtK /
-            Math.max(1, summary.byPipeline[pipeline].requests);
-        summary.byPipeline[pipeline].averageOonRatioAtK =
-            summary.byPipeline[pipeline].averageOonRatioAtK /
-            Math.max(1, summary.byPipeline[pipeline].requests);
+    for (const pipeline of byPipeline.keys()) {
+        const pipelineSummary = byPipeline.get(pipeline)!;
+        pipelineSummary.engagementHitRateAtK =
+            pipelineSummary.engagementHitRateAtK / Math.max(1, pipelineSummary.requests);
+        pipelineSummary.averageOonRatioAtK =
+            pipelineSummary.averageOonRatioAtK / Math.max(1, pipelineSummary.requests);
     }
+
+    summary.bySource = mapToRecord(bySource);
+    summary.byUserState = mapToRecord(byUserState);
+    summary.byPipeline = mapToRecord(byPipeline);
 
     console.log(JSON.stringify(summary, null, 2));
 }
