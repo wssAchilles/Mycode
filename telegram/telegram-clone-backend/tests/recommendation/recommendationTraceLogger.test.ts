@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 
 import RecommendationTrace from '../../src/models/RecommendationTrace';
@@ -32,6 +32,26 @@ const makeCandidate = (postId: mongoose.Types.ObjectId, overrides?: Partial<any>
 describe('RecommendationTraceLogger', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
+        vi.stubEnv('RECOMMENDATION_TRACE_ENABLED', 'true');
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('keeps raw recommendation trace capture disabled unless explicitly enabled', async () => {
+        vi.stubEnv('RECOMMENDATION_TRACE_ENABLED', '');
+        const spy = vi.spyOn(RecommendationTrace, 'findOneAndUpdate').mockResolvedValue(null as any);
+        const query = createFeedQuery('trace-user', 20, false, {
+            requestId: 'req-trace-default-off',
+        });
+
+        expect(new RecommendationTraceLogger().enable()).toBe(false);
+        await recordRecommendationTrace(query, [
+            makeCandidate(oid('507f191e810c19729de87070')) as any,
+        ]);
+
+        expect(spy).not.toHaveBeenCalled();
     });
 
     it('indexes rollout evidence scans by runtime mode and time before serving owner', () => {

@@ -99,7 +99,7 @@ export async function recordRecommendationTrace(
 ): Promise<void> {
     const replayCandidates = runtime.replayCandidates ?? [];
     if (
-        !isTraceEnabled()
+        !isRecommendationTraceEnabled()
         || !query.requestId
         || (
             selectedCandidates.length === 0
@@ -325,8 +325,8 @@ function sanitizeRustReplayPool(
     };
 }
 
-function isTraceEnabled(): boolean {
-    return String(process.env.RECOMMENDATION_TRACE_ENABLED || 'true').toLowerCase() !== 'false';
+export function isRecommendationTraceEnabled(): boolean {
+    return process.env.RECOMMENDATION_TRACE_ENABLED === 'true';
 }
 
 function buildSourceCounts(candidates: FeedCandidate[]) {
