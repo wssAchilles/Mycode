@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtime = vi.hoisted(() => {
   const write = vi.fn();
@@ -105,6 +105,11 @@ function query<T>(rows: T[]) {
 }
 
 describe('PIT-safe partial training exporter CLI', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
   it('runs the real exporter path without mutating a datastore', async () => {
     const decisionAt = '2026-05-01T12:00:00.000Z';
     const eventTime = new Date('2026-05-01T12:00:05.000Z');
@@ -119,7 +124,7 @@ describe('PIT-safe partial training exporter CLI', () => {
     };
     decisionLogV1.actions[0].actionKey.candidateId = postId;
     decisionLogV1.candidatePool.candidates[0].candidateId = postId;
-    const { candidatePoolSha256 } = await import(
+    const { candidatePoolSha256, decisionLogSha256 } = await import(
       '../../src/services/recommendation/decisionLog/contracts'
     );
     decisionLogV1.candidatePool.candidatePoolSha256 = candidatePoolSha256(
@@ -127,6 +132,8 @@ describe('PIT-safe partial training exporter CLI', () => {
     );
     runtime.traceFind.mockReturnValue(query([{
       requestId: decisionLogV1.requestId,
+      decisionId: decisionLogV1.decisionId,
+      decisionLogV1Sha256: decisionLogSha256(decisionLogV1),
       userId: 'user-1',
       productSurface: 'space_feed',
       decisionLogV1,
@@ -208,6 +215,60 @@ describe('PIT-safe partial training exporter CLI', () => {
       expect(row.pitEventTime).toBe(decisionAt);
       expect(row.impressionAt).toBe(eventTime.toISOString());
       expect(row.outcomeContractV1.status).toBe('observed');
+    } finally {
+      process.argv = originalArgv;
+      process.exitCode = originalExitCode;
+      error.mockRestore();
+      log.mockRestore();
+      rmSync(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a Decision Log binding mismatch before downstream reads', async () => {
+    const sharedFixture = JSON.parse(readFileSync(path.resolve(
+      __dirname,
+      '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/decision_log_v1.json',
+    ), 'utf8'));
+    runtime.traceFind.mockReturnValue(query([{
+      requestId: sharedFixture.decisionLog.requestId,
+      decisionId: sharedFixture.decisionLog.decisionId,
+      decisionLogV1Sha256: '0'.repeat(64),
+      userId: 'user-1',
+      productSurface: 'space_feed',
+      decisionLogV1: sharedFixture.decisionLog,
+      candidates: [],
+    }]));
+
+    const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-export-binding-'));
+    const originalArgv = process.argv;
+    const originalExitCode = process.exitCode;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    process.argv = [
+      'node',
+      'exportRecsysTrainingSamples.ts',
+      '--cutoff',
+      '2026-05-03T12:00:00.000Z',
+      '--output',
+      path.join(outputDirectory, 'samples.ndjson'),
+    ];
+    process.exitCode = undefined;
+
+    try {
+      await import('../../src/scripts/exportRecsysTrainingSamples');
+      await vi.waitFor(() => expect(runtime.sequelize.close).toHaveBeenCalledOnce());
+
+      expect(process.exitCode).toBe(1);
+      expect(error).toHaveBeenCalledWith(
+        '[ExportRecsysSamples] failed:',
+        expect.objectContaining({ message: 'training_export_source_binding_invalid' }),
+      );
+      expect(runtime.userActionFind).not.toHaveBeenCalled();
+      expect(runtime.userFindAll).not.toHaveBeenCalled();
+      expect(runtime.contactFindAll).not.toHaveBeenCalled();
+      expect(runtime.featureFind).not.toHaveBeenCalled();
+      expect(runtime.getSnapshotsByPostIds).not.toHaveBeenCalled();
+      expect(readdirSync(outputDirectory)).toEqual([]);
     } finally {
       process.argv = originalArgv;
       process.exitCode = originalExitCode;

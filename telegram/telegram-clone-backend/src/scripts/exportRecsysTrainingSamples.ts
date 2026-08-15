@@ -22,6 +22,7 @@ import UserFeatureVector from '../models/UserFeatureVector';
 import { postFeatureSnapshotService } from '../services/recommendation/contentFeatures';
 import {
     type RecommendationDecisionLogV1,
+    decisionLogSha256,
     recommendationDecisionLogSchema,
 } from '../services/recommendation/decisionLog/contracts';
 import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
@@ -103,6 +104,8 @@ type ContactRecord = {
 
 type TraceRecord = {
     requestId: string;
+    decisionId?: string;
+    decisionLogV1Sha256?: string;
     userId: string;
     productSurface: string;
     experimentKeys?: string[];
@@ -298,7 +301,7 @@ async function main() {
 
     const traceCursor = RecommendationTrace.find(traceQuery)
         .select(
-            'requestId userId productSurface experimentKeys decisionLogV1 candidates pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness shadowComparison',
+            'requestId decisionId decisionLogV1Sha256 userId productSurface experimentKeys decisionLogV1 candidates pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness shadowComparison',
         )
         .sort({ 'decisionLogV1.decisionAt': -1, _id: -1 });
     if (args.limit > 0) traceCursor.limit(args.limit);
@@ -310,7 +313,14 @@ async function main() {
     }> = [];
     for (const trace of traceDocs) {
         const parsed = recommendationDecisionLogSchema.safeParse(trace.decisionLogV1);
-        if (!parsed.success) continue;
+        if (!parsed.success) throw new Error('training_export_source_contract_invalid');
+        if (
+            trace.requestId !== parsed.data.requestId
+            || trace.decisionId !== parsed.data.decisionId
+            || trace.decisionLogV1Sha256 !== decisionLogSha256(parsed.data)
+        ) {
+            throw new Error('training_export_source_binding_invalid');
+        }
         const decisionAtMs = Date.parse(parsed.data.decisionAt);
         if (decisionAtMs < since.getTime() || decisionAtMs > cutoff.getTime()) continue;
         canonicalTraces.push({ trace, decision: parsed.data });
