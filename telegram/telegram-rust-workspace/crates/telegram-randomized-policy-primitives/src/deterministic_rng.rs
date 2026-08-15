@@ -326,6 +326,41 @@ mod tests {
     }
 
     #[test]
+    fn open53_replay_crosses_chacha_block_boundary() {
+        let seed = [17_u8; 32];
+        let source = [4_u8; 32];
+        let pool = [5_u8; 32];
+        let config = [6_u8; 32];
+        let epoch = b"development-epoch-block-boundary";
+        let decision = b"decision-block-boundary";
+        let mut first = DeterministicOpen53Rng::from_seed_and_context(
+            &seed, epoch, decision, &source, &pool, &config,
+        )
+        .unwrap();
+        let mut replay = DeterministicOpen53Rng::from_seed_and_context(
+            &seed, epoch, decision, &source, &pool, &config,
+        )
+        .unwrap();
+
+        let first_draws = (0..9)
+            .map(|_| first.next_open53().unwrap())
+            .collect::<Vec<_>>();
+        let replay_draws = (0..9)
+            .map(|_| replay.next_open53().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_draws, replay_draws);
+        assert!(first_draws[8].start_byte_offset >= 64);
+        assert!(
+            first_draws
+                .iter()
+                .all(|draw| draw.uniform_draw > 0.0 && draw.uniform_draw < 1.0)
+        );
+        assert!(first.byte_offset() >= 72);
+        assert_eq!(first.byte_offset(), replay.byte_offset());
+    }
+
+    #[test]
     fn commitment_and_context_are_length_framed_and_fail_closed() {
         let seed = [9_u8; 32];
         let commitment = compute_development_seed_commitment_sha256_v1(b"epoch", &seed).unwrap();
