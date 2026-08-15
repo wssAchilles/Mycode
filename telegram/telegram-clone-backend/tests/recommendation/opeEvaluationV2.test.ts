@@ -6,7 +6,10 @@ import path from 'path';
 import { ActionType } from '../../src/models/UserAction';
 import { evaluateOpeV2 } from '../../src/services/recommendation/ope/v2/evaluate';
 import { candidatePoolSha256, canonicalDecisionJson, recommendationDecisionLogSchema, type RecommendationDecisionLogV1 } from '../../src/services/recommendation/decisionLog/contracts';
-import { verifyDecisionContextEvidenceV1 } from '../../src/services/recommendation/decisionContext/verify';
+import {
+  decisionContextEvidenceSha256V1,
+} from '../../src/services/recommendation/decisionContext/verify';
+import * as decisionContextArtifacts from '../../src/services/recommendation/decisionContext/verify';
 import { opeProjectionSha256V2, projectVerifiedOpeEvidenceV2 } from '../../src/services/recommendation/ope/v2/project';
 import { evaluateRankingPromotionPolicyV2 } from '../../src/services/recommendation/promotion/v2/evaluate';
 import * as targetArtifacts from '../../src/services/recommendation/offlinePrediction/artifacts/targetDistribution';
@@ -45,6 +48,8 @@ function input(slots: SlotFixture[], evaluationConfig: typeof config & { predict
     const rows = slots.filter((row) => row.decisionId === decisionId);
     const boundVersions = Object.fromEntries(Object.entries(evaluationConfig.decisionVersions).map(([key, version]) => [key, { status: 'bound', version }]));
     const candidateIds = [...new Set(rows.flatMap((row) => [...row.prefixActionKeys, ...row.targetDistribution.actions.map((entry) => entry.actionKey)]).map((entry) => entry.candidateId))];
+    const selectedRows = [...rows].sort((left, right) => left.servedPosition - right.servedPosition);
+    const selectionRanks = new Map(selectedRows.map((row, index) => [row.loggedActionKey.candidateId, index + 1]));
     const candidates = candidateIds.map((candidateId, index) => {
       const selected = rows.find((row) => row.loggedActionKey.candidateId === candidateId);
       return {
@@ -54,7 +59,7 @@ function input(slots: SlotFixture[], evaluationConfig: typeof config & { predict
         eligible: true,
         score: 1 - index / Math.max(1, candidateIds.length),
         selected: Boolean(selected),
-        selectionRank: selected?.servedPosition ?? null,
+        selectionRank: selected ? selectionRanks.get(candidateId) ?? null : null,
         served: Boolean(selected),
         servedPosition: selected?.servedPosition ?? null,
         objectiveEvidence: [],
@@ -72,7 +77,7 @@ function input(slots: SlotFixture[], evaluationConfig: typeof config & { predict
       behaviorPolicy: { policyId: evaluationConfig.behaviorPolicy.policyId, policyVersion: { status: 'bound', version: evaluationConfig.behaviorPolicy.policyVersion } },
       versions: boundVersions,
       candidatePool: { supportEvidence: { status: 'complete' }, totalCount: candidates.length, truncated: false, candidates, candidatePoolSha256: candidatePoolSha256(candidates) },
-      actions: rows.map((row) => ({ actionKey: row.loggedActionKey, selectionRank: row.servedPosition, behaviorPropensity: { status: 'logged_randomized', selectionProbability: row.behaviorSupport.loggedActionProbability } })),
+      actions: selectedRows.map((row, index) => ({ actionKey: row.loggedActionKey, selectionRank: index + 1, behaviorPropensity: { status: 'logged_randomized', selectionProbability: row.behaviorSupport.loggedActionProbability } })),
     });
   });
   const targetDecisions = decisions.map((decision) => ({ decisionId: decision.decisionId, decisionLogSha256: decisionDigest(decision), candidatePoolSha256: decision.candidatePool.candidatePoolSha256, steps: slots.filter((row) => row.decisionId === decision.decisionId).map((row) => ({ servedPosition: row.servedPosition, prefixActionKeys: row.prefixActionKeys, actions: row.targetDistribution.actions })) }));
@@ -82,17 +87,28 @@ function input(slots: SlotFixture[], evaluationConfig: typeof config & { predict
   const target = { manifest: { datasetVersion: evaluationConfig.datasetVersion, sourceDecisionNdjsonSha256: '1'.repeat(64), sourceDatasetManifestSha256: '2'.repeat(64), policyConfigSha256: evaluationConfig.targetPolicyConfigSha256, distributionNdjsonSha256: '3'.repeat(64) }, receipt: { status: 'verified', verifierVersion: 'telegram_recommendation_policy_offline_verifier_v1', targetManifestSha256: '4'.repeat(64), sourceDecisionNdjsonSha256: '1'.repeat(64), sourceDatasetManifestSha256: '2'.repeat(64), policyConfigSha256: evaluationConfig.targetPolicyConfigSha256, distributionNdjsonSha256: '3'.repeat(64) }, targetManifestSha256: '4'.repeat(64), targetReceiptRawSha256: '5'.repeat(64), decisions: targetDecisions } as any;
   const targetGuard = mockVerifiedFixture ? vi.spyOn(targetArtifacts, 'isVerifiedTargetDistributionEvidenceV1').mockReturnValueOnce(true) : undefined;
   const predictionGuard = mockVerifiedFixture && prediction ? vi.spyOn(predictionArtifacts, 'isVerifiedCrossFittedPredictionSetResultV1').mockReturnValueOnce(true) : undefined;
+  const contextGuard = plainEvidence !== 'context'
+    ? vi.spyOn(decisionContextArtifacts, 'isVerifiedDecisionContextEvidenceV1').mockReturnValueOnce(true)
+    : undefined;
   const projected = projectVerifiedOpeEvidenceV2({ config: evaluationConfig, outcomeEvidence: (plainEvidence === 'outcome' ? structuredClone(evidence.outcomeEvidence) : evidence.outcomeEvidence) as any, decisionContextEvidence: (plainEvidence === 'context' ? structuredClone(evidence.decisionContextEvidence) : evidence.decisionContextEvidence) as any, prediction, target: shallowTarget ? Object.freeze(target) : freeze(target) });
-  targetGuard?.mockRestore(); predictionGuard?.mockRestore();
+  targetGuard?.mockRestore(); predictionGuard?.mockRestore(); contextGuard?.mockRestore();
   if (projected.status !== 'projected') throw new Error(projected.blocker);
   return projected.input;
 }
 
 function buildBoundEvidence(decisions: RecommendationDecisionLogV1[], slots: SlotFixture[], evaluationConfig: typeof config) {
-  const context = verifyDecisionContextEvidenceV1({
+  const contextPreimage = {
+    contractVersion: 'verified_decision_context_evidence_v1' as const,
+    resourceLimitsVersion: 'decision_context_evidence_limits_v1' as const,
     datasetVersion: evaluationConfig.datasetVersion,
     crossUserDependence: { status: 'none_observed_in_verified_source_v1' },
     decisions: decisions.map((decision) => ({
+      datasetVersion: evaluationConfig.datasetVersion,
+      decisionId: decision.decisionId,
+      requestId: decision.requestId,
+      decisionAt: decision.decisionAt,
+      decisionLogSha256: decisionDigest(decision),
+      candidatePoolSha256: decision.candidatePool.candidatePoolSha256,
       decisionLog: decision,
       subject: { kind: 'viewer' as const, viewerAccountPseudonym: slots.find((row) => row.decisionId === decision.decisionId)?.viewerId ?? `viewer-${decision.decisionId}` },
       contextAt: new Date(Date.parse(decision.decisionAt) - 2).toISOString(),
@@ -102,10 +118,15 @@ function buildBoundEvidence(decisions: RecommendationDecisionLogV1[], slots: Slo
       inferenceClusterId: slots.find((row) => row.decisionId === decision.decisionId)?.inferenceClusterId ?? `opaque-cluster-${decision.decisionId}`,
       clusterUnitVersion: 'viewer_account_pseudonym_v1' as const,
       realDatasetEligible: slots.find((row) => row.decisionId === decision.decisionId)?.realDatasetEligible ?? true,
-      segments: slots.find((row) => row.decisionId === decision.decisionId)?.segments ?? {},
-    })),
+      segments: Object.fromEntries(Object.entries(
+        slots.find((row) => row.decisionId === decision.decisionId)?.segments ?? {},
+      ).sort(([left], [right]) => Buffer.compare(Buffer.from(left), Buffer.from(right)))),
+    })).sort((left, right) => Buffer.compare(Buffer.from(left.decisionId), Buffer.from(right.decisionId))),
+  };
+  const context = freeze({
+    ...contextPreimage,
+    decisionContextEvidenceSha256: decisionContextEvidenceSha256V1(contextPreimage),
   });
-  if (context.status !== 'verified') throw new Error(context.blocker);
   const outcome = verifyOutcomeEvidenceV1({
     datasetVersion: evaluationConfig.datasetVersion,
     rewardDefinition: evaluationConfig.rewardDefinition,
@@ -129,7 +150,7 @@ function buildBoundEvidence(decisions: RecommendationDecisionLogV1[], slots: Slo
     }),
   });
   if (outcome.status !== 'verified') throw new Error(outcome.blocker);
-  return { outcomeEvidence: outcome.evidence, decisionContextEvidence: context.evidence };
+  return { outcomeEvidence: outcome.evidence, decisionContextEvidence: context };
 }
 
 describe('OPE v2', () => {
@@ -300,7 +321,12 @@ describe('OPE v2', () => {
       segments: {},
     })));
     const evidence = buildBoundEvidence(decisions, evidenceRows, realConfig);
+    const contextGuard = vi.spyOn(
+      decisionContextArtifacts,
+      'isVerifiedDecisionContextEvidenceV1',
+    ).mockReturnValueOnce(true);
     const projected = projectVerifiedOpeEvidenceV2({ config: realConfig, target: verified.evidence, outcomeEvidence: evidence.outcomeEvidence, decisionContextEvidence: evidence.decisionContextEvidence });
+    contextGuard.mockRestore();
     expect(projected).toEqual({ status: 'not_evaluable', blocker: 'decision_version_mismatch' });
   });
 
