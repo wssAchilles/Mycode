@@ -58,6 +58,16 @@ export function decisionContextEvidenceSha256V1(value: unknown): string {
 export function verifyDecisionContextEvidenceV1(
   input: unknown,
 ): VerifyDecisionContextEvidenceResultV1 {
+  try {
+    return verifyDecisionContextEvidenceUnchecked(input);
+  } catch {
+    return { status: 'not_evaluable', blocker: 'decision_context_contract_invalid' };
+  }
+}
+
+function verifyDecisionContextEvidenceUnchecked(
+  input: unknown,
+): VerifyDecisionContextEvidenceResultV1 {
   const rawInput = record(input);
   if (
     Array.isArray(rawInput?.decisions)

@@ -634,4 +634,17 @@ describe('verified_decision_context_evidence_v1', () => {
             blocker: 'resource_limit_exceeded',
         });
     });
+
+    it('fails closed when hostile input getters throw', () => {
+        const hostile = Object.defineProperty({}, 'decisions', {
+            get() {
+                throw new Error('hostile getter');
+            },
+        });
+
+        expect(verifyDecisionContextEvidenceV1(hostile)).toEqual({
+            status: 'not_evaluable',
+            blocker: 'decision_context_contract_invalid',
+        });
+    });
 });
