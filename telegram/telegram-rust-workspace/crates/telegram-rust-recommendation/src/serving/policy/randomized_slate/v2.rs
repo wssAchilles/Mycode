@@ -10,16 +10,17 @@ use telegram_randomized_policy_primitives::{
 };
 use telegram_recommendation_contracts::{
     BaselineOrderVersion, BehaviorPolicyKind, CandidatePoolFingerprint, CandidateSupportEvidence,
-    DEVELOPMENT_V2_MAX_OUTPUT_CANONICAL_BYTES, DEVELOPMENT_V2_MAX_RAW_INPUT_BYTES,
-    DEVELOPMENT_V2_POLICY_ARITHMETIC_VERSION, DecisionActionKey, DecisionFingerprint,
-    DevelopmentCommitmentPurposeV1, DevelopmentEvidenceKindV1, DevelopmentRandomTranscriptV1,
+    DEVELOPMENT_V2_MAX_OUTPUT_CANONICAL_BYTES, DEVELOPMENT_V2_POLICY_ARITHMETIC_VERSION,
+    DecisionActionKey, DecisionFingerprint, DevelopmentCommitmentPurposeV1,
+    DevelopmentEvidenceKindV1, DevelopmentInputAdmissionErrorV1, DevelopmentRandomTranscriptV1,
     JointProbabilityStatusV1, NumericalDiagnostics, NumericalDiagnosticsStep,
     OrderedJointProbabilityV1, PROBABILITY_MASS_TOLERANCE, ProbabilitySemantics,
     RandomizedSlateDevelopmentActionV2, RandomizedSlateDevelopmentInputV2,
     RandomizedSlateDevelopmentReceiptContractVersionV2, RandomizedSlateDevelopmentReceiptV2,
-    SupportDiagnostics, candidate_namespace_wire_tag, canonical_json,
-    compare_decision_pool_baseline, compute_development_transcript_sha256_v2, decode_hex_32,
-    derive_development_resource_receipt_v1, hex_32, policy_config_sha256_v1, sha256_hex,
+    SupportDiagnostics, admit_development_input_raw_v1, candidate_namespace_wire_tag,
+    canonical_json, compare_decision_pool_baseline, compute_development_transcript_sha256_v2,
+    decode_hex_32, derive_development_resource_receipt_v1, hex_32, policy_config_sha256_v1,
+    sha256_hex,
 };
 
 #[cfg(test)]
@@ -39,9 +40,12 @@ pub(super) enum DevelopmentV2Blocker {
 pub(super) fn simulate_development_v2(
     raw_input: &[u8],
 ) -> Result<RandomizedSlateDevelopmentReceiptV2, DevelopmentV2Blocker> {
-    if raw_input.len() > DEVELOPMENT_V2_MAX_RAW_INPUT_BYTES {
-        return Err(DevelopmentV2Blocker::ResourceLimitExceeded);
-    }
+    admit_development_input_raw_v1(raw_input).map_err(|error| match error {
+        DevelopmentInputAdmissionErrorV1::ResourceLimitExceeded => {
+            DevelopmentV2Blocker::ResourceLimitExceeded
+        }
+        DevelopmentInputAdmissionErrorV1::InvalidJson => DevelopmentV2Blocker::ContractInvalid,
+    })?;
     let input: RandomizedSlateDevelopmentInputV2 =
         serde_json::from_slice(raw_input).map_err(|_| DevelopmentV2Blocker::ContractInvalid)?;
     let source = input
@@ -381,7 +385,7 @@ mod tests {
     use std::sync::Mutex;
     use telegram_randomized_policy_primitives::compute_development_seed_commitment_sha256_v1;
     use telegram_recommendation_contracts::{
-        DEVELOPMENT_V2_MAX_RAW_INPUT_BYTES, DecisionCandidate,
+        DEVELOPMENT_V2_MAX_JSON_DEPTH, DEVELOPMENT_V2_MAX_RAW_INPUT_BYTES, DecisionCandidate,
         RandomizedSlateDevelopmentInputContractVersionV2, RandomizedSlateDevelopmentInputV2,
         RandomizedSlateDevelopmentReceiptV2, RandomizedSlateSimulationInputV1,
         candidate_pool_sha256, canonical_json, canonical_wire_json, decode_hex_32, hex_32,
@@ -497,6 +501,29 @@ mod tests {
         assert_eq!(
             simulate_development_v2(&oversized),
             Err(DevelopmentV2Blocker::ResourceLimitExceeded)
+        );
+        assert_eq!(RNG_CONSTRUCTION_COUNT.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[test]
+    fn bounded_json_admission_happens_before_rng_construction() {
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        RNG_CONSTRUCTION_COUNT.store(0, AtomicOrdering::SeqCst);
+        let deep = format!(
+            "{}0{}",
+            "[".repeat(DEVELOPMENT_V2_MAX_JSON_DEPTH + 1),
+            "]".repeat(DEVELOPMENT_V2_MAX_JSON_DEPTH + 1)
+        );
+
+        assert_eq!(
+            simulate_development_v2(deep.as_bytes()),
+            Err(DevelopmentV2Blocker::ResourceLimitExceeded)
+        );
+        assert_eq!(
+            simulate_development_v2(br#"{"a":1,"a":2}"#),
+            Err(DevelopmentV2Blocker::ContractInvalid)
         );
         assert_eq!(RNG_CONSTRUCTION_COUNT.load(AtomicOrdering::SeqCst), 0);
     }

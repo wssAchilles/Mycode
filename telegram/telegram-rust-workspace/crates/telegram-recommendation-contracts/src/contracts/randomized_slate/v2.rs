@@ -34,6 +34,9 @@ const JSON_STRING_BYTE_EXPANSION_UPPER_BOUND: u64 = 6;
 const OPEN53_MASK: u64 = (1_u64 << 53) - 1;
 const OPEN53_DENOMINATOR: f64 = 9_007_199_254_740_992.0;
 
+mod admission;
+pub use admission::*;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RandomizedSlateDevelopmentInputContractVersionV2 {
     #[serde(rename = "randomized_slate_development_input_v2")]
@@ -236,9 +239,8 @@ impl RandomizedSlateDevelopmentInputV2 {
 
 impl RandomizedSlateDevelopmentReceiptV2 {
     pub fn validate_against_raw(&self, raw_input: &[u8]) -> Result<(), String> {
-        if raw_input.len() > DEVELOPMENT_V2_MAX_RAW_INPUT_BYTES {
-            return Err("raw input exceeds development limit".to_string());
-        }
+        admit_development_input_raw_v1(raw_input)
+            .map_err(|error| format!("development input admission failed: {error:?}"))?;
         let input: RandomizedSlateDevelopmentInputV2 = serde_json::from_slice(raw_input)
             .map_err(|error| format!("parse development input: {error}"))?;
         let source = input.validate()?;
