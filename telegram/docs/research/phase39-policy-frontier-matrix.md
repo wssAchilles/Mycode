@@ -60,6 +60,15 @@ production status。配置总数、排列数、prefix evaluations、canonical ou
 
 ## 决定
 
-`CONDITIONAL GO`：exact frontier 诊断是 bounded、可证伪、复用 canonical Rust
-kernel 的安全离线工作；只有 frontier 指标和资源合同完成后才可宣称本阶段
-offline development 完成。它不改变 randomized logging 的未来授权状态。
+预实施判定为 `CONDITIONAL GO`：exact frontier 诊断是 bounded、可证伪、复用
+canonical Rust kernel 的安全离线工作。
+
+实施后 Phase 39 offline diagnostic 为 `GO`：
+
+- 私有模块只在 `cfg(test)` 下编译，codebase-memory 未发现非测试或 runtime caller；
+- 冻结网格精确产生 `180` 次 prefix evaluation、`576` 次 probability
+  evaluation、`432` 条 ordered path 和 `1,188` work units；
+- 资源超限在首次 probability-kernel 调用前失败，golden report digest 为
+  `9319da59be933ca50d5c04e0adc0a05149cd65601a3e05c02185494bb13dab8e`；
+- 输出仍固定为 diagnostic-only、`servable=false`、
+  `realDatasetEligible=false`，不改变 randomized logging 的未来授权状态。
