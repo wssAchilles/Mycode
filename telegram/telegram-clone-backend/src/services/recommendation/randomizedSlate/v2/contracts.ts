@@ -18,6 +18,7 @@ export const DEVELOPMENT_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 export const DEVELOPMENT_MAX_HASH_BYTES = 512 * 1024 * 1024;
 export const DEVELOPMENT_MAX_ALLOCATION_BYTES = 128 * 1024 * 1024;
 export const DEVELOPMENT_MAX_WORK_UNITS = 5_000_000;
+const DEVELOPMENT_MAX_EPOCH_ID_UTF8_BYTES = 128;
 export const OPEN53_WORDS_PER_DRAW = 4;
 export const OPEN53_WORD_BYTES = 8;
 export const OPEN53_MASK = (1n << 53n) - 1n;
@@ -33,6 +34,10 @@ const u32Schema = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveU32Schema = z.number().int().positive().max(0xffff_ffff);
 const safeCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const probabilitySchema = z.number().finite().gt(0).lte(1);
+const epochIdSchema = z.string().min(1).refine(
+  (value) => Buffer.byteLength(value, 'utf8') <= DEVELOPMENT_MAX_EPOCH_ID_UTF8_BYTES,
+  { message: 'epochId exceeds UTF-8 byte limit' },
+);
 
 const randomTranscriptSchema = z.object({
   startByteOffset: safeCountSchema,
@@ -107,7 +112,7 @@ const receiptSchema = z.object({
   probabilitySemantics: z.literal('conditional_on_prior_slate_prefix_v1'),
   rngProtocol: z.literal(DEVELOPMENT_RNG_SUITE),
   commitmentPurpose: z.literal('development_reveal_consistency_only_v1'),
-  epochId: z.string().min(1).max(128),
+  epochId: epochIdSchema,
   revealedDevelopmentSeedHex: z.string().regex(/^[0-9a-f]{64}$/),
   seedCommitmentSha256: sha256Schema,
   rngContextSha256: sha256Schema,
@@ -152,7 +157,7 @@ export const developmentFixtureSchema = z.object({
   sourceFixturePath: z.literal('randomized_slate_simulation_v1.json'),
   sourceFixtureSha256: sha256Schema,
   inputSha256: sha256Schema,
-  epochId: z.string().min(1).max(128),
+  epochId: epochIdSchema,
   revealedDevelopmentSeedHex: z.string().regex(/^[0-9a-f]{64}$/),
   seedCommitmentSha256: sha256Schema,
   expected: receiptSchema,

@@ -3,6 +3,7 @@ import path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
+import { developmentFixtureSchema } from '../../src/services/recommendation/randomizedSlate/v2/contracts';
 import {
   isVerifiedRandomizedSlateDevelopmentTranscriptV2,
   verifyRandomizedSlateDevelopmentFixtureV2,
@@ -75,6 +76,19 @@ describe('randomized slate development transcript V2', () => {
     });
     expect(verifyRandomizedSlateDevelopmentFixtureV2(Buffer.alloc(32 * 1024 * 1024 + 1), source))
       .toEqual({ status: 'rejected', blocker: 'resource_limit_exceeded' });
+  });
+
+  it('matches the Rust 128-byte UTF-8 epoch limit', () => {
+    const { fixture } = rawFixtures();
+    const value = JSON.parse(fixture.toString('utf8')) as Record<string, any>;
+
+    value.epochId = '界'.repeat(42);
+    value.expected.epochId = value.epochId;
+    expect(developmentFixtureSchema.safeParse(value).success).toBe(true);
+
+    value.epochId = '界'.repeat(43);
+    value.expected.epochId = value.epochId;
+    expect(developmentFixtureSchema.safeParse(value).success).toBe(false);
   });
 
   it('keeps policy arithmetic and runtime integration outside the Node V2 verifier', () => {
