@@ -31,8 +31,10 @@ Phase 25 研究以下问题：有序无放回 slate 的 randomized logging polic
 owner-approved baseline 已在 `11aee61e` 之前形成可复现提交。随后 Rust V2 在
 `0dc456e7` 固化 HKDF/ChaCha20/open53、逐 prefix 与 ordered joint/log-joint propensity、
 source/config roots 及 pre-RNG resource receipt；Node V2 在 `acdcb844` 只重放密码学、
-结构和资源证据，不复制 epsilon-PL 数学。固定 fixture 因而可作为 development-only
-verifiable artifact，但仍不是生产 randomized logger。
+结构和资源证据，不复制 epsilon-PL 数学。`afb5139` 又将 JSON 深度、节点、集合、字符串、
+重复键与 trailing-data admission 前移到 typed parse 之前，`26adadf` 对齐 Node/Rust 的
+UTF-8 epoch 字节边界。固定 fixture 因而可作为 development-only verifiable artifact，
+但仍不是生产 randomized logger。
 
 因此 `eligible_pool_epsilon_plackett_luce_v1` 成为唯一
 `selected_for_future_authorization` development candidate。该选择不证明 production
@@ -81,8 +83,9 @@ log P(a_1:k) = sum_(t=1..k) log q(a_t | a_<t)
 
 逐 slot conditional probability、未条件化的 position marginal、任意位置 inclusion
 probability 和 ordered joint probability 是四种不同对象，不能共用一个含糊字段。
-当前合同没有显式 joint/log-joint 字段，也没有 RNG seed、algorithm、domain separator
-或 commitment/reveal 证据。
+V1 simulation 合同没有显式 joint/log-joint 字段，也没有独立 canonical RNG、domain
+separator 或 commitment/reveal 证据；private V2 development receipt 已补齐这些字段和重放，
+但其 commitment purpose 仍仅为 revealed-development-seed consistency。
 
 ### 资源事实
 
@@ -95,10 +98,12 @@ A(e, k) = sum_(t=0..k-1)(e - t)
 maximum A(e, k) = A(2048, 64) = 129,056
 ```
 
-这个数字不构成完整 preflight。每个 slot 还运行 `sort_unstable`，比较次数没有冻结为
-合同；raw/decoded bytes、JSON depth、canonical bytes、hash bytes、PRNG retries、
-output records/bytes、allocation、concurrency 与 deadline 也没有统一 admission receipt。
-因此现有 `2048/64` count cap 不能证明请求在首次解析、大分配或随机调用前可达。
+这个数字本身不构成完整 preflight。V1 仍只有 count caps；private V2 已冻结一次 baseline
+sort 的保守比较上限、distribution/removal work、raw/canonical/hash/output/allocation/RNG
+预算，并在 typed parse 前限制 JSON depth、nodes、collections、strings 和 duplicate keys。
+它仍未提供 production memory/concurrency permits、fallible allocation、deadline 或 durable
+publication。因此 `2048/64` 不能单独授权真实 logger，V2 receipt 也只能支撑 private
+development evidence。
 
 ## 研究问题
 
@@ -238,6 +243,8 @@ simulated propensity 升级为真实安全证据。
 4e31fb60 feat(recommendation): 固化可重放随机字节合同
 0dc456e7 feat(recommendation): 固化可验证随机日志收据
 acdcb844 feat(recommendation): 验证随机日志开发收据
+afb5139 fix(recommendation): 前移随机日志输入资源准入
+26adadf fix(recommendation): 对齐随机日志纪元字节边界
 ```
 
 development-only V2 已完成下列闭包：
@@ -246,7 +253,8 @@ development-only V2 已完成下列闭包：
 2. 由 canonical Rust sampling loop 生成 development-only evidence；
 3. 冻结 development seed reveal-consistency、HKDF/ChaCha20 byte stream、domain separation 和 draw mapping；
 4. 记录逐 prefix support/distribution/selected interval，以及 ordered joint log propensity；
-5. raw bytes 在 parse 前 admission；算法/输出/hash 预算在候选分配、sort、RNG 和 policy 前 admission；
+5. raw bytes、JSON shape/strings/duplicate keys 在 typed parse 前 admission；算法/输出/hash
+   预算在候选分配、sort、RNG 和 policy 前 admission；
 6. 以 Rust 为 probability owner，Node 只做严格 receipt/replay verification；
 7. 用 immutable cross-runtime vectors 证明 selection、probability、RNG consumption 和摘要稳定；
 8. 输出 `selected_for_future_authorization`，但不创建 production activation capability；
@@ -313,6 +321,9 @@ Rust V2 recommendation-contracts tests: 56 passed
 Rust V2 randomized-slate focused tests: 17 passed
 Rust cross-runtime fixture tests: 13 passed
 Node V1/V2/Decision Log focused tests: 32 passed
+Rust bounded-admission contracts: 59 passed
+Rust bounded-admission randomized-slate: 7 passed
+Node V2 UTF-8 parity: 10 passed
 TypeScript npx tsc --noEmit: passed
 cargo fmt --check: passed
 strict Clippy gate: passed
