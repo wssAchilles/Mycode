@@ -92,6 +92,11 @@ async function main() {
         if (!trimmed) continue;
         const row = JSON.parse(trimmed) as SampleRow;
         if (!row.trainingFeatures || Object.keys(row.trainingFeatures).length === 0) continue;
+        for (const { label } of TASKS) {
+            if (row[label] !== 0 && row[label] !== 1) {
+                throw new Error(`training_row_label_invalid:${label}`);
+            }
+        }
         rows.push(row);
         for (const [feature, value] of Object.entries(row.trainingFeatures)) {
             if (!Number.isFinite(value) || value === 0) continue;
