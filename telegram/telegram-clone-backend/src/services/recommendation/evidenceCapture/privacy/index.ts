@@ -36,12 +36,20 @@ type CapturedInput = Readonly<{
   captureEpochId: string;
 }>;
 
+type CaptureInputResult = CapturedInput | 'key_invalid' | null;
+
 export function buildRecommendationViewerPseudonymV1(
   input: unknown,
 ): RecommendationViewerPseudonymBuildResultV1 {
   try {
     const captured = captureInput(input);
+    if (captured === 'key_invalid') return reject('viewer_pseudonym_key_invalid');
     if (!captured) return reject('viewer_pseudonym_input_invalid');
+    const viewerIdUtf8Bytes = Buffer.byteLength(captured.viewerId, 'utf8');
+    if (viewerIdUtf8Bytes > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumViewerIdUtf8Bytes) {
+      return reject('viewer_pseudonym_resource_limit_exceeded');
+    }
+
     if (captured.masterKey.length !== RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.requiredMasterKeyBytes) {
       return reject('viewer_pseudonym_key_invalid');
     }
@@ -59,7 +67,6 @@ export function buildRecommendationViewerPseudonymV1(
     } as const;
     const publicContext = Buffer.from(canonicalDecisionJson(context), 'utf8');
     const hmacMessage = Buffer.from(canonicalDecisionJson(message), 'utf8');
-    const viewerIdUtf8Bytes = Buffer.byteLength(captured.viewerId, 'utf8');
     const workUnits = captured.masterKey.length
       + viewerIdUtf8Bytes
       + publicContext.length
@@ -78,8 +85,7 @@ export function buildRecommendationViewerPseudonymV1(
       captured,
       baseDiagnostics,
     );
-    if (viewerIdUtf8Bytes > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumViewerIdUtf8Bytes
-      || publicContext.length > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumCanonicalOutputBytes
+    if (publicContext.length > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumCanonicalOutputBytes
       || hmacMessage.length > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumCanonicalOutputBytes
       || workUnits > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumWorkUnits
       || plannedCanonicalOutputBytes > RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.maximumCanonicalOutputBytes) {
@@ -162,7 +168,7 @@ export function isVerifiedRecommendationViewerPseudonymV1(
   }
 }
 
-function captureInput(value: unknown): CapturedInput | null {
+function captureInput(value: unknown): CaptureInputResult {
   if (!isObjectLike(value)) return null;
   const masterKey = safeGet(value, 'masterKey');
   const viewerId = safeGet(value, 'viewerId');
@@ -173,6 +179,9 @@ function captureInput(value: unknown): CapturedInput | null {
     || viewerId.length === 0
     || !isMetadataId(keyVersion)
     || !isMetadataId(captureEpochId)) return null;
+  if (masterKey.length !== RECOMMENDATION_VIEWER_PSEUDONYM_LIMITS_V1.requiredMasterKeyBytes) {
+    return 'key_invalid';
+  }
   const keyCopy = Buffer.from(masterKey);
   return Object.freeze({ masterKey: keyCopy, viewerId, keyVersion, captureEpochId });
 }
