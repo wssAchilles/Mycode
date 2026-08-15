@@ -9,13 +9,12 @@ use telegram_randomized_policy_primitives::{
     compute_development_rng_context_sha256_v1, compute_full_distribution,
 };
 use telegram_recommendation_contracts::{
-    BaselineOrderVersion, BehaviorPolicyKind, CandidatePoolFingerprint, CandidateSupportEvidence,
-    DEVELOPMENT_V2_MAX_OUTPUT_CANONICAL_BYTES, DEVELOPMENT_V2_POLICY_ARITHMETIC_VERSION,
-    DecisionActionKey, DecisionFingerprint, DevelopmentCommitmentPurposeV1,
-    DevelopmentEvidenceKindV1, DevelopmentInputAdmissionErrorV1, DevelopmentRandomTranscriptV1,
-    JointProbabilityStatusV1, NumericalDiagnostics, NumericalDiagnosticsStep,
-    OrderedJointProbabilityV1, PROBABILITY_MASS_TOLERANCE, ProbabilitySemantics,
-    RandomizedSlateDevelopmentActionV2, RandomizedSlateDevelopmentInputV2,
+    BaselineOrderVersion, CandidatePoolFingerprint, DEVELOPMENT_V2_MAX_OUTPUT_CANONICAL_BYTES,
+    DEVELOPMENT_V2_POLICY_ARITHMETIC_VERSION, DecisionActionKey, DecisionFingerprint,
+    DevelopmentCommitmentPurposeV1, DevelopmentEvidenceKindV1, DevelopmentInputAdmissionErrorV1,
+    DevelopmentRandomTranscriptV1, JointProbabilityStatusV1, NumericalDiagnostics,
+    NumericalDiagnosticsStep, OrderedJointProbabilityV1, PROBABILITY_MASS_TOLERANCE,
+    ProbabilitySemantics, RandomizedSlateDevelopmentActionV2, RandomizedSlateDevelopmentInputV2,
     RandomizedSlateDevelopmentReceiptContractVersionV2, RandomizedSlateDevelopmentReceiptV2,
     SupportDiagnostics, admit_development_input_raw_v1, candidate_namespace_wire_tag,
     canonical_json, compare_decision_pool_baseline, compute_development_transcript_sha256_v2,
@@ -50,18 +49,7 @@ pub(super) fn simulate_development_v2(
         serde_json::from_slice(raw_input).map_err(|_| DevelopmentV2Blocker::ContractInvalid)?;
     let source = input
         .validate()
-        .map_err(|_| DevelopmentV2Blocker::CommitmentInvalid)?;
-    if source.behavior_policy_kind != BehaviorPolicyKind::DeterministicTopK
-        || !matches!(
-            source.candidate_pool.support_evidence,
-            CandidateSupportEvidence::Complete
-        )
-        || source.candidate_pool.truncated
-        || usize::try_from(source.candidate_pool.total_count).ok()
-            != Some(source.candidate_pool.candidates.len())
-    {
-        return Err(DevelopmentV2Blocker::SourceInvalid);
-    }
+        .map_err(|error| classify_input_validation_error(&error))?;
 
     let candidates = &source.candidate_pool.candidates;
     let candidate_count = candidates.len();
@@ -71,14 +59,6 @@ pub(super) fn simulate_development_v2(
         .count();
     let slate_size = usize::try_from(input.config.slate_size.get())
         .map_err(|_| DevelopmentV2Blocker::ResourceLimitExceeded)?;
-    if candidates
-        .iter()
-        .filter(|candidate| candidate.eligible)
-        .any(|candidate| candidate.score.is_none_or(|score| !score.is_finite()))
-    {
-        return Err(DevelopmentV2Blocker::ResourceLimitExceeded);
-    }
-
     let source_canonical = canonical_json(&input.source_decision_log)
         .map_err(|_| DevelopmentV2Blocker::ContractInvalid)?;
     let config_value =
@@ -327,6 +307,18 @@ pub(super) fn simulate_development_v2(
     Ok(receipt)
 }
 
+fn classify_input_validation_error(error: &str) -> DevelopmentV2Blocker {
+    if error.starts_with("resource limit:") {
+        DevelopmentV2Blocker::ResourceLimitExceeded
+    } else if error.starts_with("source invalid:") {
+        DevelopmentV2Blocker::SourceInvalid
+    } else if error.starts_with("commitment invalid:") {
+        DevelopmentV2Blocker::CommitmentInvalid
+    } else {
+        DevelopmentV2Blocker::ContractInvalid
+    }
+}
+
 fn finalize_receipt(
     receipt: &mut RandomizedSlateDevelopmentReceiptV2,
 ) -> Result<(), DevelopmentV2Blocker> {
@@ -521,6 +513,47 @@ mod tests {
         assert_eq!(
             simulate_development_v2(br#"{"a":1,"a":2}"#),
             Err(DevelopmentV2Blocker::ContractInvalid)
+        );
+        assert_eq!(RNG_CONSTRUCTION_COUNT.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[test]
+    fn candidate_shape_rejection_happens_before_rng_construction() {
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut value: Value = serde_json::from_slice(&raw_input()).unwrap();
+        let candidates = value["sourceDecisionLog"]["candidatePool"]["candidates"]
+            .as_array_mut()
+            .unwrap();
+        let template = candidates[1].clone();
+        while candidates.len() <= telegram_recommendation_contracts::MAX_CANDIDATE_POOL_SIZE {
+            let mut candidate = template.clone();
+            candidate["candidateId"] = Value::String(format!("overflow-{}", candidates.len()));
+            candidate["poolRank"] = Value::from(candidates.len() + 1);
+            candidate["eligible"] = Value::Bool(false);
+            candidate["selected"] = Value::Bool(false);
+            candidate["selectionRank"] = Value::Null;
+            candidate["served"] = Value::Bool(false);
+            candidate["servedPosition"] = Value::Null;
+            candidates.push(candidate);
+        }
+        value["sourceDecisionLog"]["candidatePool"]["totalCount"] = Value::from(candidates.len());
+        let candidates: Vec<DecisionCandidate> = serde_json::from_value(
+            value["sourceDecisionLog"]["candidatePool"]["candidates"].clone(),
+        )
+        .unwrap();
+        value["sourceDecisionLog"]["candidatePool"]["candidatePoolSha256"] =
+            Value::String(candidate_pool_sha256(&candidates).unwrap());
+        value["sourceDecisionLogSha256"] = Value::String(sha256_hex(
+            canonical_json(&value["sourceDecisionLog"]).unwrap(),
+        ));
+        let raw = canonical_wire_json(&value).unwrap().into_bytes();
+
+        RNG_CONSTRUCTION_COUNT.store(0, AtomicOrdering::SeqCst);
+        assert_eq!(
+            simulate_development_v2(&raw),
+            Err(DevelopmentV2Blocker::ResourceLimitExceeded)
         );
         assert_eq!(RNG_CONSTRUCTION_COUNT.load(AtomicOrdering::SeqCst), 0);
     }

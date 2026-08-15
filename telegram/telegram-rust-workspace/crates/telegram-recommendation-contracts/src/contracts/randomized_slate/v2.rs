@@ -199,8 +199,46 @@ pub struct RandomizedSlateDevelopmentReceiptV2 {
 
 impl RandomizedSlateDevelopmentInputV2 {
     pub fn parsed_source_decision_log(&self) -> Result<RecommendationDecisionLogV1, String> {
-        serde_json::from_value(self.source_decision_log.clone())
+        RecommendationDecisionLogV1::deserialize(&self.source_decision_log)
             .map_err(|error| format!("parse sourceDecisionLog: {error}"))
+    }
+
+    fn validate_source_shape(&self, source: &RecommendationDecisionLogV1) -> Result<(), String> {
+        let candidates = &source.candidate_pool.candidates;
+        let slate_size = usize::try_from(self.config.slate_size.get())
+            .map_err(|_| "resource limit: slate size overflow".to_string())?;
+        if candidates.len() > super::MAX_CANDIDATE_POOL_SIZE {
+            return Err("resource limit: candidate pool exceeds 2048 entries".to_string());
+        }
+        if slate_size > super::MAX_SLATE_SIZE {
+            return Err("resource limit: slateSize exceeds 64".to_string());
+        }
+        if source.behavior_policy_kind != BehaviorPolicyKind::DeterministicTopK
+            || !matches!(
+                source.candidate_pool.support_evidence,
+                CandidateSupportEvidence::Complete
+            )
+            || source.candidate_pool.truncated
+            || usize::try_from(source.candidate_pool.total_count).ok() != Some(candidates.len())
+            || source.actions.len() > candidates.len()
+        {
+            return Err("source invalid: deterministic complete support is required".to_string());
+        }
+        let eligible_count = candidates
+            .iter()
+            .filter(|candidate| candidate.eligible)
+            .count();
+        if eligible_count < slate_size {
+            return Err("source invalid: eligible candidate count is below slateSize".to_string());
+        }
+        if candidates
+            .iter()
+            .filter(|candidate| candidate.eligible)
+            .any(|candidate| candidate.score.is_none_or(|score| !score.is_finite()))
+        {
+            return Err("source invalid: eligible candidate score is unavailable".to_string());
+        }
+        Ok(())
     }
 
     pub fn revealed_seed(&self) -> Result<[u8; 32], String> {
@@ -218,19 +256,25 @@ impl RandomizedSlateDevelopmentInputV2 {
         require_sha256("sourceDecisionLogSha256", &self.source_decision_log_sha256)?;
         require_sha256("seedCommitmentSha256", &self.seed_commitment_sha256)?;
         let source = self.parsed_source_decision_log()?;
-        source.validate()?;
+        self.validate_source_shape(&source)?;
+        source
+            .validate()
+            .map_err(|error| format!("source invalid: {error}"))?;
         let source_canonical = canonical_json(&self.source_decision_log)
             .map_err(|error| format!("canonicalize sourceDecisionLog: {error}"))?;
         if sha256_hex(&source_canonical) != self.source_decision_log_sha256 {
             return Err("sourceDecisionLogSha256 does not match sourceDecisionLog".to_string());
         }
-        let seed = self.revealed_seed()?;
+        let seed = self
+            .revealed_seed()
+            .map_err(|error| format!("commitment invalid: {error}"))?;
         let commitment =
             compute_development_seed_commitment_sha256_v1(self.epoch_id.as_bytes(), &seed)
-                .map_err(|error| format!("compute development commitment: {error:?}"))?;
+                .map_err(|error| format!("commitment invalid: {error:?}"))?;
         if hex_32(&commitment) != self.seed_commitment_sha256 {
             return Err(
-                "seedCommitmentSha256 does not match revealed development seed".to_string(),
+                "commitment invalid: seedCommitmentSha256 does not match revealed development seed"
+                    .to_string(),
             );
         }
         Ok(source)
