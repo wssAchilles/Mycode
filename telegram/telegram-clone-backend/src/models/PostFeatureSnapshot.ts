@@ -218,7 +218,10 @@ PostFeatureSnapshotSchema.index({
 });
 
 interface PostFeatureSnapshotModel extends Model<IPostFeatureSnapshot> {
-    getByPostIds(postIds: mongoose.Types.ObjectId[]): Promise<Map<string, IPostFeatureSnapshot>>;
+    getByPostIds(
+        postIds: mongoose.Types.ObjectId[],
+        session?: mongoose.ClientSession,
+    ): Promise<Map<string, IPostFeatureSnapshot>>;
     getByDominantClusters(
         clusterIds: number[],
         options?: {
@@ -240,9 +243,12 @@ interface PostFeatureSnapshotModel extends Model<IPostFeatureSnapshot> {
 
 PostFeatureSnapshotSchema.statics.getByPostIds = async function (
     postIds: mongoose.Types.ObjectId[],
+    session?: mongoose.ClientSession,
 ): Promise<Map<string, IPostFeatureSnapshot>> {
     if (postIds.length === 0) return new Map();
-    const docs = await this.find({ postId: { $in: postIds } });
+    const query = this.find({ postId: { $in: postIds } });
+    if (session) query.session(session);
+    const docs = await query;
     return new Map(docs.map((doc: IPostFeatureSnapshot) => [doc.postId.toString(), doc]));
 };
 

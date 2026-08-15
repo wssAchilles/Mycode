@@ -8,7 +8,8 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import mongoose from 'mongoose';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const runtime = vi.hoisted(() => {
   const write = vi.fn();
@@ -44,6 +45,10 @@ const runtime = vi.hoisted(() => {
     featureFind,
     traceFind,
     getSnapshotsByPostIds,
+    startSession: vi.fn(),
+    snapshotSession: {
+      endSession: vi.fn(),
+    },
     connectMongoDB: vi.fn(),
     disconnectMongoDB: vi.fn(),
     sequelize: {
@@ -103,11 +108,13 @@ function query<T>(rows: T[]) {
     select: vi.fn(),
     sort: vi.fn(),
     limit: vi.fn(),
+    session: vi.fn(),
     lean: vi.fn().mockResolvedValue(rows),
   };
   cursor.select.mockReturnValue(cursor);
   cursor.sort.mockReturnValue(cursor);
   cursor.limit.mockReturnValue(cursor);
+  cursor.session.mockReturnValue(cursor);
   return cursor;
 }
 
@@ -115,6 +122,12 @@ describe('PIT-safe partial training exporter CLI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    runtime.startSession.mockResolvedValue(runtime.snapshotSession);
+    vi.spyOn(mongoose, 'startSession').mockImplementation(runtime.startSession as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('runs the real exporter path without mutating a datastore', async () => {
@@ -199,6 +212,11 @@ describe('PIT-safe partial training exporter CLI', () => {
         quiet: true,
       });
       expect(runtime.disconnectMongoDB).toHaveBeenCalledOnce();
+      expect(runtime.startSession).toHaveBeenCalledWith({
+        snapshot: true,
+        causalConsistency: false,
+      });
+      expect(runtime.snapshotSession.endSession).toHaveBeenCalledOnce();
       expect([
         runtime.userActionFind,
         runtime.userFindAll,
@@ -211,6 +229,7 @@ describe('PIT-safe partial training exporter CLI', () => {
         'metadata.decisionId': { $in: [decisionLogV1.decisionId] },
       });
       expect(runtime.userActionFind.mock.calls[0][0]).not.toHaveProperty('targetPostId');
+      expect(runtime.getSnapshotsByPostIds.mock.calls[0][1]).toBe(runtime.snapshotSession);
       expect(runtime.write).not.toHaveBeenCalled();
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
@@ -353,6 +372,7 @@ describe('PIT-safe partial training exporter CLI', () => {
         expect.objectContaining({ message: 'training_export_argument_invalid' }),
       );
       expect(runtime.connectMongoDB).not.toHaveBeenCalled();
+      expect(runtime.startSession).not.toHaveBeenCalled();
       expect(runtime.traceFind).not.toHaveBeenCalled();
       expect(readdirSync(outputDirectory)).toEqual([]);
     } finally {

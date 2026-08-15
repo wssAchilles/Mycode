@@ -242,6 +242,8 @@ const DIAGNOSTIC_ARTIFACT_IDENTITY: TrainingArtifactIdentityInput = {
     index: { namespace: '', id: '' },
 };
 
+let snapshotSessionForCleanup: mongoose.ClientSession | undefined;
+
 function writeArtifacts(
     candidates: PitSafePartialCandidate[],
     cutoff: Date,
@@ -326,6 +328,11 @@ async function main() {
 
     await connectReadOnlyMongo();
     await sequelize.authenticate();
+    const snapshotSession = await mongoose.startSession({
+        snapshot: true,
+        causalConsistency: false,
+    });
+    snapshotSessionForCleanup = snapshotSession;
 
     const traceQuery: Record<string, unknown> = {
         'decisionLogV1.decisionAt': {
@@ -341,7 +348,8 @@ async function main() {
         .select(
             'requestId decisionId decisionLogV1Sha256 userId productSurface experimentKeys decisionLogV1 candidates pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness shadowComparison',
         )
-        .sort({ 'decisionLogV1.decisionAt': -1, _id: -1 });
+        .sort({ 'decisionLogV1.decisionAt': -1, _id: -1 })
+        .session(snapshotSession);
     traceCursor.limit(args.limit);
 
     const traceDocs = ((await traceCursor.lean()) as TraceRecord[]).slice().reverse();
@@ -417,6 +425,7 @@ async function main() {
         .select('metadata rank requestId userId action timestamp dwellTimeMs')
         .sort({ timestamp: 1, _id: 1 })
         .limit(MAX_OUTCOME_ACTIONS + 1)
+        .session(snapshotSession)
         .lean()) as OutcomeActionRecord[];
     if (outcomeActions.length > MAX_OUTCOME_ACTIONS) {
         throw new Error('training_export_resource_limit_exceeded');
@@ -445,6 +454,7 @@ async function main() {
         .select('userId action timestamp targetPostId')
         .sort({ timestamp: 1, _id: 1 })
         .limit(MAX_HISTORY_ACTIONS + 1)
+        .session(snapshotSession)
         .lean()) as HistoryActionRecord[];
     if (historyActions.length > MAX_HISTORY_ACTIONS) {
         throw new Error('training_export_resource_limit_exceeded');
@@ -476,16 +486,19 @@ async function main() {
     })
         .select('userId interestedInClusters producerEmbedding knownForCluster knownForScore qualityScore computedAt version')
         .limit(MAX_EXPORT_TRACES + 1)
+        .session(snapshotSession)
         .lean()) as Array<Record<string, unknown> & { userId: string }>;
     if (embeddingDocs.length > MAX_EXPORT_TRACES) {
         throw new Error('training_export_resource_limit_exceeded');
     }
     const snapshots = projectPitSafeSnapshotMap(
-        await postFeatureSnapshotService.getSnapshotsByPostIds(postIds),
+        await postFeatureSnapshotService.getSnapshotsByPostIds(postIds, snapshotSession),
     );
     if (snapshots.size > MAX_SERVED_SAMPLES) {
         throw new Error('training_export_resource_limit_exceeded');
     }
+    await snapshotSession.endSession();
+    snapshotSessionForCleanup = undefined;
 
     const outcomeActionsByDecisionId = new Map<string, OutcomeActionRecord[]>();
     for (const action of outcomeActions) {
@@ -577,6 +590,7 @@ async function main() {
     }
 
     writeArtifacts(candidates, cutoff, args.output, args.approvalConfig);
+    console.log('[ExportRecsysSamples] sourceRead=mongodb_snapshot_session_v1_sql_current_state_unverified_v1');
 }
 
 main()
@@ -585,6 +599,12 @@ main()
         process.exitCode = 1;
     })
     .finally(async () => {
+        try {
+            await snapshotSessionForCleanup?.endSession();
+        } catch (error) {
+            console.error('[ExportRecsysSamples] snapshot_session_cleanup_failed:', error);
+            process.exitCode = 1;
+        }
         try {
             await disconnectReadOnlyMongo();
         } catch {

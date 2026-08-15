@@ -109,8 +109,9 @@ class PostFeatureSnapshotService {
 
     async getSnapshotsByPostIds(
         postIds: mongoose.Types.ObjectId[],
+        session?: mongoose.ClientSession,
     ): Promise<Map<string, IPostFeatureSnapshot>> {
-        return PostFeatureSnapshot.getByPostIds(uniqueObjectIds(postIds));
+        return PostFeatureSnapshot.getByPostIds(uniqueObjectIds(postIds), session);
     }
 
     async ensureSnapshotsByPostIds(
