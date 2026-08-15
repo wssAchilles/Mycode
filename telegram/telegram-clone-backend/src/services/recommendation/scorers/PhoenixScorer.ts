@@ -14,7 +14,6 @@ import {
 } from '../clients/PhoenixClient';
 import {
     buildSocialPhoenixFeatureMapFromCandidate,
-    loadSocialPhoenixModel,
     scoreTaskProbability,
     type SocialPhoenixLinearModel,
 } from '../socialPhoenix';
@@ -42,7 +41,7 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
                 this.remoteEnabled = true;
             }
         }
-        this.socialModel = loadSocialPhoenixModel(process.env.SOCIAL_PHOENIX_MODEL_PATH);
+        this.socialModel = null;
     }
 
     enable(query: FeedQuery): boolean {

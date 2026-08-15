@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -58,6 +59,8 @@ describe('Social Phoenix training CLI', () => {
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
       expect(JSON.parse(readFileSync(outputPath, 'utf8')).metadata.rows).toBe(1);
+      expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/^\[TrainSocialPhoenixModel\] sha256=[0-9a-f]{64}$/));
     } finally {
       process.argv = originalArgv;
       process.exitCode = originalExitCode;

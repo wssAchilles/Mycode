@@ -3,6 +3,7 @@
  *
  * 用法：
  *   npx ts-node src/scripts/evaluateRecsysTrainingSamples.ts --input ./tmp/recsys_samples.ndjson --topK 10
+ *   npx ts-node src/scripts/evaluateRecsysTrainingSamples.ts --model ./tmp/model.json --modelSha256 <sha256>
  */
 
 import fs from 'fs';
@@ -10,7 +11,7 @@ import path from 'path';
 import readline from 'readline';
 
 import {
-    loadSocialPhoenixModel,
+    loadSocialPhoenixDevelopmentModel,
     scoreTaskProbability,
     type SocialPhoenixFeatureMap,
 } from '../services/recommendation/socialPhoenix';
@@ -58,6 +59,7 @@ function parseArgs() {
         input: kv.input || './tmp/recsys_samples.ndjson',
         topK: Math.max(1, parseInt(kv.topK || '10', 10) || 10),
         model: kv.model || '',
+        modelSha256: kv.modelSha256 || '',
     };
 }
 
@@ -69,7 +71,10 @@ async function main() {
     }
 
     const requests = new Map<string, RequestAggregate>();
-    const learnedModel = loadSocialPhoenixModel(args.model || undefined);
+    const learnedModel = loadSocialPhoenixDevelopmentModel(
+        args.model || undefined,
+        args.modelSha256 || undefined,
+    );
     const stream = fs.createReadStream(inputPath, { encoding: 'utf8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -302,7 +307,10 @@ async function main() {
     console.log(JSON.stringify(summary, null, 2));
 }
 
-function computeLearnedScore(model: NonNullable<ReturnType<typeof loadSocialPhoenixModel>>, row: SampleRow): number {
+function computeLearnedScore(
+    model: NonNullable<ReturnType<typeof loadSocialPhoenixDevelopmentModel>>,
+    row: SampleRow,
+): number {
     if (!row.trainingFeatures) {
         return Number(row.weightedScore || 0);
     }

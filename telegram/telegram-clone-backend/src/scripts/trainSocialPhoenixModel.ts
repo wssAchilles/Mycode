@@ -5,6 +5,7 @@
  *   npx ts-node src/scripts/trainSocialPhoenixModel.ts --input ./tmp/recsys_samples.ndjson --output ./tmp/social_phoenix_model.json
  */
 
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -171,10 +172,13 @@ async function main() {
 
     const outputPath = path.resolve(process.cwd(), args.output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, JSON.stringify(model, null, 2));
+    const modelBytes = Buffer.from(JSON.stringify(model, null, 2), 'utf8');
+    const modelSha256 = crypto.createHash('sha256').update(modelBytes).digest('hex');
+    fs.writeFileSync(outputPath, modelBytes, { flag: 'wx', mode: 0o600 });
 
     console.log(`[TrainSocialPhoenixModel] rows=${rows.length}`);
     console.log(`[TrainSocialPhoenixModel] features=${features.length}`);
+    console.log(`[TrainSocialPhoenixModel] sha256=${modelSha256}`);
     console.log(`[TrainSocialPhoenixModel] wrote ${outputPath}`);
 }
 
