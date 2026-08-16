@@ -17,6 +17,15 @@ import type {
     ReplayVariantName,
 } from '../services/recommendation/replay/contracts';
 
+const REPLAY_EVALUATION_LIMITS = Object.freeze({
+    maximumInputBytes: 32 * 1024 * 1024,
+    maximumLineBytes: 1 * 1024 * 1024,
+    maximumRequests: 8_192,
+    maximumCandidatesPerRequest: 2_048,
+    maximumTotalCandidates: 65_536,
+    maximumTopK: 1_000,
+});
+
 function parseArgs() {
     const args = process.argv.slice(2);
     const kv: Record<string, string> = {};
@@ -28,9 +37,16 @@ function parseArgs() {
         kv[key] = value;
     }
 
+    const topK = Number(kv.topK || '10');
+    if (
+        !Number.isInteger(topK)
+        || topK < 1
+        || topK > REPLAY_EVALUATION_LIMITS.maximumTopK
+    ) throw new Error('evaluation_config_resource_limit_exceeded');
+
     return {
         input: kv.input || './tmp/replay_requests.ndjson',
-        topK: Math.max(1, parseInt(kv.topK || '10', 10) || 10),
+        topK,
         variant: (kv.variant || 'hybrid_signal_blend_v1') as ReplayVariantName,
         output: kv.output || '',
     };
@@ -43,16 +59,60 @@ async function main() {
         throw new Error(`input_not_found:${inputPath}`);
     }
 
-    const stream = fs.createReadStream(inputPath, { encoding: 'utf8' });
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     const requests: ReplayRequestSnapshot[] = [];
+    const inputDescriptor = fs.openSync(inputPath, 'r');
+    let descriptorOwnedByStream = false;
+    let inputStream: fs.ReadStream | undefined;
+    let input: readline.Interface | undefined;
+    let nonblankRecords = 0;
+    let totalCandidates = 0;
 
-    for await (const line of rl) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const row = JSON.parse(trimmed) as ReplayRequestSnapshot;
-        if (!row.requestId || !Array.isArray(row.candidates) || row.candidates.length === 0) continue;
-        requests.push(row);
+    try {
+        const inputStat = fs.fstatSync(inputDescriptor);
+        if (
+            !inputStat.isFile()
+            || !Number.isSafeInteger(inputStat.size)
+            || inputStat.size <= 0
+            || inputStat.size > REPLAY_EVALUATION_LIMITS.maximumInputBytes
+        ) throw new Error('evaluation_input_resource_limit_exceeded');
+
+        inputStream = fs.createReadStream(inputPath, {
+            autoClose: true,
+            encoding: 'utf8',
+            end: inputStat.size - 1,
+            fd: inputDescriptor,
+        });
+        descriptorOwnedByStream = true;
+        input = readline.createInterface({ input: inputStream, crlfDelay: Infinity });
+
+        for await (const line of input) {
+            if (Buffer.byteLength(line, 'utf8') > REPLAY_EVALUATION_LIMITS.maximumLineBytes) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (nonblankRecords >= REPLAY_EVALUATION_LIMITS.maximumRequests) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            nonblankRecords += 1;
+
+            const row = JSON.parse(trimmed) as ReplayRequestSnapshot | null;
+            if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+            if (!Array.isArray(row.candidates) || row.candidates.length === 0) continue;
+            if (row.candidates.length > REPLAY_EVALUATION_LIMITS.maximumCandidatesPerRequest) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            totalCandidates += row.candidates.length;
+            if (totalCandidates > REPLAY_EVALUATION_LIMITS.maximumTotalCandidates) {
+                throw new Error('evaluation_input_resource_limit_exceeded');
+            }
+            if (!row.requestId) continue;
+            requests.push(row);
+        }
+    } finally {
+        input?.close();
+        inputStream?.destroy();
+        if (!descriptorOwnedByStream) fs.closeSync(inputDescriptor);
     }
 
     const summary = evaluateReplayRequests(requests, args.topK, args.variant);
@@ -73,4 +133,3 @@ main().catch((error) => {
     console.error('[EvaluateRecsysReplay] failed:', error);
     process.exitCode = 1;
 });
-
