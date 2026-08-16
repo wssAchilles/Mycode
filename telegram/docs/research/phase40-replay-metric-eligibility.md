@@ -31,6 +31,8 @@
 
 ## Frozen diagnostic contract
 
+本节记录 Phase 40 的历史 `replay_metric_eligibility_v1`；Phase 52 已由 `replay_metric_eligibility_v2` 取代该版本，并新增 variant-specific score provenance 资格条件。
+
 `ReplayRankingMetrics.metricEligibility` 使用版本 `replay_metric_eligibility_v1`：
 
 - `complete`：所有 request 同时具备完整 observed labels 和完整 candidate set；
