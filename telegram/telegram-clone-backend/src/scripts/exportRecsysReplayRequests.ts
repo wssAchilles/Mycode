@@ -376,6 +376,9 @@ async function main() {
             candidateSetKind: trace.replayPool?.poolKind || 'served_candidates_v1',
             candidateSetTotalCount: trace.replayPool?.totalCount ?? trace.candidates?.length ?? 0,
             candidateSetTruncated: trace.replayPool?.truncated === true,
+            candidateSetCompleteness: trace.replayPool && trace.replayPool.truncated !== true
+                ? 'complete_v1'
+                : 'unverified_v1',
             shadowComparison: trace.shadowComparison || undefined,
             candidates: replayCandidates,
         };

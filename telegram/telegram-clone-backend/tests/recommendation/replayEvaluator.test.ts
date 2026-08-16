@@ -34,6 +34,7 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
         candidateSetKind: 'pre_selector_scored_topk_v1',
         candidateSetTotalCount: 8,
         candidateSetTruncated: true,
+        candidateSetCompleteness: 'unverified_v1',
         candidates: [
             {
                 postId: '507f191e810c19729de87071',
@@ -122,20 +123,24 @@ describe('recommendation replay evaluator', () => {
     });
 
     it('reports positive ranking deltas when replay variant lifts engaged content', () => {
-        const summary = evaluateReplayRequests([buildRequest()], 2, 'hybrid_signal_blend_v1');
+        const summary = evaluateReplayRequests([buildRequest({
+            candidateSetTotalCount: 2,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+        })], 2, 'hybrid_signal_blend_v1');
 
         expect(summary.requests).toBe(1);
         expect(summary.variantMetrics.averageNdcgAtK).toBeGreaterThan(summary.baseline.averageNdcgAtK);
         expect(summary.variantMetrics.averageMrrAtK).toBeGreaterThan(summary.baseline.averageMrrAtK);
         expect(summary.averageEngagedRankLift).toBeGreaterThan(0);
         expect(summary.candidateSet.averageObservedCandidates).toBe(2);
-        expect(summary.candidateSet.averageTotalCandidates).toBe(8);
-        expect(summary.candidateSet.truncationRate).toBe(1);
+        expect(summary.candidateSet.averageTotalCandidates).toBe(2);
+        expect(summary.candidateSet.truncationRate).toBe(0);
         expect(summary.byCandidateSetKind.pre_selector_scored_topk_v1).toMatchObject({
             requests: 1,
             averageObservedCandidates: 2,
-            averageTotalCandidates: 8,
-            truncationRate: 1,
+            averageTotalCandidates: 2,
+            truncationRate: 0,
         });
         expect(summary.bySelectedSource.EmbeddingAuthorSource.variantShareAtK).toBeGreaterThan(0);
         expect(summary.requestDiffLeaders.improved[0]?.requestId).toBe('req-replay-1');
@@ -390,6 +395,9 @@ describe('recommendation replay evaluator', () => {
         const candidate = base.candidates[0];
         const request = buildRequest({
             requestId: 'req-strict-label-authority',
+            candidateSetTotalCount: 1,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
             candidates: [{
                 ...candidate,
                 labels: {

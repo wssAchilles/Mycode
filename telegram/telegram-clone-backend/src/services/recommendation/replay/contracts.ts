@@ -81,6 +81,7 @@ export interface ReplayRequestSnapshot {
     candidateSetKind?: string;
     candidateSetTotalCount?: number;
     candidateSetTruncated?: boolean;
+    candidateSetCompleteness?: 'complete_v1' | 'unverified_v1';
     shadowComparison?: {
         overlapCount: number;
         overlapRatio: number;
@@ -95,6 +96,26 @@ export interface ReplayRankingCandidate extends ReplayCandidateSnapshot {
     replayRank: number;
 }
 
+export type ReplayMetricEligibilityStatus = 'complete' | 'partial' | 'not_evaluable';
+
+export type ReplayMetricEligibilityReason =
+    | 'missing_feedback'
+    | 'candidate_set_truncated'
+    | 'candidate_set_completeness_unverified';
+
+export interface ReplayMetricEligibilitySummary {
+    contractVersion: 'replay_metric_eligibility_v1';
+    status: ReplayMetricEligibilityStatus;
+    reasons: ReplayMetricEligibilityReason[];
+    eligibleRequestDenominator: number;
+    eligibleCandidateDenominator: number;
+    observedRequestDenominator: number;
+    observedCandidateDenominator: number;
+    excludedRequestCount: number;
+    excludedObservedCandidateCount: number;
+    observedCandidateSetOnly: boolean;
+}
+
 export interface ReplayRankingMetrics {
     clickHitRateAtK: number;
     engagementHitRateAtK: number;
@@ -105,6 +126,7 @@ export interface ReplayRankingMetrics {
     averageMrrAtK: number;
     averageRecallAtK: number;
     averageNegativeRateAtK: number;
+    metricEligibility: ReplayMetricEligibilitySummary;
 }
 
 export interface ReplayBucketSummary {
@@ -167,6 +189,9 @@ export interface ReplayEvaluationSummary {
     averageOverlapAtK: number;
     averageEngagedRankLift: number;
     averageClickedRankLift: number;
+    eligibleRankLiftRequestDenominator: number;
+    engagedRankLiftRequestDenominator: number;
+    clickedRankLiftRequestDenominator: number;
     byUserState: Record<string, ReplayBucketSummary>;
     byPipeline: Record<string, ReplayBucketSummary>;
     byCandidateSetKind: Record<string, ReplayCandidateSetKindSummary>;

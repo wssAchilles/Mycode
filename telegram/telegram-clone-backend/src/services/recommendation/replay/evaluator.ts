@@ -4,6 +4,7 @@ import type {
     ReplayCandidateSnapshot,
     ReplayEvaluationSummary,
     LoggingReadinessSummary,
+    ReplayMetricEligibilitySummary,
     ReplayRankingCandidate,
     ReplayRankingMetrics,
     ReplayRequestDelta,
@@ -14,6 +15,10 @@ import { rerankReplayCandidates } from './variantScorer';
 
 type RankingSummary = {
     hasCompleteAttribution: boolean;
+    candidateSetComplete: boolean;
+    candidateSetReason: ReplayMetricEligibilitySummary['reasons'][number] | null;
+    strictMetricsEligible: boolean;
+    candidateCount: number;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -35,7 +40,15 @@ type BucketAccumulator = {
 };
 
 type MetricAccumulator = {
+    requests: number;
+    candidates: number;
     feedbackRequests: number;
+    feedbackCandidates: number;
+    missingFeedbackRequests: number;
+    missingFeedbackCandidates: number;
+    truncatedRequests: number;
+    truncatedCandidates: number;
+    candidateSetReasons: Set<ReplayMetricEligibilitySummary['reasons'][number]>;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -52,6 +65,11 @@ type CandidateSetAccumulator = {
     observedCandidates: number;
     totalCandidates: number;
     truncatedRequests: number;
+};
+
+type CandidateSetAssessment = {
+    complete: boolean;
+    reason: ReplayMetricEligibilitySummary['reasons'][number] | null;
 };
 
 export function evaluateReplayRequests(
@@ -76,6 +94,7 @@ export function evaluateReplayRequests(
     let engagedRankLiftCount = 0;
     let clickedRankLiftSum = 0;
     let clickedRankLiftCount = 0;
+    let eligibleRankLiftRequestCount = 0;
     let observedCandidateSum = 0;
     let totalCandidateSum = 0;
     let truncatedRequestCount = 0;
@@ -109,8 +128,19 @@ export function evaluateReplayRequests(
             }));
         const variantRanking = rerankReplayCandidates(request, variant);
 
-        const baselineSummary = summarizeRanking(baselineRanking, request.candidates, topK);
-        const variantSummary = summarizeRanking(variantRanking, request.candidates, topK);
+        const candidateSetAssessment = assessCandidateSet(request);
+        const baselineSummary = summarizeRanking(
+            baselineRanking,
+            request.candidates,
+            topK,
+            candidateSetAssessment,
+        );
+        const variantSummary = summarizeRanking(
+            variantRanking,
+            request.candidates,
+            topK,
+            candidateSetAssessment,
+        );
         baselineSelectedTotal += Math.min(topK, baselineRanking.length);
         variantSelectedTotal += Math.min(topK, variantRanking.length);
 
@@ -126,7 +156,7 @@ export function evaluateReplayRequests(
 
         observedCandidateSum += request.candidates.length;
         totalCandidateSum += request.candidateSetTotalCount ?? request.candidates.length;
-        if (request.candidateSetTruncated === true) {
+        if (candidateSetAssessment.reason === 'candidate_set_truncated') {
             truncatedRequestCount += 1;
         }
 
@@ -143,7 +173,8 @@ export function evaluateReplayRequests(
 
         overlapAtKSum += overlapAtK(baselineRanking, variantRanking, topK);
 
-        if (baselineSummary.hasCompleteAttribution && variantSummary.hasCompleteAttribution) {
+        if (baselineSummary.strictMetricsEligible && variantSummary.strictMetricsEligible) {
+            eligibleRankLiftRequestCount += 1;
             const engagedLift = rankLift(
                 request.candidates.filter((candidate) => attributedLabels(candidate)?.engagement),
                 baselineRanking,
@@ -177,8 +208,8 @@ export function evaluateReplayRequests(
         }
     }
 
-    const baseline = finalizeMetrics(baselineTotals, requestCount);
-    const variantMetrics = finalizeMetrics(variantTotals, requestCount);
+    const baseline = finalizeMetrics(baselineTotals);
+    const variantMetrics = finalizeMetrics(variantTotals);
 
     const bySelectedSource = Object.fromEntries(
         Array.from(sourceSelection.entries())
@@ -225,6 +256,9 @@ export function evaluateReplayRequests(
         averageOverlapAtK: overlapAtKSum / Math.max(1, requestCount),
         averageEngagedRankLift: engagedRankLiftSum / Math.max(1, engagedRankLiftCount),
         averageClickedRankLift: clickedRankLiftSum / Math.max(1, clickedRankLiftCount),
+        eligibleRankLiftRequestDenominator: eligibleRankLiftRequestCount,
+        engagedRankLiftRequestDenominator: engagedRankLiftCount,
+        clickedRankLiftRequestDenominator: clickedRankLiftCount,
         byUserState: finalizeBuckets(byUserState),
         byPipeline: finalizeBuckets(byPipeline),
         byCandidateSetKind: finalizeCandidateSetBuckets(byCandidateSetKind),
@@ -312,16 +346,46 @@ function candidateHasFeedback(candidate: ReplayCandidateSnapshot): boolean {
     ));
 }
 
+function assessCandidateSet(request: ReplayRequestSnapshot): CandidateSetAssessment {
+    if (request.candidateSetCompleteness !== 'complete_v1') {
+        return {
+            complete: false,
+            reason: 'candidate_set_completeness_unverified',
+        };
+    }
+    if (request.candidateSetTruncated === true) {
+        return {
+            complete: false,
+            reason: 'candidate_set_truncated',
+        };
+    }
+    const totalCount = request.candidateSetTotalCount;
+    if (
+        typeof totalCount !== 'number'
+        || !Number.isInteger(totalCount)
+        || totalCount < 0
+        || totalCount !== request.candidates.length
+    ) {
+        return {
+            complete: false,
+            reason: 'candidate_set_truncated',
+        };
+    }
+    return { complete: true, reason: null };
+}
+
 function summarizeRanking(
     ranking: ReplayRankingCandidate[],
     allCandidates: ReplayCandidateSnapshot[],
     topK: number,
+    candidateSetAssessment: CandidateSetAssessment,
 ): RankingSummary {
     const rows = ranking.slice(0, topK);
     const hasCompleteAttribution = allCandidates.length > 0
         && allCandidates.every((candidate) => attributedLabels(candidate) !== undefined);
-    const feedbackCandidates = hasCompleteAttribution ? allCandidates : [];
-    const feedbackRows = hasCompleteAttribution ? rows : [];
+    const strictMetricsEligible = hasCompleteAttribution && candidateSetAssessment.complete;
+    const feedbackCandidates = strictMetricsEligible ? allCandidates : [];
+    const feedbackRows = strictMetricsEligible ? rows : [];
     const uniqueAuthors = new Set(rows.map((candidate) => candidate.authorId).filter(Boolean));
     const sourceCounts = rows.reduce<Record<string, number>>((acc, candidate) => {
         acc[candidate.recallSource] = (acc[candidate.recallSource] || 0) + 1;
@@ -339,6 +403,10 @@ function summarizeRanking(
 
     return {
         hasCompleteAttribution,
+        candidateSetComplete: candidateSetAssessment.complete,
+        candidateSetReason: candidateSetAssessment.reason,
+        strictMetricsEligible,
+        candidateCount: allCandidates.length,
         clickHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.click) ? 1 : 0,
         engagementHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.engagement) ? 1 : 0,
         negativeHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.negative) ? 1 : 0,
@@ -433,7 +501,15 @@ function rankLift(
 
 function createMetricAccumulator(): MetricAccumulator {
     return {
+        requests: 0,
+        candidates: 0,
         feedbackRequests: 0,
+        feedbackCandidates: 0,
+        missingFeedbackRequests: 0,
+        missingFeedbackCandidates: 0,
+        truncatedRequests: 0,
+        truncatedCandidates: 0,
+        candidateSetReasons: new Set(),
         clickHit: 0,
         engagementHit: 0,
         negativeHit: 0,
@@ -447,10 +523,22 @@ function createMetricAccumulator(): MetricAccumulator {
 }
 
 function addRankingSummary(target: MetricAccumulator, summary: RankingSummary): void {
+    target.requests += 1;
+    target.candidates += summary.candidateCount;
     target.authorDiversity += summary.authorDiversity;
     target.oonRatio += summary.oonRatio;
-    if (summary.hasCompleteAttribution) {
+    if (!summary.hasCompleteAttribution) {
+        target.missingFeedbackRequests += 1;
+        target.missingFeedbackCandidates += summary.candidateCount;
+    }
+    if (!summary.candidateSetComplete) {
+        target.truncatedRequests += 1;
+        target.truncatedCandidates += summary.candidateCount;
+        if (summary.candidateSetReason) target.candidateSetReasons.add(summary.candidateSetReason);
+    }
+    if (summary.strictMetricsEligible) {
         target.feedbackRequests += 1;
+        target.feedbackCandidates += summary.candidateCount;
         target.clickHit += summary.clickHit;
         target.engagementHit += summary.engagementHit;
         target.negativeHit += summary.negativeHit;
@@ -463,19 +551,47 @@ function addRankingSummary(target: MetricAccumulator, summary: RankingSummary): 
 
 function finalizeMetrics(
     totals: MetricAccumulator,
-    requests: number,
 ): ReplayRankingMetrics {
     const feedbackRequests = Math.max(1, totals.feedbackRequests);
     return {
         clickHitRateAtK: totals.clickHit / feedbackRequests,
         engagementHitRateAtK: totals.engagementHit / feedbackRequests,
         negativeHitRateAtK: totals.negativeHit / feedbackRequests,
-        averageAuthorDiversityAtK: totals.authorDiversity / Math.max(1, requests),
-        averageOonRatioAtK: totals.oonRatio / Math.max(1, requests),
+        averageAuthorDiversityAtK: totals.authorDiversity / Math.max(1, totals.requests),
+        averageOonRatioAtK: totals.oonRatio / Math.max(1, totals.requests),
         averageNdcgAtK: totals.ndcgAtK / feedbackRequests,
         averageMrrAtK: totals.mrrAtK / feedbackRequests,
         averageRecallAtK: totals.recallAtK / feedbackRequests,
         averageNegativeRateAtK: totals.negativeRateAtK / feedbackRequests,
+        metricEligibility: buildMetricEligibility(totals),
+    };
+}
+
+function buildMetricEligibility(totals: MetricAccumulator): ReplayMetricEligibilitySummary {
+    const reasons: ReplayMetricEligibilitySummary['reasons'] = [];
+    if (totals.missingFeedbackRequests > 0) reasons.push('missing_feedback');
+    for (const reason of [
+        'candidate_set_truncated',
+        'candidate_set_completeness_unverified',
+    ] as const) {
+        if (totals.candidateSetReasons.has(reason)) reasons.push(reason);
+    }
+    const eligibleRequestDenominator = totals.feedbackRequests;
+    return {
+        contractVersion: 'replay_metric_eligibility_v1',
+        status: totals.requests === 0 || eligibleRequestDenominator === 0
+            ? 'not_evaluable'
+            : eligibleRequestDenominator === totals.requests
+                ? 'complete'
+                : 'partial',
+        reasons,
+        eligibleRequestDenominator,
+        eligibleCandidateDenominator: totals.feedbackCandidates,
+        observedRequestDenominator: totals.requests,
+        observedCandidateDenominator: totals.candidates,
+        excludedRequestCount: totals.requests - eligibleRequestDenominator,
+        excludedObservedCandidateCount: totals.candidates - totals.feedbackCandidates,
+        observedCandidateSetOnly: totals.truncatedRequests > 0,
     };
 }
 
@@ -493,6 +609,50 @@ function diffMetrics(
         averageMrrAtK: left.averageMrrAtK - right.averageMrrAtK,
         averageRecallAtK: left.averageRecallAtK - right.averageRecallAtK,
         averageNegativeRateAtK: left.averageNegativeRateAtK - right.averageNegativeRateAtK,
+        metricEligibility: mergeMetricEligibility(left.metricEligibility, right.metricEligibility),
+    };
+}
+
+function mergeMetricEligibility(
+    left: ReplayMetricEligibilitySummary,
+    right: ReplayMetricEligibilitySummary,
+): ReplayMetricEligibilitySummary {
+    const reasons: ReplayMetricEligibilitySummary['reasons'] = [];
+    for (const reason of [
+        'missing_feedback',
+        'candidate_set_truncated',
+        'candidate_set_completeness_unverified',
+    ] as const) {
+        if (left.reasons.includes(reason) || right.reasons.includes(reason)) reasons.push(reason);
+    }
+    const eligibleRequestDenominator = Math.min(
+        left.eligibleRequestDenominator,
+        right.eligibleRequestDenominator,
+    );
+    const excludedRequestCount = Math.max(left.excludedRequestCount, right.excludedRequestCount);
+    return {
+        contractVersion: 'replay_metric_eligibility_v1',
+        status: left.status === right.status ? left.status : 'partial',
+        reasons,
+        eligibleRequestDenominator,
+        eligibleCandidateDenominator: Math.min(
+            left.eligibleCandidateDenominator,
+            right.eligibleCandidateDenominator,
+        ),
+        observedRequestDenominator: Math.max(
+            left.observedRequestDenominator,
+            right.observedRequestDenominator,
+        ),
+        observedCandidateDenominator: Math.max(
+            left.observedCandidateDenominator,
+            right.observedCandidateDenominator,
+        ),
+        excludedRequestCount,
+        excludedObservedCandidateCount: Math.max(
+            left.excludedObservedCandidateCount,
+            right.excludedObservedCandidateCount,
+        ),
+        observedCandidateSetOnly: left.observedCandidateSetOnly || right.observedCandidateSetOnly,
     };
 }
 
@@ -540,8 +700,8 @@ function finalizeBuckets(
         Object.entries(buckets)
             .sort((left, right) => left[0].localeCompare(right[0]))
             .map(([key, bucket]) => {
-                const baseline = finalizeMetrics(bucket.baseline, bucket.requests);
-                const variant = finalizeMetrics(bucket.variant, bucket.requests);
+                const baseline = finalizeMetrics(bucket.baseline);
+                const variant = finalizeMetrics(bucket.variant);
                 return [
                     key,
                     {
