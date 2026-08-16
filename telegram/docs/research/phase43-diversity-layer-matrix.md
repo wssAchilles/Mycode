@@ -38,6 +38,9 @@
   候选的 multiplier 为 `0.85`，加入三个 source-`T` 后 share 变为 `0.4`、multiplier 变为 `0.90`。
 - 同一 source 还可能经过 intra-request source repeat、listwise source decay 和 selector source cap，
   但这些层没有共同的预算或可重构 receipt。
+- listwise source 分组只读取 `recall_source`；当该字段缺失时，不同 news domain 或 retrieval lane
+  可能被合并到同一个空 key，而 request source helper 使用不同 fallback。该差异需要先冻结
+  source identity 版本，当前不直接修正排序。
 - tie sorting 在 `DiversityStatsSideEffect` 只按 count 排序；HashMap 的 equal-count 顺序不是稳定合同，
   会让 live 诊断日志随进程/迭代顺序变化。
 
@@ -58,4 +61,3 @@ qualification seed/root、Decision Log 激活和 Task 9。
 | live 诊断日志确定性 | `GO`，只做 lexical tie-break |
 | real finite-sample inference / OPE | `UNAVAILABLE / BLOCKED` |
 | Promotion / exploration / Task 9 | `NO-GO / UNAUTHORIZED` |
-
