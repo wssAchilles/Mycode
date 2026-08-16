@@ -25,6 +25,7 @@ vi.mock('../../src/services/recommendation/rust/runtimeMetrics', () => ({
 }));
 
 import { resolveFeedRuntime } from '../../src/services/recommendation/feed/rustFeedRuntime';
+import { buildSpaceFeedDebugInfo } from '../../src/services/recommendation/feed/debugInfo';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
 const nodeCandidate = makeCandidate('507f191e810c19729de88001', 'node-author', 'FollowingSource');
@@ -142,6 +143,24 @@ describe('Rust feed runtime ownership', () => {
         expect(result.debugInfo.fallbackOwner).toBeUndefined();
         expect(result.debugInfo.fallbackReason).toBeUndefined();
         expect(result.pageMeta).toBeUndefined();
+    });
+
+    it('counts prototype-like source names as ordinary feed sources', () => {
+        const result = buildSpaceFeedDebugInfo([
+            makeCandidate('507f191e810c19729de88003', 'author-a', '__proto__'),
+            makeCandidate('507f191e810c19729de88004', 'author-b', 'constructor'),
+            makeCandidate('507f191e810c19729de88005', 'author-c', 'toString'),
+        ], {
+            pipeline: 'node_baseline',
+            runtimeMode: 'off',
+            configuredServingOwner: 'node',
+            servingOwner: 'node',
+        });
+
+        for (const source of ['__proto__', 'constructor', 'toString']) {
+            expect(Object.prototype.hasOwnProperty.call(result.selectedSourceCounts, source)).toBe(true);
+            expect(result.selectedSourceCounts[source]).toBe(1);
+        }
     });
 });
 

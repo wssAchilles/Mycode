@@ -85,5 +85,5 @@ function summarizeSelectedSourceCounts(candidates: FeedCandidate[]): Record<stri
             : 'unknown';
         acc[key] = (acc[key] || 0) + 1;
         return acc;
-    }, {});
+    }, Object.create(null) as Record<string, number>);
 }
