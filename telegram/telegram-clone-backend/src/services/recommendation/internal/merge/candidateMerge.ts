@@ -69,7 +69,7 @@ export function mergeSourceCandidates(
     }
   }
 
-  const laneCounts: Record<string, number> = {};
+  const laneCounts = Object.create(null) as Record<string, number>;
   for (const candidate of merged) {
     candidate.retrievalLane ||= sourceRetrievalLane(candidate.recallSource || '');
     laneCounts[candidate.retrievalLane] = (laneCounts[candidate.retrievalLane] || 0) + 1;

@@ -76,4 +76,24 @@ describe('candidate source merge', () => {
     expect(result.candidates[0].recallEvidence?.sourceScore).toBeTypeOf('number');
     expect(result.candidates[0].recallEvidence?.confidence).toBeGreaterThan(0);
   });
+
+  it('counts prototype-like retrieval lanes as ordinary lanes', () => {
+    const query = createFeedQuery('viewer-lane-counts', 6);
+    const lanes = ['__proto__', 'constructor', 'toString'];
+    const candidates = lanes.map((lane, index) => ({
+      ...candidate(`lane-${index}`, `author-${index}`, 'CustomSource'),
+      retrievalLane: lane,
+    }));
+
+    const result = mergeSourceCandidates(
+      query,
+      [{ sourceName: 'CustomSource', candidates }],
+      ['CustomSource'],
+    );
+
+    for (const lane of lanes) {
+      expect(Object.prototype.hasOwnProperty.call(result.laneCounts, lane)).toBe(true);
+      expect(result.laneCounts[lane]).toBe(1);
+    }
+  });
 });
