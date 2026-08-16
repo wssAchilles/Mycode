@@ -10,6 +10,20 @@ export const REPLAY_VARIANT_NAMES = Object.freeze([
 
 export type ReplayVariantName = typeof REPLAY_VARIANT_NAMES[number];
 
+export const REPLAY_SCORE_PROVENANCE_NAMES = Object.freeze([
+    'baseline_rank_v1',
+    'native_score_v1',
+    'native_weighted_score_v1',
+    'fallback_weighted_score_v1',
+    'fallback_score_v1',
+    'fallback_pipeline_score_v1',
+    'fallback_baseline_rank_v1',
+    'derived_signal_blend_v1',
+    'derived_guardrail_blend_v1',
+] as const);
+
+export type ReplayScoreProvenance = typeof REPLAY_SCORE_PROVENANCE_NAMES[number];
+
 export interface ReplayCandidateLabelSummary {
     click: boolean;
     like: boolean;
@@ -97,6 +111,7 @@ export interface ReplayRequestSnapshot {
 export interface ReplayRankingCandidate extends ReplayCandidateSnapshot {
     replayScore: number;
     replayRank: number;
+    replayScoreProvenance: ReplayScoreProvenance;
 }
 
 export type ReplayMetricEligibilityStatus = 'complete' | 'partial' | 'not_evaluable';
@@ -104,10 +119,11 @@ export type ReplayMetricEligibilityStatus = 'complete' | 'partial' | 'not_evalua
 export type ReplayMetricEligibilityReason =
     | 'missing_feedback'
     | 'candidate_set_truncated'
-    | 'candidate_set_completeness_unverified';
+    | 'candidate_set_completeness_unverified'
+    | 'score_provenance_unavailable';
 
 export interface ReplayMetricEligibilitySummary {
-    contractVersion: 'replay_metric_eligibility_v1';
+    contractVersion: 'replay_metric_eligibility_v2';
     status: ReplayMetricEligibilityStatus;
     reasons: ReplayMetricEligibilityReason[];
     eligibleRequestDenominator: number;
@@ -162,6 +178,16 @@ export interface ReplayAttributionCoverageSummary {
     attributedFeedbackRate: number;
 }
 
+export interface ReplayScoreProvenanceSummary {
+    contractVersion: 'replay_score_provenance_v1';
+    variant: ReplayVariantName;
+    requests: number;
+    candidates: number;
+    requestsWithFallback: number;
+    requestsMissingNativeScore: number;
+    scoreSourceCounts: Record<ReplayScoreProvenance, number>;
+}
+
 export interface LoggingReadinessSummary {
     totalRequests: number;
     requestsMissingRank: number;
@@ -186,6 +212,7 @@ export interface ReplayEvaluationSummary {
     candidateSet: ReplayCandidateSetSummary;
     attributionCoverage: ReplayAttributionCoverageSummary;
     loggingReadiness: LoggingReadinessSummary;
+    scoreProvenance: ReplayScoreProvenanceSummary;
     baseline: ReplayRankingMetrics;
     variantMetrics: ReplayRankingMetrics;
     delta: ReplayRankingMetrics;

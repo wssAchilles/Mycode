@@ -92,7 +92,7 @@ describe('replay metric eligibility', () => {
         );
 
         expect(summary.baseline.metricEligibility).toEqual({
-            contractVersion: 'replay_metric_eligibility_v1',
+            contractVersion: 'replay_metric_eligibility_v2',
             status: 'complete',
             reasons: [],
             eligibleRequestDenominator: 1,
@@ -118,7 +118,7 @@ describe('replay metric eligibility', () => {
         );
 
         expect(summary.baseline.metricEligibility).toEqual({
-            contractVersion: 'replay_metric_eligibility_v1',
+            contractVersion: 'replay_metric_eligibility_v2',
             status: 'not_evaluable',
             reasons: ['missing_feedback'],
             eligibleRequestDenominator: 0,
@@ -170,7 +170,7 @@ describe('replay metric eligibility', () => {
         );
 
         expect(summary.baseline.metricEligibility).toEqual({
-            contractVersion: 'replay_metric_eligibility_v1',
+            contractVersion: 'replay_metric_eligibility_v2',
             status: 'not_evaluable',
             reasons: ['candidate_set_truncated'],
             eligibleRequestDenominator: 0,
@@ -206,7 +206,7 @@ describe('replay metric eligibility', () => {
         );
 
         expect(summary.baseline.metricEligibility).toEqual({
-            contractVersion: 'replay_metric_eligibility_v1',
+            contractVersion: 'replay_metric_eligibility_v2',
             status: 'partial',
             reasons: ['missing_feedback', 'candidate_set_truncated'],
             eligibleRequestDenominator: 1,
@@ -224,5 +224,98 @@ describe('replay metric eligibility', () => {
         expect(summary.requestDiffLeaders.improved.length + summary.requestDiffLeaders.regressed.length)
             .toBeLessThanOrEqual(1);
         expect(summary.baseline.averageNdcgAtK).toBeGreaterThan(0);
+    });
+
+    it('keeps fallback ranking observable but gates trace final metrics on native score', () => {
+        const first = candidate(1, eligibleLabels());
+        const { score: _score, ...secondWithoutNativeScore } = candidate(2);
+        const summary = evaluateReplayRequests(
+            [request('trace-fallback', [
+                {
+                    ...first,
+                    score: undefined,
+                    weightedScore: 0.7,
+                    pipelineScore: 0.6,
+                },
+                {
+                    ...secondWithoutNativeScore,
+                    weightedScore: 0.5,
+                    pipelineScore: 0.4,
+                },
+            ])],
+            2,
+            'trace_final_score_v1',
+        );
+
+        expect(summary.scoreProvenance).toEqual(expect.objectContaining({
+            variant: 'trace_final_score_v1',
+            requests: 1,
+            candidates: 2,
+            requestsWithFallback: 1,
+            requestsMissingNativeScore: 1,
+            scoreSourceCounts: expect.objectContaining({
+                fallback_weighted_score_v1: 2,
+            }),
+        }));
+        expect(summary.variantMetrics.metricEligibility).toMatchObject({
+            contractVersion: 'replay_metric_eligibility_v2',
+            status: 'not_evaluable',
+            reasons: ['score_provenance_unavailable'],
+            eligibleRequestDenominator: 0,
+            excludedRequestCount: 1,
+        });
+        expect(summary.baseline.metricEligibility.status).toBe('complete');
+        expect(summary.eligibleRankLiftRequestDenominator).toBe(0);
+        expect(summary.requestDiffLeaders).toEqual({ improved: [], regressed: [] });
+    });
+
+    it('requires native weighted score across the full candidate set, not only top-k', () => {
+        const first = candidate(1, eligibleLabels());
+        const {
+            score: _score,
+            weightedScore: _weightedScore,
+            ...secondWithoutNativeWeightedScore
+        } = {
+            ...candidate(2),
+            weightedScore: undefined,
+            pipelineScore: 0.4,
+        };
+        const summary = evaluateReplayRequests(
+            [request('weighted-fallback', [first, secondWithoutNativeWeightedScore])],
+            1,
+            'trace_weighted_score_v1',
+        );
+
+        expect(summary.variantMetrics.metricEligibility).toMatchObject({
+            status: 'not_evaluable',
+            reasons: ['score_provenance_unavailable'],
+            eligibleRequestDenominator: 0,
+        });
+        expect(summary.scoreProvenance.requestsMissingNativeScore).toBe(1);
+        expect(summary.scoreProvenance.scoreSourceCounts.fallback_pipeline_score_v1).toBe(1);
+    });
+
+    it('does not apply trace score gates to baseline or hybrid diagnostics', () => {
+        const scorelessCandidates = [
+            { ...candidate(1, eligibleLabels()), score: undefined },
+            { ...candidate(2), score: undefined },
+        ];
+        const baseline = evaluateReplayRequests(
+            [request('baseline-scoreless', scorelessCandidates)],
+            2,
+            'baseline_rank_v1',
+        );
+        const hybrid = evaluateReplayRequests(
+            [request('hybrid-scoreless', scorelessCandidates)],
+            2,
+            'hybrid_signal_blend_v1',
+        );
+
+        expect(baseline.variantMetrics.metricEligibility.status).toBe('complete');
+        expect(baseline.scoreProvenance.requestsMissingNativeScore).toBe(0);
+        expect(baseline.scoreProvenance.scoreSourceCounts.baseline_rank_v1).toBe(2);
+        expect(hybrid.variantMetrics.metricEligibility.status).toBe('complete');
+        expect(hybrid.scoreProvenance.requestsMissingNativeScore).toBe(0);
+        expect(hybrid.scoreProvenance.scoreSourceCounts.derived_signal_blend_v1).toBe(2);
     });
 });

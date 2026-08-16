@@ -220,6 +220,35 @@ describe('recommendation replay evaluator', () => {
         }
     });
 
+    it('treats prototype-like source priors as unknown sources', () => {
+        const base = buildRequest();
+        const ranked = rerankReplayCandidates(buildRequest({
+            candidates: [{
+                ...base.candidates[0],
+                recallSource: '__proto__',
+            }],
+            candidateSetTotalCount: 1,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+        }), 'hybrid_signal_blend_v1');
+
+        expect(Number.isFinite(ranked[0].replayScore)).toBe(true);
+        expect(ranked[0].replayScoreProvenance).toBe('derived_signal_blend_v1');
+    });
+
+    it('labels trace ranking that falls back to baseline rank', () => {
+        const base = buildRequest();
+        const { score: _score, weightedScore: _weightedScore, pipelineScore: _pipelineScore, ...scoreless } = {
+            ...base.candidates[0],
+        };
+        const ranked = rerankReplayCandidates(buildRequest({
+            candidates: [scoreless],
+        }), 'trace_final_score_v1');
+
+        expect(ranked[0].replayScore).toBe(-1);
+        expect(ranked[0].replayScoreProvenance).toBe('fallback_baseline_rank_v1');
+    });
+
     it('industrial guardrail variant demotes negative repeats and promotes trend-linked news', () => {
         const base = buildRequest();
         const request = buildRequest({

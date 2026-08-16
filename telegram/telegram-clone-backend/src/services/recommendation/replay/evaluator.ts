@@ -9,14 +9,18 @@ import type {
     ReplayRankingMetrics,
     ReplayRequestDelta,
     ReplayRequestSnapshot,
+    ReplayScoreProvenance,
+    ReplayScoreProvenanceSummary,
     ReplayVariantName,
 } from './contracts';
-import { rerankReplayCandidates } from './variantScorer';
+import { REPLAY_SCORE_PROVENANCE_NAMES } from './contracts';
+import { hasNativeReplayScore, rerankReplayCandidates } from './variantScorer';
 
 type RankingSummary = {
     hasCompleteAttribution: boolean;
     candidateSetComplete: boolean;
     candidateSetReason: ReplayMetricEligibilitySummary['reasons'][number] | null;
+    scoreProvenanceComplete: boolean;
     strictMetricsEligible: boolean;
     candidateCount: number;
     clickHit: number;
@@ -46,6 +50,7 @@ type MetricAccumulator = {
     feedbackCandidates: number;
     missingFeedbackRequests: number;
     missingFeedbackCandidates: number;
+    scoreProvenanceUnavailableRequests: number;
     truncatedRequests: number;
     truncatedCandidates: number;
     candidateSetReasons: Set<ReplayMetricEligibilitySummary['reasons'][number]>;
@@ -72,6 +77,15 @@ type CandidateSetAssessment = {
     reason: ReplayMetricEligibilitySummary['reasons'][number] | null;
 };
 
+type ScoreProvenanceAccumulator = {
+    variant: ReplayVariantName;
+    requests: number;
+    candidates: number;
+    requestsWithFallback: number;
+    requestsMissingNativeScore: number;
+    scoreSourceCounts: Record<ReplayScoreProvenance, number>;
+};
+
 export function evaluateReplayRequests(
     requests: ReplayRequestSnapshot[],
     topK: number,
@@ -82,6 +96,7 @@ export function evaluateReplayRequests(
 
     const baselineTotals = createMetricAccumulator();
     const variantTotals = createMetricAccumulator();
+    const scoreProvenance = createScoreProvenanceAccumulator(variant);
     const byUserState = Object.create(null) as Record<string, BucketAccumulator>;
     const byPipeline = Object.create(null) as Record<string, BucketAccumulator>;
     const byCandidateSetKind = Object.create(null) as Record<string, CandidateSetAccumulator>;
@@ -125,8 +140,13 @@ export function evaluateReplayRequests(
                 ...candidate,
                 replayScore: -candidate.baselineRank,
                 replayRank: index + 1,
+                replayScoreProvenance: 'baseline_rank_v1' as const,
             }));
         const variantRanking = rerankReplayCandidates(request, variant);
+        const scoreProvenanceComplete = request.candidates.every((candidate) => (
+            hasNativeReplayScore(candidate, variant)
+        ));
+        addScoreProvenance(scoreProvenance, variantRanking, scoreProvenanceComplete);
 
         const candidateSetAssessment = assessCandidateSet(request);
         const baselineSummary = summarizeRanking(
@@ -134,12 +154,14 @@ export function evaluateReplayRequests(
             request.candidates,
             topK,
             candidateSetAssessment,
+            true,
         );
         const variantSummary = summarizeRanking(
             variantRanking,
             request.candidates,
             topK,
             candidateSetAssessment,
+            scoreProvenanceComplete,
         );
         baselineSelectedTotal += Math.min(topK, baselineRanking.length);
         variantSelectedTotal += Math.min(topK, variantRanking.length);
@@ -250,6 +272,7 @@ export function evaluateReplayRequests(
             attributedFeedbackRate: attributedFeedbackCandidates / Math.max(1, candidatesWithFeedback),
         },
         loggingReadiness,
+        scoreProvenance: finalizeScoreProvenance(scoreProvenance),
         baseline,
         variantMetrics,
         delta: diffMetrics(variantMetrics, baseline),
@@ -379,11 +402,14 @@ function summarizeRanking(
     allCandidates: ReplayCandidateSnapshot[],
     topK: number,
     candidateSetAssessment: CandidateSetAssessment,
+    scoreProvenanceComplete: boolean,
 ): RankingSummary {
     const rows = ranking.slice(0, topK);
     const hasCompleteAttribution = allCandidates.length > 0
         && allCandidates.every((candidate) => attributedLabels(candidate) !== undefined);
-    const strictMetricsEligible = hasCompleteAttribution && candidateSetAssessment.complete;
+    const strictMetricsEligible = hasCompleteAttribution
+        && candidateSetAssessment.complete
+        && scoreProvenanceComplete;
     const feedbackCandidates = strictMetricsEligible ? allCandidates : [];
     const feedbackRows = strictMetricsEligible ? rows : [];
     const uniqueAuthors = new Set(rows.map((candidate) => candidate.authorId).filter(Boolean));
@@ -405,6 +431,7 @@ function summarizeRanking(
         hasCompleteAttribution,
         candidateSetComplete: candidateSetAssessment.complete,
         candidateSetReason: candidateSetAssessment.reason,
+        scoreProvenanceComplete,
         strictMetricsEligible,
         candidateCount: allCandidates.length,
         clickHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.click) ? 1 : 0,
@@ -499,6 +526,51 @@ function rankLift(
     return { totalLift, count };
 }
 
+function createScoreProvenanceAccumulator(variant: ReplayVariantName): ScoreProvenanceAccumulator {
+    return {
+        variant,
+        requests: 0,
+        candidates: 0,
+        requestsWithFallback: 0,
+        requestsMissingNativeScore: 0,
+        scoreSourceCounts: Object.fromEntries(
+            REPLAY_SCORE_PROVENANCE_NAMES.map((name) => [name, 0]),
+        ) as Record<ReplayScoreProvenance, number>,
+    };
+}
+
+function addScoreProvenance(
+    target: ScoreProvenanceAccumulator,
+    ranking: ReplayRankingCandidate[],
+    nativeScoreComplete: boolean,
+): void {
+    target.requests += 1;
+    target.candidates += ranking.length;
+    if (!nativeScoreComplete) target.requestsMissingNativeScore += 1;
+    let requestHasFallback = false;
+    for (const candidate of ranking) {
+        target.scoreSourceCounts[candidate.replayScoreProvenance] += 1;
+        if (candidate.replayScoreProvenance.startsWith('fallback_')) {
+            requestHasFallback = true;
+        }
+    }
+    if (requestHasFallback) target.requestsWithFallback += 1;
+}
+
+function finalizeScoreProvenance(
+    totals: ScoreProvenanceAccumulator,
+): ReplayScoreProvenanceSummary {
+    return {
+        contractVersion: 'replay_score_provenance_v1',
+        variant: totals.variant,
+        requests: totals.requests,
+        candidates: totals.candidates,
+        requestsWithFallback: totals.requestsWithFallback,
+        requestsMissingNativeScore: totals.requestsMissingNativeScore,
+        scoreSourceCounts: totals.scoreSourceCounts,
+    };
+}
+
 function createMetricAccumulator(): MetricAccumulator {
     return {
         requests: 0,
@@ -507,6 +579,7 @@ function createMetricAccumulator(): MetricAccumulator {
         feedbackCandidates: 0,
         missingFeedbackRequests: 0,
         missingFeedbackCandidates: 0,
+        scoreProvenanceUnavailableRequests: 0,
         truncatedRequests: 0,
         truncatedCandidates: 0,
         candidateSetReasons: new Set(),
@@ -530,6 +603,9 @@ function addRankingSummary(target: MetricAccumulator, summary: RankingSummary): 
     if (!summary.hasCompleteAttribution) {
         target.missingFeedbackRequests += 1;
         target.missingFeedbackCandidates += summary.candidateCount;
+    }
+    if (!summary.scoreProvenanceComplete) {
+        target.scoreProvenanceUnavailableRequests += 1;
     }
     if (!summary.candidateSetComplete) {
         target.truncatedRequests += 1;
@@ -576,9 +652,12 @@ function buildMetricEligibility(totals: MetricAccumulator): ReplayMetricEligibil
     ] as const) {
         if (totals.candidateSetReasons.has(reason)) reasons.push(reason);
     }
+    if (totals.scoreProvenanceUnavailableRequests > 0) {
+        reasons.push('score_provenance_unavailable');
+    }
     const eligibleRequestDenominator = totals.feedbackRequests;
     return {
-        contractVersion: 'replay_metric_eligibility_v1',
+        contractVersion: 'replay_metric_eligibility_v2',
         status: totals.requests === 0 || eligibleRequestDenominator === 0
             ? 'not_evaluable'
             : eligibleRequestDenominator === totals.requests
@@ -622,6 +701,7 @@ function mergeMetricEligibility(
         'missing_feedback',
         'candidate_set_truncated',
         'candidate_set_completeness_unverified',
+        'score_provenance_unavailable',
     ] as const) {
         if (left.reasons.includes(reason) || right.reasons.includes(reason)) reasons.push(reason);
     }
@@ -631,7 +711,7 @@ function mergeMetricEligibility(
     );
     const excludedRequestCount = Math.max(left.excludedRequestCount, right.excludedRequestCount);
     return {
-        contractVersion: 'replay_metric_eligibility_v1',
+        contractVersion: 'replay_metric_eligibility_v2',
         status: left.status === right.status ? left.status : 'partial',
         reasons,
         eligibleRequestDenominator,

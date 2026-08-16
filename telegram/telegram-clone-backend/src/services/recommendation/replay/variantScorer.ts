@@ -2,20 +2,23 @@ import type {
     ReplayCandidateSnapshot,
     ReplayRankingCandidate,
     ReplayRequestSnapshot,
+    ReplayScoreProvenance,
     ReplayVariantName,
 } from './contracts';
 import { readFeedSignalValue } from '../signals/feedSignalSemantics';
 
-const SOURCE_PRIORS: Record<string, number> = {
-    FollowingSource: 0.16,
-    GraphSource: 0.12,
-    GraphKernelSource: 0.12,
-    EmbeddingAuthorSource: 0.11,
-    TwoTowerSource: 0.09,
-    NewsAnnSource: 0.05,
-    ColdStartSource: 0.03,
-    PopularSource: -0.02,
-};
+const SOURCE_PRIORS: Readonly<Record<string, number>> = Object.freeze(
+    Object.assign(Object.create(null) as Record<string, number>, {
+        FollowingSource: 0.16,
+        GraphSource: 0.12,
+        GraphKernelSource: 0.12,
+        EmbeddingAuthorSource: 0.11,
+        TwoTowerSource: 0.09,
+        NewsAnnSource: 0.05,
+        ColdStartSource: 0.03,
+        PopularSource: -0.02,
+    }),
+);
 
 export function rerankReplayCandidates(
     request: ReplayRequestSnapshot,
@@ -25,7 +28,7 @@ export function rerankReplayCandidates(
         .slice()
         .map((candidate) => ({
             ...candidate,
-            replayScore: scoreReplayCandidate(request, candidate, variant),
+            ...resolveReplayScore(request, candidate, variant),
             replayRank: 0,
         }))
         .sort((left, right) =>
@@ -45,23 +48,93 @@ export function scoreReplayCandidate(
     candidate: ReplayCandidateSnapshot,
     variant: ReplayVariantName,
 ): number {
+    return resolveReplayScore(request, candidate, variant).replayScore;
+}
+
+export function hasNativeReplayScore(
+    candidate: ReplayCandidateSnapshot,
+    variant: ReplayVariantName,
+): boolean {
+    switch (variant) {
+        case 'trace_final_score_v1':
+            return finite(candidate.score) !== undefined;
+        case 'trace_weighted_score_v1':
+            return finite(candidate.weightedScore) !== undefined;
+        case 'baseline_rank_v1':
+        case 'hybrid_signal_blend_v1':
+        case 'industrial_guardrail_blend_v1':
+            return true;
+        default:
+            return unsupportedReplayVariant(variant);
+    }
+}
+
+type ReplayScoreResolution = {
+    replayScore: number;
+    replayScoreProvenance: ReplayScoreProvenance;
+};
+
+function resolveReplayScore(
+    request: ReplayRequestSnapshot,
+    candidate: ReplayCandidateSnapshot,
+    variant: ReplayVariantName,
+): ReplayScoreResolution {
     switch (variant) {
         case 'baseline_rank_v1':
-            return -candidate.baselineRank;
+            return {
+                replayScore: -candidate.baselineRank,
+                replayScoreProvenance: 'baseline_rank_v1',
+            };
         case 'trace_final_score_v1':
-            return finite(candidate.score)
-                ?? finite(candidate.weightedScore)
-                ?? finite(candidate.pipelineScore)
-                ?? -candidate.baselineRank;
+            if (finite(candidate.score) !== undefined) {
+                return { replayScore: candidate.score!, replayScoreProvenance: 'native_score_v1' };
+            }
+            if (finite(candidate.weightedScore) !== undefined) {
+                return {
+                    replayScore: candidate.weightedScore!,
+                    replayScoreProvenance: 'fallback_weighted_score_v1',
+                };
+            }
+            if (finite(candidate.pipelineScore) !== undefined) {
+                return {
+                    replayScore: candidate.pipelineScore!,
+                    replayScoreProvenance: 'fallback_pipeline_score_v1',
+                };
+            }
+            return {
+                replayScore: -candidate.baselineRank,
+                replayScoreProvenance: 'fallback_baseline_rank_v1',
+            };
         case 'trace_weighted_score_v1':
-            return finite(candidate.weightedScore)
-                ?? finite(candidate.score)
-                ?? finite(candidate.pipelineScore)
-                ?? -candidate.baselineRank;
+            if (finite(candidate.weightedScore) !== undefined) {
+                return {
+                    replayScore: candidate.weightedScore!,
+                    replayScoreProvenance: 'native_weighted_score_v1',
+                };
+            }
+            if (finite(candidate.score) !== undefined) {
+                return { replayScore: candidate.score!, replayScoreProvenance: 'fallback_score_v1' };
+            }
+            if (finite(candidate.pipelineScore) !== undefined) {
+                return {
+                    replayScore: candidate.pipelineScore!,
+                    replayScoreProvenance: 'fallback_pipeline_score_v1',
+                };
+            }
+            return {
+                replayScore: -candidate.baselineRank,
+                replayScoreProvenance: 'fallback_baseline_rank_v1',
+            };
         case 'hybrid_signal_blend_v1':
-            return hybridSignalBlendScore(request, candidate);
+            return {
+                replayScore: hybridSignalBlendScore(request, candidate),
+                replayScoreProvenance: 'derived_signal_blend_v1',
+            };
         case 'industrial_guardrail_blend_v1':
-            return industrialGuardrailBlendScore(request, candidate);
+            return {
+                replayScore: industrialGuardrailBlendScore(request, candidate),
+                replayScoreProvenance: 'derived_guardrail_blend_v1',
+            };
         default:
             return unsupportedReplayVariant(variant);
     }
