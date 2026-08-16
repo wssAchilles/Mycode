@@ -38,6 +38,15 @@ interface CircuitState {
     trippedAt: number;
     /** Whether the circuit is currently open (blocking calls) */
     isOpen: boolean;
+    /** Invalidates results from calls that started before the latest trip */
+    generation: number;
+    /** Whether the single recovery probe is currently running */
+    halfOpenProbeInFlight: boolean;
+}
+
+interface CircuitPermit {
+    generation: number;
+    halfOpenProbe: boolean;
 }
 
 interface PipelineExecutionState {
@@ -96,59 +105,88 @@ class CircuitBreaker {
         this.resetTimeoutMs = config?.resetTimeoutMs ?? DEFAULT_CB_RESET_TIMEOUT_MS;
     }
 
-    /**
-     * Check whether a component is allowed to execute.
-     * Returns true if the call should proceed, false if the circuit is open.
-     */
-    canExecute(componentKey: string): boolean {
+    /** Acquire permission to execute, allowing only one half-open recovery probe. */
+    acquirePermit(componentKey: string): CircuitPermit | null {
         const state = this.states.get(componentKey);
-        if (!state || !state.isOpen) return true;
+        if (!state) return { generation: 0, halfOpenProbe: false };
 
-        // Check if the reset window has elapsed
-        if (Date.now() - state.trippedAt >= this.resetTimeoutMs) {
-            // Half-open: allow one probe call
-            state.isOpen = false;
-            state.consecutiveFailures = 0;
-            log.info(`[CircuitBreaker] ${componentKey} reset after ${this.resetTimeoutMs}ms window`);
-            return true;
+        if (!state.isOpen) {
+            return { generation: state.generation, halfOpenProbe: false };
         }
 
-        return false;
+        // Check if the reset window has elapsed
+        if (
+            Date.now() - state.trippedAt < this.resetTimeoutMs ||
+            state.halfOpenProbeInFlight
+        ) {
+            return null;
+        }
+
+        state.halfOpenProbeInFlight = true;
+        log.info(`[CircuitBreaker] ${componentKey} probing after ${this.resetTimeoutMs}ms window`);
+        return { generation: state.generation, halfOpenProbe: true };
     }
 
     /** Record a successful execution -- resets the failure counter */
-    recordSuccess(componentKey: string): void {
+    recordSuccess(componentKey: string, permit: CircuitPermit): void {
         const state = this.states.get(componentKey);
-        if (state) {
+        if (!state || permit.generation !== state.generation) return;
+
+        if (permit.halfOpenProbe) {
+            if (!state.isOpen || !state.halfOpenProbeInFlight) return;
+            state.isOpen = false;
+            state.halfOpenProbeInFlight = false;
             state.consecutiveFailures = 0;
-            if (state.isOpen) {
-                state.isOpen = false;
-                log.info(`[CircuitBreaker] ${componentKey} recovered`);
-            }
+            log.info(`[CircuitBreaker] ${componentKey} recovered`);
+            return;
         }
+
+        if (!state.isOpen) state.consecutiveFailures = 0;
     }
 
     /** Record a failed execution -- may trip the circuit */
-    recordFailure(componentKey: string): boolean {
+    recordFailure(componentKey: string, permit: CircuitPermit): boolean {
         let state = this.states.get(componentKey);
         if (!state) {
-            state = { consecutiveFailures: 0, trippedAt: 0, isOpen: false };
+            if (permit.generation !== 0 || permit.halfOpenProbe) return false;
+            state = {
+                consecutiveFailures: 0,
+                trippedAt: 0,
+                isOpen: false,
+                generation: 0,
+                halfOpenProbeInFlight: false,
+            };
             this.states.set(componentKey, state);
         }
+        if (permit.generation !== state.generation) return false;
+
+        if (permit.halfOpenProbe) {
+            if (!state.isOpen || !state.halfOpenProbeInFlight) return false;
+            state.consecutiveFailures++;
+            return this.trip(componentKey, state);
+        }
+
+        if (state.isOpen) return false;
 
         state.consecutiveFailures++;
 
-        if (state.consecutiveFailures >= this.failureThreshold && !state.isOpen) {
-            state.isOpen = true;
-            state.trippedAt = Date.now();
-            log.warn(
-                `[CircuitBreaker] ${componentKey} OPEN after ${state.consecutiveFailures} consecutive failures ` +
-                `(will reset in ${this.resetTimeoutMs}ms)`
-            );
-            return true;
+        if (state.consecutiveFailures >= this.failureThreshold) {
+            return this.trip(componentKey, state);
         }
 
         return false;
+    }
+
+    private trip(componentKey: string, state: CircuitState): true {
+        state.isOpen = true;
+        state.halfOpenProbeInFlight = false;
+        state.trippedAt = Date.now();
+        state.generation++;
+        log.warn(
+            `[CircuitBreaker] ${componentKey} OPEN after ${state.consecutiveFailures} consecutive failures ` +
+            `(will reset in ${this.resetTimeoutMs}ms)`
+        );
+        return true;
     }
 
     /** Get current state snapshot for metrics */
@@ -994,8 +1032,8 @@ export class RecommendationPipeline<Q, C> {
     ): Promise<T> {
         const componentKey = `${stage}:${name}`;
 
-        // Circuit breaker check
-        if (!this.circuitBreaker.canExecute(componentKey)) {
+        const circuitPermit = this.circuitBreaker.acquirePermit(componentKey);
+        if (!circuitPermit) {
             log.debug(`[CircuitBreaker] Skipping ${componentKey} (circuit open)`);
             state.runtimeMetrics.circuitBreakerSkips++;
             if (this.config.captureComponentMetrics) {
@@ -1035,11 +1073,11 @@ export class RecommendationPipeline<Q, C> {
 
         try {
             const value = await result;
-            this.circuitBreaker.recordSuccess(componentKey);
+            this.circuitBreaker.recordSuccess(componentKey, circuitPermit);
             return value;
         } catch (err) {
             // Both timeouts and runtime errors count as failures for the circuit breaker
-            if (this.circuitBreaker.recordFailure(componentKey)) {
+            if (this.circuitBreaker.recordFailure(componentKey, circuitPermit)) {
                 state.runtimeMetrics.circuitBreakerTrips++;
             }
 

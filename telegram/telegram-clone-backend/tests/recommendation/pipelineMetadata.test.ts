@@ -648,4 +648,94 @@ describe('RecommendationPipeline metadata contracts', () => {
             vi.useRealTimers();
         }
     });
+
+    it('allows only one half-open circuit probe', async () => {
+        vi.useFakeTimers();
+        let releaseProbe = () => {};
+        let firstProbe: Promise<unknown> | undefined;
+        let secondProbe: Promise<unknown> | undefined;
+        try {
+            const probeGate = new Promise<void>((resolve) => {
+                releaseProbe = resolve;
+            });
+            let recoveryCalls = 0;
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                circuitBreaker: {
+                    failureThreshold: 1,
+                    resetTimeoutMs: 50,
+                },
+            }).withSource({
+                name: 'HalfOpenSource',
+                enable: () => true,
+                getCandidates: async (query) => {
+                    if (query.requestId === 'req-trip-half-open') {
+                        throw new Error('expected source failure');
+                    }
+                    recoveryCalls++;
+                    await probeGate;
+                    return [];
+                },
+            });
+
+            await pipeline.execute({ requestId: 'req-trip-half-open', limit: 20 });
+            await vi.advanceTimersByTimeAsync(50);
+
+            firstProbe = pipeline.execute({ requestId: 'req-half-open-first', limit: 20 });
+            secondProbe = pipeline.execute({ requestId: 'req-half-open-second', limit: 20 });
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(recoveryCalls).toBe(1);
+        } finally {
+            releaseProbe();
+            await vi.advanceTimersByTimeAsync(0);
+            await Promise.all([firstProbe, secondProbe].filter(Boolean));
+            vi.useRealTimers();
+        }
+    });
+
+    it('ignores a success from a call started before the circuit opened', async () => {
+        let markStaleStarted = () => {};
+        const staleStarted = new Promise<void>((resolve) => {
+            markStaleStarted = resolve;
+        });
+        let releaseStale = () => {};
+        const staleGate = new Promise<void>((resolve) => {
+            releaseStale = resolve;
+        });
+        let callsAfterTrip = 0;
+        const pipeline = new RecommendationPipeline<Query, Candidate>({
+            circuitBreaker: {
+                failureThreshold: 1,
+                resetTimeoutMs: 60_000,
+            },
+        }).withSource({
+            name: 'GenerationSource',
+            enable: () => true,
+            getCandidates: async (query) => {
+                if (query.requestId === 'req-stale-success') {
+                    markStaleStarted();
+                    await staleGate;
+                    return [];
+                }
+                if (query.requestId === 'req-trip-generation') {
+                    throw new Error('expected source failure');
+                }
+                callsAfterTrip++;
+                return [];
+            },
+        });
+
+        const staleExecution = pipeline.execute({
+            requestId: 'req-stale-success',
+            limit: 20,
+        });
+        await staleStarted;
+        await pipeline.execute({ requestId: 'req-trip-generation', limit: 20 });
+        releaseStale();
+        await staleExecution;
+
+        await pipeline.execute({ requestId: 'req-after-stale-success', limit: 20 });
+
+        expect(callsAfterTrip).toBe(0);
+    });
 });
