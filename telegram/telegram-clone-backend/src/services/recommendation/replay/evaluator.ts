@@ -40,6 +40,7 @@ type RankingSummary = {
 type BucketAccumulator = {
     requests: number;
     baseline: MetricAccumulator;
+    pairedBaseline: MetricAccumulator;
     variant: MetricAccumulator;
 };
 
@@ -95,6 +96,7 @@ export function evaluateReplayRequests(
     const candidateCount = requests.reduce((sum, request) => sum + request.candidates.length, 0);
 
     const baselineTotals = createMetricAccumulator();
+    const pairedBaselineTotals = createMetricAccumulator();
     const variantTotals = createMetricAccumulator();
     const scoreProvenance = createScoreProvenanceAccumulator(variant);
     const byUserState = Object.create(null) as Record<string, BucketAccumulator>;
@@ -163,17 +165,25 @@ export function evaluateReplayRequests(
             candidateSetAssessment,
             scoreProvenanceComplete,
         );
+        const pairedBaselineSummary: RankingSummary = {
+            ...baselineSummary,
+            scoreProvenanceComplete:
+                baselineSummary.scoreProvenanceComplete && variantSummary.scoreProvenanceComplete,
+            strictMetricsEligible:
+                baselineSummary.strictMetricsEligible && variantSummary.strictMetricsEligible,
+        };
         baselineSelectedTotal += Math.min(topK, baselineRanking.length);
         variantSelectedTotal += Math.min(topK, variantRanking.length);
 
         addRankingSummary(baselineTotals, baselineSummary);
+        addRankingSummary(pairedBaselineTotals, pairedBaselineSummary);
         addRankingSummary(variantTotals, variantSummary);
 
         const userStateKey = request.userState || '__unknown__';
         const pipelineKey = request.pipelineVersion || request.pipeline || '__unknown__';
         const candidateSetKind = request.candidateSetKind || '__unknown__';
-        addBucketSummary(byUserState, userStateKey, baselineSummary, variantSummary);
-        addBucketSummary(byPipeline, pipelineKey, baselineSummary, variantSummary);
+        addBucketSummary(byUserState, userStateKey, baselineSummary, pairedBaselineSummary, variantSummary);
+        addBucketSummary(byPipeline, pipelineKey, baselineSummary, pairedBaselineSummary, variantSummary);
         addCandidateSetSummary(byCandidateSetKind, candidateSetKind, request);
 
         observedCandidateSum += request.candidates.length;
@@ -231,6 +241,7 @@ export function evaluateReplayRequests(
     }
 
     const baseline = finalizeMetrics(baselineTotals);
+    const pairedBaseline = finalizeMetrics(pairedBaselineTotals);
     const variantMetrics = finalizeMetrics(variantTotals);
 
     const bySelectedSource = Object.fromEntries(
@@ -275,7 +286,7 @@ export function evaluateReplayRequests(
         scoreProvenance: finalizeScoreProvenance(scoreProvenance),
         baseline,
         variantMetrics,
-        delta: diffMetrics(variantMetrics, baseline),
+        delta: diffMetrics(variantMetrics, pairedBaseline),
         averageOverlapAtK: overlapAtKSum / Math.max(1, requestCount),
         averageEngagedRankLift: engagedRankLiftSum / Math.max(1, engagedRankLiftCount),
         averageClickedRankLift: clickedRankLiftSum / Math.max(1, clickedRankLiftCount),
@@ -745,15 +756,18 @@ function addBucketSummary(
     target: Record<string, BucketAccumulator>,
     key: string,
     baseline: RankingSummary,
+    pairedBaseline: RankingSummary,
     variant: RankingSummary,
 ): void {
     const bucket = target[key] || {
         requests: 0,
         baseline: createMetricAccumulator(),
+        pairedBaseline: createMetricAccumulator(),
         variant: createMetricAccumulator(),
     };
     bucket.requests += 1;
     addRankingSummary(bucket.baseline, baseline);
+    addRankingSummary(bucket.pairedBaseline, pairedBaseline);
     addRankingSummary(bucket.variant, variant);
     target[key] = bucket;
 }
@@ -786,6 +800,7 @@ function finalizeBuckets(
             .sort((left, right) => left[0].localeCompare(right[0]))
             .map(([key, bucket]) => {
                 const baseline = finalizeMetrics(bucket.baseline);
+                const pairedBaseline = finalizeMetrics(bucket.pairedBaseline);
                 const variant = finalizeMetrics(bucket.variant);
                 return [
                     key,
@@ -793,7 +808,7 @@ function finalizeBuckets(
                         requests: bucket.requests,
                         baseline,
                         variant,
-                        delta: diffMetrics(variant, baseline),
+                        delta: diffMetrics(variant, pairedBaseline),
                     },
                 ];
             }),

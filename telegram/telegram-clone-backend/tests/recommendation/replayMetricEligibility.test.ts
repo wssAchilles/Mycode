@@ -271,6 +271,7 @@ describe('replay metric eligibility', () => {
             eligibleRequestDenominator: 0,
             observedRequestDenominator: 1,
         });
+        expect(summary.delta.averageNdcgAtK).toBe(0);
         expect(summary.eligibleRankLiftRequestDenominator).toBe(0);
         expect(summary.requestDiffLeaders).toEqual({ improved: [], regressed: [] });
     });
@@ -323,5 +324,31 @@ describe('replay metric eligibility', () => {
         expect(hybrid.variantMetrics.metricEligibility.status).toBe('complete');
         expect(hybrid.scoreProvenance.requestsMissingNativeScore).toBe(0);
         expect(hybrid.scoreProvenance.scoreSourceCounts.derived_signal_blend_v1).toBe(2);
+    });
+
+    it('computes strict deltas over the common eligible request set', () => {
+        const nativeRequest = request('native-delta', [
+            { ...candidate(1, eligibleLabels()), score: 0.1 },
+            { ...candidate(2), score: 0.9 },
+        ]);
+        const fallbackRequest = request('fallback-delta', [
+            { ...candidate(3, eligibleLabels()), score: undefined },
+            { ...candidate(4), score: undefined },
+        ]);
+
+        const single = evaluateReplayRequests([nativeRequest], 2, 'trace_final_score_v1');
+        const mixed = evaluateReplayRequests(
+            [nativeRequest, fallbackRequest],
+            2,
+            'trace_final_score_v1',
+        );
+
+        expect(mixed.delta.averageNdcgAtK).toBeCloseTo(single.delta.averageNdcgAtK);
+        expect(mixed.delta.metricEligibility).toMatchObject({
+            status: 'partial',
+            eligibleRequestDenominator: 1,
+            observedRequestDenominator: 2,
+            reasons: ['score_provenance_unavailable'],
+        });
     });
 });

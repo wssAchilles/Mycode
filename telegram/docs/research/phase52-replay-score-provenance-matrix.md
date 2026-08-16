@@ -84,6 +84,8 @@ inference `UNAVAILABLE`。
 | **严格 abstention** | 对 `trace_final_score_v1` 要求每个候选 `score` finite；对 `trace_weighted_score_v1` 要求每个候选 `weightedScore` finite。所有候选（不只是 top-K）均满足，且 labels 与 candidate set 仍完整时才进入严格 NDCG/MRR/Recall/negative/click。 | 分母减少，可能 `partial` 或 `not_evaluable`；若只检查 top-K，会让未入选缺分候选在重排中被错误忽略。 | **采用**，作为唯一 score-backed 指标门槛。 |
 | **candidate filtering** | 先删除缺分候选，再在剩余集合计算；只能定义为另一个 filtered-universe observed diagnostic。 | 改变 candidate set、top-K 和 selection event；缺失与来源/位置相关时产生选择偏差；与 `complete_v1` 不兼容。 | **拒绝**严格指标；不在当前合同新增 filtered target。 |
 | **fallback + explicit provenance** | 保留现有排序可运行性；为每个候选标记 `native_<field>` 或 `fallback_<field>/<baseline_rank>`，并聚合 fallback candidate/request rate。 | provenance 只说明采用了什么，不能补回缺失 native score、propensity 或真实 label；混合排序不得进入 native variant 质量分母。 | **采用为 diagnostics-only**，适配现有 bounded replay。 |
+| **independent aggregate delta** | 分别对 baseline 与 variant 的 eligible request 求宏平均，再直接相减。 | score provenance 只在 variant 侧缺失时，两侧分母和 request 集合不同；差值混合了策略变化与样本组成变化。 | **拒绝**，不得把不配对的 aggregate difference 作为 variant delta。 |
+| **paired common-eligible delta** | 在同一 request 集合上累计 baseline/variant 严格指标；观察性 author/OON 指标仍可保留全量诊断。 | 没有共同 eligible request 时只能返回兼容性零值与 `not_evaluable`；不能通过删候选或缺失插补扩大集合。 | **采用**，复用现有 per-request eligibility，额外 O(requests) accumulator。 |
 | **diagnostics-only abstention** | 输出 observed ranking、fallback coverage、source counts、request/candidate 分母和 eligibility reasons；不输出 finite-sample utility/pass。 | 数值字段可能保留兼容性零值，消费者若忽略 status/reasons 仍会误读。 | **继续采用**，并把 score provenance 纳入 reason/version。 |
 
 ## 最小可执行范围
@@ -99,8 +101,9 @@ inference `UNAVAILABLE`。
    request，并记录独立 reason（需要新版本化的 eligibility contract，不能把它塞进旧 reason
    而不改版本）。observed ranking 与 fallback coverage 仍可返回。
 4. **指标**：保留 `eligibleRequestDenominator`、`eligibleCandidateDenominator`、
-   `excludedRequestCount`；新增的 fallback rates 只作为诊断。没有产品 owner 阈值时输出 frontier，
-   不生成 pass gate。
+   `excludedRequestCount`；baseline/variant 的严格 delta 只在共同 eligible request 集合上累计，
+   没有共同集合时输出兼容性零值和 `not_evaluable`。新增的 fallback rates 只作为诊断。没有产品
+   owner 阈值时输出 frontier，不生成 pass gate。
 5. **资源与失败条件**：每个候选只需一次 finite/source 判定，新增计算为
    `O(C_total)`，额外计数器为 `O(1)`；若保留 per-candidate provenance，额外存储为
    `O(C_total)`，其中 `C_total <= 65,536` 由现有 replay CLI admission 约束。不得在该路径创建
@@ -114,6 +117,7 @@ inference `UNAVAILABLE`。
   `partial`/`not_evaluable`，并显示实际 fallback source 与分母。
 - 另一个 request 需证明“只 top-K 有 native score、候选集其余部分缺失”仍被排除，防止 candidate
   filtering 或 top-K-only shortcut。
+- 混合 native/fallback requests 必须证明 delta 使用共同 eligible 分母，而不是把两侧不同宏平均直接相减；共同分母为零时 strict delta 保持零值并标记 `not_evaluable`。
 - `baseline_rank_v1` 的现有行为必须不受影响；`hybrid_signal_blend_v1` 和
   `industrial_guardrail_blend_v1` 仍只能声明 diagnostics。
 - focused Vitest、TypeScript `--noEmit`、Rust fmt/Clippy/Cargo locked 检查和 `git diff --check`
