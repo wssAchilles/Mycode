@@ -709,20 +709,25 @@ function mergeMetricEligibility(
         left.eligibleRequestDenominator,
         right.eligibleRequestDenominator,
     );
+    const observedRequestDenominator = Math.max(
+        left.observedRequestDenominator,
+        right.observedRequestDenominator,
+    );
     const excludedRequestCount = Math.max(left.excludedRequestCount, right.excludedRequestCount);
     return {
         contractVersion: 'replay_metric_eligibility_v2',
-        status: left.status === right.status ? left.status : 'partial',
+        status: eligibleRequestDenominator === 0
+            ? 'not_evaluable'
+            : eligibleRequestDenominator === observedRequestDenominator
+                ? 'complete'
+                : 'partial',
         reasons,
         eligibleRequestDenominator,
         eligibleCandidateDenominator: Math.min(
             left.eligibleCandidateDenominator,
             right.eligibleCandidateDenominator,
         ),
-        observedRequestDenominator: Math.max(
-            left.observedRequestDenominator,
-            right.observedRequestDenominator,
-        ),
+        observedRequestDenominator,
         observedCandidateDenominator: Math.max(
             left.observedCandidateDenominator,
             right.observedCandidateDenominator,

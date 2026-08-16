@@ -265,6 +265,12 @@ describe('replay metric eligibility', () => {
             excludedRequestCount: 1,
         });
         expect(summary.baseline.metricEligibility.status).toBe('complete');
+        expect(summary.delta.metricEligibility).toMatchObject({
+            status: 'not_evaluable',
+            reasons: ['score_provenance_unavailable'],
+            eligibleRequestDenominator: 0,
+            observedRequestDenominator: 1,
+        });
         expect(summary.eligibleRankLiftRequestDenominator).toBe(0);
         expect(summary.requestDiffLeaders).toEqual({ improved: [], regressed: [] });
     });
