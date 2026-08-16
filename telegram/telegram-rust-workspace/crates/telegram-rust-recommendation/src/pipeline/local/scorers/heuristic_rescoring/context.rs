@@ -1,5 +1,6 @@
 use super::media_cluster_diversity::media_cluster_key;
 use crate::contracts::RecommendationCandidatePayload;
+use crate::pipeline::local::clock::ranking_now;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 
@@ -77,7 +78,7 @@ impl HeuristicRescoringContext {
             topic_affinity_buckets,
             phoenix_score_stats,
             seen_post_ids: seen_post_ids.clone(),
-            now: Utc::now(),
+            now: ranking_now(),
         }
     }
 }

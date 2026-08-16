@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use chrono::{Duration, SecondsFormat, TimeZone, Utc};
 use serde_json::json;
 
+use crate::pipeline::local::clock::with_ranking_clock;
 use crate::pipeline::local::scorers::local_ranking_ladder_specs;
 
 use super::{
@@ -103,6 +105,84 @@ fn evaluates_replay_fixture_scenarios() {
 }
 
 #[test]
+fn replay_results_are_bound_to_fixture_time_not_ambient_wall_clock() {
+    let fixtures = replay_fixtures();
+    let early = Utc.with_ymd_and_hms(2020, 1, 2, 3, 4, 5).unwrap();
+    let late = Utc.with_ymd_and_hms(2035, 6, 7, 8, 9, 10).unwrap();
+
+    let evaluate = || {
+        fixtures
+            .iter()
+            .flat_map(|fixture| evaluate_replay_fixture(fixture).expect("evaluate replay fixture"))
+            .collect::<Vec<_>>()
+    };
+    let early_results = with_ranking_clock(early, evaluate);
+    let late_results = with_ranking_clock(late, evaluate);
+
+    assert_eq!(early_results, late_results);
+    for (scenario, result) in fixtures
+        .iter()
+        .flat_map(|fixture| fixture.scenarios.iter())
+        .zip(early_results)
+    {
+        let latest = scenario
+            .candidates
+            .iter()
+            .map(|candidate| candidate.created_at)
+            .max()
+            .expect("frozen replay scenarios must contain candidates");
+        assert_eq!(
+            result.replay_clock_anchor,
+            (latest + Duration::hours(48)).to_rfc3339_opts(SecondsFormat::Millis, true)
+        );
+    }
+}
+
+#[test]
+fn replay_reachable_ranking_code_uses_the_scoped_clock() {
+    let sources = [
+        ("replay/evaluator.rs", include_str!("evaluator.rs")),
+        (
+            "pipeline/local/filters/mod.rs",
+            include_str!("../pipeline/local/filters/mod.rs"),
+        ),
+        (
+            "pipeline/local/scoring/rule_signals.rs",
+            include_str!("../pipeline/local/scoring/rule_signals.rs"),
+        ),
+        (
+            "pipeline/local/signals/user_actions.rs",
+            include_str!("../pipeline/local/signals/user_actions.rs"),
+        ),
+        (
+            "pipeline/local/scorers/helpers/signals.rs",
+            include_str!("../pipeline/local/scorers/helpers/signals.rs"),
+        ),
+        (
+            "pipeline/local/scorers/helpers/actions.rs",
+            include_str!("../pipeline/local/scorers/helpers/actions.rs"),
+        ),
+        (
+            "pipeline/local/scorers/calibration.rs",
+            include_str!("../pipeline/local/scorers/calibration.rs"),
+        ),
+        (
+            "pipeline/local/scorers/heuristic_rescoring/context.rs",
+            include_str!("../pipeline/local/scorers/heuristic_rescoring/context.rs"),
+        ),
+    ];
+
+    for (path, source) in sources {
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production_source.contains("Utc::now()")
+                && !production_source.contains("chrono::Utc::now()"),
+            "replay-reachable ranking code bypasses the scoped clock: {path}"
+        );
+    }
+}
+
+#[test]
 fn replay_manifest_stays_aligned_with_fixture_scenarios() {
     let fixtures = replay_fixtures();
     let manifest = parse_replay_manifest().expect("parse replay scenario manifest");
@@ -184,6 +264,7 @@ fn replay_evaluation_result_deserializes_missing_logging_readiness() {
     .expect("deserialize legacy replay result");
 
     assert_eq!(result.logging_readiness, LoggingReadinessSummary::default());
+    assert!(result.replay_clock_anchor.is_empty());
 }
 
 #[test]

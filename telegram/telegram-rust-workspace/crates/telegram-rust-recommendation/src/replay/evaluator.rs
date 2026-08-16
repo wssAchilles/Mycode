@@ -7,6 +7,7 @@ use telegram_recommendation_fixtures::replay_assertions::{
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
+use crate::pipeline::local::clock::{ranking_now, with_ranking_clock};
 use crate::pipeline::local::filters::run_pre_score_filters;
 use crate::pipeline::local::scorers::{local_ranking_ladder_specs, run_local_scorers};
 use crate::selectors::top_k::{
@@ -35,6 +36,17 @@ pub fn evaluate_replay_fixture(
 }
 
 pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> ReplayEvaluationResult {
+    let replay_clock_anchor = replay_clock_anchor(scenario);
+    let replay_clock_anchor_wire = replay_clock_anchor.to_rfc3339_opts(SecondsFormat::Millis, true);
+    with_ranking_clock(replay_clock_anchor, move || {
+        evaluate_scenario_with_clock(scenario, replay_clock_anchor_wire)
+    })
+}
+
+fn evaluate_scenario_with_clock(
+    scenario: &RecommendationReplayScenarioPayload,
+    replay_clock_anchor: String,
+) -> ReplayEvaluationResult {
     let scenario = normalize_replay_clock(scenario);
     let logging_readiness = logging_readiness_summary(&scenario);
     let pre_filter = run_pre_score_filters(&scenario.query, scenario.candidates.clone());
@@ -389,6 +401,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
 
     ReplayEvaluationResult {
         scenario_name: scenario.name.clone(),
+        replay_clock_anchor,
         stage_names,
         filter_drop_counts: pre_filter.drop_counts,
         filtered_post_ids,
@@ -445,6 +458,20 @@ fn usable_score(score: Option<f64>) -> bool {
     score.is_some_and(f64::is_finite)
 }
 
+fn replay_clock_anchor(scenario: &RecommendationReplayScenarioPayload) -> DateTime<Utc> {
+    scenario
+        .candidates
+        .iter()
+        .map(|candidate| candidate.created_at)
+        .max()
+        .map(|latest| {
+            latest
+                .checked_add_signed(Duration::hours(48))
+                .unwrap_or(latest)
+        })
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+}
+
 fn normalize_replay_clock(
     scenario: &RecommendationReplayScenarioPayload,
 ) -> RecommendationReplayScenarioPayload {
@@ -457,7 +484,7 @@ fn normalize_replay_clock(
         return scenario.clone();
     };
 
-    let target_anchor = Utc::now() - Duration::hours(48);
+    let target_anchor = ranking_now() - Duration::hours(48);
     let delta = target_anchor.signed_duration_since(max_created_at);
     let mut normalized = scenario.clone();
     for candidate in &mut normalized.candidates {

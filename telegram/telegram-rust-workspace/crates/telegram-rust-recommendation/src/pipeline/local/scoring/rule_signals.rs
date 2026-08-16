@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{Timelike, Utc};
+use chrono::Timelike;
 use serde_json::Value;
 use telegram_ranking_primitives::{
     TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD, new_score_breakdown_map,
@@ -13,6 +13,7 @@ use telegram_source_primitives::{
 use whatlang::detect;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::pipeline::local::clock::ranking_now;
 use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, related_post_ids,
 };
@@ -23,7 +24,7 @@ pub(super) fn freshness_signal(
     candidate: &RecommendationCandidatePayload,
     policy: &ScoringPolicy,
 ) -> f64 {
-    let age_hours = Utc::now()
+    let age_hours = ranking_now()
         .signed_duration_since(candidate.created_at)
         .num_seconds()
         .max(0) as f64
@@ -235,7 +236,7 @@ pub(super) fn multi_source_evidence_signal(candidate: &RecommendationCandidatePa
 /// 内容速度信号: 互动量 / 发布小时数
 /// 高速度意味着内容正在快速获得关注
 pub(super) fn content_velocity_signal(candidate: &RecommendationCandidatePayload) -> f64 {
-    let age_hours = Utc::now()
+    let age_hours = ranking_now()
         .signed_duration_since(candidate.created_at)
         .num_seconds()
         .max(0) as f64
@@ -346,7 +347,7 @@ pub(super) fn negative_feedback_signal(
 
     // 从用户行为序列中匹配负面反馈
     // 关键改进: 加入时间衰减 — 3天前的 dismiss 不应该和今天的一样强
-    let now_ms = Utc::now().timestamp_millis();
+    let now_ms = ranking_now().timestamp_millis();
     let related_ids = related_post_ids(candidate);
 
     for action in query.user_action_sequence.as_ref().into_iter().flatten() {
@@ -537,7 +538,7 @@ pub(super) fn freshness_quality_interaction(freshness: f64, quality: f64) -> f64
 /// 时段个性化: 根据 UTC 时间调整内容类型偏好
 /// 注: 如有用户本地时区信息，应替换为本地时间
 pub(super) fn time_of_day_adjustment(_query: &RecommendationQueryPayload) -> f64 {
-    let hour = Utc::now().hour();
+    let hour = ranking_now().hour();
 
     match hour {
         6..=8 => 0.96,   // 早晨：轻微偏好新闻和信息类

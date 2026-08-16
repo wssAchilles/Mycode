@@ -7,6 +7,7 @@ use telegram_ranking_primitives::{
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::pipeline::local::clock::ranking_now;
 use crate::pipeline::local::context::ranking_policy_number;
 
 use super::super::NegativeFeedbackSummary;
@@ -80,7 +81,7 @@ pub(in crate::pipeline::local::scorers) fn direct_negative_feedback(
         };
     };
 
-    let now = Utc::now();
+    let now = ranking_now();
     let mut strength: f64 = 0.0;
     for action in actions {
         let action_name = action

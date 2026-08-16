@@ -1,4 +1,3 @@
-use chrono::Utc;
 use telegram_ranking_primitives::{
     ACTION_NEGATIVE_FIELD, ActionWeightedScoreInput, FATIGUE_STRENGTH_FIELD,
     HeuristicWeightedScoreInput, NEGATIVE_FEEDBACK_STRENGTH_FIELD, PhoenixWeightedScoreInput,
@@ -13,6 +12,7 @@ use telegram_source_primitives::{
 };
 
 use crate::contracts::RecommendationCandidatePayload;
+use crate::pipeline::local::clock::ranking_now;
 
 use super::super::{ContentQualitySummary, MIN_VIDEO_DURATION_SEC};
 use super::context::breakdown_value;
@@ -178,7 +178,7 @@ pub(super) fn weighted_evidence_prior(candidate: &RecommendationCandidatePayload
 pub(in crate::pipeline::local::scorers) fn freshness_multiplier(
     candidate: &RecommendationCandidatePayload,
 ) -> f64 {
-    let age_hours = Utc::now()
+    let age_hours = ranking_now()
         .signed_duration_since(candidate.created_at)
         .num_seconds()
         .max(0) as f64
@@ -258,7 +258,7 @@ pub(in crate::pipeline::local::scorers) fn exploration_risk(
             .unwrap_or_default(),
     );
     let low_quality = breakdown_value(breakdown, "contentLowQualityPenalty");
-    let stale_penalty = if Utc::now()
+    let stale_penalty = if ranking_now()
         .signed_duration_since(candidate.created_at)
         .num_hours()
         > 168

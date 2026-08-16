@@ -49,6 +49,8 @@ pub struct RecommendationReplayScenarioPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ReplayEvaluationResultPayload {
     pub scenario_name: String,
+    #[serde(default)]
+    pub replay_clock_anchor: String,
     pub stage_names: Vec<String>,
     pub filter_drop_counts: HashMap<String, usize>,
     pub filtered_post_ids: Vec<String>,
@@ -181,6 +183,7 @@ mod tests {
     fn replay_evaluation_result_preserves_passed_contract() {
         let result = ReplayEvaluationResultPayload {
             scenario_name: "warm_user".to_string(),
+            replay_clock_anchor: "2026-01-02T03:04:05.000Z".to_string(),
             stage_names: vec!["RustWeightedScorer".to_string()],
             filter_drop_counts: HashMap::new(),
             filtered_post_ids: Vec::new(),

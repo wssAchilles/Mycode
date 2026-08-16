@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::news_trends::core::normalizer::normalize_keyword;
+use crate::pipeline::local::clock::ranking_now;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AffinitySummary {
@@ -164,7 +165,7 @@ impl UserActionProfile {
         } else {
             primary_actions
         };
-        let now = Utc::now();
+        let now = ranking_now();
 
         for action in actions {
             profile.ingest_action(action, now);

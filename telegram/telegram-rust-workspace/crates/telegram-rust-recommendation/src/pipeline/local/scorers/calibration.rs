@@ -4,6 +4,7 @@ use super::runner::ScoringContext;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
+use crate::pipeline::local::clock::ranking_now;
 use crate::pipeline::local::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_number,
     source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
@@ -306,7 +307,7 @@ pub(super) fn recency_adjustment_plan(
             * 1000.0;
         RecencyAdjustmentPlan {
             half_life_ms,
-            now: Utc::now(),
+            now: ranking_now(),
         }
     })
 }
