@@ -390,7 +390,7 @@ function summarizeRanking(
     const sourceCounts = rows.reduce<Record<string, number>>((acc, candidate) => {
         acc[candidate.recallSource] = (acc[candidate.recallSource] || 0) + 1;
         return acc;
-    }, {});
+    }, Object.create(null) as Record<string, number>);
     const totalRelevant = feedbackCandidates.filter((candidate) => (
         attributedLabels(candidate)?.engagement
     )).length;

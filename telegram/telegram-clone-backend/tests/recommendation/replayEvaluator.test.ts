@@ -181,6 +181,45 @@ describe('recommendation replay evaluator', () => {
         expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     });
 
+    it('preserves prototype-like recall sources in selected-source metrics', () => {
+        const base = buildRequest();
+        const summary = evaluateReplayRequests([buildRequest({
+            candidateSetTotalCount: 3,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+            candidates: [
+                {
+                    ...base.candidates[0],
+                    postId: '507f191e810c19729de87081',
+                    modelPostId: '507f191e810c19729de87081',
+                    recallSource: '__proto__',
+                    baselineRank: 1,
+                },
+                {
+                    ...base.candidates[1],
+                    postId: '507f191e810c19729de87082',
+                    modelPostId: '507f191e810c19729de87082',
+                    recallSource: 'constructor',
+                    baselineRank: 2,
+                },
+                {
+                    ...base.candidates[0],
+                    postId: '507f191e810c19729de87083',
+                    modelPostId: '507f191e810c19729de87083',
+                    recallSource: 'toString',
+                    baselineRank: 3,
+                },
+            ],
+        })], 3, 'baseline_rank_v1');
+
+        for (const key of ['__proto__', 'constructor', 'toString']) {
+            expect(summary.bySelectedSource[key]).toMatchObject({
+                baselineShareAtK: 1 / 3,
+                variantShareAtK: 1 / 3,
+            });
+        }
+    });
+
     it('industrial guardrail variant demotes negative repeats and promotes trend-linked news', () => {
         const base = buildRequest();
         const request = buildRequest({
