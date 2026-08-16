@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -75,6 +75,72 @@ describe('replay evaluation CLI input bounds', () => {
             requestId: 'request-too-large',
             candidates: Array.from({ length: 2_049 }, (_, index) => ({ postId: `post-${index}` })),
         })}\n`, 'utf8');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        process.argv = ['node', 'evaluateRecsysReplay.ts', '--input', inputPath];
+        process.exitCode = undefined;
+
+        try {
+            await import('../../src/scripts/evaluateRecsysReplay');
+            await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+            expect(error).toHaveBeenCalledWith(
+                '[EvaluateRecsysReplay] failed:',
+                expect.objectContaining({ message: 'evaluation_input_resource_limit_exceeded' }),
+            );
+            expect(runtime.evaluateReplayRequests).not.toHaveBeenCalled();
+            expect(log).not.toHaveBeenCalled();
+            expect(process.exitCode).toBe(1);
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects invalid topK before opening the input', async () => {
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        process.argv = [
+            'node',
+            'evaluateRecsysReplay.ts',
+            '--input',
+            '/definitely-missing/replay.ndjson',
+            '--topK',
+            '1001',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            await import('../../src/scripts/evaluateRecsysReplay');
+            await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+            expect(error).toHaveBeenCalledWith(
+                '[EvaluateRecsysReplay] failed:',
+                expect.objectContaining({ message: 'evaluation_config_resource_limit_exceeded' }),
+            );
+            expect(runtime.evaluateReplayRequests).not.toHaveBeenCalled();
+            expect(log).not.toHaveBeenCalled();
+            expect(process.exitCode).toBe(1);
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            error.mockRestore();
+            log.mockRestore();
+        }
+    });
+
+    it('rejects an oversized file from the opened descriptor before parsing', async () => {
+        const directory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-eval-file-limit-'));
+        const inputPath = path.join(directory, 'requests.ndjson');
+        writeFileSync(inputPath, '', 'utf8');
+        truncateSync(inputPath, 32 * 1024 * 1024 + 1);
         const originalArgv = process.argv;
         const originalExitCode = process.exitCode;
         const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
