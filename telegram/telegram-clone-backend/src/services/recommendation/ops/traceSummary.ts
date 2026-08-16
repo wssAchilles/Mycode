@@ -163,11 +163,11 @@ export async function buildRecommendationTraceSummary(
         .limit(limit)
         .lean() as TraceSummaryRecord[];
 
-    const byPipelineVersion: Record<string, DimensionAccumulator> = {};
-    const byStrategyVersion: Record<string, DimensionAccumulator> = {};
-    const byTraceVersion: Record<string, DimensionAccumulator> = {};
-    const byExperimentKey: Record<string, DimensionAccumulator> = {};
-    const byCandidateSetKind: Record<string, DimensionAccumulator> = {};
+    const byPipelineVersion = Object.create(null) as Record<string, DimensionAccumulator>;
+    const byStrategyVersion = Object.create(null) as Record<string, DimensionAccumulator>;
+    const byTraceVersion = Object.create(null) as Record<string, DimensionAccumulator>;
+    const byExperimentKey = Object.create(null) as Record<string, DimensionAccumulator>;
+    const byCandidateSetKind = Object.create(null) as Record<string, DimensionAccumulator>;
     const ownerCounts = new Map<string, number>();
     const fallbackCounts = new Map<string, number>();
     const userStateCounts = new Map<string, number>();
