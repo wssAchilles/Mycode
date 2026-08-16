@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 
 import { RecommendationPipeline } from '../../src/services/recommendation/framework/Pipeline';
 import { runStagedQueryHydrators } from '../../src/services/recommendation/framework/queryHydrationStages';
-import type { ScoredCandidate } from '../../src/services/recommendation/framework/interfaces';
+import type {
+    PipelineMetrics,
+    ScoredCandidate,
+} from '../../src/services/recommendation/framework/interfaces';
 import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
 import { DuplicateFilter } from '../../src/services/recommendation/filters/DuplicateFilter';
 import { EngagementScorer } from '../../src/services/recommendation/scorers/EngagementScorer';
@@ -432,5 +435,217 @@ describe('RecommendationPipeline metadata contracts', () => {
         expect(replayCandidates[0]._scoreBreakdown).toMatchObject(
             selectorInput[0].scoreBreakdown ?? {},
         );
+    });
+
+    it('isolates component and safety metrics between overlapping executions', async () => {
+        const metrics: PipelineMetrics[] = [];
+        let releaseHeldSource = () => {};
+        const heldSourceGate = new Promise<void>((resolve) => {
+            releaseHeldSource = resolve;
+        });
+        let failSource = () => {};
+        const failingSourceGate = new Promise<void>((resolve) => {
+            failSource = resolve;
+        });
+        const pipeline = new RecommendationPipeline<Query, Candidate>({
+            onMetrics: (value) => metrics.push(value),
+            circuitBreaker: {
+                failureThreshold: 1,
+                resetTimeoutMs: 60_000,
+            },
+        })
+            .withSource({
+                name: 'SlowFailingSource',
+                enable: (query) => query.requestId !== 'req-overlap-held',
+                getCandidates: async () => {
+                    await failingSourceGate;
+                    throw new Error('expected source failure');
+                },
+            })
+            .withSource({
+                name: 'HeldSource',
+                enable: (query) => query.requestId === 'req-overlap-held',
+                getCandidates: async () => {
+                    await heldSourceGate;
+                    return [];
+                },
+            });
+
+        const failingExecution = pipeline.execute({
+            requestId: 'req-overlap-failing',
+            limit: 20,
+        });
+        const heldExecution = pipeline.execute({
+            requestId: 'req-overlap-held',
+            limit: 20,
+        });
+
+        failSource();
+        await failingExecution;
+        releaseHeldSource();
+        await heldExecution;
+        await pipeline.execute({ requestId: 'req-overlap-skipped', limit: 20 });
+
+        const failingMetrics = metrics.find(({ requestId }) =>
+            requestId === 'req-overlap-failing'
+        )!;
+        const heldMetrics = metrics.find(({ requestId }) =>
+            requestId === 'req-overlap-held'
+        )!;
+        const skippedMetrics = metrics.find(({ requestId }) =>
+            requestId === 'req-overlap-skipped'
+        )!;
+
+        expect(failingMetrics.components?.map(({ name }) => name)).toEqual([
+            'SlowFailingSource',
+        ]);
+        expect(heldMetrics.components?.map(({ name }) => name)).toEqual(['HeldSource']);
+        expect(failingMetrics.safety).toMatchObject({
+            circuitBreakerTrips: 1,
+            circuitBreakerSkips: 0,
+        });
+        expect(heldMetrics.safety).toMatchObject({
+            circuitBreakerTrips: 0,
+            circuitBreakerSkips: 0,
+        });
+        expect(
+            heldMetrics.safety?.circuitBreakerState['Source:SlowFailingSource']
+        ).toEqual({ open: true, consecutiveFailures: 1 });
+        expect(skippedMetrics.components).toEqual([{
+            stage: 'Source',
+            name: 'SlowFailingSource',
+            durationMs: 0,
+            circuitBreakerSkipped: true,
+        }]);
+        expect(skippedMetrics.safety).toMatchObject({
+            circuitBreakerTrips: 0,
+            circuitBreakerSkips: 1,
+            fallbackCount: 1,
+        });
+    });
+
+    it('clears completed component and pipeline timers', async () => {
+        vi.useFakeTimers();
+        try {
+            const metrics: PipelineMetrics[] = [];
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                componentTimeoutMs: 100,
+                pipelineTimeoutMs: 200,
+                onMetrics: (value) => metrics.push(value),
+            }).withSource({
+                name: 'TimerSource',
+                enable: () => true,
+                getCandidates: async () => [],
+            });
+
+            await pipeline.execute({ requestId: 'req-timer', limit: 20 });
+
+            expect(vi.getTimerCount()).toBe(0);
+            expect(metrics[0].safety?.componentTimeoutCount).toBe(0);
+            expect(metrics[0].components?.[0]).toMatchObject({
+                name: 'TimerSource',
+                timedOut: undefined,
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('emits one terminal metric and skips side effects after a pipeline timeout', async () => {
+        vi.useFakeTimers();
+        try {
+            const metrics: PipelineMetrics[] = [];
+            let releaseHydrator = () => {};
+            const hydratorGate = new Promise<void>((resolve) => {
+                releaseHydrator = resolve;
+            });
+            let sideEffectRuns = 0;
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                pipelineTimeoutMs: 50,
+                onMetrics: (value) => metrics.push(value),
+            })
+                .withSource({
+                    name: 'TimeoutSource',
+                    enable: () => true,
+                    getCandidates: async () => [
+                        mkCandidate(oid('507f191e810c19729de870a1')),
+                    ],
+                })
+                .withPostSelectionHydrator({
+                    name: 'HeldPostSelectionHydrator',
+                    enable: () => true,
+                    hydrate: async (_query, candidates) => {
+                        await hydratorGate;
+                        return candidates;
+                    },
+                    update: (_candidate, hydrated) => hydrated as Candidate,
+                })
+                .withSideEffect({
+                    name: 'TimeoutSideEffect',
+                    enable: () => true,
+                    run: async () => {
+                        sideEffectRuns++;
+                    },
+                });
+
+            const execution = pipeline.execute({
+                requestId: 'req-pipeline-timeout',
+                limit: 20,
+            });
+            await vi.advanceTimersByTimeAsync(50);
+            const result = await execution;
+
+            expect(result.selectedCandidates).toEqual([]);
+            expect(vi.getTimerCount()).toBe(0);
+            expect(metrics).toHaveLength(1);
+            expect(metrics[0].safety).toMatchObject({
+                pipelineTimedOut: true,
+                componentTimeoutCount: 0,
+            });
+
+            releaseHydrator();
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(sideEffectRuns).toBe(0);
+            expect(metrics).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('rejects when the timeout metric callback fails', async () => {
+        vi.useFakeTimers();
+        let releaseSource = () => {};
+        try {
+            const sourceGate = new Promise<void>((resolve) => {
+                releaseSource = resolve;
+            });
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                pipelineTimeoutMs: 50,
+                onMetrics: () => {
+                    throw new Error('metrics failed');
+                },
+            }).withSource({
+                name: 'HeldMetricsSource',
+                enable: () => true,
+                getCandidates: async () => {
+                    await sourceGate;
+                    return [];
+                },
+            });
+
+            const execution = pipeline.execute({
+                requestId: 'req-timeout-metrics-failure',
+                limit: 20,
+            });
+            const rejection = expect(execution).rejects.toThrow('metrics failed');
+
+            await vi.advanceTimersByTimeAsync(50);
+            await rejection;
+        } finally {
+            releaseSource();
+            await vi.advanceTimersByTimeAsync(0);
+            vi.useRealTimers();
+        }
     });
 });

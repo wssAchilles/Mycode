@@ -40,6 +40,18 @@ interface CircuitState {
     isOpen: boolean;
 }
 
+interface PipelineExecutionState {
+    pipelineTimedOut: boolean;
+    metricsEmitted: boolean;
+    componentMetrics: ComponentMetric[];
+    runtimeMetrics: {
+        timeoutCount: number;
+        circuitBreakerTrips: number;
+        circuitBreakerSkips: number;
+        fallbackCount: number;
+    };
+}
+
 const DEFAULT_CB_FAILURE_THRESHOLD = 5;
 const DEFAULT_CB_RESET_TIMEOUT_MS = 30_000;
 
@@ -79,10 +91,6 @@ class CircuitBreaker {
     private readonly failureThreshold: number;
     private readonly resetTimeoutMs: number;
 
-    /** Aggregate metrics */
-    totalTrips = 0;
-    totalSkips = 0;
-
     constructor(config?: CircuitBreakerConfig) {
         this.failureThreshold = config?.failureThreshold ?? DEFAULT_CB_FAILURE_THRESHOLD;
         this.resetTimeoutMs = config?.resetTimeoutMs ?? DEFAULT_CB_RESET_TIMEOUT_MS;
@@ -105,7 +113,6 @@ class CircuitBreaker {
             return true;
         }
 
-        this.totalSkips++;
         return false;
     }
 
@@ -122,7 +129,7 @@ class CircuitBreaker {
     }
 
     /** Record a failed execution -- may trip the circuit */
-    recordFailure(componentKey: string): void {
+    recordFailure(componentKey: string): boolean {
         let state = this.states.get(componentKey);
         if (!state) {
             state = { consecutiveFailures: 0, trippedAt: 0, isOpen: false };
@@ -134,12 +141,14 @@ class CircuitBreaker {
         if (state.consecutiveFailures >= this.failureThreshold && !state.isOpen) {
             state.isOpen = true;
             state.trippedAt = Date.now();
-            this.totalTrips++;
             log.warn(
                 `[CircuitBreaker] ${componentKey} OPEN after ${state.consecutiveFailures} consecutive failures ` +
                 `(will reset in ${this.resetTimeoutMs}ms)`
             );
+            return true;
         }
+
+        return false;
     }
 
     /** Get current state snapshot for metrics */
@@ -170,16 +179,7 @@ export class RecommendationPipeline<Q, C> {
     private sideEffects: SideEffect<Q, C>[] = [];
     private sourceMerger?: SourceCandidateMerger<Q, C>;
     private queryHydratorStage: (hydrator: QueryHydrator<Q>) => number = () => 0;
-    private componentMetrics: ComponentMetric[] = [];
     private circuitBreaker: CircuitBreaker;
-    private pipelineTimedOut = false;
-
-    /** Per-request runtime metrics (reset each execute) */
-    private runtimeMetrics = {
-        timeoutCount: 0,
-        circuitBreakerTrips: 0,
-        fallbackCount: 0,
-    };
 
     private config: PipelineConfig = {
         defaultResultSize: 20,
@@ -274,8 +274,8 @@ export class RecommendationPipeline<Q, C> {
      * 复刻 CandidatePipeline::execute()
      *
      * When `pipelineTimeoutMs` is configured the pipeline races against a
-     * wall-clock deadline. If the deadline fires the method returns whatever
-     * partial results are available at that point instead of throwing.
+     * wall-clock deadline. If the deadline fires the method returns an empty
+     * partial result instead of throwing.
      */
     async execute(query: Q): Promise<PipelineResult<C>> {
         const queryRequestId = (query as any)?.requestId;
@@ -285,66 +285,73 @@ export class RecommendationPipeline<Q, C> {
                 : uuidv4(),
             startTime: Date.now(),
         };
-
-        // Reset per-request state
-        this.pipelineTimedOut = false;
-        this.runtimeMetrics = { timeoutCount: 0, circuitBreakerTrips: 0, fallbackCount: 0 };
-        this.componentMetrics = [];
+        const state: PipelineExecutionState = {
+            pipelineTimedOut: false,
+            metricsEmitted: false,
+            componentMetrics: [],
+            runtimeMetrics: {
+                timeoutCount: 0,
+                circuitBreakerTrips: 0,
+                circuitBreakerSkips: 0,
+                fallbackCount: 0,
+            },
+        };
 
         const pipelineTimeoutMs = this.config.pipelineTimeoutMs;
 
         // Wrap the core pipeline in a timeout race when configured
-        const coreExecution = this.executeCore(query, ctx);
+        const coreExecution = this.executeCore(query, ctx, state);
 
         if (pipelineTimeoutMs && pipelineTimeoutMs > 0) {
-            return Promise.race([
-                coreExecution,
-                this.pipelineTimeoutResult(pipelineTimeoutMs, ctx),
-            ]);
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            const timeoutResult = new Promise<PipelineResult<C>>((resolve, reject) => {
+                timeout = setTimeout(() => {
+                    try {
+                        state.pipelineTimedOut = true;
+                        const elapsed = Date.now() - ctx.startTime;
+                        log.warn(
+                            `[Pipeline ${ctx.requestId}] Pipeline timeout after ${elapsed}ms (limit ${pipelineTimeoutMs}ms) — returning partial results`
+                        );
+                        const timing: PipelineResult<C>['timing'] = {
+                            total: elapsed,
+                            sourcing: 0,
+                            hydrating: 0,
+                            filtering: 0,
+                            scoring: 0,
+                            selecting: 0,
+                        };
+                        this.emitMetrics(ctx, timing, state, 0, 0, 0, 0, 0);
+                        resolve({
+                            selectedCandidates: [],
+                            filteredCandidates: [],
+                            retrievedCount: 0,
+                            timing,
+                        });
+                    } catch (error) {
+                        reject(error);
+                    }
+                }, pipelineTimeoutMs);
+            });
+
+            try {
+                return await Promise.race([coreExecution, timeoutResult]);
+            } finally {
+                if (timeout !== undefined) clearTimeout(timeout);
+            }
         }
 
         return coreExecution;
     }
 
     /**
-     * Internal: builds a partial result when the pipeline-level deadline fires.
-     * Sets `this.pipelineTimedOut` so `executeCore` can also bail early at
-     * stage boundaries when it checks the flag.
-     */
-    private pipelineTimeoutResult(
-        timeoutMs: number,
-        ctx: PipelineContext,
-    ): Promise<PipelineResult<C>> {
-        return new Promise<PipelineResult<C>>((resolve) => {
-            setTimeout(() => {
-                this.pipelineTimedOut = true;
-                const elapsed = Date.now() - ctx.startTime;
-                log.warn(
-                    `[Pipeline ${ctx.requestId}] Pipeline timeout after ${elapsed}ms (limit ${timeoutMs}ms) — returning partial results`
-                );
-                this.runtimeMetrics.timeoutCount++;
-                resolve({
-                    selectedCandidates: [],
-                    filteredCandidates: [],
-                    retrievedCount: 0,
-                    timing: {
-                        total: elapsed,
-                        sourcing: 0,
-                        hydrating: 0,
-                        filtering: 0,
-                        scoring: 0,
-                        selecting: 0,
-                    },
-                });
-            }, timeoutMs);
-        });
-    }
-
-    /**
      * Core pipeline stages. Separated from `execute()` so the pipeline-level
      * timeout can race against the entire execution.
      */
-    private async executeCore(query: Q, ctx: PipelineContext): Promise<PipelineResult<C>> {
+    private async executeCore(
+        query: Q,
+        ctx: PipelineContext,
+        state: PipelineExecutionState,
+    ): Promise<PipelineResult<C>> {
         const timing = {
             total: 0,
             sourcing: 0,
@@ -358,15 +365,15 @@ export class RecommendationPipeline<Q, C> {
 
         try {
             // 1. Query Hydration (并行执行)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state);
             const queryStart = Date.now();
-            const hydratedQuery = await this.hydrateQuery(query, ctx);
+            const hydratedQuery = await this.hydrateQuery(query, ctx, state);
             timing.hydrating = Date.now() - queryStart;
 
             // 2. Sourcing (并行执行)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state);
             const sourceStart = Date.now();
-            let candidates = await this.fetchCandidates(hydratedQuery, ctx);
+            let candidates = await this.fetchCandidates(hydratedQuery, ctx, state);
             timing.sourcing = Date.now() - sourceStart;
 
             // 限制最大候选数
@@ -377,40 +384,43 @@ export class RecommendationPipeline<Q, C> {
             const retrievedCount = candidates.length;
 
             // 3. Candidate Hydration (并行执行)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state, retrievedCount);
             const hydrateStart = Date.now();
-            candidates = await this.hydrateCandidates(hydratedQuery, candidates, ctx);
+            candidates = await this.hydrateCandidates(hydratedQuery, candidates, ctx, state);
             timing.hydrating += Date.now() - hydrateStart;
 
             // 4. Filtering (顺序执行)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state, retrievedCount);
             const filterStart = Date.now();
             const { kept, removed } = await this.filterCandidates(
                 hydratedQuery,
                 candidates,
-                ctx
+                ctx,
+                state,
             );
             timing.filtering = Date.now() - filterStart;
             const filteredCount = removed.length;
             const allRemoved: C[] = [...removed];
 
             // 5. Scoring (顺序执行)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state, retrievedCount, filteredCount, allRemoved);
             const scoreStart = Date.now();
             const scoredCandidates = await this.scoreCandidates(
                 hydratedQuery,
                 kept,
-                ctx
+                ctx,
+                state,
             );
             timing.scoring = Date.now() - scoreStart;
 
             // 6. Post-score Filters (顺序执行，使用 candidate.score)
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state, retrievedCount, filteredCount, allRemoved);
             const postFilterStart = Date.now();
             const { kept: postFilteredCandidates, removed: postRemoved } = await this.postFilterCandidates(
                 hydratedQuery,
                 scoredCandidates,
-                ctx
+                ctx,
+                state,
             );
             timing.filtering += Date.now() - postFilterStart;
             const postFilteredCount = postRemoved.length;
@@ -421,7 +431,7 @@ export class RecommendationPipeline<Q, C> {
             const preSelectorCandidates = this.buildPreSelectorTraceCandidates(postFilteredCandidates);
 
             // 7. Selection
-            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
+            if (state.pipelineTimedOut) return this.buildPartialResult(ctx, timing, state, retrievedCount, filteredCount, allRemoved);
             const selectStart = Date.now();
             const selectedCandidates = this.selectCandidates(
                 hydratedQuery,
@@ -433,25 +443,27 @@ export class RecommendationPipeline<Q, C> {
             // 8. Post-selection Hydration + Filtering (e.g., VF)
             let finalCandidates = selectedCandidates;
 
-            if (this.postSelectionHydrators.length > 0 && !this.pipelineTimedOut) {
+            if (this.postSelectionHydrators.length > 0 && !state.pipelineTimedOut) {
                 const psHydrateStart = Date.now();
                 finalCandidates = await this.hydrateCandidatesWith(
                     hydratedQuery,
                     finalCandidates,
                     this.postSelectionHydrators,
-                    'PostSelectionHydrator'
+                    'PostSelectionHydrator',
+                    state,
                 );
                 timing.postSelectionHydrating = Date.now() - psHydrateStart;
             }
 
             let postSelectionFilteredCount = 0;
-            if (this.postSelectionFilters.length > 0 && finalCandidates.length > 0 && !this.pipelineTimedOut) {
+            if (this.postSelectionFilters.length > 0 && finalCandidates.length > 0 && !state.pipelineTimedOut) {
                 const psFilterStart = Date.now();
                 const { kept: psKept, removed: psRemoved } = await this.filterCandidatesWith(
                     hydratedQuery,
                     finalCandidates,
                     this.postSelectionFilters,
-                    'PostSelectionFilter'
+                    'PostSelectionFilter',
+                    state,
                 );
                 timing.postSelectionFiltering = Date.now() - psFilterStart;
                 finalCandidates = psKept;
@@ -459,6 +471,17 @@ export class RecommendationPipeline<Q, C> {
                 if (psRemoved.length > 0) {
                     allRemoved.push(...psRemoved);
                 }
+            }
+
+            if (state.pipelineTimedOut) {
+                return this.buildPartialResult(
+                    ctx,
+                    timing,
+                    state,
+                    retrievedCount,
+                    filteredCount,
+                    allRemoved,
+                );
             }
 
             // Ensure final result size matches query.limit (selector may oversample for post-selection)
@@ -478,7 +501,7 @@ export class RecommendationPipeline<Q, C> {
             timing.total = Date.now() - ctx.startTime;
 
             // 指标回调
-            this.emitMetrics(ctx, timing, retrievedCount, filteredCount, postFilteredCount, postSelectionFilteredCount, finalCandidates.length);
+            this.emitMetrics(ctx, timing, state, retrievedCount, filteredCount, postFilteredCount, postSelectionFilteredCount, finalCandidates.length);
 
             if (this.config.debug) {
                 this.logPipelineResult(
@@ -487,7 +510,8 @@ export class RecommendationPipeline<Q, C> {
                     retrievedCount,
                     filteredCount,
                     postFilteredCount,
-                    selectedCandidates.length
+                    selectedCandidates.length,
+                    state,
                 );
             }
 
@@ -509,12 +533,13 @@ export class RecommendationPipeline<Q, C> {
     private buildPartialResult(
         ctx: PipelineContext,
         timing: PipelineResult<C>['timing'],
+        state: PipelineExecutionState,
         retrievedCount = 0,
         filteredCount = 0,
         allRemoved: C[] = [],
     ): PipelineResult<C> {
         timing.total = Date.now() - ctx.startTime;
-        this.emitMetrics(ctx, timing, retrievedCount, filteredCount, 0, 0, 0);
+        this.emitMetrics(ctx, timing, state, retrievedCount, filteredCount, 0, 0, 0);
         return {
             selectedCandidates: [],
             filteredCandidates: allRemoved,
@@ -529,12 +554,15 @@ export class RecommendationPipeline<Q, C> {
     private emitMetrics(
         ctx: PipelineContext,
         timing: PipelineResult<any>['timing'],
+        state: PipelineExecutionState,
         retrievedCount: number,
         filteredCount: number,
         postFilteredCount: number,
         postSelectionFilteredCount: number,
         selectedCount: number,
     ): void {
+        if (state.metricsEmitted) return;
+        state.metricsEmitted = true;
         this.config.onMetrics?.({
             requestId: ctx.requestId,
             timing,
@@ -545,13 +573,13 @@ export class RecommendationPipeline<Q, C> {
                 postSelectionFiltered: postSelectionFilteredCount,
                 selected: selectedCount,
             },
-            components: this.config.captureComponentMetrics ? this.componentMetrics : undefined,
+            components: this.config.captureComponentMetrics ? [...state.componentMetrics] : undefined,
             safety: {
-                pipelineTimedOut: this.pipelineTimedOut,
-                componentTimeoutCount: this.runtimeMetrics.timeoutCount,
-                circuitBreakerTrips: this.runtimeMetrics.circuitBreakerTrips,
-                circuitBreakerSkips: this.circuitBreaker.totalSkips,
-                fallbackCount: this.runtimeMetrics.fallbackCount,
+                pipelineTimedOut: state.pipelineTimedOut,
+                componentTimeoutCount: state.runtimeMetrics.timeoutCount,
+                circuitBreakerTrips: state.runtimeMetrics.circuitBreakerTrips,
+                circuitBreakerSkips: state.runtimeMetrics.circuitBreakerSkips,
+                fallbackCount: state.runtimeMetrics.fallbackCount,
                 circuitBreakerState: this.circuitBreaker.getSnapshot(),
             },
         });
@@ -565,7 +593,11 @@ export class RecommendationPipeline<Q, C> {
      * 1. Query Hydration - 丰富查询上下文
      * 复刻 hydrate_query()
      */
-    private async hydrateQuery(query: Q, _ctx: PipelineContext): Promise<Q> {
+    private async hydrateQuery(
+        query: Q,
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
+    ): Promise<Q> {
         const result = await runStagedQueryHydrators(
             query,
             this.queryHydrators,
@@ -574,8 +606,11 @@ export class RecommendationPipeline<Q, C> {
                 if (!hydrator.enable(stageQuery)) {
                     return { enabled: false, hydrated: stageQuery };
                 }
-                const hydrated = await this.runComponent('QueryHydrator', hydrator.name, () =>
-                    hydrator.hydrate(stageQuery)
+                const hydrated = await this.runComponent(
+                    'QueryHydrator',
+                    hydrator.name,
+                    () => hydrator.hydrate(stageQuery),
+                    state,
                 ).catch((error) => {
                     log.error(`[QueryHydrator ${hydrator.name}] Error: ${error}`);
                     return stageQuery;
@@ -597,14 +632,21 @@ export class RecommendationPipeline<Q, C> {
      * Graceful degradation: timeouts and circuit-breaker-open produce empty
      * results instead of blocking the whole pipeline.
      */
-    private async fetchCandidates(query: Q, _ctx: PipelineContext): Promise<C[]> {
+    private async fetchCandidates(
+        query: Q,
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
+    ): Promise<C[]> {
         const enabledSources = this.sources.filter((s) => s.enable(query));
 
         // 并行执行所有 Source
         const results = await Promise.all(
             enabledSources.map(async (source) => {
-                return this.runComponent('Source', source.name, () =>
-                    source.getCandidates(query)
+                return this.runComponent(
+                    'Source',
+                    source.name,
+                    () => source.getCandidates(query),
+                    state,
                 )
                     .then((candidates) =>
                         (candidates || []).map((candidate) =>
@@ -614,10 +656,10 @@ export class RecommendationPipeline<Q, C> {
                     .catch((error) => {
                         if (error instanceof CircuitBreakerOpenError) {
                             log.warn(`[Source ${source.name}] Skipped (circuit breaker open)`);
-                            this.runtimeMetrics.fallbackCount++;
+                            state.runtimeMetrics.fallbackCount++;
                         } else if (error instanceof ComponentTimeoutError) {
                             log.warn(`[Source ${source.name}] Timed out after ${error.timeoutMs}ms — returning empty`);
-                            this.runtimeMetrics.fallbackCount++;
+                            state.runtimeMetrics.fallbackCount++;
                         } else {
                             log.error(`[Source ${source.name}] Error: ${error}`);
                         }
@@ -643,16 +685,18 @@ export class RecommendationPipeline<Q, C> {
     private async hydrateCandidates(
         query: Q,
         candidates: C[],
-        _ctx: PipelineContext
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
     ): Promise<C[]> {
-        return this.hydrateCandidatesWith(query, candidates, this.hydrators, 'Hydrator');
+        return this.hydrateCandidatesWith(query, candidates, this.hydrators, 'Hydrator', state);
     }
 
     private async hydrateCandidatesWith(
         query: Q,
         candidates: C[],
         hydrators: Hydrator<Q, C>[],
-        stage: string
+        stage: string,
+        state: PipelineExecutionState,
     ): Promise<C[]> {
         if (candidates.length === 0) return candidates;
 
@@ -661,8 +705,11 @@ export class RecommendationPipeline<Q, C> {
 
         const results = await Promise.all(
             enabledHydrators.map(async (hydrator) => {
-                return this.runComponent(stage, hydrator.name, () =>
-                    hydrator.hydrate(query, candidates)
+                return this.runComponent(
+                    stage,
+                    hydrator.name,
+                    () => hydrator.hydrate(query, candidates),
+                    state,
                 ).catch((error) => {
                     log.error(`[${stage} ${hydrator.name}] Error: ${error}`);
                     return candidates;
@@ -696,16 +743,18 @@ export class RecommendationPipeline<Q, C> {
     private async filterCandidates(
         query: Q,
         candidates: C[],
-        _ctx: PipelineContext
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
     ): Promise<FilterResult<C>> {
-        return this.filterCandidatesWith(query, candidates, this.filters, 'Filter');
+        return this.filterCandidatesWith(query, candidates, this.filters, 'Filter', state);
     }
 
     private async filterCandidatesWith(
         query: Q,
         candidates: C[],
         filters: Filter<Q, C>[],
-        stage: string
+        stage: string,
+        state: PipelineExecutionState,
     ): Promise<FilterResult<C>> {
         let kept = candidates;
         const allRemoved: C[] = [];
@@ -714,8 +763,11 @@ export class RecommendationPipeline<Q, C> {
             if (!filter.enable(query)) continue;
 
             try {
-                const result = await this.runComponent(stage, filter.name, () =>
-                    filter.filter(query, kept)
+                const result = await this.runComponent(
+                    stage,
+                    filter.name,
+                    () => filter.filter(query, kept),
+                    state,
                 );
                 kept = result.kept;
                 allRemoved.push(...result.removed);
@@ -734,7 +786,8 @@ export class RecommendationPipeline<Q, C> {
     private async postFilterCandidates(
         query: Q,
         scoredCandidates: ScoredCandidate<C>[],
-        _ctx: PipelineContext
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
     ): Promise<{ kept: ScoredCandidate<C>[]; removed: C[] }> {
         if (this.postFilters.length === 0) {
             return { kept: scoredCandidates, removed: [] };
@@ -746,8 +799,11 @@ export class RecommendationPipeline<Q, C> {
         for (const filter of this.postFilters) {
             if (!filter.enable(query)) continue;
             try {
-                const result = await this.runComponent('PostFilter', filter.name, () =>
-                    filter.filter(query, candidates)
+                const result = await this.runComponent(
+                    'PostFilter',
+                    filter.name,
+                    () => filter.filter(query, candidates),
+                    state,
                 );
                 candidates = result.kept;
             } catch (error) {
@@ -774,7 +830,8 @@ export class RecommendationPipeline<Q, C> {
     private async scoreCandidates(
         query: Q,
         candidates: C[],
-        _ctx: PipelineContext
+        _ctx: PipelineContext,
+        state: PipelineExecutionState,
     ): Promise<ScoredCandidate<C>[]> {
         if (candidates.length === 0) return [];
 
@@ -789,8 +846,11 @@ export class RecommendationPipeline<Q, C> {
             if (!scorer.enable(query)) continue;
 
             try {
-                const scored = await this.runComponent('Scorer', scorer.name, () =>
-                    scorer.score(query, scoredCandidates.map((sc) => sc.candidate))
+                const scored = await this.runComponent(
+                    'Scorer',
+                    scorer.name,
+                    () => scorer.score(query, scoredCandidates.map((sc) => sc.candidate)),
+                    state,
                 );
 
                 if (!scored || scored.length !== scoredCandidates.length) {
@@ -903,7 +963,8 @@ export class RecommendationPipeline<Q, C> {
         retrievedCount: number,
         filteredCount: number,
         postFilteredCount: number,
-        selectedCount: number
+        selectedCount: number,
+        state: PipelineExecutionState,
     ): void {
         log.info(`[Pipeline ${ctx.requestId}] Completed:
       - Retrieved: ${retrievedCount}
@@ -917,8 +978,8 @@ export class RecommendationPipeline<Q, C> {
         - Scoring: ${timing.scoring}ms
         - Selecting: ${timing.selecting}ms`);
 
-        if (this.config.captureComponentMetrics && this.componentMetrics.length > 0) {
-            log.info(`[Pipeline ${ctx.requestId}] Component metrics: ${JSON.stringify(this.componentMetrics, null, 2)}`);
+        if (this.config.captureComponentMetrics && state.componentMetrics.length > 0) {
+            log.info(`[Pipeline ${ctx.requestId}] Component metrics: ${JSON.stringify(state.componentMetrics, null, 2)}`);
         }
     }
 
@@ -928,15 +989,17 @@ export class RecommendationPipeline<Q, C> {
     private async runComponent<T>(
         stage: string,
         name: string,
-        fn: () => Promise<T>
+        fn: () => Promise<T>,
+        state: PipelineExecutionState,
     ): Promise<T> {
         const componentKey = `${stage}:${name}`;
 
         // Circuit breaker check
         if (!this.circuitBreaker.canExecute(componentKey)) {
             log.debug(`[CircuitBreaker] Skipping ${componentKey} (circuit open)`);
+            state.runtimeMetrics.circuitBreakerSkips++;
             if (this.config.captureComponentMetrics) {
-                this.componentMetrics.push({
+                state.componentMetrics.push({
                     stage,
                     name,
                     durationMs: 0,
@@ -950,6 +1013,7 @@ export class RecommendationPipeline<Q, C> {
         let timedOut = false;
         let error: unknown;
         const timeoutMs = this.config.componentTimeoutMs;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
 
         const runner = fn().catch((e) => {
             error = e;
@@ -960,9 +1024,9 @@ export class RecommendationPipeline<Q, C> {
             ? Promise.race([
                   runner,
                   new Promise<never>((_, reject) => {
-                      setTimeout(() => {
+                      timeout = setTimeout(() => {
                           timedOut = true;
-                          this.runtimeMetrics.timeoutCount++;
+                          state.runtimeMetrics.timeoutCount++;
                           reject(new ComponentTimeoutError(name, timeoutMs));
                       }, timeoutMs);
                   }),
@@ -975,18 +1039,16 @@ export class RecommendationPipeline<Q, C> {
             return value;
         } catch (err) {
             // Both timeouts and runtime errors count as failures for the circuit breaker
-            this.circuitBreaker.recordFailure(componentKey);
-
-            // Track if this failure just tripped the circuit open
-            if (!this.circuitBreaker.canExecute(componentKey)) {
-                this.runtimeMetrics.circuitBreakerTrips++;
+            if (this.circuitBreaker.recordFailure(componentKey)) {
+                state.runtimeMetrics.circuitBreakerTrips++;
             }
 
             throw err;
         } finally {
+            if (timeout !== undefined) clearTimeout(timeout);
             const duration = Date.now() - start;
             if (this.config.captureComponentMetrics) {
-                this.componentMetrics.push({
+                state.componentMetrics.push({
                     stage,
                     name,
                     durationMs: duration,
