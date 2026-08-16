@@ -82,9 +82,9 @@ export function evaluateReplayRequests(
 
     const baselineTotals = createMetricAccumulator();
     const variantTotals = createMetricAccumulator();
-    const byUserState: Record<string, BucketAccumulator> = {};
-    const byPipeline: Record<string, BucketAccumulator> = {};
-    const byCandidateSetKind: Record<string, CandidateSetAccumulator> = {};
+    const byUserState = Object.create(null) as Record<string, BucketAccumulator>;
+    const byPipeline = Object.create(null) as Record<string, BucketAccumulator>;
+    const byCandidateSetKind = Object.create(null) as Record<string, CandidateSetAccumulator>;
     const sourceSelection = new Map<string, { baseline: number; variant: number }>();
     const requestDiffs: ReplayRequestDelta[] = [];
     let overlapAtKSum = 0;

@@ -156,6 +156,31 @@ describe('recommendation replay evaluator', () => {
         expect(summary.requestDiffLeaders.improved[0]?.requestId).toBe('req-replay-1');
     });
 
+    it('isolates prototype-like dynamic grouping keys', () => {
+        let summary: ReturnType<typeof evaluateReplayRequests> | undefined;
+
+        expect(() => {
+            summary = evaluateReplayRequests([buildRequest({
+                userState: '__proto__',
+                pipelineVersion: 'constructor',
+                candidateSetKind: 'toString',
+            })], 1, 'baseline_rank_v1');
+        }).not.toThrow();
+
+        expect(Object.prototype.hasOwnProperty.call(summary!.byUserState, '__proto__')).toBe(true);
+        expect(summary!.byUserState['__proto__']).toMatchObject({ requests: 1 });
+        expect(Object.prototype.hasOwnProperty.call(summary!.byPipeline, 'constructor')).toBe(true);
+        expect(summary!.byPipeline.constructor).toMatchObject({ requests: 1 });
+        expect(Object.prototype.hasOwnProperty.call(summary!.byCandidateSetKind, 'toString')).toBe(true);
+        expect(summary!.byCandidateSetKind.toString).toEqual({
+            requests: 1,
+            averageObservedCandidates: 2,
+            averageTotalCandidates: 8,
+            truncationRate: 1,
+        });
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
+
     it('industrial guardrail variant demotes negative repeats and promotes trend-linked news', () => {
         const base = buildRequest();
         const request = buildRequest({
