@@ -92,6 +92,16 @@ impl DiversityStatsSideEffect {
     }
 }
 
+fn top_distribution_summary(distribution: &HashMap<String, usize>, limit: usize) -> Vec<String> {
+    let mut entries: Vec<_> = distribution.iter().collect();
+    entries.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+    entries
+        .into_iter()
+        .take(limit)
+        .map(|(key, count)| format!("{key}:{count}"))
+        .collect()
+}
+
 #[async_trait]
 impl SideEffect for DiversityStatsSideEffect {
     async fn execute(&self, context: &SideEffectContext) -> Result<(), SideEffectError> {
@@ -117,13 +127,7 @@ impl SideEffect for DiversityStatsSideEffect {
         );
 
         // Log top sources.
-        let mut top_sources: Vec<_> = stats.source_distribution.iter().collect();
-        top_sources.sort_by(|a, b| b.1.cmp(a.1));
-        let top_source_summary: Vec<String> = top_sources
-            .iter()
-            .take(5)
-            .map(|(source, count)| format!("{source}:{count}"))
-            .collect();
+        let top_source_summary = top_distribution_summary(&stats.source_distribution, 5);
 
         if !top_source_summary.is_empty() {
             info!(
@@ -134,13 +138,7 @@ impl SideEffect for DiversityStatsSideEffect {
         }
 
         // Log top authors.
-        let mut top_authors: Vec<_> = stats.author_distribution.iter().collect();
-        top_authors.sort_by(|a, b| b.1.cmp(a.1));
-        let top_author_summary: Vec<String> = top_authors
-            .iter()
-            .take(5)
-            .map(|(author, count)| format!("{author}:{count}"))
-            .collect();
+        let top_author_summary = top_distribution_summary(&stats.author_distribution, 5);
 
         if !top_author_summary.is_empty() {
             info!(
@@ -273,6 +271,20 @@ mod tests {
 
         assert_eq!(stats.source_distribution.get("GraphSource"), Some(&2));
         assert_eq!(stats.source_distribution.get("PopularSource"), Some(&1));
+    }
+
+    #[test]
+    fn top_distribution_summary_breaks_count_ties_by_key() {
+        let distribution = HashMap::from([
+            ("zeta".to_string(), 2),
+            ("alpha".to_string(), 2),
+            ("beta".to_string(), 1),
+        ]);
+
+        assert_eq!(
+            top_distribution_summary(&distribution, 3),
+            vec!["alpha:2", "zeta:2", "beta:1"]
+        );
     }
 
     #[tokio::test]
