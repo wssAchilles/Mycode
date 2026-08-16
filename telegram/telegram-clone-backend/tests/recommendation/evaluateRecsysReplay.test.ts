@@ -136,6 +136,40 @@ describe('replay evaluation CLI input bounds', () => {
         }
     });
 
+    it('rejects unknown variants before opening the input', async () => {
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        process.argv = [
+            'node',
+            'evaluateRecsysReplay.ts',
+            '--input',
+            '/definitely-missing/replay.ndjson',
+            '--variant',
+            'unknown_variant_v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            await import('../../src/scripts/evaluateRecsysReplay');
+            await vi.waitFor(() => expect(error).toHaveBeenCalled());
+
+            expect(error).toHaveBeenCalledWith(
+                '[EvaluateRecsysReplay] failed:',
+                expect.objectContaining({ message: 'evaluation_config_variant_invalid' }),
+            );
+            expect(runtime.evaluateReplayRequests).not.toHaveBeenCalled();
+            expect(log).not.toHaveBeenCalled();
+            expect(process.exitCode).toBe(1);
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            error.mockRestore();
+            log.mockRestore();
+        }
+    });
+
     it('rejects an oversized file from the opened descriptor before parsing', async () => {
         const directory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-eval-file-limit-'));
         const inputPath = path.join(directory, 'requests.ndjson');

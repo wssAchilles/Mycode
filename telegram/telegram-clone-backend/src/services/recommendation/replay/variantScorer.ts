@@ -63,8 +63,12 @@ export function scoreReplayCandidate(
         case 'industrial_guardrail_blend_v1':
             return industrialGuardrailBlendScore(request, candidate);
         default:
-            return -candidate.baselineRank;
+            return unsupportedReplayVariant(variant);
     }
+}
+
+function unsupportedReplayVariant(_variant: never): never {
+    throw new Error('unsupported_replay_variant');
 }
 
 function hybridSignalBlendScore(

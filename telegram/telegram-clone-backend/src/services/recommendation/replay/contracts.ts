@@ -1,11 +1,14 @@
 import type { OutcomeContractV1 } from '../outcomes/outcomeContractV1';
 
-export type ReplayVariantName =
-    | 'baseline_rank_v1'
-    | 'trace_final_score_v1'
-    | 'trace_weighted_score_v1'
-    | 'hybrid_signal_blend_v1'
-    | 'industrial_guardrail_blend_v1';
+export const REPLAY_VARIANT_NAMES = Object.freeze([
+    'baseline_rank_v1',
+    'trace_final_score_v1',
+    'trace_weighted_score_v1',
+    'hybrid_signal_blend_v1',
+    'industrial_guardrail_blend_v1',
+] as const);
+
+export type ReplayVariantName = typeof REPLAY_VARIANT_NAMES[number];
 
 export interface ReplayCandidateLabelSummary {
     click: boolean;

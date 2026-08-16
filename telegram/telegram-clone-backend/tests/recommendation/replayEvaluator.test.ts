@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { evaluateReplayRequests } from '../../src/services/recommendation/replay/evaluator';
 import { rerankReplayCandidates } from '../../src/services/recommendation/replay/variantScorer';
-import type { ReplayRequestSnapshot } from '../../src/services/recommendation/replay/contracts';
+import type {
+    ReplayRequestSnapshot,
+    ReplayVariantName,
+} from '../../src/services/recommendation/replay/contracts';
 
 function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequestSnapshot {
     return {
@@ -114,6 +117,13 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
 }
 
 describe('recommendation replay evaluator', () => {
+    it('rejects unknown variants instead of silently replaying the baseline', () => {
+        expect(() => rerankReplayCandidates(
+            buildRequest(),
+            'unknown_variant_v1' as ReplayVariantName,
+        )).toThrow('unsupported_replay_variant');
+    });
+
     it('hybrid replay variant promotes embedding-matched engaged candidates over popular fallback', () => {
         const ranked = rerankReplayCandidates(buildRequest(), 'hybrid_signal_blend_v1');
 

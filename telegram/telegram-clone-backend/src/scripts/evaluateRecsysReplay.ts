@@ -12,9 +12,9 @@ import readline from 'readline';
 import {
     evaluateReplayRequests,
 } from '../services/recommendation/replay/evaluator';
-import type {
-    ReplayRequestSnapshot,
-    ReplayVariantName,
+import {
+    REPLAY_VARIANT_NAMES,
+    type ReplayRequestSnapshot,
 } from '../services/recommendation/replay/contracts';
 
 const REPLAY_EVALUATION_LIMITS = Object.freeze({
@@ -44,10 +44,14 @@ function parseArgs() {
         || topK > REPLAY_EVALUATION_LIMITS.maximumTopK
     ) throw new Error('evaluation_config_resource_limit_exceeded');
 
+    const requestedVariant = kv.variant || 'hybrid_signal_blend_v1';
+    const variant = REPLAY_VARIANT_NAMES.find((name) => name === requestedVariant);
+    if (!variant) throw new Error('evaluation_config_variant_invalid');
+
     return {
         input: kv.input || './tmp/replay_requests.ndjson',
         topK,
-        variant: (kv.variant || 'hybrid_signal_blend_v1') as ReplayVariantName,
+        variant,
         output: kv.output || '',
     };
 }
