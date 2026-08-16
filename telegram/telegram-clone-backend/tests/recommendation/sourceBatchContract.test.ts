@@ -107,4 +107,36 @@ describe('RecommendationAdapterService source batch contract', () => {
     expect(result.items[0]?.stage.detail?.timedOut).toBe(true);
     expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold-fast');
   });
+
+  it('counts prototype-like graph recall types as ordinary kernel sources', async () => {
+    const service = new RecommendationAdapterService();
+    const recallTypes = ['__proto__', 'constructor', 'toString'];
+    (service as any).sourceCatalog = {
+      GraphSource: {
+        name: 'GraphSource',
+        enable: () => true,
+        getCandidates: async () => recallTypes.map((graphRecallType, index) => ({
+          postId: `graph-${index}`,
+          authorId: `author-${index}`,
+          content: 'graph candidate',
+          createdAt: new Date('2026-04-20T00:00:00.000Z'),
+          isReply: false,
+          isRepost: false,
+          recallSource: 'GraphKernelSource',
+          graphRecallType,
+        })),
+      },
+    };
+
+    const result = await service.getSourceCandidates(
+      'GraphSource',
+      createFeedQuery('viewer-graph-counts', 20),
+    );
+    const counts = result.stage.detail?.kernelSourceCounts as Record<string, number>;
+
+    for (const recallType of recallTypes) {
+      expect(Object.prototype.hasOwnProperty.call(counts, recallType)).toBe(true);
+      expect(counts[recallType]).toBe(1);
+    }
+  });
 });

@@ -1151,7 +1151,7 @@ function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrieva
   const kernelCandidates = candidates.filter(isGraphKernelCandidate).length;
   const totalCandidates = candidates.length;
   const legacyCandidates = totalCandidates - kernelCandidates;
-  const kernelSourceCounts: Record<string, number> = {};
+  const kernelSourceCounts = Object.create(null) as Record<string, number>;
 
   for (const candidate of candidates) {
     if (!isGraphKernelCandidate(candidate)) {
