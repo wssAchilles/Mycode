@@ -206,11 +206,35 @@ describe('Rust feed runtime ownership', () => {
             servingOwner: 'node',
             evaluatedOwner: 'rust',
             owner: 'node',
-            fallbackMode: 'shadow_failed',
+            fallbackMode: 'shadow_compare_only',
         });
         expect(result.debugInfo.fallbackOwner).toBeUndefined();
         expect(result.debugInfo.fallbackReason).toBeUndefined();
         expect(result.pageMeta).toBeUndefined();
+    });
+
+    it('returns the Node baseline before a pending shadow evaluation settles', async () => {
+        mocks.getMode.mockReturnValue('shadow');
+        let resolveShadow!: (value: ReturnType<typeof rustResult>) => void;
+        mocks.getCandidates.mockReturnValue(new Promise((resolve) => {
+            resolveShadow = resolve;
+        }));
+
+        const result = await Promise.race([
+            resolveFeedRuntime(makeInput()),
+            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 50)),
+        ]);
+
+        expect(result).toMatchObject({
+            feed: [nodeCandidate],
+            debugInfo: {
+                servingOwner: 'node',
+                fallbackMode: 'shadow_compare_only',
+            },
+        });
+
+        resolveShadow(rustResult([rustCandidatePayload]));
+        await vi.waitFor(() => expect(mocks.recordShadow).toHaveBeenCalledTimes(1));
     });
 
     it('counts prototype-like source names as ordinary feed sources', () => {

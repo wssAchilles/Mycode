@@ -216,41 +216,21 @@ async function resolveNodeBaselineFeed(
         };
     }
 
-    try {
-        const rustResult = await getRustFeedCandidates(input, false);
-        const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
-        const shadowComparison = buildRecommendationShadowComparison(feed, rustCandidates);
-        recommendationRuntimeMetrics.recordShadow(
-            rustResult.summary,
-            shadowComparison,
-        );
-        debugInfo = buildSpaceFeedDebugInfo(feed, {
-            requestId: input.requestId,
-            pipeline: 'node_baseline_with_rust_shadow',
-            runtimeMode: runtime.runtimeMode,
-            configuredServingOwner: runtime.configuredServingOwner,
-            servingOwner: 'node',
-            evaluatedOwner: runtime.evaluatedOwner,
-            fallbackMode: rustResult.summary.fallbackMode,
-            degradedReasons: rustResult.summary.degradedReasons,
-            shadowComparison,
+    void getRustFeedCandidates(input, false)
+        .then((rustResult) => {
+            const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
+            const shadowComparison = buildRecommendationShadowComparison(feed, rustCandidates);
+            recommendationRuntimeMetrics.recordShadow(
+                rustResult.summary,
+                shadowComparison,
+            );
+        })
+        .catch((error) => {
+            console.warn(
+                '[SpaceService] Rust recommendation shadow failed:',
+                (error as any)?.message || error,
+            );
         });
-    } catch (error) {
-        console.warn(
-            '[SpaceService] Rust recommendation shadow failed:',
-            (error as any)?.message || error,
-        );
-        debugInfo = buildSpaceFeedDebugInfo(feed, {
-            requestId: input.requestId,
-            pipeline: 'node_baseline_shadow_failed',
-            runtimeMode: runtime.runtimeMode,
-            configuredServingOwner: runtime.configuredServingOwner,
-            servingOwner: 'node',
-            evaluatedOwner: runtime.evaluatedOwner,
-            fallbackMode: 'shadow_failed',
-            degradedReasons: [String((error as any)?.message || error || 'rust_shadow_failed')],
-        });
-    }
 
     return {
         feed,
