@@ -17,6 +17,8 @@ import type {
 } from '../types/FeedQuery';
 import type { EmbeddingContract } from '../contracts/embeddingContract';
 
+export const RANKED_CURSOR_ABSTENTION_MODE = 'ranked_cursor_abstention_v1' as const;
+
 type SerializedUserFeatures = Omit<UserFeatures, 'accountCreatedAt'> & {
   accountCreatedAt?: string;
 };

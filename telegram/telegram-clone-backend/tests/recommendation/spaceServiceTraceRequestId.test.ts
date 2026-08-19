@@ -123,6 +123,51 @@ describe('spaceService trace request ownership', () => {
         });
     });
 
+    it('does not repopulate a terminal cursor abstention with self posts', async () => {
+        const cursor = new Date('2026-07-15T00:00:00.000Z');
+        mocks.resolveFeedRuntime.mockImplementationOnce(async (input) => ({
+            feed: [],
+            finalFeedQuery: input.createBaseQuery(),
+            pageMeta: {
+                hasMore: false,
+                continuationAbstained: true,
+            },
+            debugInfo: {
+                requestId: input.requestId,
+                pipeline: 'rust_primary_ranked_cursor_abstention',
+                runtimeMode: 'primary',
+                configuredServingOwner: 'rust',
+                servingOwner: 'rust',
+                owner: 'rust',
+                fallbackOwner: 'node',
+                fallbackMode: 'ranked_cursor_abstention',
+                degradedReasons: ['ranked_cursor_abstention'],
+                selectedCount: 0,
+                sourceCounts: {},
+                generatedAt: '2026-07-15T12:00:00.000Z',
+            },
+        }));
+        const getUserPosts = vi.spyOn(spaceService as any, 'getUserPosts')
+            .mockResolvedValueOnce([]);
+        const getUserMap = vi.spyOn(spaceService as any, 'getUserMap')
+            .mockResolvedValueOnce(new Map());
+
+        const page = await spaceService.getFeedPage(
+            'trace-request-user',
+            2,
+            cursor,
+            true,
+            { requestId: 'fc486e46-7463-4dfb-b1f7-632052b73c9d' },
+        );
+
+        expect(page.candidates).toEqual([]);
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBeUndefined();
+        expect(mocks.mixerGetFeed).not.toHaveBeenCalled();
+        expect(getUserPosts).not.toHaveBeenCalled();
+        expect(getUserMap).not.toHaveBeenCalled();
+    });
+
     it('records the returned post-self page once with the independent policy feed', async () => {
         const selectedA = {
             postId: new mongoose.Types.ObjectId('507f191e810c19729de8c001'),

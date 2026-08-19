@@ -40,6 +40,7 @@ export interface RecommendationTraceShadowComparisonInput {
 
 export interface RecommendationTraceServingInput {
     servingVersion?: string;
+    cursorMode?: string;
     stableOrderKey?: string;
     cursor?: string;
     nextCursor?: string;
@@ -488,6 +489,7 @@ function sanitizeServing(value?: RecommendationTraceServingInput): Recommendatio
     if (!value) return undefined;
     const serving: RecommendationTraceServingInput = {};
     setIfDefined(serving as Record<string, unknown>, 'servingVersion', value.servingVersion);
+    setIfDefined(serving as Record<string, unknown>, 'cursorMode', value.cursorMode);
     setIfDefined(serving as Record<string, unknown>, 'stableOrderKey', value.stableOrderKey);
     setIfDefined(serving as Record<string, unknown>, 'cursor', value.cursor);
     setIfDefined(serving as Record<string, unknown>, 'nextCursor', value.nextCursor);

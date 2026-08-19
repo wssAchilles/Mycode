@@ -4,6 +4,7 @@ use telegram_serving_primitives::{
 };
 
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
+use crate::serving::cursor::RANKED_CURSOR_ABSTENTION_MODE;
 use crate::serving::stage_payload::build_serve_cache_stage;
 
 use super::RecommendationPipeline;
@@ -41,6 +42,7 @@ impl RecommendationPipeline {
         cached_result.summary.request_id = query.request_id.clone();
         cached_result.summary.serving.cursor = query.cursor;
         cached_result.summary.serving.serve_cache_hit = true;
+        enforce_ranked_cursor_abstention(&mut cached_result, query);
         if let Some(trace) = cached_result.summary.trace.as_mut() {
             trace.request_id = query.request_id.clone();
             trace.trace_mode = PIPELINE_TRACE_MODE_CACHE_REPLAY.to_string();
@@ -69,5 +71,73 @@ impl RecommendationPipeline {
             .stage_latency_ms
             .insert(PAGE_BUILD_LATENCY_KEY.to_string(), page_build_duration_ms);
         cached_result
+    }
+}
+
+fn enforce_ranked_cursor_abstention(
+    result: &mut RecommendationResultPayload,
+    query: &RecommendationQueryPayload,
+) {
+    if query.in_network_only {
+        return;
+    }
+
+    result.has_more = false;
+    result.next_cursor = None;
+    result.summary.serving.cursor_mode = RANKED_CURSOR_ABSTENTION_MODE.to_string();
+    result.summary.serving.has_more = false;
+    result.summary.serving.next_cursor = None;
+    if !result
+        .summary
+        .degraded_reasons
+        .iter()
+        .any(|reason| reason == "ranked_cursor_abstention")
+    {
+        result
+            .summary
+            .degraded_reasons
+            .push("ranked_cursor_abstention".to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use crate::contracts::RecommendationQueryPayload;
+    use crate::serving::cache::tests::test_result;
+
+    use super::enforce_ranked_cursor_abstention;
+
+    #[test]
+    fn cached_general_feed_cannot_replay_a_legacy_cursor() {
+        let next_cursor = Utc.with_ymd_and_hms(2026, 7, 15, 0, 0, 0).unwrap();
+        let mut result = test_result("stable-ranked-page");
+        result.has_more = true;
+        result.next_cursor = Some(next_cursor);
+        result.summary.serving.has_more = true;
+        result.summary.serving.next_cursor = Some(next_cursor);
+        let query = RecommendationQueryPayload {
+            request_id: "ranked-cache-replay".to_string(),
+            in_network_only: false,
+            ..RecommendationQueryPayload::default()
+        };
+
+        enforce_ranked_cursor_abstention(&mut result, &query);
+
+        assert!(!result.has_more);
+        assert!(result.next_cursor.is_none());
+        assert!(!result.summary.serving.has_more);
+        assert!(result.summary.serving.next_cursor.is_none());
+        assert_eq!(
+            result.summary.serving.cursor_mode,
+            "ranked_cursor_abstention_v1"
+        );
+        assert!(
+            result
+                .summary
+                .degraded_reasons
+                .contains(&"ranked_cursor_abstention".to_string())
+        );
     }
 }

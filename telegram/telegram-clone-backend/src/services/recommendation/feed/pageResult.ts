@@ -16,13 +16,17 @@ export interface SpaceFeedPageResult {
     debug?: SpaceFeedDebugInfo;
 }
 
+type SpaceFeedPageMeta = Pick<SpaceFeedPageResult, 'requestId' | 'decisionId'>
+    & Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta' | 'requestId' | 'decisionId'>>
+    & { continuationAbstained?: boolean };
+
 export function buildSpaceFeedPageResult(
     candidates: FeedCandidate[],
     limit: number,
-    pageMeta: Pick<SpaceFeedPageResult, 'requestId' | 'decisionId'>
-        & Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta' | 'requestId' | 'decisionId'>>,
+    pageMeta: SpaceFeedPageMeta,
 ): SpaceFeedPageResult {
     const locallyTruncated = candidates.length > limit;
+    const continuationAbstained = pageMeta.continuationAbstained === true;
     candidates = candidates.slice(0, limit);
     const servedCandidateIds = new Set(candidates.map((candidate) => candidate.postId.toString()));
     const servedIdsDelta: string[] = [];
@@ -56,8 +60,12 @@ export function buildSpaceFeedPageResult(
         candidates,
         decisionActionCandidateIds: (pageMeta.decisionActionCandidateIds ?? [])
             .filter((candidateId) => servedCandidateIds.has(candidateId)),
-        hasMore: locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit),
-        nextCursor: locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor,
+        hasMore: continuationAbstained
+            ? false
+            : locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit),
+        nextCursor: continuationAbstained
+            ? undefined
+            : locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor,
         servedIdsDelta,
         rustServing: pageMeta?.rustServing,
         debug: pageMeta?.debug,

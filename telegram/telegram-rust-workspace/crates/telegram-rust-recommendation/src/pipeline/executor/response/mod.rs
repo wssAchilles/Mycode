@@ -6,11 +6,16 @@ use telegram_serving_primitives::PAGE_BUILD_LATENCY_KEY;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    RecommendationQueryPayload, RecommendationResultPayload, RecommendationSelectorPayload,
+    RecommendationGraphRetrievalPayload, RecommendationQueryPayload,
+    RecommendationRankingSummaryPayload, RecommendationResultPayload,
+    RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
     RecommendationSummaryPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
-use crate::serving::cursor::{SERVED_STATE_VERSION, SERVING_VERSION};
+use crate::serving::cursor::{
+    CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE, SERVED_STATE_VERSION, SERVING_VERSION,
+};
+use crate::serving::stable_order::build_stable_order_key;
 
 use super::super::utils::dedup_strings;
 use super::ranking_stage::RankingStageOutput;
@@ -70,6 +75,12 @@ pub(super) fn build_live_recommendation_result(
             .degraded_reasons
             .push("underfilled_selection".to_string());
     }
+    let ranked_cursor_abstained = !input.hydrated_query.in_network_only;
+    if ranked_cursor_abstained && has_more {
+        telemetry
+            .degraded_reasons
+            .push("ranked_cursor_abstention".to_string());
+    }
     dedup_strings(&mut telemetry.degraded_reasons);
     telemetry.stage_latency_ms.insert(
         PAGE_BUILD_LATENCY_KEY.to_string(),
@@ -86,10 +97,22 @@ pub(super) fn build_live_recommendation_result(
         false,
     );
 
+    let cursor_mode = if ranked_cursor_abstained {
+        RANKED_CURSOR_ABSTENTION_MODE
+    } else {
+        CURSOR_MODE
+    };
+    let public_next_cursor = if ranked_cursor_abstained {
+        None
+    } else {
+        next_cursor
+    };
+    let public_has_more = has_more && !ranked_cursor_abstained;
     let serving_summary = build_live_serving_summary(LiveServingSummaryInput {
+        cursor_mode,
         cursor: input.hydrated_query.cursor,
-        next_cursor,
-        has_more,
+        next_cursor: public_next_cursor,
+        has_more: public_has_more,
         stable_order_key: stable_order_key.clone(),
         duplicate_suppressed_count,
         cross_page_duplicate_count,
@@ -138,10 +161,115 @@ pub(super) fn build_live_recommendation_result(
         serving_version: SERVING_VERSION.to_string(),
         cursor: input.hydrated_query.cursor,
         next_cursor: summary.serving.next_cursor,
-        has_more: summary.serving.has_more,
+        has_more: public_has_more,
         served_state_version: SERVED_STATE_VERSION.to_string(),
         stable_order_key,
         candidates: final_candidates,
+        summary,
+    }
+}
+
+pub(super) fn build_ranked_cursor_abstention_result(
+    config: &RecommendationConfig,
+    definition: &RecommendationPipelineDefinition,
+    query: &RecommendationQueryPayload,
+    page_build_duration_ms: u64,
+) -> RecommendationResultPayload {
+    let stable_order_key = build_stable_order_key(&[], query.in_network_only);
+    let serving = build_live_serving_summary(LiveServingSummaryInput {
+        cursor_mode: RANKED_CURSOR_ABSTENTION_MODE,
+        cursor: query.cursor,
+        next_cursor: None,
+        has_more: false,
+        stable_order_key: stable_order_key.clone(),
+        duplicate_suppressed_count: 0,
+        cross_page_duplicate_count: 0,
+        suppression_reasons: HashMap::new(),
+        page_remaining_count: 0,
+        page_underfilled: true,
+        page_underfill_reason: Some("ranked_cursor_abstention".to_string()),
+    });
+    let trace = build_recommendation_trace(
+        query,
+        &[],
+        &[],
+        &definition.pipeline_version,
+        &definition.owner,
+        &definition.fallback_mode,
+        false,
+    );
+    let summary = RecommendationSummaryPayload {
+        request_id: query.request_id.clone(),
+        stage: config.stage.clone(),
+        pipeline_version: definition.pipeline_version.clone(),
+        owner: definition.owner.clone(),
+        fallback_mode: definition.fallback_mode.clone(),
+        provider_calls: HashMap::new(),
+        provider_latency_ms: HashMap::new(),
+        retrieved_count: 0,
+        selected_count: 0,
+        source_counts: HashMap::new(),
+        filter_drop_counts: HashMap::new(),
+        stage_timings: HashMap::new(),
+        stage_latency_ms: HashMap::from([(
+            PAGE_BUILD_LATENCY_KEY.to_string(),
+            page_build_duration_ms,
+        )]),
+        degraded_reasons: vec!["ranked_cursor_abstention".to_string()],
+        recent_hot_applied: false,
+        online_eval: build_online_eval(&[]),
+        selector: RecommendationSelectorPayload {
+            oversample_factor: config.selector_oversample_factor,
+            max_size: config.selector_max_size,
+            final_limit: query.limit,
+            truncated: false,
+            selector_report: None,
+            selector_report_unavailable_reason: Some("ranked_cursor_abstention".to_string()),
+        },
+        serving,
+        retrieval: RecommendationRetrievalSummaryPayload {
+            stage: "ranked_cursor_abstention".to_string(),
+            total_candidates: 0,
+            in_network_candidates: 0,
+            out_of_network_candidates: 0,
+            ml_retrieved_candidates: 0,
+            recent_hot_candidates: 0,
+            source_counts: HashMap::new(),
+            source_outcome_counts: HashMap::new(),
+            source_failure_counts: HashMap::new(),
+            source_disabled_counts: HashMap::new(),
+            lane_counts: HashMap::new(),
+            ml_source_counts: HashMap::new(),
+            stage_timings: HashMap::new(),
+            degraded_reasons: Vec::new(),
+            graph: RecommendationGraphRetrievalPayload::default(),
+        },
+        ranking: RecommendationRankingSummaryPayload {
+            stage: "ranked_cursor_abstention".to_string(),
+            input_candidates: 0,
+            hydrated_candidates: 0,
+            filtered_candidates: 0,
+            scored_candidates: 0,
+            ml_eligible_candidates: 0,
+            ml_ranked_candidates: 0,
+            weighted_candidates: 0,
+            stage_timings: HashMap::new(),
+            filter_drop_counts: HashMap::new(),
+            degraded_reasons: Vec::new(),
+        },
+        stages: Vec::new(),
+        trace: Some(trace),
+    };
+
+    RecommendationResultPayload {
+        request_id: query.request_id.clone(),
+        serving_version: SERVING_VERSION.to_string(),
+        cursor: query.cursor,
+        next_cursor: None,
+        has_more: false,
+        served_state_version: SERVED_STATE_VERSION.to_string(),
+        stable_order_key,
+        candidates: Vec::new(),
         summary,
     }
 }

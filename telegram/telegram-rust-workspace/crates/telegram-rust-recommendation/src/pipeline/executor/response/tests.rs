@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_pipeline_primitives::{
     RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
@@ -11,18 +12,25 @@ use telegram_serving_primitives::{
 };
 
 use crate::candidate_pipeline::definition::build_pipeline_definition;
+use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationGraphRetrievalPayload,
     RecommendationQueryPayload, RecommendationRankingSummaryPayload,
     RecommendationRetrievalSummaryPayload, RecommendationStagePayload,
 };
+use crate::metrics::RecommendationMetrics;
+use crate::pipeline::builder::RecommendationPipelineBuilder;
+use crate::state::recent_store::RecentHotStore;
 
 use super::super::ranking_stage::RankingStageOutput;
 use super::super::retrieval_stage::RetrievalStageOutput;
 use super::super::serving_stage::ServingStageOutput;
 use super::super::telemetry::RunTelemetry;
-use super::{LiveRecommendationResultInput, build_live_recommendation_result};
+use super::{
+    LiveRecommendationResultInput, build_live_recommendation_result,
+    build_ranked_cursor_abstention_result,
+};
 
 #[test]
 fn builds_live_result_and_records_selection_degradation() {
@@ -59,6 +67,7 @@ fn builds_live_result_and_records_selection_degradation() {
         subscribed_user_ids: Vec::new(),
     };
     let candidate = candidate("post-1");
+    let next_cursor = candidate.created_at;
 
     let mut telemetry = RunTelemetry::default();
     telemetry.add_stage(RecommendationStagePayload {
@@ -119,13 +128,13 @@ fn builds_live_result_and_records_selection_degradation() {
             final_candidates: vec![candidate],
             duplicate_suppressed_count: 0,
             cross_page_duplicate_count: 0,
-            has_more: false,
-            page_remaining_count: 0,
+            has_more: true,
+            page_remaining_count: 1,
             page_underfilled: true,
             page_underfill_reason: Some("under_limit".to_string()),
             suppression_reasons: HashMap::new(),
-            truncated: false,
-            next_cursor: None,
+            truncated: true,
+            next_cursor: Some(next_cursor),
             stable_order_key: "stable-key".to_string(),
         },
         telemetry,
@@ -134,6 +143,14 @@ fn builds_live_result_and_records_selection_degradation() {
 
     assert_eq!(result.request_id, "req-response");
     assert_eq!(result.candidates.len(), 1);
+    assert!(!result.has_more);
+    assert!(result.next_cursor.is_none());
+    assert!(!result.summary.serving.has_more);
+    assert_eq!(result.summary.serving.page_remaining_count, 1);
+    assert_eq!(
+        result.summary.serving.cursor_mode,
+        "ranked_cursor_abstention_v1"
+    );
     assert_eq!(result.summary.selected_count, 1);
     assert_eq!(
         result.summary.stage_latency_ms.get(PAGE_BUILD_LATENCY_KEY),
@@ -144,6 +161,12 @@ fn builds_live_result_and_records_selection_degradation() {
             .summary
             .degraded_reasons
             .contains(&"underfilled_selection".to_string())
+    );
+    assert!(
+        result
+            .summary
+            .degraded_reasons
+            .contains(&"ranked_cursor_abstention".to_string())
     );
     assert_eq!(
         result.summary.serving.cache_policy_reason,
@@ -157,6 +180,104 @@ fn builds_live_result_and_records_selection_degradation() {
             .selector
             .selector_report_unavailable_reason
             .is_none()
+    );
+}
+
+#[test]
+fn builds_terminal_ranked_cursor_abstention_without_running_pipeline_stages() {
+    let config = test_config();
+    let definition = build_pipeline_definition(&config);
+    let cursor = Utc.with_ymd_and_hms(2026, 7, 15, 0, 0, 0).unwrap();
+    let query = RecommendationQueryPayload {
+        request_id: "req-ranked-cursor-abstention".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ab".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 20,
+        cursor: Some(cursor),
+        in_network_only: false,
+        ..RecommendationQueryPayload::default()
+    };
+
+    let result = build_ranked_cursor_abstention_result(&config, &definition, &query, 5);
+
+    assert!(result.candidates.is_empty());
+    assert_eq!(result.cursor, Some(cursor));
+    assert!(result.next_cursor.is_none());
+    assert!(!result.has_more);
+    assert_eq!(
+        result.summary.serving.cursor_mode,
+        "ranked_cursor_abstention_v1"
+    );
+    assert_eq!(result.summary.retrieved_count, 0);
+    assert_eq!(result.summary.selected_count, 0);
+    assert!(result.summary.provider_calls.is_empty());
+    assert!(result.summary.stages.is_empty());
+    assert!(
+        result
+            .summary
+            .degraded_reasons
+            .contains(&"ranked_cursor_abstention".to_string())
+    );
+    assert!(
+        !result
+            .summary
+            .degraded_reasons
+            .contains(&"empty_selection".to_string())
+    );
+}
+
+#[tokio::test]
+async fn executor_abstains_before_cache_and_provider_work() {
+    let mut config = test_config();
+    config.backend_url = "http://127.0.0.1:1".to_string();
+    config.redis_url = "redis://127.0.0.1:1".to_string();
+    config.timeout_ms = 50;
+    let recent_store = Arc::new(RecentHotStore::new_sharded(
+        config.recent_per_user_capacity,
+        config.recent_global_capacity,
+        config.recent_hot_shard_count,
+    ));
+    let metrics = Arc::new(tokio::sync::Mutex::new(RecommendationMetrics::default()));
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let pipeline =
+        RecommendationPipelineBuilder::new(backend_client, config, recent_store, metrics).build();
+    let before = pipeline.cache_control_plane_snapshot().serve_cache;
+    let query = RecommendationQueryPayload {
+        request_id: "req-executor-ranked-cursor-abstention".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ac".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 20,
+        cursor: Some(Utc.with_ymd_and_hms(2026, 7, 15, 0, 0, 0).unwrap()),
+        in_network_only: false,
+        ..RecommendationQueryPayload::default()
+    };
+
+    let result = pipeline
+        .run(query)
+        .await
+        .expect("terminal abstention result");
+    let after = pipeline.cache_control_plane_snapshot().serve_cache;
+
+    assert!(result.candidates.is_empty());
+    assert!(result.summary.provider_calls.is_empty());
+    assert!(result.summary.stages.is_empty());
+    assert_eq!(
+        result.summary.serving.cursor_mode,
+        "ranked_cursor_abstention_v1"
+    );
+    assert_eq!(
+        (
+            after.local_hit_count,
+            after.local_miss_count,
+            after.shared_hit_count,
+            after.shared_miss_count,
+        ),
+        (
+            before.local_hit_count,
+            before.local_miss_count,
+            before.shared_hit_count,
+            before.shared_miss_count,
+        )
     );
 }
 

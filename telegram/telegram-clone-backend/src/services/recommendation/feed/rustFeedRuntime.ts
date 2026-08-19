@@ -6,6 +6,7 @@ import {
     getRustRecommendationTimeoutMs,
 } from '../clients/RustRecommendationClient';
 import {
+    RANKED_CURSOR_ABSTENTION_MODE,
     deserializeRecommendationCandidates,
     serializeRecommendationQuery,
 } from '../rust/contracts';
@@ -23,6 +24,7 @@ import {
 
 export interface RustFeedServingMeta {
     servingVersion?: string;
+    cursorMode?: string;
     stableOrderKey?: string;
     cursor?: string;
     nextCursor?: string;
@@ -33,6 +35,7 @@ export interface RustFeedServingMeta {
 export interface FeedRuntimePageMeta {
     hasMore?: boolean;
     nextCursor?: string;
+    continuationAbstained?: boolean;
     rustServing?: RustFeedServingMeta;
 }
 
@@ -70,8 +73,29 @@ async function resolvePrimaryRustFeed(
     input: ResolveFeedRuntimeInput,
     runtime: RecommendationRuntimeSemantics,
 ): Promise<FeedRuntimeResult> {
+    const finalFeedQuery = input.createBaseQuery();
+    const rankedCursorAbstained = !finalFeedQuery.inNetworkOnly;
+
+    if (rankedCursorAbstained && finalFeedQuery.cursor) {
+        return {
+            feed: [],
+            finalFeedQuery,
+            pageMeta: rankedCursorAbstentionPageMeta,
+            debugInfo: buildSpaceFeedDebugInfo([], {
+                requestId: input.requestId,
+                pipeline: 'rust_primary_ranked_cursor_abstention',
+                runtimeMode: runtime.runtimeMode,
+                configuredServingOwner: runtime.configuredServingOwner,
+                servingOwner: 'rust',
+                fallbackOwner: runtime.fallbackOwner,
+                fallbackMode: 'ranked_cursor_abstention',
+                degradedReasons: ['ranked_cursor_abstention'],
+            }),
+        };
+    }
+
     try {
-        const rustResult = await getRustFeedCandidates(input, true);
+        const rustResult = await getRustFeedCandidates(input, true, finalFeedQuery);
         const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
 
         if (rustCandidates.length === 0) {
@@ -79,9 +103,14 @@ async function resolvePrimaryRustFeed(
                 '[SpaceService] Rust recommendation primary returned empty selection, falling back to baseline pipeline',
             );
             const feed = await input.runBaselineFeed();
+            const degradedReasons = withRankedCursorAbstention([
+                ...rustResult.summary.degradedReasons,
+                'rust_primary_empty_selection',
+            ], rankedCursorAbstained);
             return {
                 feed,
-                finalFeedQuery: input.createBaseQuery(),
+                finalFeedQuery,
+                pageMeta: rankedCursorAbstained ? rankedCursorAbstentionPageMeta : undefined,
                 debugInfo: buildSpaceFeedDebugInfo(feed, {
                     requestId: input.requestId,
                     pipeline: 'rust_primary_empty_fallback_node',
@@ -91,24 +120,30 @@ async function resolvePrimaryRustFeed(
                     fallbackOwner: runtime.fallbackOwner,
                     fallbackReason: 'rust_primary_empty_fallback_node',
                     fallbackMode: rustResult.summary.fallbackMode,
-                    degradedReasons: [
-                        ...rustResult.summary.degradedReasons,
-                        'rust_primary_empty_selection',
-                    ],
+                    degradedReasons,
                 }),
             };
         }
 
+        const serving = rustResult.summary.serving;
+        const continuationAbstained = rankedCursorAbstained
+            || serving.cursorMode === RANKED_CURSOR_ABSTENTION_MODE;
+        const degradedReasons = withRankedCursorAbstention(
+            rustResult.summary.degradedReasons,
+            continuationAbstained,
+        );
         const pageMeta: FeedRuntimePageMeta = {
-            hasMore: rustResult.hasMore,
-            nextCursor: rustResult.nextCursor,
+            hasMore: continuationAbstained ? false : rustResult.hasMore,
+            nextCursor: continuationAbstained ? undefined : rustResult.nextCursor,
+            continuationAbstained: continuationAbstained || undefined,
             rustServing: {
                 servingVersion: rustResult.servingVersion,
+                cursorMode: serving.cursorMode,
                 stableOrderKey: rustResult.stableOrderKey,
                 cursor: rustResult.cursor,
-                nextCursor: rustResult.nextCursor,
+                nextCursor: continuationAbstained ? undefined : rustResult.nextCursor,
                 servedStateVersion: rustResult.servedStateVersion,
-                hasMore: rustResult.hasMore,
+                hasMore: continuationAbstained ? false : serving.hasMore,
             },
         };
 
@@ -125,7 +160,7 @@ async function resolvePrimaryRustFeed(
                 servingOwner: 'rust',
                 fallbackOwner: runtime.fallbackOwner,
                 fallbackMode: rustResult.summary.fallbackMode,
-                degradedReasons: rustResult.summary.degradedReasons,
+                degradedReasons,
             }),
         };
     } catch (error) {
@@ -134,9 +169,14 @@ async function resolvePrimaryRustFeed(
             (error as any)?.message || error,
         );
         const feed = await input.runBaselineFeed();
+        const degradedReasons = withRankedCursorAbstention(
+            [String((error as any)?.message || error || 'rust_primary_failed')],
+            rankedCursorAbstained,
+        );
         return {
             feed,
-            finalFeedQuery: input.createBaseQuery(),
+            finalFeedQuery,
+            pageMeta: rankedCursorAbstained ? rankedCursorAbstentionPageMeta : undefined,
             debugInfo: buildSpaceFeedDebugInfo(feed, {
                 requestId: input.requestId,
                 pipeline: 'rust_primary_error_fallback_node',
@@ -146,7 +186,7 @@ async function resolvePrimaryRustFeed(
                 fallbackOwner: runtime.fallbackOwner,
                 fallbackReason: 'rust_primary_error_fallback_node',
                 fallbackMode: 'rust_primary_failed',
-                degradedReasons: [String((error as any)?.message || error || 'rust_primary_failed')],
+                degradedReasons,
             }),
         };
     }
@@ -219,12 +259,16 @@ async function resolveNodeBaselineFeed(
     };
 }
 
-async function getRustFeedCandidates(input: ResolveFeedRuntimeInput, recordPrimary: boolean) {
+async function getRustFeedCandidates(
+    input: ResolveFeedRuntimeInput,
+    recordPrimary: boolean,
+    baseQuery = input.createBaseQuery(),
+) {
     const rustClient = new RustRecommendationClient(
         getDefaultRustRecommendationBaseUrl(),
         getRustRecommendationTimeoutMs(),
     );
-    const query = await input.withFeedTrendKeywords(input.createBaseQuery());
+    const query = await input.withFeedTrendKeywords(baseQuery);
     const result = await rustClient.getCandidates(
         serializeRecommendationQuery(query),
     );
@@ -232,4 +276,18 @@ async function getRustFeedCandidates(input: ResolveFeedRuntimeInput, recordPrima
         recommendationRuntimeMetrics.recordPrimary(result.summary);
     }
     return { ...result, query };
+}
+
+const rankedCursorAbstentionPageMeta: FeedRuntimePageMeta = {
+    hasMore: false,
+    continuationAbstained: true,
+};
+
+function withRankedCursorAbstention(
+    degradedReasons: string[],
+    continuationAbstained: boolean,
+): string[] {
+    return continuationAbstained
+        ? Array.from(new Set([...degradedReasons, 'ranked_cursor_abstention']))
+        : degradedReasons;
 }

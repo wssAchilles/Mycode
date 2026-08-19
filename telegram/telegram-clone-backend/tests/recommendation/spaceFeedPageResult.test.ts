@@ -60,4 +60,25 @@ describe('buildSpaceFeedPageResult', () => {
             `topic:conversation:${conversationId.toString().toLowerCase()}`,
         ]);
     });
+
+    it('does not synthesize a cursor after ranked continuation abstains', () => {
+        const page = buildSpaceFeedPageResult(
+            [
+                candidate(),
+                candidate({ createdAt: new Date('2026-05-03T00:00:00.000Z') }),
+            ],
+            1,
+            {
+                requestId: '770b3f5a-b5d9-4228-8411-cd7e54b4f955',
+                decisionId: '71d48f31-6cd4-4329-bcd2-2e5ca38ac3a1',
+                hasMore: true,
+                nextCursor: '2026-05-03T00:00:00.000Z',
+                continuationAbstained: true,
+            },
+        );
+
+        expect(page.candidates).toHaveLength(1);
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBeUndefined();
+    });
 });

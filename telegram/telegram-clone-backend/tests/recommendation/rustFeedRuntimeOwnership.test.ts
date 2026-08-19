@@ -66,7 +66,7 @@ describe('Rust feed runtime ownership', () => {
         mocks.getMode.mockReturnValue('primary');
         mocks.getCandidates.mockResolvedValue(rustResult([rustCandidatePayload]));
 
-        const result = await resolveFeedRuntime(makeInput());
+        const result = await resolveFeedRuntime(makeInput({ inNetworkOnly: true }));
 
         expect(result.feed[0].authorId).toBe('rust-author');
         expect(result.debugInfo).toMatchObject({
@@ -87,6 +87,64 @@ describe('Rust feed runtime ownership', () => {
         });
     });
 
+    it('fails closed when Rust abstains from ranked-feed continuation', async () => {
+        mocks.getMode.mockReturnValue('primary');
+        mocks.getCandidates.mockResolvedValue(
+            rustResult([rustCandidatePayload], 'ranked_cursor_abstention_v1'),
+        );
+
+        const result = await resolveFeedRuntime(makeInput());
+
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+            rustServing: {
+                cursorMode: 'ranked_cursor_abstention_v1',
+                hasMore: false,
+            },
+        });
+        expect(result.pageMeta?.nextCursor).toBeUndefined();
+        expect(result.pageMeta?.rustServing?.nextCursor).toBeUndefined();
+        expect(result.debugInfo.degradedReasons).toContain('ranked_cursor_abstention');
+    });
+
+    it('fails closed when a general-feed Rust receipt uses the legacy cursor mode', async () => {
+        mocks.getMode.mockReturnValue('primary');
+        mocks.getCandidates.mockResolvedValue(rustResult([rustCandidatePayload]));
+
+        const result = await resolveFeedRuntime(makeInput());
+
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+            rustServing: {
+                cursorMode: 'created_at_desc_v1',
+            },
+        });
+        expect(result.pageMeta?.nextCursor).toBeUndefined();
+        expect(result.pageMeta?.rustServing?.nextCursor).toBeUndefined();
+        expect(result.debugInfo.degradedReasons).toContain('ranked_cursor_abstention');
+    });
+
+    it('rejects an incoming general-feed cursor before Rust or Node retrieval', async () => {
+        mocks.getMode.mockReturnValue('primary');
+        const input = makeInput({
+            cursor: new Date('2026-07-14T00:00:00.000Z'),
+        });
+
+        const result = await resolveFeedRuntime(input);
+
+        expect(result.feed).toEqual([]);
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+        });
+        expect(result.pageMeta?.nextCursor).toBeUndefined();
+        expect(result.debugInfo.degradedReasons).toContain('ranked_cursor_abstention');
+        expect(mocks.getCandidates).not.toHaveBeenCalled();
+        expect(input.runBaselineFeed).not.toHaveBeenCalled();
+    });
+
     it('returns only Node page truth when Rust primary selects nothing', async () => {
         mocks.getMode.mockReturnValue('primary');
         mocks.getCandidates.mockResolvedValue(rustResult([]));
@@ -102,7 +160,12 @@ describe('Rust feed runtime ownership', () => {
             fallbackReason: 'rust_primary_empty_fallback_node',
             owner: 'node',
         });
-        expect(result.pageMeta).toBeUndefined();
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+        });
+        expect(result.pageMeta?.nextCursor).toBeUndefined();
+        expect(result.debugInfo.degradedReasons).toContain('ranked_cursor_abstention');
         expect(result.rustTraceForServedFeed).toBeUndefined();
     });
 
@@ -121,7 +184,12 @@ describe('Rust feed runtime ownership', () => {
             fallbackReason: 'rust_primary_error_fallback_node',
             owner: 'node',
         });
-        expect(result.pageMeta).toBeUndefined();
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+        });
+        expect(result.pageMeta?.nextCursor).toBeUndefined();
+        expect(result.debugInfo.degradedReasons).toContain('ranked_cursor_abstention');
         expect(result.rustTraceForServedFeed).toBeUndefined();
     });
 
@@ -164,20 +232,25 @@ describe('Rust feed runtime ownership', () => {
     });
 });
 
-function makeInput() {
+function makeInput(options: {
+    inNetworkOnly?: boolean;
+    cursor?: Date;
+} = {}) {
     return {
         userId: 'runtime-user',
         limit: 10,
         requestId: 'runtime-request',
-        createBaseQuery: () => createFeedQuery('runtime-user', 10, false, {
+        createBaseQuery: () => createFeedQuery('runtime-user', 10, options.inNetworkOnly ?? false, {
             requestId: 'runtime-request',
+            cursor: options.cursor,
         }),
         withFeedTrendKeywords: async (query: ReturnType<typeof createFeedQuery>) => query,
         runBaselineFeed: vi.fn().mockResolvedValue([nodeCandidate]),
     };
 }
 
-function rustResult(candidates: any[]) {
+function rustResult(candidates: any[], cursorMode = 'created_at_desc_v1') {
+    const continuationAbstained = cursorMode === 'ranked_cursor_abstention_v1';
     return {
         candidates,
         hasMore: true,
@@ -190,6 +263,11 @@ function rustResult(candidates: any[]) {
             owner: 'rust',
             fallbackMode: 'none',
             degradedReasons: [],
+            serving: {
+                cursorMode,
+                hasMore: !continuationAbstained,
+                nextCursor: continuationAbstained ? undefined : 'rust-next',
+            },
         },
     };
 }

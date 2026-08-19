@@ -920,8 +920,10 @@ class SpaceService {
         const policyFeed = feed;
         let finalServedCandidates = policyFeed;
         let finalDebugInfo = debugInfo;
+        const terminalCursorAbstention = cursor !== undefined
+            && pageMeta?.continuationAbstained === true;
 
-        if (includeSelf) {
+        if (includeSelf && !terminalCursorAbstention) {
             const selfLimit = Math.min(5, limit);
             const [selfPosts, userMap] = await Promise.all([
                 this.getUserPosts(userId, selfLimit, cursor),

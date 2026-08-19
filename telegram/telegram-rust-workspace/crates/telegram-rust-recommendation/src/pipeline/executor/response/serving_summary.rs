@@ -4,10 +4,11 @@ use chrono::{DateTime, Utc};
 use telegram_serving_primitives::SERVE_CACHE_POLICY_REASON_PENDING_EVALUATION;
 
 use crate::contracts::RecommendationServingSummaryPayload;
-use crate::serving::cursor::{CURSOR_MODE, SERVED_STATE_VERSION, SERVING_VERSION};
+use crate::serving::cursor::{SERVED_STATE_VERSION, SERVING_VERSION};
 use crate::serving::policy::{CACHE_KEY_MODE, CACHE_POLICY_MODE};
 
 pub(super) struct LiveServingSummaryInput {
+    pub(super) cursor_mode: &'static str,
     pub(super) cursor: Option<DateTime<Utc>>,
     pub(super) next_cursor: Option<DateTime<Utc>>,
     pub(super) has_more: bool,
@@ -25,7 +26,7 @@ pub(super) fn build_live_serving_summary(
 ) -> RecommendationServingSummaryPayload {
     RecommendationServingSummaryPayload {
         serving_version: SERVING_VERSION.to_string(),
-        cursor_mode: CURSOR_MODE.to_string(),
+        cursor_mode: input.cursor_mode.to_string(),
         cursor: input.cursor,
         next_cursor: input.next_cursor,
         has_more: input.has_more,

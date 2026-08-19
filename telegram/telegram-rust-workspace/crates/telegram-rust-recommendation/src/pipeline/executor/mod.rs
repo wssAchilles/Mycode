@@ -11,6 +11,7 @@ use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::serving::cache::ServeCache;
 use crate::serving::cache::ServeCacheSnapshot;
+use crate::serving::cursor::ranked_cursor_requires_abstention;
 use crate::serving::policy::build_query_fingerprint;
 use crate::serving::singleflight::{CacheSingleflight, CacheSingleflightSnapshot};
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
@@ -34,7 +35,10 @@ mod summary;
 mod telemetry;
 mod trace;
 
-use response::{LiveRecommendationResultInput, build_live_recommendation_result};
+use response::{
+    LiveRecommendationResultInput, build_live_recommendation_result,
+    build_ranked_cursor_abstention_result,
+};
 use telemetry::RunTelemetry;
 
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
@@ -89,6 +93,17 @@ impl RecommendationPipeline {
     ) -> Result<RecommendationResultPayload> {
         let request_start = Instant::now();
         let query_fingerprint = build_query_fingerprint(&query);
+        if ranked_cursor_requires_abstention(query.in_network_only, query.cursor.is_some()) {
+            let mut result = build_ranked_cursor_abstention_result(
+                &self.config,
+                &self.definition,
+                &query,
+                request_start.elapsed().as_millis() as u64,
+            );
+            self.dispatch_live_post_response_side_effects(&query, query_fingerprint, &mut result);
+            return Ok(result);
+        }
+
         let serve_cache_start = Instant::now();
         let serve_cache_lookup = self.serve_cache.get(&query_fingerprint).await;
         let serve_cache_duration_ms = serve_cache_start.elapsed().as_millis() as u64;
