@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import mongoose from 'mongoose';
 
 const mocks = vi.hoisted(() => ({
     userFindAll: vi.fn(),
@@ -180,6 +181,59 @@ describe('DailyRecommendationRefreshJob', () => {
         expect(mocks.scanEmbeddingContractEvidence).toHaveBeenCalledWith({ limit: undefined });
     });
 
+    it('keeps same-timestamp posts reachable across snapshot batches', async () => {
+        const createdAt = new Date('2026-06-10T00:00:00.000Z');
+        const postIds = [
+            new mongoose.Types.ObjectId('000000000000000000000003'),
+            new mongoose.Types.ObjectId('000000000000000000000002'),
+            new mongoose.Types.ObjectId('000000000000000000000001'),
+        ];
+        let postFindCall = 0;
+
+        mocks.jobRunCreate.mockResolvedValue({ _id: 'job-run-timestamp-tie' });
+        mocks.bootstrapBackfill.mockResolvedValue({ scanned: 0, created: 0 });
+        mocks.userFindAll.mockResolvedValue([]);
+        mocks.applyDailyDecay.mockResolvedValue({ totalProcessed: 0 });
+        mocks.backfillPredictionMetadata.mockResolvedValue({ matched: 0, updated: 0, dryRun: false });
+        mocks.postFind.mockImplementation((query: Record<string, unknown>) => {
+            postFindCall += 1;
+            if (postFindCall === 1) {
+                return findPostsResult([
+                    { _id: postIds[0], createdAt },
+                    { _id: postIds[1], createdAt },
+                ]);
+            }
+            if (postFindCall === 2 && '$or' in query) {
+                return findPostsResult([{ _id: postIds[2], createdAt }]);
+            }
+            return findPostsResult([]);
+        });
+        mocks.refreshSnapshotsByPostIds.mockResolvedValue(undefined);
+        mocks.postSnapshotCountDocuments.mockResolvedValue(3);
+        mocks.scanEmbeddingContractEvidence.mockResolvedValue({
+            embeddingEvidence: embeddingEvidenceSummary,
+        });
+
+        const result = await new DailyRecommendationRefreshJob().run({
+            trigger: 'manual',
+            userLimit: 1,
+            postDays: 7,
+            postBatchSize: 2,
+            skipFeatureExport: true,
+        });
+
+        expect(result.posts).toEqual({ scanned: 3, refreshed: 3 });
+        expect(mocks.refreshSnapshotsByPostIds).toHaveBeenNthCalledWith(1, postIds.slice(0, 2));
+        expect(mocks.refreshSnapshotsByPostIds).toHaveBeenNthCalledWith(2, postIds.slice(2));
+        expect(mocks.postFind).toHaveBeenNthCalledWith(2, {
+            $or: [
+                { createdAt: { $gte: expect.any(Date), $lt: createdAt } },
+                { createdAt, _id: { $lt: postIds[1] } },
+            ],
+            deletedAt: null,
+        });
+    });
+
     it('marks the job run as failed when a refresh step throws', async () => {
         mocks.jobRunCreate.mockResolvedValue({ _id: 'job-run-failed' });
         mocks.bootstrapBackfill.mockRejectedValue(new Error('bootstrap failed'));
@@ -236,7 +290,7 @@ const embeddingEvidenceSummary = {
     },
 };
 
-function findPostsResult(posts: Array<{ _id: string; createdAt: Date }>) {
+function findPostsResult(posts: Array<{ _id: string | mongoose.Types.ObjectId; createdAt: Date }>) {
     return {
         select: vi.fn().mockReturnThis(),
         sort: vi.fn().mockReturnThis(),

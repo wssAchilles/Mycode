@@ -206,13 +206,18 @@ export class DailyRecommendationRefreshJob {
         const createdAfter = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         let scanned = 0;
         let refreshed = 0;
-        let cursor: Date | undefined;
+        let cursor: { createdAt: Date; id: mongoose.Types.ObjectId } | undefined;
 
         while (true) {
             const query: Record<string, unknown> = {
-                createdAt: cursor
-                    ? { $gte: createdAfter, $lt: cursor }
-                    : { $gte: createdAfter },
+                ...(cursor
+                    ? {
+                        $or: [
+                            { createdAt: { $gte: createdAfter, $lt: cursor.createdAt } },
+                            { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+                        ],
+                    }
+                    : { createdAt: { $gte: createdAfter } }),
                 deletedAt: null,
             };
 
@@ -228,7 +233,11 @@ export class DailyRecommendationRefreshJob {
             await postFeatureSnapshotService.refreshSnapshotsByPostIds(postIds);
             scanned += posts.length;
             refreshed += posts.length;
-            cursor = new Date(posts[posts.length - 1].createdAt);
+            const lastPost = posts[posts.length - 1];
+            cursor = {
+                createdAt: new Date(lastPost.createdAt),
+                id: lastPost._id as mongoose.Types.ObjectId,
+            };
         }
 
         const totalSnapshots = await PostFeatureSnapshot.countDocuments();
