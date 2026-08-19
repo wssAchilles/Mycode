@@ -62,11 +62,15 @@ export const spaceProfileUpdateSchema = z
 export const spaceFeedRequestSchema = z
     .object({
         limit: z
-            .preprocess((v) => (typeof v === 'string' ? parseInt(v, 10) : v), z.number().int().min(1).max(50))
+            .preprocess(
+                (v) => (typeof v === 'string' && /^[0-9]+$/.test(v.trim()) ? Number(v) : v),
+                z.number().int().min(1).max(50),
+            )
             .optional(),
-        cursor: z
-            .preprocess((v) => (v == null || v === '' ? undefined : String(v)), z.string())
-            .optional(),
+        cursor: z.preprocess(
+            (v) => (v == null || v === '' ? undefined : v),
+            z.string().optional(),
+        ),
         request_id: z.string().min(1).max(128).optional(),
         includeSelf: zBoolish.optional(),
         in_network_only: zBoolish.optional(),

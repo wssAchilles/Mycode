@@ -22,12 +22,25 @@ const router = Router();
 router.get('/feed', async (req: Request, res: Response) => {
     try {
         const userId = (req as Request & { userId?: string }).userId;
-        const limit = parseInt(req.query.limit as string) || 20;
-        const cursorRaw = req.query.cursor as string | undefined;
+        const parsed = spaceFeedRequestSchema.safeParse({
+            limit: req.query.limit,
+            cursor: req.query.cursor,
+            includeSelf: req.query.includeSelf,
+            in_network_only: req.query.in_network_only,
+        });
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: 'invalid_feed_request',
+                details: parsed.error.flatten(),
+            });
+        }
+
+        const limit = parsed.data.limit ?? 20;
+        const cursorRaw = parsed.data.cursor;
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
-        const includeSelf = req.query.includeSelf !== 'false';
-        const inNetworkOnly = String(req.query.in_network_only || '').trim().toLowerCase() === 'true';
+        const includeSelf = parsed.data.includeSelf ?? true;
+        const inNetworkOnly = parsed.data.in_network_only ?? false;
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });

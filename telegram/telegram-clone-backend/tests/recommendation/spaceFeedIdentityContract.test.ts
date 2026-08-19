@@ -78,21 +78,83 @@ describe('space feed server-owned identity', () => {
         }));
     });
 
-    it('creates and returns server identities for GET', async () => {
+    it('parses consumed GET fields and ignores POST-only fields', async () => {
         const result = page(
             'ff49a8ee-af47-4189-b81d-f22b0b93fc36',
             '1958a2a9-213d-413e-9a09-447489a12422',
         );
         mocks.getFeedPage.mockResolvedValueOnce(result);
         const res = response();
+        const cursor = '2026-07-16T06:00:00.000Z';
 
-        await handler('get')({ userId: 'viewer-1', query: {} }, res);
+        await handler('get')({
+            userId: 'viewer-1',
+            query: {
+                limit: '50',
+                cursor,
+                includeSelf: 'false',
+                in_network_only: 'true',
+                request_id: '',
+                seen_ids: 'ignored-by-simple-get',
+            },
+        }, res);
 
-        expect(mocks.getFeedPage.mock.calls[0][4].requestId).toMatch(/^[0-9a-f-]{36}$/i);
+        expect(mocks.getFeedPage).toHaveBeenCalledWith(
+            'viewer-1',
+            50,
+            new Date(cursor),
+            false,
+            {
+                requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+                inNetworkOnly: true,
+            },
+        );
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
             request_id: result.requestId,
             decision_id: result.decisionId,
         }));
+    });
+
+    it.each([
+        ['get', '-1'],
+        ['get', '0'],
+        ['get', '51'],
+        ['get', '20junk'],
+        ['get', '0x10'],
+        ['get', '1e1'],
+        ['get', 'not-a-number'],
+        ['post', '20junk'],
+        ['post', '0x10'],
+        ['post', '1e1'],
+    ] as const)(
+        'rejects invalid %s limit %s before fetching the feed',
+        async (method, limit) => {
+            const res = response();
+            const req = method === 'get'
+                ? { userId: 'viewer-1', query: { limit } }
+                : { userId: 'viewer-1', body: { limit } };
+
+            await handler(method)(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: 'invalid_feed_request',
+                details: expect.any(Object),
+            });
+            expect(mocks.getFeedPage).not.toHaveBeenCalled();
+        },
+    );
+
+    it('rejects repeated GET cursor values before fetching the feed', async () => {
+        const res = response();
+
+        await handler('get')({
+            userId: 'viewer-1',
+            query: { cursor: ['2026-07-16T06:00:00.000Z', '2026-07-16T05:00:00.000Z'] },
+        }, res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(mocks.getFeedPage).not.toHaveBeenCalled();
     });
 
     it.each(['get', 'post'] as const)(
