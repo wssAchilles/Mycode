@@ -69,7 +69,7 @@ export const spaceFeedRequestSchema = z
             .optional(),
         cursor: z.preprocess(
             (v) => (v == null || v === '' ? undefined : v),
-            z.string().optional(),
+            z.string().datetime({ offset: true }).optional(),
         ),
         request_id: z.string().min(1).max(128).optional(),
         includeSelf: zBoolish.optional(),

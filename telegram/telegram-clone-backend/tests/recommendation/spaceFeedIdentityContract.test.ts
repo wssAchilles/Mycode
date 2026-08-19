@@ -157,6 +157,30 @@ describe('space feed server-owned identity', () => {
         expect(mocks.getFeedPage).not.toHaveBeenCalled();
     });
 
+    it.each([
+        ['get', 'not-a-date'],
+        ['get', '0'],
+        ['post', 'not-a-date'],
+        ['post', '0'],
+    ] as const)(
+        'rejects invalid %s cursor %s before fetching the feed',
+        async (method, cursor) => {
+            const res = response();
+            const req = method === 'get'
+                ? { userId: 'viewer-1', query: { cursor } }
+                : { userId: 'viewer-1', body: { cursor } };
+
+            await handler(method)(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: 'invalid_feed_request',
+                details: expect.any(Object),
+            });
+            expect(mocks.getFeedPage).not.toHaveBeenCalled();
+        },
+    );
+
     it.each(['get', 'post'] as const)(
         'only attaches decision action identity to served policy posts for %s',
         async (method) => {
