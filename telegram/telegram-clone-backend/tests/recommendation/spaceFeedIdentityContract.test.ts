@@ -181,6 +181,47 @@ describe('space feed server-owned identity', () => {
         },
     );
 
+    it.each(['1junk', '0x10', '1e1', '1.5'] as const)(
+        'rejects malformed POST client_app_id %s before fetching the feed',
+        async (clientAppId) => {
+            const res = response();
+
+            await handler('post')({
+                userId: 'viewer-1',
+                body: { client_app_id: clientAppId },
+            }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                error: 'invalid_feed_request',
+                details: expect.any(Object),
+            });
+            expect(mocks.getFeedPage).not.toHaveBeenCalled();
+        },
+    );
+
+    it('forwards a decimal-string client_app_id as a number', async () => {
+        const result = page(
+            '82b8c8de-ef0c-4de8-b2f0-70cc3e8d2a42',
+            'd6cc22aa-7656-43c9-b6b8-9d1c0cce1e5c',
+        );
+        mocks.getFeedPage.mockResolvedValueOnce(result);
+        const res = response();
+
+        await handler('post')({
+            userId: 'viewer-1',
+            body: { client_app_id: '1' },
+        }, res);
+
+        expect(mocks.getFeedPage).toHaveBeenCalledWith(
+            'viewer-1',
+            20,
+            undefined,
+            true,
+            expect.objectContaining({ clientAppId: 1 }),
+        );
+    });
+
     it.each(['get', 'post'] as const)(
         'only attaches decision action identity to served policy posts for %s',
         async (method) => {

@@ -80,7 +80,10 @@ export const spaceFeedRequestSchema = z
         country_code: z.string().optional(),
         language_code: z.string().optional(),
         client_app_id: z
-            .preprocess((v) => (typeof v === 'string' ? parseInt(v, 10) : v), z.number().int().min(0).max(1_000_000))
+            .preprocess(
+                (v) => (typeof v === 'string' && /^[0-9]+$/.test(v.trim()) ? Number(v) : v),
+                z.number().int().min(0).max(1_000_000),
+            )
             .optional(),
     })
     .passthrough();
