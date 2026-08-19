@@ -181,4 +181,76 @@ describe('spaceService trace request ownership', () => {
         expect(finalServedCandidates).toBe(page.candidates);
         expect(decisionAt).toBeInstanceOf(Date);
     });
+
+    it('keeps displaced Rust candidates reachable after self-post merging', async () => {
+        const rustFirst = {
+            postId: new mongoose.Types.ObjectId('507f191e810c19729de8c011'),
+            authorId: 'author-a',
+            content: 'rust first',
+            createdAt: new Date('2026-07-16T06:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+            recallSource: 'FollowingSource',
+        };
+        const rustSecond = {
+            ...rustFirst,
+            postId: new mongoose.Types.ObjectId('507f191e810c19729de8c012'),
+            authorId: 'author-b',
+            content: 'rust second',
+            createdAt: new Date('2026-07-16T05:00:00.000Z'),
+        };
+        const selfId = new mongoose.Types.ObjectId('507f191e810c19729de8c010');
+        mocks.mixerGetFeed.mockResolvedValueOnce([rustFirst, rustSecond]);
+        const defaultRuntime = mocks.resolveFeedRuntime.getMockImplementation()!;
+        mocks.resolveFeedRuntime.mockImplementationOnce(async (input) => ({
+            ...await defaultRuntime(input),
+            pageMeta: {
+                hasMore: false,
+                nextCursor: rustSecond.createdAt.toISOString(),
+                rustServing: {
+                    servingVersion: 'rust-serving-v1',
+                    stableOrderKey: 'created_at_desc_v1',
+                    nextCursor: rustSecond.createdAt.toISOString(),
+                    hasMore: false,
+                },
+            },
+        }));
+        vi.spyOn(spaceService as any, 'getUserPosts').mockResolvedValueOnce([{
+            toObject: () => ({
+                _id: selfId,
+                authorId: 'trace-request-user',
+                content: 'self post',
+                createdAt: new Date('2026-07-16T07:00:00.000Z'),
+            }),
+        }]);
+        vi.spyOn(spaceService as any, 'getUserMap').mockResolvedValueOnce(new Map([
+            ['trace-request-user', { id: 'trace-request-user', username: 'viewer' }],
+        ]));
+        const recorder = vi.spyOn(spaceService as any, 'recordServedFeedTrace')
+            .mockResolvedValue(undefined);
+
+        const page = await spaceService.getFeedPage(
+            'trace-request-user',
+            2,
+            undefined,
+            true,
+            { requestId: 'a3d4f9de-2d7a-4fa9-a6f2-19f0e7a3e5a1' },
+        );
+
+        expect(page.candidates.map((candidate) => candidate.postId.toString())).toEqual([
+            selfId.toString(),
+            rustFirst.postId.toString(),
+        ]);
+        expect(page.hasMore).toBe(true);
+        expect(page.nextCursor).toBe(rustFirst.createdAt.toISOString());
+        expect(page.rustServing).toMatchObject({
+            nextCursor: rustSecond.createdAt.toISOString(),
+            hasMore: false,
+        });
+        expect(page.debug).toMatchObject({
+            inNetworkCount: 0,
+            outOfNetworkCount: 2,
+        });
+        expect(recorder.mock.calls[0][2]).toBe(page.candidates);
+    });
 });

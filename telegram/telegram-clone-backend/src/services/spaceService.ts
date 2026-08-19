@@ -950,9 +950,9 @@ class SpaceService {
                     if (!id || seen.has(id)) continue;
                     seen.add(id);
                     finalServedCandidates.push(item);
-                    if (finalServedCandidates.length >= limit) break;
+                    if (finalServedCandidates.length > limit) break;
                 }
-                finalDebugInfo = buildSpaceFeedDebugInfo(finalServedCandidates, {
+                finalDebugInfo = buildSpaceFeedDebugInfo(finalServedCandidates.slice(0, limit), {
                     requestId: debugInfo?.requestId,
                     pipeline: debugInfo?.pipeline || 'node_baseline',
                     runtimeMode: debugInfo.runtimeMode,
