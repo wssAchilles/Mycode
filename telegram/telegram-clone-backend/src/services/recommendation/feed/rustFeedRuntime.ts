@@ -21,6 +21,7 @@ import {
     buildSpaceFeedDebugInfo,
     type SpaceFeedDebugInfo,
 } from './debugInfo';
+import { recordRecommendationTrace } from '../observability/recommendationTrace';
 
 export interface RustFeedServingMeta {
     servingVersion?: string;
@@ -224,6 +225,14 @@ async function resolveNodeBaselineFeed(
                 rustResult.summary,
                 shadowComparison,
             );
+            return recordRecommendationTrace(input.createBaseQuery(), feed, {
+                shadowComparison,
+            }).catch((error) => {
+                console.warn(
+                    '[SpaceService] Rust recommendation shadow trace failed:',
+                    (error as any)?.message || error,
+                );
+            });
         })
         .catch((error) => {
             console.warn(

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     getCandidates: vi.fn(),
     recordPrimary: vi.fn(),
     recordShadow: vi.fn(),
+    recordTrace: vi.fn(),
 }));
 
 vi.mock('../../src/services/recommendation/clients/RustRecommendationClient', () => ({
@@ -22,6 +23,10 @@ vi.mock('../../src/services/recommendation/rust/runtimeMetrics', () => ({
         recordPrimary: mocks.recordPrimary,
         recordShadow: mocks.recordShadow,
     },
+}));
+
+vi.mock('../../src/services/recommendation/observability/recommendationTrace', () => ({
+    recordRecommendationTrace: mocks.recordTrace,
 }));
 
 import { resolveFeedRuntime } from '../../src/services/recommendation/feed/rustFeedRuntime';
@@ -41,6 +46,7 @@ describe('Rust feed runtime ownership', () => {
         mocks.getCandidates.mockReset();
         mocks.recordPrimary.mockReset();
         mocks.recordShadow.mockReset();
+        mocks.recordTrace.mockReset();
         vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     });
 
@@ -220,10 +226,14 @@ describe('Rust feed runtime ownership', () => {
             resolveShadow = resolve;
         }));
 
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const result = await Promise.race([
             resolveFeedRuntime(makeInput()),
-            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 50)),
+            new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error('shadow blocked baseline')), 50);
+            }),
         ]);
+        if (timeoutId) clearTimeout(timeoutId);
 
         expect(result).toMatchObject({
             feed: [nodeCandidate],
@@ -235,6 +245,20 @@ describe('Rust feed runtime ownership', () => {
 
         resolveShadow(rustResult([rustCandidatePayload]));
         await vi.waitFor(() => expect(mocks.recordShadow).toHaveBeenCalledTimes(1));
+        expect(mocks.recordTrace).toHaveBeenCalledWith(
+            expect.objectContaining({ requestId: 'runtime-request' }),
+            [nodeCandidate],
+            expect.objectContaining({
+                shadowComparison: {
+                    overlapCount: 0,
+                    overlapRatio: 0,
+                    selectedCount: 1,
+                    baselineCount: 1,
+                },
+            }),
+        );
+        expect(mocks.recordTrace.mock.calls[0][2]).not.toHaveProperty('runtimeMode');
+        expect(mocks.recordTrace.mock.calls[0][2]).not.toHaveProperty('servingOwner');
     });
 
     it('counts prototype-like source names as ordinary feed sources', () => {
