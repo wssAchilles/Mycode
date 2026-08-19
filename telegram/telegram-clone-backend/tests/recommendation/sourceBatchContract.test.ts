@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RecommendationAdapterService } from '../../src/services/recommendation/internal/adapterService';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
@@ -106,6 +106,33 @@ describe('RecommendationAdapterService source batch contract', () => {
     expect(result.items[0]?.stage.detail?.errorClass).toBe('source_timeout');
     expect(result.items[0]?.stage.detail?.timedOut).toBe(true);
     expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold-fast');
+  });
+
+  it('clears a source timeout after a fast source completes', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = new RecommendationAdapterService();
+      (service as any).sourceBatchComponentTimeoutMs = 10;
+      (service as any).sourceCatalog = {
+        FastSource: {
+          name: 'FastSource',
+          enable: () => true,
+          getCandidates: async () => [],
+        },
+      };
+      const timerCountBefore = vi.getTimerCount();
+
+      const result = await service.getSourceCandidatesBatch(
+        ['FastSource'],
+        createFeedQuery('viewer-batch-fast', 20),
+      );
+
+      expect(result.items[0]?.timedOut).toBe(false);
+      expect(vi.getTimerCount()).toBe(timerCountBefore);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it('counts prototype-like graph recall types as ordinary kernel sources', async () => {

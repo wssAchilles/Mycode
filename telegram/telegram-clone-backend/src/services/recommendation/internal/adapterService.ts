@@ -399,6 +399,7 @@ export class RecommendationAdapterService {
       this.sourceBatchComponentTimeoutMs,
     );
 
+    let timer: NodeJS.Timeout | undefined;
     const timeoutResult = new Promise<{
       candidates: FeedCandidate[];
       stage: InternalStageExecution;
@@ -406,7 +407,7 @@ export class RecommendationAdapterService {
       timeoutMs?: number;
       errorClass?: string;
     }>((resolve) => {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         resolve({
           candidates: [],
           timedOut: true,
@@ -428,15 +429,19 @@ export class RecommendationAdapterService {
         });
       }, timeoutMs);
 
-      if (typeof (timer as NodeJS.Timeout).unref === 'function') {
+      if (typeof timer.unref === 'function') {
         timer.unref();
       }
     });
 
-    return Promise.race([
-      this.getSourceCandidates(sourceName, query),
-      timeoutResult,
-    ]);
+    try {
+      return await Promise.race([
+        this.getSourceCandidates(sourceName, query),
+        timeoutResult,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async getSourceCandidatesBatch(
