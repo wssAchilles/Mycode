@@ -48,11 +48,7 @@ pub fn build_stable_order_key(
 }
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate
-        .score
-        .or(candidate.weighted_score)
-        .or(candidate.pipeline_score)
-        .unwrap_or_default()
+    candidate.score.unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -160,5 +156,18 @@ mod tests {
             assert_eq!(candidate.weighted_score, expected.weighted_score);
             assert_eq!(candidate.pipeline_score, expected.pipeline_score);
         }
+    }
+
+    #[test]
+    fn general_serving_order_uses_final_score_only() {
+        let mut weighted_only = candidate("weighted-only", 99.0, 1_700_000_000_100);
+        weighted_only.score = None;
+        weighted_only.pipeline_score = Some(99.0);
+        let final_scored = candidate("final-scored", 0.1, 1_700_000_000_000);
+        let mut candidates = vec![weighted_only, final_scored];
+
+        sort_candidates_stably(&mut candidates, false);
+
+        assert_eq!(candidates[0].post_id, "final-scored");
     }
 }

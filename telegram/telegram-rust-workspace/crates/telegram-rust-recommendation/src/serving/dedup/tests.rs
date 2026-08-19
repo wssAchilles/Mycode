@@ -244,11 +244,12 @@ fn backfills_deferred_candidates_by_priority_and_score() {
         impressed_post_ids: Vec::new(),
         subscribed_user_ids: Vec::new(),
     };
-    let candidates = vec![
+    let mut candidates = vec![
         candidate_with_score("post-1", "author-1", 1.0),
-        candidate_with_score("post-2", "author-1", 0.2),
+        candidate_with_score("post-2", "author-1", 99.0),
         candidate_with_score("post-3", "author-1", 0.9),
     ];
+    candidates[1].score = None;
 
     let result = dedup_for_serving(&query, &candidates, 3, 1);
     let ids = result
