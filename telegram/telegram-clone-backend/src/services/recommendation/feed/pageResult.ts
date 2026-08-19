@@ -22,6 +22,9 @@ export function buildSpaceFeedPageResult(
     pageMeta: Pick<SpaceFeedPageResult, 'requestId' | 'decisionId'>
         & Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta' | 'requestId' | 'decisionId'>>,
 ): SpaceFeedPageResult {
+    const locallyTruncated = candidates.length > limit;
+    candidates = candidates.slice(0, limit);
+    const servedCandidateIds = new Set(candidates.map((candidate) => candidate.postId.toString()));
     const servedIdsDelta: string[] = [];
     const servedSeen = new Set<string>();
 
@@ -51,9 +54,10 @@ export function buildSpaceFeedPageResult(
         decisionId: pageMeta.decisionId,
         clientRequestId: pageMeta.clientRequestId,
         candidates,
-        decisionActionCandidateIds: pageMeta.decisionActionCandidateIds ?? [],
-        hasMore: pageMeta?.hasMore ?? candidates.length >= limit,
-        nextCursor: pageMeta?.nextCursor ?? derivedNextCursor,
+        decisionActionCandidateIds: (pageMeta.decisionActionCandidateIds ?? [])
+            .filter((candidateId) => servedCandidateIds.has(candidateId)),
+        hasMore: locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit),
+        nextCursor: locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor,
         servedIdsDelta,
         rustServing: pageMeta?.rustServing,
         debug: pageMeta?.debug,
