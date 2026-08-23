@@ -25,6 +25,14 @@ function deferred<T>() {
   return { promise, resolve, reject, isSettled: () => settled };
 }
 
+function aggregateResult<T>(value: T): Promise<T> & { allowDiskUse(value: boolean): Promise<T> } {
+  const aggregate = Promise.resolve(value) as Promise<T> & {
+    allowDiskUse(value: boolean): Promise<T>;
+  };
+  aggregate.allowDiskUse = vi.fn(() => aggregate);
+  return aggregate;
+}
+
 describe('GraphSource graph kernel orchestration', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -106,7 +114,7 @@ describe('GraphSource graph kernel orchestration', () => {
       recall: vi.fn().mockResolvedValue([]),
     };
 
-    vi.spyOn(Post as any, 'aggregate').mockResolvedValue([
+    vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([
       {
         _id: oid('507f191e810c19729de8b001'),
         authorId: 'author-1',
@@ -125,7 +133,7 @@ describe('GraphSource graph kernel orchestration', () => {
         isRepost: false,
         deletedAt: null,
       },
-    ]);
+    ]));
 
     const source = new GraphSource({
       client: legacyClient as any,
@@ -478,7 +486,7 @@ describe('GraphSource graph kernel orchestration', () => {
       contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
       batch: vi.fn(() => batchRequest.promise),
     };
-    vi.spyOn(Post as any, 'aggregate').mockResolvedValue([{
+    vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([{
       _id: oid('507f191e810c19729de8b003'),
       authorId: 'author-1',
       content: 'served without waiting for batch shadow',
@@ -486,7 +494,7 @@ describe('GraphSource graph kernel orchestration', () => {
       isReply: false,
       isRepost: false,
       deletedAt: null,
-    }]);
+    }]));
     const source = new GraphSource({
       client: { recall: vi.fn() } as any,
       graphKernelClient: graphKernelClient as any,
@@ -537,7 +545,7 @@ describe('GraphSource graph kernel orchestration', () => {
         .mockImplementationOnce(() => batchRequest.promise)
         .mockImplementation(() => admittedAfterRelease.promise),
     };
-    vi.spyOn(Post as any, 'aggregate').mockResolvedValue([{
+    vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([{
       _id: oid('507f191e810c19729de8b004'),
       authorId: 'author-1',
       content: 'served under shadow admission pressure',
@@ -545,7 +553,7 @@ describe('GraphSource graph kernel orchestration', () => {
       isReply: false,
       isRepost: false,
       deletedAt: null,
-    }]);
+    }]));
     const firstSource = new GraphSource({
       client: { recall: vi.fn() } as any,
       graphKernelClient: graphKernelClient as any,

@@ -210,7 +210,7 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
     },
     { $unwind: '$posts' },
     { $replaceRoot: { newRoot: '$posts' } },
-  ]);
+  ]).allowDiskUse(true);
   const queryDurationMs = Math.max(0, Date.now() - queryStartedAt);
   const candidates = (posts as Array<Parameters<typeof createFeedCandidate>[0]>).map((post) =>
     createFeedCandidate(post),
