@@ -120,6 +120,8 @@ function normalizeCandidateSource(
 }
 
 function candidateMergeKey(candidate: FeedCandidate): string {
+  const originalPostId = candidate.originalPostId?.toString().trim();
+  if (!candidate.isNews && originalPostId) return originalPostId;
   const modelPostId = candidate.modelPostId?.trim();
   return modelPostId || candidate.postId.toString();
 }

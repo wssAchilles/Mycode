@@ -77,6 +77,34 @@ describe('candidate source merge', () => {
     expect(result.candidates[0].recallEvidence?.confidence).toBeGreaterThan(0);
   });
 
+  it('merges repost hits by original post identity before filtering', () => {
+    const query = createFeedQuery('viewer-repost-merge', 6);
+    const originalPostId = new mongoose.Types.ObjectId();
+    const followingCandidate = {
+      ...candidate('repost-1', 'author-1', 'FollowingSource'),
+      originalPostId,
+    };
+    const graphCandidate = {
+      ...candidate('repost-2', 'author-1', 'GraphSource'),
+      originalPostId,
+      graphScore: 0.9,
+    };
+
+    const result = mergeSourceCandidates(
+      query,
+      [
+        { sourceName: 'FollowingSource', candidates: [followingCandidate] },
+        { sourceName: 'GraphSource', candidates: [graphCandidate] },
+      ],
+      ['FollowingSource', 'GraphSource'],
+    );
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.detail.duplicateRecallHits).toBe(1);
+    expect(result.candidates[0].secondaryRecallSources).toContain('GraphSource');
+    expect(result.candidates[0].graphScore).toBe(0.9);
+  });
+
   it('counts prototype-like retrieval lanes as ordinary lanes', () => {
     const query = createFeedQuery('viewer-lane-counts', 6);
     const lanes = ['__proto__', 'constructor', 'toString'];
