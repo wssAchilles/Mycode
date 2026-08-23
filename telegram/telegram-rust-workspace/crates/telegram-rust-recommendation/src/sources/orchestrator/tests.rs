@@ -509,6 +509,67 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
 }
 
 #[tokio::test]
+async fn applies_source_policy_on_cached_source_hits() {
+    let mut config = fixture_config("http://127.0.0.1:1".to_string());
+    config.source_order = vec!["FollowingSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:policy");
+    source_cache
+        .store(
+            "FollowingSource",
+            "viewer-1",
+            &[fixture_candidate(
+                "post-cached",
+                "author-cached",
+                "FollowingSource",
+            )],
+        )
+        .await
+        .expect("seed source cache");
+
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&fixture_query(), &[])
+        .await
+        .expect("retrieve cached source candidates");
+
+    assert_eq!(response.candidates.len(), 1);
+    assert_eq!(
+        response.candidates[0].retrieval_lane.as_deref(),
+        Some("in_network")
+    );
+    assert!(response.candidates[0].recall_evidence.is_some());
+
+    let stage = response
+        .stages
+        .iter()
+        .find(|stage| stage.name == "FollowingSource_cached")
+        .expect("cached source stage");
+    assert_eq!(stage.output_count, 1);
+    assert_eq!(
+        stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("sourceCacheHit")),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&0)
+    );
+}
+
+#[tokio::test]
 async fn classifies_empty_source_success_without_failure_or_disabled_counts() {
     let (base_url, server_handle) = spawn_empty_source_server().await;
     let mut config = fixture_config(base_url);

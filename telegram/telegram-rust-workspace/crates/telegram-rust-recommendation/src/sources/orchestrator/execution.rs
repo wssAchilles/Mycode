@@ -195,11 +195,14 @@ impl RecommendationSourceOrchestrator {
                 if let Some(candidates) = hit.candidates {
                     let provider_key =
                         telegram_pipeline_primitives::source_provider_key(&source_name);
+                    let mut stage = build_cached_source_stage(&source_name, candidates.len());
+                    let mut candidates = candidates;
+                    apply_source_policy(query, &source_name, &mut stage, &mut candidates);
                     cached_results.push((
                         index,
                         SourceExecution {
                             source_name: source_name.clone(),
-                            stage: build_cached_source_stage(&source_name, candidates.len()),
+                            stage,
                             candidates,
                             provider_calls: HashMap::from([(provider_key, 0)]),
                             provider_latency_ms: HashMap::new(),
