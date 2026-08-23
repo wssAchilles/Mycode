@@ -34,7 +34,8 @@ impl RecommendationPipeline {
                 telemetry.record_provider_call(SELF_POST_RESCUE_PROVIDER_KEY);
                 telemetry
                     .record_provider_latency(SELF_POST_RESCUE_PROVIDER_KEY, response.latency_ms);
-                let output_count = response.payload.candidates.len();
+                let safe_candidates = filter_safe_rescue_candidates(response.payload.candidates);
+                let output_count = safe_candidates.len();
                 telemetry.add_stage(build_self_post_rescue_stage(
                     rescue_timer.elapsed_ms(),
                     output_count,
@@ -44,7 +45,7 @@ impl RecommendationPipeline {
                 ));
                 telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, rescue_timer.elapsed_ms());
                 if output_count > 0 {
-                    final_candidates = response.payload.candidates;
+                    final_candidates = safe_candidates;
                     telemetry
                         .degraded_reasons
                         .push(SELF_POST_RESCUE_APPLIED_DEGRADED_REASON.to_string());
@@ -65,5 +66,45 @@ impl RecommendationPipeline {
             }
         }
         final_candidates
+    }
+}
+
+fn filter_safe_rescue_candidates(
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> Vec<RecommendationCandidatePayload> {
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.is_nsfw != Some(true))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_safe_rescue_candidates;
+    use crate::contracts::RecommendationCandidatePayload;
+    use serde_json::json;
+
+    fn candidate(post_id: &str, is_nsfw: bool) -> RecommendationCandidatePayload {
+        serde_json::from_value(json!({
+            "postId": post_id,
+            "authorId": "author-1",
+            "content": "candidate",
+            "createdAt": "2026-08-22T00:00:00Z",
+            "isReply": false,
+            "isRepost": false,
+            "isNsfw": is_nsfw,
+        }))
+        .expect("candidate fixture should satisfy the payload contract")
+    }
+
+    #[test]
+    fn rescue_filter_rejects_nsfw_candidates() {
+        let kept = filter_safe_rescue_candidates(vec![
+            candidate("safe", false),
+            candidate("unsafe", true),
+        ]);
+
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].post_id, "safe");
     }
 }
