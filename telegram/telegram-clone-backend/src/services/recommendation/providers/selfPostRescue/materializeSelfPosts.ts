@@ -22,6 +22,7 @@ export async function materializeSelfPosts(
   const posts = await Post.find({
     authorId: request.userId,
     deletedAt: null,
+    isNsfw: { $ne: true },
     createdAt: { $gte: createdAfter },
   })
     .sort({ isPinned: -1, createdAt: -1, _id: -1 })
