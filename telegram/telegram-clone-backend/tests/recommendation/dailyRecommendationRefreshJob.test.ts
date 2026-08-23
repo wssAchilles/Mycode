@@ -252,6 +252,18 @@ describe('DailyRecommendationRefreshJob', () => {
             }),
         );
     });
+
+    it('clears the running state when run evidence creation fails', async () => {
+        const job = new DailyRecommendationRefreshJob();
+        mocks.jobRunCreate.mockRejectedValueOnce(new Error('run evidence unavailable'));
+
+        await expect(job.run({ trigger: 'manual' }))
+            .rejects
+            .toThrow('run evidence unavailable');
+
+        expect(job.running).toBe(false);
+        expect(mocks.jobRunUpdateOne).not.toHaveBeenCalled();
+    });
 });
 
 const embeddingEvidenceSummary = {

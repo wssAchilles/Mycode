@@ -67,16 +67,17 @@ export class DailyRecommendationRefreshJob {
 
         this.isRunning = true;
         const startedAt = new Date();
-        const runDoc = await RecommendationJobRun.create({
-            jobName: 'daily_recommendation_refresh',
-            status: 'running',
-            startedAt,
-            trigger: options.trigger ?? 'cron',
-            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
-            summary: {},
-        });
+        let runDoc: { _id: unknown } | undefined;
 
         try {
+            runDoc = await RecommendationJobRun.create({
+                jobName: 'daily_recommendation_refresh',
+                status: 'running',
+                startedAt,
+                trigger: options.trigger ?? 'cron',
+                releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
+                summary: {},
+            });
             const result = await this.execute(options);
             const finishedAt = new Date();
             await RecommendationJobRun.updateOne(
@@ -92,18 +93,20 @@ export class DailyRecommendationRefreshJob {
             );
             return result;
         } catch (error) {
-            const finishedAt = new Date();
-            await RecommendationJobRun.updateOne(
-                { _id: runDoc._id },
-                {
-                    $set: {
-                        status: 'failed',
-                        finishedAt,
-                        durationMs: finishedAt.getTime() - startedAt.getTime(),
-                        error: error instanceof Error ? error.message : String(error),
+            if (runDoc) {
+                const finishedAt = new Date();
+                await RecommendationJobRun.updateOne(
+                    { _id: runDoc._id },
+                    {
+                        $set: {
+                            status: 'failed',
+                            finishedAt,
+                            durationMs: finishedAt.getTime() - startedAt.getTime(),
+                            error: error instanceof Error ? error.message : String(error),
+                        },
                     },
-                },
-            );
+                );
+            }
             throw error;
         } finally {
             this.isRunning = false;
