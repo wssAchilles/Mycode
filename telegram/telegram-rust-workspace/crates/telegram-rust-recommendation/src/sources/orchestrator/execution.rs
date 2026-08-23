@@ -191,7 +191,7 @@ impl RecommendationSourceOrchestrator {
         let mut uncached_entries = Vec::new();
         for (index, source_name) in enabled_entries {
             if is_cacheable(&source_name) && self.source_cache.enabled() {
-                let hit = self.source_cache.get(&source_name, &query.user_id).await;
+                let hit = self.source_cache.get_for_query(&source_name, query).await;
                 if let Some(candidates) = hit.candidates {
                     let provider_key =
                         telegram_pipeline_primitives::source_provider_key(&source_name);
@@ -271,11 +271,13 @@ impl RecommendationSourceOrchestrator {
                 for execution in items_by_name.values() {
                     if is_cacheable(&execution.source_name) && !execution.candidates.is_empty() {
                         let source_name = execution.source_name.clone();
-                        let user_id = query.user_id.clone();
+                        let query = query.clone();
                         let candidates = execution.candidates.clone();
                         let cache = self.source_cache.clone();
                         tokio::spawn(async move {
-                            let _ = cache.store(&source_name, &user_id, &candidates).await;
+                            let _ = cache
+                                .store_for_query(&source_name, &query, &candidates)
+                                .await;
                         });
                     }
                 }

@@ -7,11 +7,13 @@ use chrono::{Duration, Utc};
 use redis::AsyncCommands;
 use tokio::sync::Mutex;
 
-use crate::contracts::RecommendationCandidatePayload;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::serving::policy::build_query_fingerprint;
 
 /// Per-source cache for retrieval results.
 ///
-/// Caches source candidates by `(source_name, user_id)` with configurable TTL.
+/// Legacy callers cache by `(source_name, user_id)`. The source orchestrator uses
+/// query-aware keys so cursor and user-context changes cannot reuse stale candidates.
 /// Uses Redis as primary store with in-memory fallback, matching the ServeCache pattern.
 #[derive(Debug, Clone)]
 pub struct SourceCache {
@@ -60,11 +62,27 @@ impl SourceCache {
         }
 
         let key = self.cache_key(source_name, user_id);
+        self.get_by_key(&key).await
+    }
 
+    pub async fn get_for_query(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> SourceCacheHit {
+        if !self.enabled {
+            return SourceCacheHit::default();
+        }
+
+        let key = self.query_cache_key(source_name, query);
+        self.get_by_key(&key).await
+    }
+
+    async fn get_by_key(&self, key: &str) -> SourceCacheHit {
         // Try Redis first.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
-            && let Ok(value) = connection.get::<_, Option<String>>(&key).await
+            && let Ok(value) = connection.get::<_, Option<String>>(key).await
             && let Some(value) = value
             && let Ok(candidates) =
                 serde_json::from_str::<Vec<RecommendationCandidatePayload>>(&value)
@@ -76,7 +94,7 @@ impl SourceCache {
 
         // Fallback to in-memory cache.
         let memory = self.memory.lock().await;
-        if let Some(entry) = memory.get(&key)
+        if let Some(entry) = memory.get(key)
             && entry.expires_at > Utc::now()
         {
             return SourceCacheHit {
@@ -98,21 +116,42 @@ impl SourceCache {
         }
 
         let key = self.cache_key(source_name, user_id);
+        self.store_by_key(&key, candidates).await
+    }
 
+    pub async fn store_for_query(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let key = self.query_cache_key(source_name, query);
+        self.store_by_key(&key, candidates).await
+    }
+
+    async fn store_by_key(
+        &self,
+        key: &str,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
         // Write to Redis.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
             let serialized = serde_json::to_string(candidates)?;
             let _: () = connection
-                .set_ex(&key, serialized, self.ttl_secs as u64)
+                .set_ex(key, serialized, self.ttl_secs as u64)
                 .await?;
         }
 
         // Write to in-memory cache.
         let mut memory = self.memory.lock().await;
         memory.insert(
-            key,
+            key.to_owned(),
             SourceCacheEntry {
                 candidates: candidates.to_vec(),
                 expires_at: Utc::now() + Duration::seconds(self.ttl_secs as i64),
@@ -124,6 +163,15 @@ impl SourceCache {
 
     fn cache_key(&self, source_name: &str, user_id: &str) -> String {
         format!("{}:{source_name}:{user_id}", self.prefix)
+    }
+
+    fn query_cache_key(&self, source_name: &str, query: &RecommendationQueryPayload) -> String {
+        format!(
+            "{}:{source_name}:{}:query:{}",
+            self.prefix,
+            query.user_id,
+            build_query_fingerprint(query)
+        )
     }
 }
 

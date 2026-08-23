@@ -515,9 +515,9 @@ async fn applies_source_policy_on_cached_source_hits() {
     let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
     let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:policy");
     source_cache
-        .store(
+        .store_for_query(
             "FollowingSource",
-            "viewer-1",
+            &fixture_query(),
             &[fixture_candidate(
                 "post-cached",
                 "author-cached",
@@ -566,6 +566,62 @@ async fn applies_source_policy_on_cached_source_hits() {
             .provider_calls
             .get(&source_provider_key("FollowingSource")),
         Some(&0)
+    );
+}
+
+#[tokio::test]
+async fn does_not_reuse_source_cache_across_cursor_queries() {
+    let mut config = fixture_config("http://127.0.0.1:1".to_string());
+    config.source_order = vec!["FollowingSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:cursor");
+    let first_query = fixture_query();
+    source_cache
+        .store_for_query(
+            "FollowingSource",
+            &first_query,
+            &[fixture_candidate(
+                "post-first-page",
+                "author-followed",
+                "FollowingSource",
+            )],
+        )
+        .await
+        .expect("seed source cache");
+
+    let mut continuation_query = first_query;
+    continuation_query.cursor = Some(
+        DateTime::parse_from_rfc3339("2026-04-16T00:00:00.000Z")
+            .expect("valid cursor")
+            .with_timezone(&Utc),
+    );
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&continuation_query, &[])
+        .await
+        .expect("retrieve continuation candidates");
+
+    assert!(response.candidates.is_empty());
+    assert!(
+        response
+            .stages
+            .iter()
+            .all(|stage| stage.name != "FollowingSource_cached")
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_failure_counts
+            .get("FollowingSource"),
+        Some(&1)
     );
 }
 
