@@ -57,13 +57,17 @@ impl RecommendationConfig {
             graph_kernel_url: read_env("CPP_GRAPH_KERNEL_URL")
                 .unwrap_or_else(|| "http://graph_kernel:4300".to_string()),
             graph_kernel_timeout_ms: parse_env("CPP_GRAPH_KERNEL_TIMEOUT_MS", 1200)?,
-            graph_materializer_limit_per_author: parse_env(
+            graph_materializer_limit_per_author: parse_bounded_env(
                 "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LIMIT_PER_AUTHOR",
                 2,
+                1,
+                8,
             )?,
-            graph_materializer_lookback_days: parse_env(
+            graph_materializer_lookback_days: parse_bounded_env(
                 "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LOOKBACK_DAYS",
                 7,
+                1,
+                180,
             )?,
             stage: read_env("RUST_RECOMMENDATION_STAGE")
                 .unwrap_or_else(|| RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string()),
@@ -140,6 +144,27 @@ where
     }
 }
 
+fn parse_bounded_env<T>(key: &str, default: T, minimum: T, maximum: T) -> Result<T>
+where
+    T: std::str::FromStr + Copy + std::fmt::Display + PartialOrd,
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    let value = parse_env(key, default)?;
+    validate_bounded(key, value, minimum, maximum)
+}
+
+fn validate_bounded<T>(key: &str, value: T, minimum: T, maximum: T) -> Result<T>
+where
+    T: Copy + std::fmt::Display + PartialOrd,
+{
+    if value < minimum || value > maximum {
+        return Err(anyhow!(
+            "{key}={value} must be between {minimum} and {maximum}"
+        ));
+    }
+    Ok(value)
+}
+
 fn parse_bool_env(key: &str, default: bool) -> bool {
     match read_env(key) {
         Some(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
@@ -164,5 +189,28 @@ fn parse_csv_env(key: &str, default: &[&str]) -> Vec<String> {
             }
         }
         None => default.iter().map(|entry| (*entry).to_string()).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_bounded;
+
+    #[test]
+    fn materializer_bounds_accept_contract_edges() {
+        assert_eq!(validate_bounded("limit", 1, 1, 8).unwrap(), 1);
+        assert_eq!(validate_bounded("limit", 8, 1, 8).unwrap(), 8);
+        assert_eq!(validate_bounded("days", 1, 1, 180).unwrap(), 1);
+        assert_eq!(validate_bounded("days", 180, 1, 180).unwrap(), 180);
+    }
+
+    #[test]
+    fn materializer_bounds_reject_contract_violations() {
+        let below = validate_bounded("limit", 0, 1, 8).unwrap_err().to_string();
+        let above = validate_bounded("days", 181, 1, 180)
+            .unwrap_err()
+            .to_string();
+        assert!(below.contains("limit=0 must be between 1 and 8"));
+        assert!(above.contains("days=181 must be between 1 and 180"));
     }
 }
