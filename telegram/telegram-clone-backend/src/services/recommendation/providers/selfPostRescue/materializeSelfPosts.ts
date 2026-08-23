@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Post from '../../../../models/Post';
 import User from '../../../../models/User';
 import {
@@ -18,12 +19,14 @@ export async function materializeSelfPosts(
     Math.min(180, request.lookbackDays ?? DEFAULT_LOOKBACK_DAYS),
   );
   const createdAfter = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const excludePostIds = normalizeObjectIds(request.excludePostIds ?? []);
 
   const posts = await Post.find({
     authorId: request.userId,
     deletedAt: null,
     isNsfw: { $ne: true },
     createdAt: { $gte: createdAfter },
+    ...(excludePostIds.length > 0 ? { _id: { $nin: excludePostIds } } : {}),
   })
     .sort({ isPinned: -1, createdAt: -1, _id: -1 })
     .limit(limit)
@@ -46,4 +49,10 @@ export async function materializeSelfPosts(
     isLikedByUser: false,
     isRepostedByUser: false,
   }));
+}
+
+function normalizeObjectIds(values: string[]): mongoose.Types.ObjectId[] {
+  return values
+    .filter((value) => mongoose.Types.ObjectId.isValid(String(value)))
+    .map((value) => new mongoose.Types.ObjectId(String(value)));
 }

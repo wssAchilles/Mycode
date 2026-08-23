@@ -144,6 +144,7 @@ impl BackendRecommendationClient {
         user_id: &str,
         limit: usize,
         lookback_days: usize,
+        exclude_post_ids: &[String],
     ) -> Result<ProviderResponse<SelfPostRescueResponse>> {
         self.post_json(
             SELF_POST_RESCUE_PROVIDER_PATH,
@@ -151,6 +152,7 @@ impl BackendRecommendationClient {
                 user_id: user_id.to_string(),
                 limit: Some(limit),
                 lookback_days: Some(lookback_days),
+                exclude_post_ids: exclude_post_ids.to_vec(),
             },
         )
         .await

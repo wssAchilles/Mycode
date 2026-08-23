@@ -39,12 +39,20 @@ describe('self post rescue', () => {
     mocks.postFind.mockReturnValue(posts);
     mocks.userFindByPk.mockResolvedValue({ username: 'user-1', avatarUrl: null });
 
-    const candidates = await materializeSelfPosts({ userId: 'user-1', limit: 5 });
+    const excludedPostId = '507f1f77bcf86cd799439011';
+    const candidates = await materializeSelfPosts({
+      userId: 'user-1',
+      limit: 5,
+      excludePostIds: [excludedPostId, 'not-an-object-id'],
+    });
 
     expect(mocks.postFind).toHaveBeenCalledWith(expect.objectContaining({
       authorId: 'user-1',
       isNsfw: { $ne: true },
+      _id: { $nin: [expect.objectContaining({})] },
     }));
+    const query = mocks.postFind.mock.calls[0][0] as { _id: { $nin: Array<{ toString(): string }> } };
+    expect(query._id.$nin.map((id) => id.toString())).toEqual([excludedPostId]);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].isNsfw).toBe(false);
   });
