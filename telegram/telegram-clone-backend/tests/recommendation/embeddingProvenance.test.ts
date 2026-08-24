@@ -115,6 +115,85 @@ describe('embedding provenance', () => {
     });
   });
 
+  it('uses hydrated topics and action keywords instead of the candidate pool as the keyword profile', async () => {
+    const query = createFeedQuery('viewer-keyword-profile', 20);
+    query.interestedTopics = ['preferred'];
+    query.userActionSequence = [{ targetKeywords: ['Action-Only'] }] as any;
+    const popularUnrelatedPost = {
+      _id: oid('507f191e810c19729de8b101'),
+      authorId: 'author-popular',
+      content: 'popular unrelated post',
+      keywords: ['popular'],
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      isNews: false,
+      stats: { likeCount: 100, commentCount: 0, repostCount: 0, viewCount: 0 },
+      media: [],
+      isNsfw: false,
+      isPinned: false,
+    };
+    const preferredPost = {
+      ...popularUnrelatedPost,
+      _id: oid('507f191e810c19729de8b102'),
+      authorId: 'author-preferred',
+      content: 'preferred post',
+      keywords: ['ACTION-ONLY'],
+      stats: { likeCount: 0, commentCount: 0, repostCount: 0, viewCount: 0 },
+    };
+    const source = new TwoTowerSource();
+    vi.spyOn(source as any, 'loadCandidatePools').mockResolvedValue([
+      {
+        entries: [{ post: popularUnrelatedPost }, { post: preferredPost }],
+        poolKind: 'legacy_pool',
+        priorityScore: 1,
+      },
+    ]);
+
+    const out = await source.getCandidates(query as any);
+
+    expect(out.map((candidate) => candidate.postId.toString())).toEqual([
+      preferredPost._id.toString(),
+      popularUnrelatedPost._id.toString(),
+    ]);
+    expect(out[0]._scoreBreakdown).toMatchObject({
+      retrievalPoolKeywordFallback: 1,
+    });
+    expect(out[0]._scoreBreakdown?.retrievalKeywordScore).toBeCloseTo(Math.SQRT1_2);
+  });
+
+  it('skips malformed candidate keywords while retaining valid fallback candidates', async () => {
+    const query = createFeedQuery('viewer-malformed-keywords', 20);
+    query.interestedTopics = ['preferred'];
+    const malformedPost = {
+      _id: oid('507f191e810c19729de8b103'),
+      authorId: 'author-malformed',
+      content: 'malformed keywords',
+      keywords: [null, 'preferred'] as any,
+      createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+      isNews: false,
+      stats: { likeCount: 0, commentCount: 0, repostCount: 0, viewCount: 0 },
+      media: [],
+      isNsfw: false,
+      isPinned: false,
+    };
+    const source = new TwoTowerSource();
+    vi.spyOn(source as any, 'loadCandidatePools').mockResolvedValue([
+      {
+        entries: [{ post: malformedPost }],
+        poolKind: 'legacy_pool',
+        priorityScore: 1,
+      },
+    ]);
+
+    const out = await source.getCandidates(query as any);
+
+    expect(out).toHaveLength(1);
+    expect(out[0]._scoreBreakdown).toMatchObject({ retrievalKeywordScore: 1 });
+  });
+
   it('hydrates TwoTower ANN candidates only for observation and never serves them', async () => {
     const query = createFeedQuery('viewer-observe', 20);
     query.embeddingContext = {

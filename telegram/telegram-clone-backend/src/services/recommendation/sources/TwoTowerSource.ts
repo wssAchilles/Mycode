@@ -111,7 +111,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         }
 
         if (candidates.length === 0 && pools.length > 0) {
-            candidates = this.getKeywordFallbackCandidates(flattenCandidatePools(pools));
+            candidates = this.getKeywordFallbackCandidates(query, flattenCandidatePools(pools));
             if (candidates.length > 0) {
                 servedPath = 'keyword_fallback';
             }
@@ -496,10 +496,20 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     private getKeywordFallbackCandidates(
+        query: FeedQuery,
         pools: Array<{ entry: TwoTowerPoolEntry; poolKind: EmbeddingRecallPoolKind; priorityScore: number }>,
     ): FeedCandidate[] {
-        const keywordUniverse = pools.flatMap(({ entry }) => entry.post.keywords || []);
-        const userVec = buildEmbedding(keywordUniverse.slice(0, 40));
+        const userKeywords = [
+            ...(query.interestedTopics ?? []),
+            ...(query.userActionSequence ?? []).flatMap((action) =>
+                Array.isArray(action?.targetKeywords) ? action.targetKeywords : [],
+            ),
+        ]
+            .filter((keyword): keyword is string => typeof keyword === 'string')
+            .map((keyword) => keyword.trim().toLowerCase())
+            .filter(Boolean)
+            .slice(0, 40);
+        const userVec = buildEmbedding(userKeywords);
 
         return pools
             .map(({ entry: { post }, poolKind, priorityScore }) => {
@@ -571,7 +581,10 @@ function recencyPrior(createdAt: Date): number {
 function buildEmbedding(keywords: string[]): Map<string, number> {
     const vec = new Map<string, number>();
     for (const keyword of keywords) {
-        vec.set(keyword, (vec.get(keyword) || 0) + 1);
+        if (typeof keyword !== 'string') continue;
+        const normalizedKeyword = keyword.trim().toLowerCase();
+        if (!normalizedKeyword) continue;
+        vec.set(normalizedKeyword, (vec.get(normalizedKeyword) || 0) + 1);
     }
     const norm = Math.sqrt(
         Array.from(vec.values()).reduce((sum, value) => sum + value * value, 0) || 1,
