@@ -43,6 +43,16 @@ const CONFIG = {
     },
 };
 
+function parseCachedEdgeScore(value: string): number | undefined {
+    const normalized = value.trim();
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized)) {
+        return undefined;
+    }
+
+    const score = Number(normalized);
+    return Number.isFinite(score) ? score : undefined;
+}
+
 // ========== L1 本地缓存 (LRU) ==========
 class L1Cache<T> {
     private cache = new Map<string, { value: T; expiresAt: number }>();
@@ -268,9 +278,8 @@ export class FeatureCacheService {
         try {
             const l2Result = await redis.get(cacheKey);
             if (l2Result !== null) {
-                const normalized = l2Result.trim();
-                const score = Number(normalized);
-                if (normalized !== '' && Number.isFinite(score)) {
+                const score = parseCachedEdgeScore(l2Result);
+                if (score !== undefined) {
                     this.realGraphL1.set(cacheKey, score);
                     return score;
                 }
@@ -330,9 +339,8 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value !== null) {
-                    const normalized = l2Value.trim();
-                    const score = Number(normalized);
-                    if (normalized === '' || !Number.isFinite(score)) {
+                    const score = parseCachedEdgeScore(l2Value);
+                    if (score === undefined) {
                         missingFromL2.push(pair);
                         continue;
                     }

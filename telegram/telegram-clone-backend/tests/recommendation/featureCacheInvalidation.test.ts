@@ -46,7 +46,7 @@ describe('FeatureCacheService invalidation', () => {
         expect(service.getCacheStats().l1.userEmbedding).toBe(0);
     });
 
-    it.each(['not-a-score', ''])(
+    it.each(['not-a-score', '', '0x10', '0b10'])(
         'falls back to the database when a single cached edge score is invalid: %s',
         async (cachedScore) => {
             const service = new FeatureCacheService();
@@ -58,26 +58,38 @@ describe('FeatureCacheService invalidation', () => {
         },
     );
 
-    it('falls back to the database when a batch cached edge score is not finite', async () => {
+    it('keeps valid batch cache entries aligned while recovering invalid and missing scores', async () => {
         const service = new FeatureCacheService();
-        redisMocks.mget.mockResolvedValue(['Infinity']);
+        redisMocks.mget.mockResolvedValue(['0.41', '0x10', null]);
         realGraphMocks.find.mockReturnValue({
             lean: vi.fn().mockResolvedValue([
-                { sourceUserId: 'source-1', targetUserId: 'target-1', decayedSum: 0.73 },
+                { sourceUserId: 'source-2', targetUserId: 'target-2', decayedSum: 0.73 },
+                { sourceUserId: 'source-3', targetUserId: 'target-3', decayedSum: 0.84 },
             ]),
         });
+        const pipelineSetex = vi.fn();
         redisMocks.pipeline.mockReturnValue({
-            setex: vi.fn(),
+            setex: pipelineSetex,
             exec: vi.fn().mockResolvedValue([]),
         });
 
         const result = await service.getEdgeScoresBatch([
             { sourceUserId: 'source-1', targetUserId: 'target-1' },
+            { sourceUserId: 'source-2', targetUserId: 'target-2' },
+            { sourceUserId: 'source-3', targetUserId: 'target-3' },
         ]);
 
-        expect(result.get('source-1:target-1')).toBe(0.73);
+        expect(result).toEqual(new Map([
+            ['source-1:target-1', 0.41],
+            ['source-2:target-2', 0.73],
+            ['source-3:target-3', 0.84],
+        ]));
         expect(realGraphMocks.find).toHaveBeenCalledWith({
-            $or: [{ sourceUserId: 'source-1', targetUserId: 'target-1' }],
+            $or: [
+                { sourceUserId: 'source-2', targetUserId: 'target-2' },
+                { sourceUserId: 'source-3', targetUserId: 'target-3' },
+            ],
         });
+        expect(pipelineSetex).toHaveBeenCalledTimes(2);
     });
 });
