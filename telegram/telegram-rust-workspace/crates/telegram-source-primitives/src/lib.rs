@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -257,9 +257,10 @@ pub fn source_retrieval_lane(source_name: &str) -> &'static str {
 
 pub fn configured_sources(configured_order: &[String]) -> Vec<String> {
     let mut resolved = Vec::new();
+    let mut seen = HashSet::new();
 
     for name in configured_order {
-        if source_descriptor(name).is_some() {
+        if source_descriptor(name).is_some() && seen.insert(name.as_str()) {
             resolved.push(name.clone());
         }
     }
@@ -393,7 +394,7 @@ mod tests {
         SOURCE_STAGE_OUTCOME_SUCCESS, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
         SOURCE_STAGE_SOURCE_NAME_FIELD, SOURCE_STAGE_TIMED_OUT_FIELD,
         SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass, SourceReadinessImpact,
-        annotate_source_batch_stage_detail, annotate_source_stage_detail,
+        annotate_source_batch_stage_detail, annotate_source_stage_detail, configured_sources,
         fail_open_source_stage_detail, source_descriptor, source_retrieval_lane,
         source_stage_execution_outcome,
     };
@@ -415,6 +416,22 @@ mod tests {
         assert_eq!(source_retrieval_lane(POPULAR_SOURCE), FALLBACK_LANE);
         assert_eq!(source_retrieval_lane("UnknownSource"), FALLBACK_LANE);
         assert_eq!(source_retrieval_lane(MOE_RETRIEVAL_SOURCE), INTEREST_LANE);
+    }
+
+    #[test]
+    fn configured_sources_stably_deduplicates_valid_names() {
+        let configured = vec![
+            "PopularSource".to_string(),
+            "UnknownSource".to_string(),
+            "PopularSource".to_string(),
+            "FollowingSource".to_string(),
+            "FollowingSource".to_string(),
+        ];
+
+        assert_eq!(
+            configured_sources(&configured),
+            vec!["PopularSource".to_string(), "FollowingSource".to_string()]
+        );
     }
 
     #[test]
