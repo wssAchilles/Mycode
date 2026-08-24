@@ -67,11 +67,11 @@ function verifyRecommendationInternalToken(req: Request, res: Response, next: Ne
 const candidateStageRequestSchema = z.object({
   query: recommendationQueryPayloadSchema,
   candidates: z.array(recommendationCandidatePayloadSchema),
-  componentNames: z.array(z.string().min(1)).max(16).optional(),
+  componentNames: z.array(z.string().trim().min(1)).max(16).optional(),
 });
 
 const queryHydratorBatchRequestSchema = z.object({
-  hydratorNames: z.array(z.string().min(1)).min(1).max(16),
+  hydratorNames: z.array(z.string().trim().min(1)).min(1).max(16),
   query: recommendationQueryPayloadSchema,
 });
 
