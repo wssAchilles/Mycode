@@ -133,7 +133,9 @@ struct FrontierPoint {
     epsilon: f64,
     temperature: f64,
     baseline_total_score: f64,
+    baseline_position_scores: Vec<f64>,
     expected_total_score: f64,
+    expected_position_scores: Vec<f64>,
     synthetic_utility_loss: f64,
     minimum_conditional_propensity: f64,
     minimum_ordered_joint_propensity: f64,
@@ -171,9 +173,10 @@ struct FrontierReport {
     report_sha256: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct EnumerationStats {
     expected_total_score: f64,
+    expected_position_scores: Vec<f64>,
     path_probability_sum: f64,
     minimum_conditional_propensity: f64,
     minimum_ordered_joint_propensity: f64,
@@ -215,10 +218,19 @@ where
     let mut reports = Vec::with_capacity(scenarios.len());
 
     for scenario in scenarios {
+        let baseline_position_scores = scenario.scores[..scenario.slate_size].to_vec();
         let baseline_total_score = deterministic_top_k_score(scenario)?;
         let mut points = Vec::with_capacity(configurations.len());
         for configuration in configurations {
             let stats = enumerate_configuration(scenario, *configuration, kernel)?;
+            if stats.expected_position_scores.len() != baseline_position_scores.len()
+                || stats
+                    .expected_position_scores
+                    .iter()
+                    .any(|score| !score.is_finite())
+            {
+                return Err(FrontierError::NumericInvalid);
+            }
             let synthetic_utility_loss = baseline_total_score - stats.expected_total_score;
             if !synthetic_utility_loss.is_finite() || synthetic_utility_loss < -NUMERIC_TOLERANCE {
                 return Err(FrontierError::NumericInvalid);
@@ -237,7 +249,9 @@ where
                 epsilon: configuration.epsilon,
                 temperature: configuration.temperature,
                 baseline_total_score,
+                baseline_position_scores: baseline_position_scores.clone(),
                 expected_total_score: stats.expected_total_score,
+                expected_position_scores: stats.expected_position_scores,
                 synthetic_utility_loss,
                 minimum_conditional_propensity: stats.minimum_conditional_propensity,
                 minimum_ordered_joint_propensity: minimum_joint,
@@ -547,6 +561,7 @@ where
     >,
 {
     let mut stats = EnumerationStats {
+        expected_position_scores: vec![0.0; scenario.slate_size],
         minimum_conditional_propensity: f64::INFINITY,
         minimum_ordered_joint_propensity: f64::INFINITY,
         ..EnumerationStats::default()
@@ -566,7 +581,7 @@ where
     let mut next_slots: Vec<Option<SubsetState>> = vec![None; slot_count];
     let mut touched_masks = Vec::new();
     // The kernel depends only on the remaining set, so merge path histories by subset.
-    for _depth in 0..scenario.slate_size {
+    for depth in 0..scenario.slate_size {
         for state in states.iter().copied() {
             let remaining = (0..candidate_count)
                 .filter(|index| state.selected_mask & (1_u16 << index) == 0)
@@ -622,6 +637,14 @@ where
                 if !accumulated_score.is_finite() {
                     return Err(FrontierError::NumericInvalid);
                 }
+                let position_contribution = next_mass * scenario.scores[remaining[selected_index]];
+                if !position_contribution.is_finite() {
+                    return Err(FrontierError::NumericInvalid);
+                }
+                stats.expected_position_scores[depth] += position_contribution;
+                if !stats.expected_position_scores[depth].is_finite() {
+                    return Err(FrontierError::NumericInvalid);
+                }
                 let slot = &mut next_slots[selected_mask as usize];
                 if let Some(existing) = slot {
                     existing.mass += next_mass;
@@ -669,6 +692,8 @@ where
         || (stats.path_probability_sum - 1.0).abs() > NUMERIC_TOLERANCE
         || !stats.minimum_conditional_propensity.is_finite()
         || !stats.minimum_ordered_joint_propensity.is_finite()
+        || (stats.expected_position_scores.iter().sum::<f64>() - stats.expected_total_score).abs()
+            > NUMERIC_TOLERANCE
     {
         return Err(FrontierError::NumericInvalid);
     }
@@ -724,7 +749,7 @@ mod tests {
         assert!(first.resource_plan.maximum_state_bytes > 0);
         assert_eq!(
             first.report_sha256,
-            "03bb0b361caf4487604bebcee355f9b4f07a153ff0aca6d620d1f923834b34f7"
+            "06a753d2a4c41f46cf6e1c8f0300a84770918b26a1938de88798746b0665ea6d"
         );
         for scenario in &first.scenarios {
             assert!(scenario.points.iter().any(|point| point.pareto_frontier));
@@ -733,6 +758,20 @@ mod tests {
                     point.expected_total_score <= point.baseline_total_score + NUMERIC_TOLERANCE
                 );
                 assert!(point.synthetic_utility_loss >= 0.0);
+                assert_eq!(
+                    point.baseline_position_scores.len(),
+                    point.expected_position_scores.len()
+                );
+                assert_eq!(
+                    point.baseline_position_scores.len(),
+                    scenario.slate_size as usize
+                );
+                assert!(
+                    point
+                        .expected_position_scores
+                        .iter()
+                        .all(|score| score.is_finite())
+                );
                 assert!(point.minimum_conditional_propensity > 0.0);
                 assert!(point.minimum_ordered_joint_propensity > 0.0);
                 assert!(point.maximum_inverse_ordered_joint_weight.is_finite());
@@ -817,9 +856,10 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Clone, Copy, Default)]
+    #[derive(Debug, Clone, Default)]
     struct OrderedReferenceStats {
         expected_total_score: f64,
+        expected_position_scores: Vec<f64>,
         path_probability_sum: f64,
         minimum_conditional_propensity: f64,
         minimum_ordered_joint_propensity: f64,
@@ -831,6 +871,7 @@ mod tests {
         configuration: FrontierConfiguration,
     ) -> OrderedReferenceStats {
         let mut stats = OrderedReferenceStats {
+            expected_position_scores: vec![0.0; scenario.slate_size],
             minimum_conditional_propensity: f64::INFINITY,
             minimum_ordered_joint_propensity: f64::INFINITY,
             ..OrderedReferenceStats::default()
@@ -874,6 +915,8 @@ mod tests {
                     .minimum_conditional_propensity
                     .min(conditional_probability);
                 let selected = remaining[selected_index];
+                stats.expected_position_scores[depth] +=
+                    joint_probability * conditional_probability * scenario.scores[selected];
                 let mut next_remaining = remaining.clone();
                 next_remaining.remove(selected_index);
                 stack.push((
@@ -912,6 +955,14 @@ mod tests {
         .expect("subset state evaluation should succeed");
         assert_eq!(kernel_calls, 11);
         assert!((actual.expected_total_score - reference.expected_total_score).abs() < 1e-12);
+        assert_eq!(actual.expected_position_scores.len(), scenario.slate_size);
+        assert!(
+            actual
+                .expected_position_scores
+                .iter()
+                .zip(reference.expected_position_scores.iter())
+                .all(|(actual, reference)| (actual - reference).abs() < 1e-12)
+        );
         assert!((actual.path_probability_sum - reference.path_probability_sum).abs() < 1e-12);
         assert!(
             (actual.minimum_conditional_propensity - reference.minimum_conditional_propensity)
@@ -938,7 +989,9 @@ mod tests {
             epsilon: f64::MAX,
             temperature: f64::MAX,
             baseline_total_score: f64::MAX,
+            baseline_position_scores: vec![f64::MAX; MAX_SLATE_SIZE],
             expected_total_score: -f64::MAX,
+            expected_position_scores: vec![f64::MIN; MAX_SLATE_SIZE],
             synthetic_utility_loss: f64::MAX,
             minimum_conditional_propensity: f64::MIN_POSITIVE,
             minimum_ordered_joint_propensity: f64::MIN_POSITIVE,
