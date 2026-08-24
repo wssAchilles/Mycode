@@ -271,13 +271,11 @@ impl RecommendationSourceOrchestrator {
                 for execution in items_by_name.values() {
                     if is_cacheable(&execution.source_name) && !execution.candidates.is_empty() {
                         let source_name = execution.source_name.clone();
-                        let query = query.clone();
+                        let cache_key = self.source_cache.query_cache_key(&source_name, query);
                         let candidates = execution.candidates.clone();
                         let cache = self.source_cache.clone();
                         tokio::spawn(async move {
-                            let _ = cache
-                                .store_for_query(&source_name, &query, &candidates)
-                                .await;
+                            let _ = cache.store_for_key(&cache_key, &candidates).await;
                         });
                     }
                 }
@@ -328,16 +326,19 @@ impl RecommendationSourceOrchestrator {
         disabled_results: Vec<(usize, SourceExecution)>,
     ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
         let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
+        let query_shared = Arc::new(query.clone());
         let mut join_set = JoinSet::new();
 
         for (index, source_name) in source_entries {
             let backend_client = self.backend_client.clone();
-            let query = query.clone();
+            let query = Arc::clone(&query_shared);
             let semaphore = semaphore.clone();
             join_set.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.expect("source semaphore");
                 let started_at = Instant::now();
-                let response = backend_client.source_candidates(&source_name, &query).await;
+                let response = backend_client
+                    .source_candidates(&source_name, query.as_ref())
+                    .await;
                 let provider_key = source_provider_key(&source_name);
                 (
                     index,

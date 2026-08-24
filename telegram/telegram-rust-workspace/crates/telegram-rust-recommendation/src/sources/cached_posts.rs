@@ -165,13 +165,29 @@ impl SourceCache {
         format!("{}:{source_name}:{user_id}", self.prefix)
     }
 
-    fn query_cache_key(&self, source_name: &str, query: &RecommendationQueryPayload) -> String {
+    pub(crate) fn query_cache_key(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> String {
         format!(
             "{}:{source_name}:{}:query:{}",
             self.prefix,
             query.user_id,
             build_query_fingerprint(query)
         )
+    }
+
+    pub(crate) async fn store_for_key(
+        &self,
+        key: &str,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        self.store_by_key(key, candidates).await
     }
 
     #[cfg(test)]
@@ -310,6 +326,29 @@ mod tests {
         assert_eq!(cached.len(), 2);
         assert_eq!(cached[0].post_id, "p1");
         assert_eq!(cached[1].post_id, "p2");
+    }
+
+    #[tokio::test]
+    async fn precomputed_query_key_roundtrip() {
+        let cache = SourceCache::new("redis://127.0.0.1:1", true, 300, "test:query-key");
+        let query = RecommendationQueryPayload {
+            user_id: "user-1".to_string(),
+            limit: 20,
+            ..Default::default()
+        };
+        let key = cache.query_cache_key("FollowingSource", &query);
+        cache
+            .store_for_key(&key, &[make_candidate("query-post")])
+            .await
+            .unwrap();
+
+        let hit = cache.get_by_key(&key).await;
+        assert_eq!(
+            hit.candidates
+                .as_ref()
+                .map(|candidates| candidates[0].post_id.as_str()),
+            Some("query-post")
+        );
     }
 
     #[tokio::test]
