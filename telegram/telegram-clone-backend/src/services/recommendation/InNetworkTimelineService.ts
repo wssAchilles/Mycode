@@ -75,15 +75,26 @@ export class InNetworkTimelineService {
             pipeline.zremrangebyscore(thunderKey, 0, cutoffMs);
             pipeline.expire(thunderKey, this.KEY_TTL_SECONDS);
             pipeline.zcard(key);
+            pipeline.zcard(thunderKey);
 
             const results = await pipeline.exec();
-            const zcardRes = results?.[results.length - 1];
-            const card = typeof zcardRes?.[1] === 'number' ? (zcardRes[1] as number) : null;
+            const keyCardResult = results?.[results.length - 2];
+            const thunderCardResult = results?.[results.length - 1];
+            const keyCard = typeof keyCardResult?.[1] === 'number' ? (keyCardResult[1] as number) : null;
+            const thunderCard = typeof thunderCardResult?.[1] === 'number'
+                ? (thunderCardResult[1] as number)
+                : null;
 
             // 2) Enforce per-author cap (remove oldest)
-            if (card && card > this.PER_AUTHOR_CAP) {
-                const removeCount = card - this.PER_AUTHOR_CAP;
-                await redis.zremrangebyrank(key, 0, removeCount - 1);
+            if (keyCard && keyCard > this.PER_AUTHOR_CAP) {
+                await redis.zremrangebyrank(key, 0, keyCard - this.PER_AUTHOR_CAP - 1);
+            }
+            if (thunderCard && thunderCard > this.PER_AUTHOR_CAP) {
+                await redis.zremrangebyrank(
+                    thunderKey,
+                    0,
+                    thunderCard - this.PER_AUTHOR_CAP - 1,
+                );
             }
         } catch (err) {
             // Best-effort: timeline is a cache. Do not break post creation.
