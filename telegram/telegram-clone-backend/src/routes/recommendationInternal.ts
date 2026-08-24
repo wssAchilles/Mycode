@@ -76,7 +76,7 @@ const queryHydratorBatchRequestSchema = z.object({
 });
 
 const sourceBatchRequestSchema = z.object({
-  sourceNames: z.array(z.string().min(1)).min(1).max(16),
+  sourceNames: z.array(z.string().trim().min(1)).min(1).max(16),
   query: recommendationQueryPayloadSchema,
 });
 
