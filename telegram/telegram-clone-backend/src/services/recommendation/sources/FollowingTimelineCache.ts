@@ -46,6 +46,7 @@ export class FollowingTimelineCache {
         }
 
         if (toRefresh.length > 0) {
+            const globalLimit = this.maxPerAuthor * toRefresh.length;
             const freshPosts = await Post.find({
                 authorId: { $in: toRefresh },
                 createdAt: { $gte: ageCutoff },
@@ -53,7 +54,7 @@ export class FollowingTimelineCache {
                 deletedAt: null,
             })
                 .sort({ createdAt: -1 })
-                .limit(this.maxPerAuthor * toRefresh.length)
+                .limit(globalLimit)
                 .lean();
 
             const grouped = new Map<AuthorId, IPost[]>();
@@ -63,6 +64,29 @@ export class FollowingTimelineCache {
                     list.push(post as unknown as IPost);
                 }
                 grouped.set(post.authorId, list);
+            }
+
+            // A prolific author can consume the shared limit before another author appears.
+            // Only backfill when the limit was saturated, keeping the normal path to one query.
+            if (freshPosts.length === globalLimit) {
+                const missingAuthorIds = toRefresh.filter((id) => !grouped.has(id));
+                const backfilled = await Promise.all(
+                    missingAuthorIds.map(async (authorId) => {
+                        const posts = await Post.find({
+                            authorId,
+                            createdAt: { $gte: ageCutoff },
+                            isNews: { $ne: true },
+                            deletedAt: null,
+                        })
+                            .sort({ createdAt: -1 })
+                            .limit(this.maxPerAuthor)
+                            .lean();
+                        return [authorId, posts as unknown as IPost[]] as const;
+                    }),
+                );
+                for (const [authorId, posts] of backfilled) {
+                    grouped.set(authorId, posts);
+                }
             }
 
             for (const id of toRefresh) {
