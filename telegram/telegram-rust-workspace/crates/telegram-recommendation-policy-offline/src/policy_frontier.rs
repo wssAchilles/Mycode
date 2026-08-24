@@ -4,7 +4,7 @@ use telegram_randomized_policy_primitives::{
 };
 use telegram_recommendation_contracts::{canonical_json, sha256_hex};
 
-const CONTRACT_VERSION: &str = "epsilon_plackett_luce_utility_frontier_diagnostic_v1";
+const CONTRACT_VERSION: &str = "epsilon_plackett_luce_utility_frontier_diagnostic_v2";
 const MAX_SCENARIOS: usize = 8;
 const MAX_CONFIGURATIONS: usize = 64;
 const MAX_CANDIDATES: usize = 16;
@@ -13,6 +13,7 @@ const MAX_SCENARIO_ID_BYTES: usize = 64;
 const MAX_PREFIX_EVALUATIONS: u64 = 100_000;
 const MAX_PATHS: u64 = 100_000;
 const MAX_WORK_UNITS: u64 = 1_000_000;
+const MAX_STATE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: u64 = 1_048_576;
 const MAX_POINT_BYTES: u64 = 1_024;
 const MAX_SCENARIO_BYTES: u64 = 256;
@@ -122,6 +123,8 @@ struct FrontierResourcePlan {
     probability_evaluations: u64,
     ordered_paths: u64,
     work_units: u64,
+    state_storage_operations: u64,
+    maximum_state_bytes: u64,
     planned_output_canonical_bytes_upper_bound: u64,
 }
 
@@ -178,8 +181,10 @@ struct EnumerationStats {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct EnumerationState {
-    joint_probability: f64,
+struct SubsetState {
+    selected_mask: u16,
+    mass: f64,
+    minimum_ordered_joint_propensity: f64,
     accumulated_score: f64,
 }
 
@@ -295,6 +300,8 @@ fn preflight(
     let mut prefix_evaluations = 0_u64;
     let mut probability_evaluations = 0_u64;
     let mut ordered_paths = 0_u64;
+    let mut state_storage_operations = 0_u64;
+    let mut maximum_state_bytes = 0_u64;
     for scenario in scenarios {
         if scenario.id.is_empty()
             || scenario.id.len() > MAX_SCENARIO_ID_BYTES
@@ -324,6 +331,10 @@ fn preflight(
         ordered_paths = ordered_paths
             .checked_add(counts.ordered_paths)
             .ok_or(FrontierError::ResourceLimitExceeded)?;
+        state_storage_operations = state_storage_operations
+            .checked_add(counts.state_storage_operations)
+            .ok_or(FrontierError::ResourceLimitExceeded)?;
+        maximum_state_bytes = maximum_state_bytes.max(subset_state_bytes(scenario.scores.len())?);
     }
     for configuration in configurations {
         if !configuration.epsilon.is_finite()
@@ -349,12 +360,15 @@ fn preflight(
     ordered_paths = ordered_paths
         .checked_mul(configuration_count)
         .ok_or(FrontierError::ResourceLimitExceeded)?;
+    state_storage_operations = state_storage_operations
+        .checked_mul(configuration_count)
+        .ok_or(FrontierError::ResourceLimitExceeded)?;
     let point_count = scenario_count
         .checked_mul(configuration_count)
         .ok_or(FrontierError::ResourceLimitExceeded)?;
     let work_units = prefix_evaluations
         .checked_add(probability_evaluations)
-        .and_then(|value| value.checked_add(ordered_paths))
+        .and_then(|value| value.checked_add(state_storage_operations))
         .ok_or(FrontierError::ResourceLimitExceeded)?;
     let point_bytes = point_count
         .checked_mul(MAX_POINT_BYTES)
@@ -369,6 +383,7 @@ fn preflight(
     if prefix_evaluations > MAX_PREFIX_EVALUATIONS
         || ordered_paths > MAX_PATHS
         || work_units > MAX_WORK_UNITS
+        || maximum_state_bytes > MAX_STATE_BYTES
         || planned_output > MAX_OUTPUT_BYTES
     {
         return Err(FrontierError::ResourceLimitExceeded);
@@ -383,6 +398,8 @@ fn preflight(
         probability_evaluations,
         ordered_paths,
         work_units,
+        state_storage_operations,
+        maximum_state_bytes,
         planned_output_canonical_bytes_upper_bound: planned_output,
     })
 }
@@ -392,48 +409,114 @@ struct EnumerationCounts {
     prefix_evaluations: u64,
     probability_evaluations: u64,
     ordered_paths: u64,
+    state_storage_operations: u64,
 }
 
 fn enumeration_counts(
     candidate_count: usize,
     slate_size: usize,
 ) -> Result<EnumerationCounts, FrontierError> {
-    let mut permutations = 1_u64;
     let mut prefix_evaluations = 0_u64;
     let mut probability_evaluations = 0_u64;
     for depth in 0..slate_size {
-        if depth > 0 {
-            permutations = permutations
-                .checked_mul(
-                    u64::try_from(candidate_count - depth + 1)
-                        .map_err(|_| FrontierError::ResourceLimitExceeded)?,
-                )
-                .ok_or(FrontierError::ResourceLimitExceeded)?;
-        }
+        let states = combination_count(candidate_count, depth)?;
         let remaining = u64::try_from(candidate_count - depth)
             .map_err(|_| FrontierError::ResourceLimitExceeded)?;
         prefix_evaluations = prefix_evaluations
-            .checked_add(permutations)
+            .checked_add(states)
             .ok_or(FrontierError::ResourceLimitExceeded)?;
         probability_evaluations = probability_evaluations
             .checked_add(
-                permutations
+                states
                     .checked_mul(remaining)
                     .ok_or(FrontierError::ResourceLimitExceeded)?,
             )
             .ok_or(FrontierError::ResourceLimitExceeded)?;
     }
-    let ordered_paths = permutations
-        .checked_mul(
-            u64::try_from(candidate_count - slate_size + 1)
-                .map_err(|_| FrontierError::ResourceLimitExceeded)?,
+    let ordered_paths = ordered_path_count(candidate_count, slate_size)?;
+    let slot_initialization_operations = 1_u64
+        .checked_shl(
+            u32::try_from(candidate_count).map_err(|_| FrontierError::ResourceLimitExceeded)?,
         )
+        .ok_or(FrontierError::ResourceLimitExceeded)?;
+    let mut touched_state_operations = 0_u64;
+    for depth in 1..=slate_size {
+        let depth_states = combination_count(candidate_count, depth)?;
+        touched_state_operations = touched_state_operations
+            .checked_add(
+                depth_states
+                    .checked_mul(3)
+                    .ok_or(FrontierError::ResourceLimitExceeded)?,
+            )
+            .ok_or(FrontierError::ResourceLimitExceeded)?;
+    }
+    let terminal_state_operations = combination_count(candidate_count, slate_size)?;
+    let state_storage_operations = slot_initialization_operations
+        .checked_add(touched_state_operations)
+        .and_then(|value| value.checked_add(terminal_state_operations))
         .ok_or(FrontierError::ResourceLimitExceeded)?;
     Ok(EnumerationCounts {
         prefix_evaluations,
         probability_evaluations,
         ordered_paths,
+        state_storage_operations,
     })
+}
+
+fn combination_count(candidate_count: usize, subset_size: usize) -> Result<u64, FrontierError> {
+    let subset_size = subset_size.min(candidate_count - subset_size);
+    let mut count = 1_u64;
+    for index in 1..=subset_size {
+        count = count
+            .checked_mul(
+                u64::try_from(candidate_count - subset_size + index)
+                    .map_err(|_| FrontierError::ResourceLimitExceeded)?,
+            )
+            .ok_or(FrontierError::ResourceLimitExceeded)?
+            .checked_div(u64::try_from(index).map_err(|_| FrontierError::ResourceLimitExceeded)?)
+            .ok_or(FrontierError::ResourceLimitExceeded)?;
+    }
+    Ok(count)
+}
+
+fn ordered_path_count(candidate_count: usize, slate_size: usize) -> Result<u64, FrontierError> {
+    let mut count = 1_u64;
+    for depth in 0..slate_size {
+        count = count
+            .checked_mul(
+                u64::try_from(candidate_count - depth)
+                    .map_err(|_| FrontierError::ResourceLimitExceeded)?,
+            )
+            .ok_or(FrontierError::ResourceLimitExceeded)?;
+    }
+    Ok(count)
+}
+
+fn subset_state_bytes(candidate_count: usize) -> Result<u64, FrontierError> {
+    let slot_count = 1_u64
+        .checked_shl(
+            u32::try_from(candidate_count).map_err(|_| FrontierError::ResourceLimitExceeded)?,
+        )
+        .ok_or(FrontierError::ResourceLimitExceeded)?;
+    let state_slot_bytes = u64::try_from(
+        std::mem::size_of::<Option<SubsetState>>() + std::mem::size_of::<SubsetState>(),
+    )
+    .map_err(|_| FrontierError::ResourceLimitExceeded)?;
+    let transient_bytes = u64::try_from(
+        candidate_count * (std::mem::size_of::<usize>() + std::mem::size_of::<f64>()),
+    )
+    .map_err(|_| FrontierError::ResourceLimitExceeded)?;
+    let touched_mask_bytes = slot_count
+        .checked_mul(
+            u64::try_from(std::mem::size_of::<u16>())
+                .map_err(|_| FrontierError::ResourceLimitExceeded)?,
+        )
+        .ok_or(FrontierError::ResourceLimitExceeded)?;
+    slot_count
+        .checked_mul(state_slot_bytes)
+        .and_then(|bytes| bytes.checked_add(transient_bytes))
+        .and_then(|bytes| bytes.checked_add(touched_mask_bytes))
+        .ok_or(FrontierError::ResourceLimitExceeded)
 }
 
 fn deterministic_top_k_score(scenario: &FrozenScenario) -> Result<f64, FrontierError> {
@@ -468,19 +551,119 @@ where
         minimum_ordered_joint_propensity: f64::INFINITY,
         ..EnumerationStats::default()
     };
-    let remaining = (0..scenario.scores.len()).collect::<Vec<_>>();
-    enumerate_prefix(
-        scenario,
-        configuration,
-        remaining,
-        0,
-        EnumerationState {
-            joint_probability: 1.0,
-            accumulated_score: 0.0,
-        },
-        &mut stats,
-        kernel,
-    )?;
+    let candidate_count = scenario.scores.len();
+    let slot_count = 1_usize
+        .checked_shl(
+            u32::try_from(candidate_count).map_err(|_| FrontierError::ResourceLimitExceeded)?,
+        )
+        .ok_or(FrontierError::ResourceLimitExceeded)?;
+    let mut states = vec![SubsetState {
+        selected_mask: 0,
+        mass: 1.0,
+        minimum_ordered_joint_propensity: 1.0,
+        accumulated_score: 0.0,
+    }];
+    let mut next_slots: Vec<Option<SubsetState>> = vec![None; slot_count];
+    let mut touched_masks = Vec::new();
+    // The kernel depends only on the remaining set, so merge path histories by subset.
+    for _depth in 0..scenario.slate_size {
+        for state in states.iter().copied() {
+            let remaining = (0..candidate_count)
+                .filter(|index| state.selected_mask & (1_u16 << index) == 0)
+                .collect::<Vec<_>>();
+            let logits = remaining
+                .iter()
+                .map(|index| scenario.scores[*index])
+                .collect::<Vec<_>>();
+            let distribution = kernel(&logits, configuration.epsilon, configuration.temperature)
+                .map_err(|_| FrontierError::ProbabilityInvalid)?;
+            if distribution.probabilities.len() != remaining.len() {
+                return Err(FrontierError::ProbabilityInvalid);
+            }
+            let probability_mass_error = distribution
+                .diagnostics
+                .plackett_luce_mass_error
+                .max(distribution.diagnostics.mixed_mass_error);
+            if !probability_mass_error.is_finite()
+                || probability_mass_error > PROBABILITY_MASS_TOLERANCE
+            {
+                return Err(FrontierError::ProbabilityInvalid);
+            }
+            stats.maximum_probability_mass_error = stats
+                .maximum_probability_mass_error
+                .max(probability_mass_error);
+
+            for (selected_index, (plackett_luce_probability, conditional_probability)) in
+                distribution.probabilities.iter().copied().enumerate()
+            {
+                if !plackett_luce_probability.is_finite()
+                    || plackett_luce_probability <= 0.0
+                    || !conditional_probability.is_finite()
+                    || conditional_probability <= 0.0
+                {
+                    return Err(FrontierError::ProbabilityInvalid);
+                }
+                let next_mass = state.mass * conditional_probability;
+                let next_minimum_joint =
+                    state.minimum_ordered_joint_propensity * conditional_probability;
+                if !next_mass.is_finite()
+                    || next_mass <= 0.0
+                    || !next_minimum_joint.is_finite()
+                    || next_minimum_joint <= 0.0
+                {
+                    return Err(FrontierError::ProbabilityInvalid);
+                }
+                stats.minimum_conditional_propensity = stats
+                    .minimum_conditional_propensity
+                    .min(conditional_probability);
+                let selected_mask = state.selected_mask | (1_u16 << remaining[selected_index]);
+                let accumulated_score =
+                    state.accumulated_score + scenario.scores[remaining[selected_index]];
+                if !accumulated_score.is_finite() {
+                    return Err(FrontierError::NumericInvalid);
+                }
+                let slot = &mut next_slots[selected_mask as usize];
+                if let Some(existing) = slot {
+                    existing.mass += next_mass;
+                    if !existing.mass.is_finite() {
+                        return Err(FrontierError::NumericInvalid);
+                    }
+                    existing.minimum_ordered_joint_propensity = existing
+                        .minimum_ordered_joint_propensity
+                        .min(next_minimum_joint);
+                } else {
+                    touched_masks.push(selected_mask);
+                    *slot = Some(SubsetState {
+                        selected_mask,
+                        mass: next_mass,
+                        minimum_ordered_joint_propensity: next_minimum_joint,
+                        accumulated_score,
+                    });
+                }
+            }
+        }
+        states.clear();
+        for selected_mask in touched_masks.drain(..) {
+            if let Some(state) = next_slots[selected_mask as usize].take() {
+                states.push(state);
+            }
+        }
+        if states.is_empty() {
+            return Err(FrontierError::NumericInvalid);
+        }
+    }
+
+    for state in states {
+        let expected_contribution = state.mass * state.accumulated_score;
+        if !expected_contribution.is_finite() {
+            return Err(FrontierError::NumericInvalid);
+        }
+        stats.path_probability_sum += state.mass;
+        stats.expected_total_score += expected_contribution;
+        stats.minimum_ordered_joint_propensity = stats
+            .minimum_ordered_joint_propensity
+            .min(state.minimum_ordered_joint_propensity);
+    }
     if !stats.expected_total_score.is_finite()
         || !stats.path_probability_sum.is_finite()
         || (stats.path_probability_sum - 1.0).abs() > NUMERIC_TOLERANCE
@@ -490,97 +673,6 @@ where
         return Err(FrontierError::NumericInvalid);
     }
     Ok(stats)
-}
-
-fn enumerate_prefix<F>(
-    scenario: &FrozenScenario,
-    configuration: FrontierConfiguration,
-    remaining: Vec<usize>,
-    depth: usize,
-    state: EnumerationState,
-    stats: &mut EnumerationStats,
-    kernel: &mut F,
-) -> Result<(), FrontierError>
-where
-    F: FnMut(
-        &[f64],
-        f64,
-        f64,
-    ) -> Result<
-        telegram_randomized_policy_primitives::FullDistribution,
-        EpsilonPlackettLuceError,
-    >,
-{
-    if depth == scenario.slate_size {
-        let expected_contribution = state.joint_probability * state.accumulated_score;
-        if !expected_contribution.is_finite() {
-            return Err(FrontierError::NumericInvalid);
-        }
-        stats.path_probability_sum += state.joint_probability;
-        stats.expected_total_score += expected_contribution;
-        if !stats.path_probability_sum.is_finite() || !stats.expected_total_score.is_finite() {
-            return Err(FrontierError::NumericInvalid);
-        }
-        stats.minimum_ordered_joint_propensity = stats
-            .minimum_ordered_joint_propensity
-            .min(state.joint_probability);
-        return Ok(());
-    }
-
-    let logits = remaining
-        .iter()
-        .map(|index| scenario.scores[*index])
-        .collect::<Vec<_>>();
-    let distribution = kernel(&logits, configuration.epsilon, configuration.temperature)
-        .map_err(|_| FrontierError::ProbabilityInvalid)?;
-    if distribution.probabilities.len() != remaining.len() {
-        return Err(FrontierError::ProbabilityInvalid);
-    }
-    let probability_mass_error = distribution
-        .diagnostics
-        .plackett_luce_mass_error
-        .max(distribution.diagnostics.mixed_mass_error);
-    if !probability_mass_error.is_finite() || probability_mass_error > PROBABILITY_MASS_TOLERANCE {
-        return Err(FrontierError::ProbabilityInvalid);
-    }
-    stats.maximum_probability_mass_error = stats
-        .maximum_probability_mass_error
-        .max(probability_mass_error);
-
-    for (selected_index, (plackett_luce_probability, conditional_probability)) in
-        distribution.probabilities.iter().copied().enumerate()
-    {
-        if !plackett_luce_probability.is_finite()
-            || plackett_luce_probability <= 0.0
-            || !conditional_probability.is_finite()
-            || conditional_probability <= 0.0
-        {
-            return Err(FrontierError::ProbabilityInvalid);
-        }
-        let next_joint_probability = state.joint_probability * conditional_probability;
-        if !next_joint_probability.is_finite() || next_joint_probability <= 0.0 {
-            return Err(FrontierError::ProbabilityInvalid);
-        }
-        stats.minimum_conditional_propensity = stats
-            .minimum_conditional_propensity
-            .min(conditional_probability);
-        let selected = remaining[selected_index];
-        let mut next_remaining = remaining.clone();
-        next_remaining.remove(selected_index);
-        enumerate_prefix(
-            scenario,
-            configuration,
-            next_remaining,
-            depth + 1,
-            EnumerationState {
-                joint_probability: next_joint_probability,
-                accumulated_score: state.accumulated_score + scenario.scores[selected],
-            },
-            stats,
-            kernel,
-        )?;
-    }
-    Ok(())
 }
 
 fn mark_frontier(points: &mut [FrontierPoint]) {
@@ -627,10 +719,12 @@ mod tests {
         assert_eq!(first.resource_plan.prefix_evaluations, 180);
         assert_eq!(first.resource_plan.probability_evaluations, 576);
         assert_eq!(first.resource_plan.ordered_paths, 432);
-        assert_eq!(first.resource_plan.work_units, 1_188);
+        assert_eq!(first.resource_plan.work_units, 2628);
+        assert_eq!(first.resource_plan.state_storage_operations, 1872);
+        assert!(first.resource_plan.maximum_state_bytes > 0);
         assert_eq!(
             first.report_sha256,
-            "9319da59be933ca50d5c04e0adc0a05149cd65601a3e05c02185494bb13dab8e"
+            "03bb0b361caf4487604bebcee355f9b4f07a153ff0aca6d620d1f923834b34f7"
         );
         for scenario in &first.scenarios {
             assert!(scenario.points.iter().any(|point| point.pareto_frontier));
@@ -700,13 +794,140 @@ mod tests {
     }
 
     #[test]
-    fn exact_enumeration_counts_match_ordered_prefixes() {
+    fn exact_enumeration_counts_match_subset_states() {
         assert_eq!(enumeration_counts(4, 2).unwrap().prefix_evaluations, 5);
         assert_eq!(
             enumeration_counts(4, 2).unwrap().probability_evaluations,
             16
         );
         assert_eq!(enumeration_counts(4, 2).unwrap().ordered_paths, 12);
+        assert_eq!(
+            enumeration_counts(4, 2).unwrap().state_storage_operations,
+            52
+        );
+        assert_eq!(enumeration_counts(4, 3).unwrap().prefix_evaluations, 11);
+        assert_eq!(
+            enumeration_counts(4, 3).unwrap().probability_evaluations,
+            28
+        );
+        assert_eq!(enumeration_counts(4, 3).unwrap().ordered_paths, 24);
+        assert_eq!(
+            enumeration_counts(4, 3).unwrap().state_storage_operations,
+            62
+        );
+    }
+
+    #[derive(Debug, Clone, Copy, Default)]
+    struct OrderedReferenceStats {
+        expected_total_score: f64,
+        path_probability_sum: f64,
+        minimum_conditional_propensity: f64,
+        minimum_ordered_joint_propensity: f64,
+        maximum_probability_mass_error: f64,
+    }
+
+    fn ordered_reference(
+        scenario: &FrozenScenario,
+        configuration: FrontierConfiguration,
+    ) -> OrderedReferenceStats {
+        let mut stats = OrderedReferenceStats {
+            minimum_conditional_propensity: f64::INFINITY,
+            minimum_ordered_joint_propensity: f64::INFINITY,
+            ..OrderedReferenceStats::default()
+        };
+        let mut stack = vec![(
+            (0..scenario.scores.len()).collect::<Vec<_>>(),
+            0_usize,
+            1.0_f64,
+            0.0_f64,
+        )];
+        while let Some((remaining, depth, joint_probability, accumulated_score)) = stack.pop() {
+            if depth == scenario.slate_size {
+                stats.path_probability_sum += joint_probability;
+                stats.expected_total_score += joint_probability * accumulated_score;
+                stats.minimum_ordered_joint_propensity = stats
+                    .minimum_ordered_joint_propensity
+                    .min(joint_probability);
+                continue;
+            }
+            let logits = remaining
+                .iter()
+                .map(|index| scenario.scores[*index])
+                .collect::<Vec<_>>();
+            let distribution = compute_full_distribution(
+                &logits,
+                configuration.epsilon,
+                configuration.temperature,
+            )
+            .expect("reference kernel should accept bounded input");
+            let probability_mass_error = distribution
+                .diagnostics
+                .plackett_luce_mass_error
+                .max(distribution.diagnostics.mixed_mass_error);
+            stats.maximum_probability_mass_error = stats
+                .maximum_probability_mass_error
+                .max(probability_mass_error);
+            for (selected_index, (_, conditional_probability)) in
+                distribution.probabilities.iter().copied().enumerate()
+            {
+                stats.minimum_conditional_propensity = stats
+                    .minimum_conditional_propensity
+                    .min(conditional_probability);
+                let selected = remaining[selected_index];
+                let mut next_remaining = remaining.clone();
+                next_remaining.remove(selected_index);
+                stack.push((
+                    next_remaining,
+                    depth + 1,
+                    joint_probability * conditional_probability,
+                    accumulated_score + scenario.scores[selected],
+                ));
+            }
+        }
+        stats
+    }
+
+    #[test]
+    fn subset_state_frontier_matches_ordered_reference() {
+        const SCORES: [f64; 4] = [3.0, 1.0, 0.0, -1.0];
+        let scenario = FrozenScenario {
+            id: "subset_equivalence",
+            scores: &SCORES,
+            slate_size: 3,
+        };
+        let configuration = FrontierConfiguration {
+            epsilon: 0.5,
+            temperature: 1.0,
+        };
+        let reference = ordered_reference(&scenario, configuration);
+        let mut kernel_calls = 0_usize;
+        let actual = enumerate_configuration(
+            &scenario,
+            configuration,
+            &mut |logits, epsilon, temperature| {
+                kernel_calls += 1;
+                compute_full_distribution(logits, epsilon, temperature)
+            },
+        )
+        .expect("subset state evaluation should succeed");
+        assert_eq!(kernel_calls, 11);
+        assert!((actual.expected_total_score - reference.expected_total_score).abs() < 1e-12);
+        assert!((actual.path_probability_sum - reference.path_probability_sum).abs() < 1e-12);
+        assert!(
+            (actual.minimum_conditional_propensity - reference.minimum_conditional_propensity)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            (actual.minimum_ordered_joint_propensity - reference.minimum_ordered_joint_propensity)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            (actual.maximum_probability_mass_error - reference.maximum_probability_mass_error)
+                .abs()
+                < 1e-12
+        );
     }
 
     #[test]
