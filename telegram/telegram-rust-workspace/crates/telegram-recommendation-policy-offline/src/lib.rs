@@ -4,3 +4,8 @@ pub mod target_distribution;
 // entry point without a separately reviewed evidence contract.
 #[cfg(test)]
 mod policy_frontier;
+
+// This fixture is deliberately private and test-only: it validates cursor
+// assumptions without creating an online pagination or serving contract.
+#[cfg(test)]
+mod cursor_consistency;
