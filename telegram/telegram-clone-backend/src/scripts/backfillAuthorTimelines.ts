@@ -1,7 +1,8 @@
 /**
  * One-time backfill for Redis author timelines:
  * - Reads recent posts from MongoDB
- * - Writes to Redis ZSET `tl:author:{authorId}` with score=createdAtMs
+ * - Writes to Redis ZSET `tl:author:{authorId}` and its compatibility key
+ *   `timeline:author:{authorId}` with score=createdAtMs
  *
  * Usage:
  *   ts-node src/scripts/backfillAuthorTimelines.ts --days 7
@@ -61,8 +62,13 @@ async function main() {
         if (batch.length === 0) return;
         const pipeline = redis.pipeline();
         for (const p of batch) {
-            const key = InNetworkTimelineService.timelineKey(p.authorId);
-            pipeline.zadd(key, p.createdAt.getTime(), p.id);
+            const keys = [
+                InNetworkTimelineService.timelineKey(p.authorId),
+                InNetworkTimelineService.thunderTimelineKey(p.authorId),
+            ];
+            for (const key of keys) {
+                pipeline.zadd(key, p.createdAt.getTime(), p.id);
+            }
             touchedAuthors.add(p.authorId);
         }
         await pipeline.exec();
@@ -88,24 +94,30 @@ async function main() {
         const slice = authors.slice(i, i + 200);
         const pipeline = redis.pipeline();
         slice.forEach((authorId) => {
-            const key = InNetworkTimelineService.timelineKey(authorId);
-            pipeline.zremrangebyscore(key, 0, cutoffMs);
-            pipeline.expire(key, 8 * 24 * 60 * 60);
-            pipeline.zcard(key);
+            const keys = [
+                InNetworkTimelineService.timelineKey(authorId),
+                InNetworkTimelineService.thunderTimelineKey(authorId),
+            ];
+            for (const key of keys) {
+                pipeline.zremrangebyscore(key, 0, cutoffMs);
+                pipeline.expire(key, 8 * 24 * 60 * 60);
+                pipeline.zcard(key);
+            }
         });
         const res = await pipeline.exec();
-        // Enforce cap (200) for this batch; zcard replies are in positions 2,5,8...
+        // Enforce cap (200) for both keys; each key occupies three replies.
         for (let j = 0; j < slice.length; j++) {
             const authorId = slice[j];
-            const zcardReply = res?.[j * 3 + 2]?.[1];
-            const card = typeof zcardReply === 'number' ? (zcardReply as number) : null;
-            if (card && card > 200) {
-                const removeCount = card - 200;
-                await redis.zremrangebyrank(
-                    InNetworkTimelineService.timelineKey(authorId),
-                    0,
-                    removeCount - 1
-                );
+            const keys = [
+                InNetworkTimelineService.timelineKey(authorId),
+                InNetworkTimelineService.thunderTimelineKey(authorId),
+            ];
+            for (const [keyIndex, key] of keys.entries()) {
+                const zcardReply = res?.[j * 6 + keyIndex * 3 + 2]?.[1];
+                const card = typeof zcardReply === 'number' ? (zcardReply as number) : null;
+                if (card && card > 200) {
+                    await redis.zremrangebyrank(key, 0, card - 200 - 1);
+                }
             }
         }
     }
@@ -126,4 +138,3 @@ main()
             redis.disconnect();
         } catch {}
     });
-
