@@ -268,9 +268,12 @@ export class FeatureCacheService {
         try {
             const l2Result = await redis.get(cacheKey);
             if (l2Result !== null) {
-                const score = parseFloat(l2Result);
-                this.realGraphL1.set(cacheKey, score);
-                return score;
+                const normalized = l2Result.trim();
+                const score = Number(normalized);
+                if (normalized !== '' && Number.isFinite(score)) {
+                    this.realGraphL1.set(cacheKey, score);
+                    return score;
+                }
             }
         } catch {
             // 继续从 DB 读取
@@ -327,7 +330,12 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value !== null) {
-                    const score = parseFloat(l2Value);
+                    const normalized = l2Value.trim();
+                    const score = Number(normalized);
+                    if (normalized === '' || !Number.isFinite(score)) {
+                        missingFromL2.push(pair);
+                        continue;
+                    }
                     result.set(pairKey, score);
                     this.realGraphL1.set(
                         `${CONFIG.l2.keyPrefix}rg:${pair.sourceUserId}:${pair.targetUserId}`,
