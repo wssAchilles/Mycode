@@ -168,15 +168,23 @@ impl ServeCache {
             store_result.drifted = existing_result.stable_order_key != result.stable_order_key;
         }
 
+        let mut redis_error = None;
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let _: () = connection
+            let result: redis::RedisResult<()> = connection
                 .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
-                .await?;
+                .await;
+            if let Err(error) = result {
+                redis_error = Some(error);
+            }
         }
 
         self.memory.insert(key, result.clone());
+
+        if let Some(error) = redis_error {
+            return Err(error.into());
+        }
 
         Ok(store_result)
     }
