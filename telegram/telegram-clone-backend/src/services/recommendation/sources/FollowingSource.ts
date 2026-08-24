@@ -68,12 +68,14 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
             // Mongo $in does not preserve order, so re-order by Redis timeline order
             const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
             const ordered = ids.map((id) => postMap.get(id)).filter(Boolean) as any[];
-            this.recordStageDetail(query, this.buildStageDetail('redis_author_timeline', timelineRead.summary));
+            if (ordered.length > 0) {
+                this.recordStageDetail(query, this.buildStageDetail('redis_author_timeline', timelineRead.summary));
 
-            return ordered.map((post) => ({
-                ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
-                inNetwork: true,
-            }));
+                return ordered.map((post) => ({
+                    ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
+                    inNetwork: true,
+                }));
+            }
         }
 
         // Fallback: shared in-process cache that still scans Mongo (kept for compatibility until backfill)
