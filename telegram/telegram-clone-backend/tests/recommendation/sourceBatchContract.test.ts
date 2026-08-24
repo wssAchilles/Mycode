@@ -50,6 +50,34 @@ describe('RecommendationAdapterService source batch contract', () => {
     expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold');
   });
 
+  it('stable-deduplicates repeated source names before execution', async () => {
+    const service = new RecommendationAdapterService();
+    const popularGetCandidates = vi.fn().mockResolvedValue([]);
+    (service as any).sourceCatalog = {
+      PopularSource: {
+        name: 'PopularSource',
+        enable: () => true,
+        getCandidates: popularGetCandidates,
+      },
+      ColdStartSource: {
+        name: 'ColdStartSource',
+        enable: () => true,
+        getCandidates: vi.fn().mockResolvedValue([]),
+      },
+    };
+
+    const result = await service.getSourceCandidatesBatch(
+      ['PopularSource', 'PopularSource', 'ColdStartSource'],
+      createFeedQuery('viewer-batch-dedup', 20),
+    );
+
+    expect(result.items.map((item) => item.sourceName)).toEqual([
+      'PopularSource',
+      'ColdStartSource',
+    ]);
+    expect(popularGetCandidates).toHaveBeenCalledTimes(1);
+  });
+
   it('fails open when one source exceeds the batch component timeout', async () => {
     const service = new RecommendationAdapterService();
     (service as any).sourceBatchComponentTimeoutMs = 10;

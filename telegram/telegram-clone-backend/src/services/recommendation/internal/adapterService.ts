@@ -448,7 +448,9 @@ export class RecommendationAdapterService {
     sourceNames: string[],
     query: FeedQuery,
   ): Promise<InternalSourceBatchResult> {
-    const orderedSourceNames = sourceNames.map((sourceName) => String(sourceName || '').trim());
+    const orderedSourceNames = Array.from(
+      new Set(sourceNames.map((sourceName) => String(sourceName || '').trim())),
+    );
     const items = await Promise.all(
       orderedSourceNames.map(async (sourceName) => ({
         sourceName,
