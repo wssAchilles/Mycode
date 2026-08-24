@@ -187,6 +187,56 @@ describe('GraphSource graph kernel orchestration', () => {
     });
   });
 
+  it('preserves legacy graph recall order and skips invalid post ids', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    const postId1 = '507f191e810c19729de8b001';
+    const postId2 = '507f191e810c19729de8b002';
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+    };
+    const legacyClient = {
+      recall: vi.fn().mockResolvedValue([
+        { postId: 'invalid-post-id', score: 1, path: 'invalid', type: 'friend_of_friend' },
+        { postId: postId2, score: 0.9, path: 'via-user-2', type: 'similar_user' },
+        { postId: postId1, score: 0.5, path: 'via-user-1', type: 'topic_interest' },
+      ]),
+    };
+    vi.spyOn(Post as any, 'find').mockReturnValue({
+      lean: vi.fn().mockResolvedValue([
+        {
+          _id: oid(postId1),
+          authorId: 'author-1',
+          content: 'candidate one',
+          createdAt: new Date('2026-04-17T01:00:00.000Z'),
+        },
+        {
+          _id: oid(postId2),
+          authorId: 'author-2',
+          content: 'candidate two',
+          createdAt: new Date('2026-04-17T00:30:00.000Z'),
+        },
+      ]),
+    });
+
+    const source = new GraphSource({
+      client: legacyClient as any,
+      graphKernelClient: graphKernelClient as any,
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates.map((candidate) => candidate.postId.toString())).toEqual([postId2, postId1]);
+    expect(candidates.map((candidate) => (candidate as any).graphScore)).toEqual([0.9, 0.5]);
+    expect(Post.find).toHaveBeenCalledWith(expect.objectContaining({
+      _id: { $in: [oid(postId2), oid(postId1)] },
+    }));
+  });
+
   it('preserves graph-kernel empty diagnostics when falling back to legacy graph source', async () => {
     const query = createFeedQuery('viewer-1', 10);
     query.userFeatures = {

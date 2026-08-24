@@ -259,9 +259,19 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 return [];
             }
 
-            // 从数据库获取帖子详情
-            const postIds = graphCandidates.map(
-                c => new mongoose.Types.ObjectId(c.postId)
+            const validGraphCandidates = graphCandidates.filter((candidate) =>
+                mongoose.isValidObjectId(candidate.postId)
+            );
+            if (validGraphCandidates.length === 0) {
+                return [];
+            }
+
+            // 从数据库获取帖子详情，并保留 Graph 召回顺序。
+            const graphCandidatesByPostId = new Map(
+                validGraphCandidates.map((candidate) => [candidate.postId, candidate])
+            );
+            const postIds = Array.from(graphCandidatesByPostId.keys()).map(
+                (postId) => new mongoose.Types.ObjectId(postId)
             );
 
             const posts = await Post.find({
@@ -270,13 +280,16 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 deletedAt: null,
             }).lean();
 
-            // 构建 postId -> graphCandidate 映射
-            const graphScoreMap = new Map(
-                graphCandidates.map(c => [c.postId, c])
+            const postMap = new Map(
+                posts.map((post: any) => [post._id.toString(), post])
             );
+            const orderedPosts = Array.from(graphCandidatesByPostId.keys())
+                .map((postId) => postMap.get(postId))
+                .filter((post): post is any => Boolean(post));
+            const graphScoreMap = graphCandidatesByPostId;
 
             // 转换为 FeedCandidate
-            return posts.map((post: any) => {
+            return orderedPosts.map((post: any) => {
                 const graphInfo = graphScoreMap.get(post._id.toString());
                 const candidate = createFeedCandidate(post);
 
