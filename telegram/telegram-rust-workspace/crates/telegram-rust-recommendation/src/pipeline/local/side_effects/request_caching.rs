@@ -110,11 +110,12 @@ impl RequestCachingSideEffect {
         let key = self.redis_key(user_id, request_hash);
         let serialized = serde_json::to_string(result)?;
 
-        // Write to Redis.
+        // Write to Redis when available; the local cache remains the fallback.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let _: () = connection.set_ex(&key, &serialized, self.ttl_secs).await?;
+            let _: redis::RedisResult<()> =
+                connection.set_ex(&key, &serialized, self.ttl_secs).await;
         }
 
         // Write to memory cache as fallback.
@@ -333,6 +334,12 @@ mod tests {
         // Should succeed even without Redis (uses memory cache).
         let result = side_effect.execute(&context).await;
         assert!(result.is_ok());
+        assert!(
+            side_effect
+                .get_cached_result("user-1", "hash-1")
+                .await
+                .is_some()
+        );
     }
 
     #[tokio::test]
