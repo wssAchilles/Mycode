@@ -171,4 +171,75 @@ describe('TopKSelector', () => {
         expect(selected.every((entry) => entry.scoreContractVersion === 'recommendation_score_contract_v2')).toBe(true);
         expect(selected.filter((entry) => entry.recallSource === 'TwoTowerSource').length).toBeLessThanOrEqual(3);
     });
+
+    it('falls back to safe defaults for non-positive OON and exploration ratios', () => {
+        const selector = new TopKSelector(6, { oversampleFactor: 1, maxSize: 20, authorSoftCap: 3 });
+        const candidates = [
+            candidate('f1', 'author-f1', 'in_network', true, 10),
+            candidate('f2', 'author-f2', 'in_network', true, 9.9),
+            candidate('f3', 'author-f3', 'in_network', true, 9.8),
+            candidate('g1', 'author-g1', 'social_expansion', false, 9.7),
+            candidate('g2', 'author-g2', 'social_expansion', false, 9.6),
+            candidate('i1', 'author-i1', 'interest', false, 9.5),
+            candidate('i2', 'author-i2', 'interest', false, 9.4),
+            candidate('p1', 'author-p1', 'fallback', false, 9.3),
+        ].map(scored);
+        const baseline = selector.select(query('warm', 6), candidates).map((entry) => entry.modelPostId);
+        const malformedQuery = query('warm', 6);
+        malformedQuery.rankingPolicy = {
+            maxOonRatio: 0,
+            explorationFloorRatio: -1,
+        };
+
+        expect(selector.select(malformedQuery, candidates).map((entry) => entry.modelPostId)).toEqual(baseline);
+    });
+
+    it('does not force an exploration floor for tiny result sizes', () => {
+        const selector = new TopKSelector(3, { oversampleFactor: 1, maxSize: 20, authorSoftCap: 3 });
+        const exploration = candidate('p1', 'author-p1', 'fallback', false, 6);
+        exploration._scoreBreakdown = { explorationEligible: 1, fatigueStrength: 0.1 };
+        const selected = selector.select(
+            query('warm', 3),
+            [
+                candidate('f1', 'author-f1', 'in_network', true, 10),
+                candidate('f2', 'author-f2', 'in_network', true, 8),
+                {
+                    ...candidate('i1', 'author-i1', 'interest', false, 7),
+                    _scoreBreakdown: { fatigueStrength: 1 },
+                },
+                exploration,
+            ].map(scored),
+        );
+
+        expect(selected.map((entry) => entry.modelPostId)).toEqual(['f1', 'i1', 'f2']);
+    });
+
+    it('caps the heavy default exploration floor for oversampled selections', () => {
+        const selector = new TopKSelector(20, { oversampleFactor: 5, maxSize: 200, authorSoftCap: 3 });
+        const makeLane = (
+            prefix: string,
+            count: number,
+            lane: FeedCandidate['retrievalLane'],
+            inNetwork: boolean,
+            score: number,
+            exploration = false,
+        ) => Array.from({ length: count }, (_, index) => {
+            const item = candidate(`${prefix}${index}`, `${prefix}-author-${index}`, lane, inNetwork, score - index, index);
+            item._scoreBreakdown = { fatigueStrength: 1, ...(exploration ? { explorationEligible: 1 } : {}) };
+            return item;
+        });
+        const selected = selector.select(
+            query('heavy', 20),
+            [
+                ...makeLane('f', 35, 'in_network', true, 1000),
+                ...makeLane('g', 16, 'social_expansion', false, 900),
+                ...makeLane('i', 18, 'interest', false, 800),
+                ...makeLane('p', 25, 'fallback', false, 700),
+                ...makeLane('e', 6, 'fallback', false, 600, true),
+            ].map(scored),
+        );
+
+        expect(selected).toHaveLength(100);
+        expect(selected.slice(69, 75).filter((entry) => entry.selectionPool === 'exploration')).toHaveLength(2);
+    });
 });
