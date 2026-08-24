@@ -138,14 +138,15 @@ impl SourceCache {
         key: &str,
         candidates: &[RecommendationCandidatePayload],
     ) -> Result<()> {
-        // Write to Redis.
+        let serialized = serde_json::to_string(candidates)?;
+
+        // Write to Redis when available; the local cache remains the fallback.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let serialized = serde_json::to_string(candidates)?;
-            let _: () = connection
+            let _: redis::RedisResult<()> = connection
                 .set_ex(key, serialized, self.ttl_secs as u64)
-                .await?;
+                .await;
         }
 
         // Write to in-memory cache.
