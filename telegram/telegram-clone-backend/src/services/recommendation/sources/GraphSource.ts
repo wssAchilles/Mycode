@@ -259,17 +259,23 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 return [];
             }
 
-            const validGraphCandidates = graphCandidates.filter((candidate) =>
-                mongoose.isValidObjectId(candidate.postId)
-            );
-            if (validGraphCandidates.length === 0) {
+            const graphCandidatesByPostId = new Map<string, (typeof graphCandidates)[number]>();
+            for (const candidate of graphCandidates) {
+                if (!mongoose.isValidObjectId(candidate.postId)) {
+                    continue;
+                }
+
+                const postId = new mongoose.Types.ObjectId(candidate.postId).toString();
+                const existing = graphCandidatesByPostId.get(postId);
+                if (!existing || candidate.score > existing.score) {
+                    graphCandidatesByPostId.set(postId, candidate);
+                }
+            }
+            if (graphCandidatesByPostId.size === 0) {
                 return [];
             }
 
-            // 从数据库获取帖子详情，并保留 Graph 召回顺序。
-            const graphCandidatesByPostId = new Map(
-                validGraphCandidates.map((candidate) => [candidate.postId, candidate])
-            );
+            // 从数据库获取帖子详情，并保留 Graph 召回顺序；重复帖子取最高分元数据。
             const postIds = Array.from(graphCandidatesByPostId.keys()).map(
                 (postId) => new mongoose.Types.ObjectId(postId)
             );

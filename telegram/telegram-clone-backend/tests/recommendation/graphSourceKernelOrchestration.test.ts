@@ -201,7 +201,8 @@ describe('GraphSource graph kernel orchestration', () => {
     const legacyClient = {
       recall: vi.fn().mockResolvedValue([
         { postId: 'invalid-post-id', score: 1, path: 'invalid', type: 'friend_of_friend' },
-        { postId: postId2, score: 0.9, path: 'via-user-2', type: 'similar_user' },
+        { postId: postId2.toUpperCase(), score: 0.9, path: 'via-user-2', type: 'similar_user' },
+        { postId: postId2, score: 0.5, path: 'via-user-2-low', type: 'topic_interest' },
         { postId: postId1, score: 0.5, path: 'via-user-1', type: 'topic_interest' },
       ]),
     };
@@ -232,6 +233,7 @@ describe('GraphSource graph kernel orchestration', () => {
 
     expect(candidates.map((candidate) => candidate.postId.toString())).toEqual([postId2, postId1]);
     expect(candidates.map((candidate) => (candidate as any).graphScore)).toEqual([0.9, 0.5]);
+    expect((candidates[0] as any).graphPath).toBe('via-user-2');
     expect(Post.find).toHaveBeenCalledWith(expect.objectContaining({
       _id: { $in: [oid(postId2), oid(postId1)] },
     }));
