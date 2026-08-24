@@ -454,11 +454,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         for (const candidate of socialNeighbors) {
             this.upsertGraphKernelAuthor(authorAggregates, {
                 userId: candidate.userId,
-                score: Number(candidate.score ?? 0)
+                score: (typeof candidate.score === 'number' ? candidate.score : Number.NaN)
                     + Number(candidate.engagementScore ?? 0) * 0.25
                     + Number(candidate.recentnessScore ?? 0) * 0.05,
                 sourceKind: 'social_neighbor',
-                relationKinds: candidate.relationKinds ?? [],
+                relationKinds: candidate.relationKinds,
                 weight: sourceWeights.social_neighbor,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
                 freshnessScore: Number(candidate.recentnessScore ?? 0),
@@ -468,11 +468,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         for (const candidate of recentEngagers) {
             this.upsertGraphKernelAuthor(authorAggregates, {
                 userId: candidate.userId,
-                score: Number(candidate.score ?? 0) * 0.2
+                score: (typeof candidate.score === 'number' ? candidate.score : Number.NaN) * 0.2
                     + Number(candidate.engagementScore ?? 0) * 0.45
                     + Number(candidate.recentnessScore ?? 0) * 0.45,
                 sourceKind: 'recent_engager',
-                relationKinds: candidate.relationKinds ?? [],
+                relationKinds: candidate.relationKinds,
                 weight: sourceWeights.recent_engager,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
                 freshnessScore: Number(candidate.recentnessScore ?? 0),
@@ -482,9 +482,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         for (const candidate of bridgeUsers) {
             this.upsertGraphKernelAuthor(authorAggregates, {
                 userId: candidate.userId,
-                score: Number(candidate.bridgeStrength ?? candidate.score ?? 0),
+                score: typeof candidate.bridgeStrength === 'number'
+                    ? candidate.bridgeStrength
+                    : (typeof candidate.score === 'number' ? candidate.score : Number.NaN),
                 sourceKind: 'bridge_user',
-                viaUserIds: candidate.viaUserIds ?? [],
+                viaUserIds: candidate.viaUserIds,
                 weight: sourceWeights.bridge_user,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
                 freshnessScore: 0.4,
@@ -494,11 +496,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         for (const candidate of coEngagers) {
             this.upsertGraphKernelAuthor(authorAggregates, {
                 userId: candidate.userId,
-                score: Number(candidate.score ?? 0) * 0.65
+                score: (typeof candidate.score === 'number' ? candidate.score : Number.NaN) * 0.65
                     + Number(candidate.engagementScore ?? 0) * 0.25
                     + Number(candidate.recentnessScore ?? 0) * 0.1,
                 sourceKind: 'co_engager',
-                relationKinds: candidate.relationKinds ?? [],
+                relationKinds: candidate.relationKinds,
                 weight: sourceWeights.co_engager,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
                 freshnessScore: Number(candidate.recentnessScore ?? 0),
@@ -508,11 +510,11 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         for (const candidate of contentAffinityNeighbors) {
             this.upsertGraphKernelAuthor(authorAggregates, {
                 userId: candidate.userId,
-                score: Number(candidate.score ?? 0) * 0.55
+                score: (typeof candidate.score === 'number' ? candidate.score : Number.NaN) * 0.55
                     + Number(candidate.engagementScore ?? 0) * 0.15
                     + Number(candidate.recentnessScore ?? 0) * 0.3,
                 sourceKind: 'content_affinity',
-                relationKinds: candidate.relationKinds ?? [],
+                relationKinds: candidate.relationKinds,
                 weight: sourceWeights.content_affinity,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
                 freshnessScore: Number(candidate.recentnessScore ?? 0),
@@ -860,10 +862,26 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             freshnessScore?: number;
         },
     ): void {
+        if (
+            typeof input.userId !== 'string'
+            || input.userId.trim().length === 0
+            || !Number.isFinite(input.score)
+            || input.score < 0
+            || (input.weight !== undefined && !Number.isFinite(input.weight))
+            || (input.viewerSignal !== undefined && !Number.isFinite(input.viewerSignal))
+            || (input.freshnessScore !== undefined && !Number.isFinite(input.freshnessScore))
+            || (input.relationKinds !== undefined && !Array.isArray(input.relationKinds))
+            || (input.viaUserIds !== undefined && !Array.isArray(input.viaUserIds))
+        ) {
+            return;
+        }
         const weightedScore = Math.max(0, input.score) * Math.max(0.5, input.weight || 1);
         const viewerSignal = clamp01(input.viewerSignal || 0);
         const freshnessScore = clamp01(input.freshnessScore || 0);
         const effectiveScore = weightedScore * (1 + viewerSignal * 0.22);
+        if (!Number.isFinite(weightedScore) || !Number.isFinite(effectiveScore)) {
+            return;
+        }
         const current = target.get(input.userId) ?? {
             userId: input.userId,
             totalScore: 0,
@@ -880,19 +898,25 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             componentScores: {},
         };
 
-        current.totalScore += effectiveScore;
+        const nextTotalScore = current.totalScore + effectiveScore;
+        const nextComponentScore =
+            (current.componentScores[input.sourceKind] || 0) + effectiveScore;
+        if (!Number.isFinite(nextTotalScore) || !Number.isFinite(nextComponentScore)) {
+            target.delete(input.userId);
+            return;
+        }
+        current.totalScore = nextTotalScore;
         current.sourceKinds.add(input.sourceKind);
         current.viewerSignal = Math.max(current.viewerSignal, viewerSignal);
         current.pathFreshness = Math.max(current.pathFreshness, freshnessScore);
-        current.componentScores[input.sourceKind] =
-            (current.componentScores[input.sourceKind] || 0) + effectiveScore;
+        current.componentScores[input.sourceKind] = nextComponentScore;
         for (const relationKind of input.relationKinds ?? []) {
-            if (relationKind && relationKind.trim().length > 0) {
+            if (typeof relationKind === 'string' && relationKind.trim().length > 0) {
                 current.relationKinds.add(relationKind.trim());
             }
         }
         for (const viaUserId of input.viaUserIds ?? []) {
-            if (viaUserId && viaUserId.trim().length > 0) {
+            if (typeof viaUserId === 'string' && viaUserId.trim().length > 0) {
                 current.viaUserIds.add(viaUserId.trim());
             }
         }

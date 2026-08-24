@@ -187,6 +187,83 @@ describe('GraphSource graph kernel orchestration', () => {
     });
   });
 
+  it('skips non-finite or empty graph-kernel authors before materialization', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    const validPostId = '507f191e810c19729de8b001';
+    const graphKernelClient = {
+      socialNeighborsWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [
+          { userId: 'invalid-score-author', score: Number.POSITIVE_INFINITY },
+          { userId: 'nan-score-author', score: Number.NaN },
+          { userId: 'overflow-author', score: Number.MAX_VALUE },
+          { userId: 'missing-score-author' },
+          { userId: 'null-score-author', score: null as any },
+          { userId: 'negative-score-author', score: -1 },
+          {
+            userId: 'invalid-metadata-author',
+            score: 1,
+            relationKinds: {} as any,
+          },
+          { userId: '', score: 9 },
+          { userId: 'valid-author', score: 1 },
+        ],
+      }),
+      recentEngagersWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [
+          { userId: 'overflow-author', score: Number.MAX_VALUE },
+          { userId: 'valid-author', score: Number.NaN },
+        ],
+      }),
+      bridgeUsersWithDiagnostics: vi.fn().mockResolvedValue({
+        candidates: [{
+          userId: 'invalid-via-author',
+          depth: 1,
+          pathCount: 1,
+          viaUserIds: {} as any,
+        }, {
+          userId: 'missing-bridge-score',
+          depth: 1,
+          pathCount: 1,
+          viaUserIds: [],
+        }],
+      }),
+      coEngagersWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+      contentAffinityNeighborsWithDiagnostics: vi.fn().mockResolvedValue({ candidates: [] }),
+    };
+    const legacyClient = { recall: vi.fn().mockResolvedValue([]) };
+
+    vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([
+      {
+        _id: oid(validPostId),
+        authorId: 'valid-author',
+        content: 'valid candidate',
+        createdAt: new Date('2026-04-17T01:00:00.000Z'),
+        isReply: false,
+        isRepost: false,
+        deletedAt: null,
+      },
+    ]));
+
+    const source = new GraphSource({
+      client: legacyClient as any,
+      graphKernelClient: graphKernelClient as any,
+      maxTotal: 10,
+    });
+
+    const candidates = await source.getCandidates(query);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].authorId).toBe('valid-author');
+    expect(source.stageDetail(query, candidates)).toMatchObject({
+      graphKernelRankedAuthorCount: 1,
+      graphKernelMaterializerDiagnostics: {
+        requestedAuthorCount: 1,
+        uniqueAuthorCount: 1,
+      },
+    });
+    expect(legacyClient.recall).not.toHaveBeenCalled();
+  });
+
   it('preserves legacy graph recall order and skips invalid post ids', async () => {
     const query = createFeedQuery('viewer-1', 10);
     const postId1 = '507f191e810c19729de8b001';
