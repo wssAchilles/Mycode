@@ -29,18 +29,28 @@ export class NewsMaterializationService {
         let scanned = 0;
         let upserted = 0;
         let snapshotRequested = 0;
-        let cursor: Date | undefined;
+        let cursor: { updatedAt: Date; id: string } | undefined;
 
         while (scanned < limit) {
-            const where: Record<string, unknown> = {
+            const where: Record<PropertyKey, unknown> = {
                 isActive: true,
                 deletedAt: null,
             };
-            if (options.since || cursor) {
-                where.updatedAt = {
-                    ...(options.since ? { [Op.gte]: options.since } : {}),
-                    ...(cursor ? { [Op.lt]: cursor } : {}),
-                };
+            if (cursor) {
+                where[Op.or] = [
+                    {
+                        updatedAt: {
+                            ...(options.since ? { [Op.gte]: options.since } : {}),
+                            [Op.lt]: cursor.updatedAt,
+                        },
+                    },
+                    {
+                        updatedAt: cursor.updatedAt,
+                        id: { [Op.lt]: cursor.id },
+                    },
+                ];
+            } else if (options.since) {
+                where.updatedAt = { [Op.gte]: options.since };
             }
 
             const articles = await NewsArticle.findAll({
@@ -54,7 +64,11 @@ export class NewsMaterializationService {
             if (articles.length === 0) break;
 
             scanned += articles.length;
-            cursor = articles[articles.length - 1].updatedAt;
+            const lastArticle = articles[articles.length - 1];
+            cursor = {
+                updatedAt: lastArticle.updatedAt,
+                id: lastArticle.id,
+            };
 
             if (dryRun) continue;
 
