@@ -17,7 +17,7 @@ use telegram_ranking_primitives::{
 
 use super::helpers::{
     bootstrapped_cold_start_keywords, breakdown_value, build_stage, candidate_keyword_set, clamp01,
-    keyword_overlap_ratio, merge_breakdown, user_state,
+    finite_score_product, keyword_overlap_ratio, merge_breakdown, user_state,
 };
 
 pub(super) fn author_affinity_scorer(
@@ -93,7 +93,7 @@ pub(super) fn apply_author_affinity(
     });
     let multiplier = (base_multiplier + realtime_boost).clamp(0.35, 1.5);
 
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.author_affinity_score = Some(affinity_score);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
@@ -209,7 +209,7 @@ pub(super) fn apply_cold_start_interest(
             + fallback_prior,
     );
     let multiplier = 1.0 + strength.min(0.28);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "coldStartInterestStrength", strength);
@@ -313,7 +313,7 @@ pub(super) fn apply_interest_decay(
         + exposure_pressure * 0.055)
         .clamp(0.0, 0.42);
     let multiplier = (1.0 + positive_lift - negative_penalty).clamp(0.54, 1.16);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(

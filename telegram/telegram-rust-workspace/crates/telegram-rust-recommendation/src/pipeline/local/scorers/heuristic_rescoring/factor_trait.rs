@@ -1,4 +1,4 @@
-use super::super::helpers::merge_breakdown;
+use super::super::helpers::{finite_score_product, merge_breakdown};
 use super::context::HeuristicRescoringContext;
 use crate::contracts::RecommendationCandidatePayload;
 
@@ -33,7 +33,7 @@ pub(super) fn apply_factor(
         return;
     }
     let current = candidate.weighted_score.unwrap_or_default();
-    let adjusted = current * multiplier;
+    let adjusted = finite_score_product(current, multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     let breakdown_key = format!("{}Multiplier", factor.name());

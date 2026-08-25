@@ -1,6 +1,6 @@
 mod context;
 
-use super::helpers::build_stage;
+use super::helpers::{build_stage, finite_score_product};
 use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use context::ListwiseGroups;
@@ -75,7 +75,7 @@ fn apply_listwise_decay(
             }
             let multiplier = decay_rate.powi(position as i32);
             let current = candidates[idx].weighted_score.unwrap_or(0.0);
-            let adjusted = current * multiplier;
+            let adjusted = finite_score_product(current, multiplier);
             candidates[idx].weighted_score = Some(adjusted);
             candidates[idx].pipeline_score = Some(adjusted);
         }

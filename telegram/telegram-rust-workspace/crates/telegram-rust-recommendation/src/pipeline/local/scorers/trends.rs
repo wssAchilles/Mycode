@@ -17,8 +17,8 @@ use telegram_ranking_primitives::{
 use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
-    breakdown_value, build_stage, candidate_keyword_set, clamp01, freshness_multiplier,
-    keyword_overlap_ratio, merge_breakdown,
+    breakdown_value, build_stage, candidate_keyword_set, clamp01, finite_score_product,
+    freshness_multiplier, keyword_overlap_ratio, merge_breakdown,
 };
 
 pub(super) fn news_trend_link_scorer(
@@ -86,7 +86,7 @@ pub(super) fn apply_news_trend_link(
     )) * 0.24;
     let strength = clamp01(keyword_match * 0.68 + news_prior + trend_prior);
     let multiplier = (1.0 + plan.boost * strength).clamp(1.0, 1.14);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "newsTrendLinkMatch", keyword_match);
@@ -176,7 +176,7 @@ pub(super) fn apply_trend_affinity(
     let strength =
         clamp01(trend_match * 0.62 + lane_prior + news_prior + evidence_prior + freshness_prior);
     let multiplier = (1.0 + plan.boost * strength).clamp(1.0, 1.16);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "trendAffinityMatch", trend_match);
@@ -263,7 +263,7 @@ pub(super) fn apply_trend_personalization(
         0.0
     };
     let multiplier = (1.0 + plan.boost * 0.9 * strength).clamp(1.0, 1.14);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "trendPersonalizationMatch", trend_match);

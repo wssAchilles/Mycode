@@ -19,7 +19,8 @@ use telegram_ranking_primitives::{
 
 use super::helpers::{
     build_stage, clamp01, compute_content_quality, direct_negative_feedback, early_suppression,
-    engagement_multiplier, evidence_multiplier, freshness_multiplier, merge_breakdown,
+    engagement_multiplier, evidence_multiplier, finite_score_product, freshness_multiplier,
+    merge_breakdown,
 };
 
 pub(super) fn score_calibration_scorer(
@@ -90,17 +91,20 @@ pub(super) fn apply_score_calibration(
         Some("heavy") => 1.02,
         _ => 1.0,
     };
-    let adjusted = current
-        * source_multiplier
-        * quality_multiplier
-        * freshness_multiplier
-        * engagement_multiplier
-        * evidence_multiplier
-        * early_suppression.multiplier
-        * negative_feedback.multiplier
-        * behavior_multiplier
-        * calibration_table.multiplier
-        * user_state_multiplier;
+    let adjusted = [
+        source_multiplier,
+        quality_multiplier,
+        freshness_multiplier,
+        engagement_multiplier,
+        evidence_multiplier,
+        early_suppression.multiplier,
+        negative_feedback.multiplier,
+        behavior_multiplier,
+        calibration_table.multiplier,
+        user_state_multiplier,
+    ]
+    .into_iter()
+    .fold(current, finite_score_product);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "calibrationSourceMultiplier", source_multiplier);
@@ -230,9 +234,13 @@ pub(super) fn content_quality_stage(
 
 pub(super) fn apply_content_quality(candidate: &mut RecommendationCandidatePayload) {
     let quality = compute_content_quality(candidate);
-    let adjusted = candidate.weighted_score.unwrap_or_default()
-        * (0.82 + quality.score * 0.36)
-        * (1.0 - quality.low_quality_penalty * 0.18);
+    let adjusted = finite_score_product(
+        finite_score_product(
+            candidate.weighted_score.unwrap_or_default(),
+            0.82 + quality.score * 0.36,
+        ),
+        1.0 - quality.low_quality_penalty * 0.18,
+    );
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "contentQuality", quality.score);
@@ -327,7 +335,7 @@ pub(super) fn apply_recency(
         .max(0) as f64;
     let decay_factor = 0.5_f64.powf(age_ms / plan.half_life_ms);
     let multiplier = 0.85 + (1.25 - 0.85) * decay_factor;
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "recencyMultiplier", multiplier);

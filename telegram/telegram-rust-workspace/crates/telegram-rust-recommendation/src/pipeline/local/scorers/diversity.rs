@@ -11,8 +11,8 @@ use telegram_ranking_primitives::{
 use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
-    breakdown_value, build_stage, candidate_semantic_tokens, diversity_key, jaccard_overlap,
-    merge_breakdown, request_source_key, request_topic_key,
+    breakdown_value, build_stage, candidate_semantic_tokens, diversity_key, finite_score_product,
+    jaccard_overlap, merge_breakdown, request_source_key, request_topic_key,
 };
 
 pub(super) fn intra_request_diversity_scorer(
@@ -80,7 +80,8 @@ pub(super) fn intra_request_diversity_scorer(
         let protection = (trend_protection + evidence_protection).clamp(0.0, 0.38);
         let penalty = (raw_penalty * (1.0 - protection)).clamp(0.0, 0.24);
         let multiplier = 1.0 - penalty;
-        let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
+        let adjusted =
+            finite_score_product(next[index].weighted_score.unwrap_or_default(), multiplier);
         next[index].weighted_score = Some(adjusted);
         next[index].pipeline_score = Some(adjusted);
         merge_breakdown(&mut next[index], "intraRequestRedundancyPenalty", penalty);
@@ -167,7 +168,8 @@ pub(super) fn author_diversity_scorer(
         let multiplier = ((1.0 - 0.3) * 0.8_f64.powi(position as i32) + 0.3)
             * multi_source_softener
             * recall_evidence_softener;
-        let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
+        let adjusted =
+            finite_score_product(next[index].weighted_score.unwrap_or_default(), multiplier);
         next[index].score = Some(adjusted);
         next[index].pipeline_score = Some(adjusted);
         merge_breakdown(&mut next[index], "diversityMultiplier", multiplier);

@@ -26,7 +26,7 @@ fn thompson_sample(successes: f64, failures: f64, jitter: f64) -> f64 {
 
 use super::helpers::{
     breakdown_value, build_stage, clamp01, default_exploration_rate, exploration_risk,
-    merge_breakdown, stable_unit_interval, user_state,
+    finite_score_product, merge_breakdown, stable_unit_interval, user_state,
 };
 
 pub(super) fn exploration_scorer(
@@ -147,7 +147,7 @@ pub(super) fn apply_exploration(
         0.0
     };
     let multiplier = (1.0 + strength).clamp(1.0, 1.16);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(
@@ -304,7 +304,7 @@ pub(super) fn apply_bandit_exploration(
         0.0
     };
     let multiplier = (1.0 + lift).clamp(1.0, 1.14);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "banditEligible", eligible as i32 as f64);
