@@ -65,9 +65,28 @@ fn parse_bool(value: &Value) -> Option<bool> {
 }
 
 fn parse_number(value: &Value) -> Option<f64> {
-    match value {
+    let parsed = match value {
         Value::Number(value) => value.as_f64(),
         Value::String(value) => value.parse::<f64>().ok(),
         _ => None,
+    };
+
+    parsed.filter(|value| value.is_finite())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::parse_number;
+
+    #[test]
+    fn parse_number_rejects_non_finite_overrides() {
+        for value in [json!("NaN"), json!("inf"), json!("-inf")] {
+            assert_eq!(parse_number(&value), None);
+        }
+
+        assert_eq!(parse_number(&json!(1.25)), Some(1.25));
+        assert_eq!(parse_number(&json!("2.5")), Some(2.5));
     }
 }
