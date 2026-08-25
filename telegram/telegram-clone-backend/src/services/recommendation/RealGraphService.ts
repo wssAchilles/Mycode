@@ -319,24 +319,46 @@ export class RealGraphService {
             };
         let matched = 0;
         let updated = 0;
-        let cursor: Date | undefined;
+        let cursor: { updatedAt: Date; id: IRealGraphEdge['_id'] } | undefined;
 
         while (matched < limit) {
-            const updatedAtQuery = {
-                ...(options?.since ? { $gte: options.since } : {}),
-                ...(cursor ? { $lt: cursor } : {}),
-            };
-            const pageQuery = {
-                ...query,
-                ...(Object.keys(updatedAtQuery).length > 0 ? { updatedAt: updatedAtQuery } : {}),
-            };
+            const pageQuery: Record<string, unknown> = { ...query };
+            if (cursor) {
+                const cursorQuery = {
+                    $or: [
+                        {
+                            updatedAt: {
+                                ...(options?.since ? { $gte: options.since } : {}),
+                                $lt: cursor.updatedAt,
+                            },
+                        },
+                        {
+                            updatedAt: cursor.updatedAt,
+                            _id: { $lt: cursor.id },
+                        },
+                    ],
+                };
+                if (pageQuery.$or) {
+                    const metadataQuery = pageQuery.$or;
+                    delete pageQuery.$or;
+                    pageQuery.$and = [{ $or: metadataQuery }, cursorQuery];
+                } else {
+                    pageQuery.$or = cursorQuery.$or;
+                }
+            } else if (options?.since) {
+                pageQuery.updatedAt = { $gte: options.since };
+            }
             const edges = await RealGraphEdge.find(pageQuery)
                 .sort({ updatedAt: -1, _id: -1 })
                 .limit(Math.min(batchSize, limit - matched));
             if (edges.length === 0) break;
 
             matched += edges.length;
-            cursor = edges[edges.length - 1].updatedAt;
+            const lastEdge = edges[edges.length - 1];
+            cursor = {
+                updatedAt: lastEdge.updatedAt,
+                id: lastEdge._id,
+            };
 
             if (!dryRun) {
                 for (const edge of edges) {
