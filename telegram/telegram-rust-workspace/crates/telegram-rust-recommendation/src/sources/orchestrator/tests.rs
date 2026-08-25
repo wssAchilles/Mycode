@@ -16,7 +16,8 @@ use telegram_pipeline_primitives::{
 };
 use telegram_rust_http_types::SuccessEnvelope;
 use telegram_source_primitives::{
-    RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
+    RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_SOURCE_RANK_SCORE_FIELD, RETRIEVAL_SOURCE_SCORE_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
     SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
     SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS,
@@ -872,4 +873,44 @@ fn lane_merge_deduplicates_multi_source_hits_and_preserves_secondary_evidence() 
         Some(1)
     );
     assert!(source_merge_detail_contract_violations(Some(&detail)).is_empty());
+}
+
+#[test]
+fn lane_merge_drops_non_finite_recall_evidence_values() {
+    let mut candidate = fixture_candidate("evidence-post", "author-1", "FollowingSource");
+    candidate.score = Some(0.7);
+    candidate.recall_evidence = Some(crate::contracts::RecallEvidencePayload {
+        primary_source: Some("FollowingSource".to_string()),
+        primary_lane: Some("social".to_string()),
+        source_rank: Some(f64::INFINITY),
+        source_rank_score: Some(f64::NAN),
+        source_score: Some(f64::NAN),
+        source_count: f64::NAN,
+        same_lane_source_count: f64::INFINITY,
+        cross_lane_source_count: f64::NEG_INFINITY,
+        confidence: f64::NAN,
+    });
+
+    let (merged, _, _) = merge_source_candidates(
+        &fixture_query(),
+        vec![("FollowingSource".to_string(), vec![candidate])],
+        &["FollowingSource".to_string()],
+    );
+
+    let merged = merged.first().expect("candidate should be preserved");
+    let evidence = merged
+        .recall_evidence
+        .as_ref()
+        .expect("merged candidate should expose recall evidence");
+    assert!(evidence.source_rank.is_none());
+    assert!(evidence.source_rank_score.is_none());
+    assert_eq!(evidence.source_score, Some(0.7));
+    assert!(evidence.confidence.is_finite());
+    let breakdown = merged
+        .score_breakdown
+        .as_ref()
+        .expect("merge should create score breakdown");
+    assert!(breakdown[RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD].is_finite());
+    assert!(breakdown[RETRIEVAL_SOURCE_RANK_SCORE_FIELD].is_finite());
+    assert_eq!(breakdown[RETRIEVAL_SOURCE_SCORE_FIELD], 0.7);
 }

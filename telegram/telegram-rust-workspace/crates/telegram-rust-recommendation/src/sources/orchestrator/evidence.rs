@@ -136,16 +136,21 @@ fn apply_merged_recall_evidence(
         .retrieval_lane
         .clone()
         .or_else(|| existing.primary_lane.clone());
-    let source_rank_score = existing.source_rank_score.unwrap_or_default();
+    let source_rank = existing.source_rank.filter(|value| value.is_finite());
+    let source_rank_score = existing
+        .source_rank_score
+        .filter(|value| value.is_finite())
+        .unwrap_or_default();
     let source_score = existing
         .source_score
+        .filter(|value| value.is_finite())
         .unwrap_or_else(|| candidate.primary_score());
     let source_count = 1.0 + secondary_count as f64;
     let effective_source_count =
         effective_source_count(secondary_count, same_lane_count, cross_lane_count);
     let source_diversity_score =
         source_diversity_score(secondary_count, same_lane_count, cross_lane_count);
-    let confidence = (existing.confidence.max(0.38)
+    let confidence = (finite_or_zero(existing.confidence).max(0.38)
         + source_rank_score * 0.08
         + normalized_source_score(source_score) * 0.06
         + (effective_source_count - 1.0).max(0.0) * 0.05
@@ -155,8 +160,8 @@ fn apply_merged_recall_evidence(
     candidate.recall_evidence = Some(RecallEvidencePayload {
         primary_source,
         primary_lane,
-        source_rank: existing.source_rank,
-        source_rank_score: existing.source_rank_score,
+        source_rank,
+        source_rank_score: existing.source_rank_score.filter(|value| value.is_finite()),
         source_score: Some(source_score),
         source_count,
         same_lane_source_count: same_lane_count as f64,
@@ -182,6 +187,10 @@ fn apply_merged_recall_evidence(
     );
     breakdown.insert(RETRIEVAL_SOURCE_SCORE_FIELD.to_string(), source_score);
     breakdown.insert(RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD.to_string(), confidence);
+}
+
+fn finite_or_zero(value: f64) -> f64 {
+    if value.is_finite() { value } else { 0.0 }
 }
 
 fn effective_source_count(
