@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const pipeline = {
     zadd: vi.fn(),
     zremrangebyscore: vi.fn(),
+    zrevrangebyscore: vi.fn(),
     expire: vi.fn(),
     zcard: vi.fn(),
     exec: vi.fn(),
@@ -28,6 +29,7 @@ describe('InNetworkTimelineService write retention', () => {
     vi.clearAllMocks();
     mocks.pipeline.zadd.mockReturnThis();
     mocks.pipeline.zremrangebyscore.mockReturnThis();
+    mocks.pipeline.zrevrangebyscore.mockReturnThis();
     mocks.pipeline.expire.mockReturnThis();
     mocks.pipeline.zcard.mockReturnThis();
     mocks.pipeline.exec.mockResolvedValue([
@@ -61,5 +63,31 @@ describe('InNetworkTimelineService write retention', () => {
       0,
       49,
     );
+  });
+
+  it('drops non-finite scores from the merged timeline', async () => {
+    mocks.pipeline.exec.mockResolvedValueOnce([
+      [
+        null,
+        [
+          'post-valid',
+          '123',
+          'post-positive-infinity',
+          'Infinity',
+          'post-negative-infinity',
+          '-Infinity',
+          'post-nan',
+          'NaN',
+        ],
+      ],
+    ]);
+
+    const result = await InNetworkTimelineService.getMergedPostIdsForAuthorsWithSummary({
+      authorIds: ['author-1'],
+      maxResults: 10,
+    });
+
+    expect(result.postIds).toEqual(['post-valid']);
+    expect(result.summary.scannedHitCount).toBe(1);
   });
 });

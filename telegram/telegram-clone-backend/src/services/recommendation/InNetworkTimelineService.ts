@@ -208,7 +208,7 @@ export class InNetworkTimelineService {
             for (let i = 0; i + 1 < data.length; i += 2) {
                 const postId = String(data[i]);
                 const score = Number(data[i + 1]);
-                if (!postId || Number.isNaN(score)) continue;
+                if (!postId || !Number.isFinite(score)) continue;
                 scored.push({ postId, score });
             }
         }
