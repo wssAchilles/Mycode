@@ -69,9 +69,11 @@ export class FollowingTimelineCache {
             // A prolific author can consume the shared limit before another author appears.
             // Only backfill when the limit was saturated, keeping the normal path to one query.
             if (freshPosts.length === globalLimit) {
-                const missingAuthorIds = toRefresh.filter((id) => !grouped.has(id));
+                const underfilledAuthorIds = toRefresh.filter(
+                    (id) => (grouped.get(id)?.length ?? 0) < this.maxPerAuthor,
+                );
                 const backfilled = await Promise.all(
-                    missingAuthorIds.map(async (authorId) => {
+                    underfilledAuthorIds.map(async (authorId) => {
                         const posts = await Post.find({
                             authorId,
                             createdAt: { $gte: ageCutoff },

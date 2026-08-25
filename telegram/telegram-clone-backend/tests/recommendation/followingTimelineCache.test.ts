@@ -57,4 +57,27 @@ describe('FollowingTimelineCache', () => {
     expect(result.filter((item) => item.authorId === 'author-a')).toHaveLength(2);
     expect(result.filter((item) => item.authorId === 'author-b')).toHaveLength(1);
   });
+
+  it('backfills an author only partially covered by the shared Mongo limit', async () => {
+    const sharedPosts = [
+      post('author-a', 1),
+      post('author-a', 2),
+      post('author-a', 3),
+      post('author-b', 4),
+    ];
+    const authorBPosts = [sharedPosts[3], post('author-b', 5)];
+    const findSpy = mockFindResults([sharedPosts, authorBPosts]);
+
+    const cache = new FollowingTimelineCache({
+      ttlMs: 60_000,
+      maxPerAuthor: 2,
+      maxAgeDays: 30,
+    });
+    const result = await cache.getPostsForAuthors(['author-a', 'author-b']);
+
+    expect(findSpy).toHaveBeenCalledTimes(2);
+    expect(findSpy.mock.calls[1]?.[0]).toMatchObject({ authorId: 'author-b' });
+    expect(result.filter((item) => item.authorId === 'author-a')).toHaveLength(2);
+    expect(result.filter((item) => item.authorId === 'author-b')).toHaveLength(2);
+  });
 });
