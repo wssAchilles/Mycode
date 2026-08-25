@@ -363,7 +363,17 @@ impl RecommendationSourceOrchestrator {
         while let Some(joined) = join_set.join_next().await {
             let (index, source_name, duration_ms, result) = joined.expect("source join task");
             let mut execution = match result {
-                Ok(source_execution) => source_execution,
+                Ok(source_execution) => {
+                    if is_cacheable(&source_name) && !source_execution.candidates.is_empty() {
+                        let cache_key = self.source_cache.query_cache_key(&source_name, query);
+                        let candidates = source_execution.candidates.clone();
+                        let cache = self.source_cache.clone();
+                        tokio::spawn(async move {
+                            let _ = cache.store_for_key(&cache_key, &candidates).await;
+                        });
+                    }
+                    source_execution
+                }
                 Err(error) => {
                     build_failed_source_execution(&source_name, &error.to_string(), duration_ms)
                 }

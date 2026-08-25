@@ -509,6 +509,73 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
 }
 
 #[tokio::test]
+async fn caches_successful_individual_source_after_batch_failure() {
+    let (base_url, server_handle) = spawn_source_server().await;
+    let mut config = fixture_config(base_url);
+    config.redis_url = "not-a-redis-url".to_string();
+    config.source_order = vec!["FollowingSource".to_string()];
+    config.source_cache_enabled = true;
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:batch-fallback");
+    let query = fixture_query();
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache.clone(),
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&query, &[])
+        .await
+        .expect("retrieve fallback source candidates");
+    assert_eq!(response.candidates.len(), 1);
+    assert_eq!(
+        response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&1)
+    );
+
+    let mut cached_candidates = None;
+    for _ in 0..20 {
+        if let Some(candidates) = source_cache
+            .get_for_query("FollowingSource", &query)
+            .await
+            .candidates
+        {
+            cached_candidates = Some(candidates);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(cached_candidates.as_ref().map(Vec::len), Some(1));
+
+    let cached_response = orchestrator
+        .retrieve_candidates(&query, &[])
+        .await
+        .expect("retrieve cached fallback source candidates");
+    assert_eq!(cached_response.candidates.len(), 1);
+    assert!(
+        cached_response
+            .stages
+            .iter()
+            .any(|stage| stage.name == "FollowingSource_cached")
+    );
+    assert_eq!(
+        cached_response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&0)
+    );
+
+    server_handle.abort();
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
 async fn applies_source_policy_on_cached_source_hits() {
     let mut config = fixture_config("http://127.0.0.1:1".to_string());
     config.source_order = vec!["FollowingSource".to_string()];
