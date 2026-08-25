@@ -48,7 +48,7 @@ pub fn build_stable_order_key(
 }
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate.score.unwrap_or_default()
+    candidate.final_score()
 }
 
 #[cfg(test)]
@@ -163,8 +163,10 @@ mod tests {
         let mut weighted_only = candidate("weighted-only", 99.0, 1_700_000_000_100);
         weighted_only.score = None;
         weighted_only.pipeline_score = Some(99.0);
+        let mut nonfinite_final = candidate("nonfinite-final", 0.2, 1_700_000_000_200);
+        nonfinite_final.score = Some(f64::NAN);
         let final_scored = candidate("final-scored", 0.1, 1_700_000_000_000);
-        let mut candidates = vec![weighted_only, final_scored];
+        let mut candidates = vec![weighted_only, nonfinite_final, final_scored];
 
         sort_candidates_stably(&mut candidates, false);
 

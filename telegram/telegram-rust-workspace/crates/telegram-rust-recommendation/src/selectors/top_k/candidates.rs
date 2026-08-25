@@ -23,7 +23,7 @@ use crate::pipeline::local::context::{
 };
 
 pub(super) fn selector_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate.score.unwrap_or_default()
+    candidate.final_score()
 }
 
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {

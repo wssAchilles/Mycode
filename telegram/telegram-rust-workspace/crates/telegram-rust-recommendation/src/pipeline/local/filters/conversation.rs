@@ -27,7 +27,7 @@ pub(super) fn conversation_dedup_filter(
             .conversation_id
             .clone()
             .unwrap_or_else(|| candidate.post_id.clone());
-        let score = candidate.score.unwrap_or_default();
+        let score = candidate.final_score();
         match best_by_conversation.get(&key).copied() {
             Some((index, existing_score)) if score > existing_score => {
                 removed.push(kept[index].clone());
