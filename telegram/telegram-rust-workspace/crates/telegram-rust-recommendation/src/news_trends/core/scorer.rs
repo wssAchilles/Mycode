@@ -329,7 +329,10 @@ fn velocity_signal(documents: &[NormalizedDocument], now_ms: i64) -> f64 {
 }
 
 fn positive_social_actions(metrics: &TrendMetricsPayload) -> f64 {
-    metric(metrics.likes) + metric(metrics.comments) + metric(metrics.reposts)
+    [metrics.likes, metrics.comments, metrics.reposts]
+        .into_iter()
+        .map(metric)
+        .fold(0.0, |total, value| (total + value).min(f64::MAX))
 }
 
 fn metric(value: Option<f64>) -> f64 {
