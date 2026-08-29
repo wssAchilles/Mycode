@@ -238,6 +238,53 @@ fn in_network_recency_selector_writes_serving_attribution() {
     }
 }
 
+#[test]
+fn selector_uses_serving_tie_break_for_in_network_truncation() {
+    let mut query = query("warm", 1);
+    query.in_network_only = true;
+
+    let selected = select_candidates(
+        &query,
+        &[
+            candidate("post-a", "author-a", "in_network", true, 1.0),
+            candidate("post-b", "author-b", "in_network", true, 1.0),
+        ],
+        1,
+        1,
+        2,
+    );
+
+    assert_eq!(
+        selected
+            .iter()
+            .map(|candidate| candidate.post_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["post-b"]
+    );
+}
+
+#[test]
+fn selector_uses_serving_tie_break_for_general_window_selection() {
+    let selected = select_candidates(
+        &query("warm", 1),
+        &[
+            candidate("post-a", "author-a", "interest", false, 1.0),
+            candidate("post-b", "author-b", "interest", false, 1.0),
+        ],
+        1,
+        1,
+        2,
+    );
+
+    assert_eq!(
+        selected
+            .iter()
+            .map(|candidate| candidate.post_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["post-b"]
+    );
+}
+
 fn trend_candidate(
     post_id: &str,
     author_id: &str,

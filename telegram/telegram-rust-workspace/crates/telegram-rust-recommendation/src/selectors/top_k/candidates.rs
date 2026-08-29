@@ -21,28 +21,10 @@ use crate::contracts::RecommendationCandidatePayload;
 use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
 };
-
-pub(super) fn selector_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate.final_score()
-}
+use crate::serving::stable_order::compare_candidates;
 
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {
-    candidates.sort_by(|left, right| {
-        if in_network_only {
-            right
-                .created_at
-                .cmp(&left.created_at)
-                .then_with(|| left.post_id.cmp(&right.post_id))
-                .then_with(|| left.author_id.cmp(&right.author_id))
-        } else {
-            selector_score(right)
-                .partial_cmp(&selector_score(left))
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| right.created_at.cmp(&left.created_at))
-                .then_with(|| left.post_id.cmp(&right.post_id))
-                .then_with(|| left.author_id.cmp(&right.author_id))
-        }
-    });
+    candidates.sort_by(|left, right| compare_candidates(left, right, in_network_only));
 }
 
 pub(super) fn candidate_lane(candidate: &RecommendationCandidatePayload) -> &str {

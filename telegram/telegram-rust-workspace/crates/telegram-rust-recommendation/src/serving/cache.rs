@@ -5,6 +5,7 @@ use anyhow::Result;
 use chrono::Duration;
 use moka::sync::Cache;
 use redis::AsyncCommands;
+use telegram_selector_primitives::SELECTOR_POLICY_VERSION;
 use telegram_serving_primitives::{
     CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE,
     SERVED_STATE_VERSION, SERVING_VERSION,
@@ -198,7 +199,7 @@ impl ServeCache {
     }
 
     fn redis_key(&self, fingerprint: &str) -> String {
-        format!("{}:{fingerprint}", self.prefix)
+        format!("{}:{}:{fingerprint}", self.prefix, SELECTOR_POLICY_VERSION)
     }
 
     pub fn snapshot(&self) -> ServeCacheSnapshot {
@@ -232,7 +233,10 @@ fn cache_result_matches_contract(result: &RecommendationResultPayload) -> bool {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE};
+    use super::{
+        CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE,
+        SELECTOR_POLICY_VERSION,
+    };
     use super::{ServeCache, ServeCacheHitTier};
     use crate::contracts::{
         RecommendationGraphRetrievalPayload, RecommendationOnlineEvaluationPayload,
@@ -467,5 +471,20 @@ pub(crate) mod tests {
         let lookup = cache.get("current").await;
         assert_eq!(lookup.tier, ServeCacheHitTier::Local);
         assert!(lookup.result.is_some());
+    }
+
+    #[test]
+    fn cache_key_is_namespaced_by_selector_policy_version() {
+        let cache = test_cache(60, 16);
+
+        assert_eq!(
+            cache.redis_key("fingerprint"),
+            format!("recommendation:serve:test:{SELECTOR_POLICY_VERSION}:fingerprint")
+        );
+        assert!(
+            !cache
+                .redis_key("fingerprint")
+                .contains("rust_top_k_selector_policy_v1")
+        );
     }
 }
