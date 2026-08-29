@@ -1530,6 +1530,24 @@ fn lightweight_phoenix_uses_trend_news_and_source_quality_priors() {
 }
 
 #[test]
+fn popularity_does_not_reward_negative_engagement_totals() {
+    let mut candidate = candidate("post-negative-count", "author-negative-count");
+    candidate.like_count = Some(-2.0);
+    candidate.comment_count = Some(0.0);
+    candidate.repost_count = Some(0.0);
+    candidate.view_count = Some(100.0);
+
+    let result = run_local_scorers(&query(), vec![candidate]);
+    assert_eq!(
+        result.candidates[0]
+            .ranking_signals
+            .expect("ranking signals")
+            .popularity,
+        0.0
+    );
+}
+
+#[test]
 fn stale_single_click_does_not_overboost_author_affinity() {
     let mut query = query();
     query.user_action_sequence = Some(vec![HashMap::from([

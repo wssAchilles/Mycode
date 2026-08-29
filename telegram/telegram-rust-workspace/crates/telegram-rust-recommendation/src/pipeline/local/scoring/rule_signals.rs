@@ -33,9 +33,10 @@ pub(super) fn freshness_signal(
 }
 
 pub(super) fn popularity_signal(candidate: &RecommendationCandidatePayload) -> f64 {
-    let engagements = candidate.like_count.unwrap_or_default()
+    let engagements = (candidate.like_count.unwrap_or_default()
         + candidate.comment_count.unwrap_or_default() * 2.0
-        + candidate.repost_count.unwrap_or_default() * 3.0;
+        + candidate.repost_count.unwrap_or_default() * 3.0)
+        .max(0.0);
     let views = candidate.view_count.unwrap_or(1.0).max(1.0);
     let rate = (engagements / views).min(1.0);
 
