@@ -1587,6 +1587,40 @@ fn exploration_scorer_marks_quality_novel_candidates() {
 }
 
 #[test]
+fn bandit_exploration_keeps_extreme_candidate_metrics_finite() {
+    let mut candidate = candidate("post-extreme-bandit", "author-extreme");
+    candidate.like_count = Some(f64::MAX);
+    candidate.comment_count = Some(f64::MAX);
+    candidate.repost_count = Some(f64::MAX);
+    candidate.view_count = Some(f64::MAX);
+    candidate.action_scores = Some(ActionScoresPayload {
+        like: f64::MAX,
+        reply: f64::MAX,
+        repost: f64::MAX,
+        dwell: f64::MAX,
+        ..ActionScoresPayload::default()
+    });
+
+    let result = run_local_scorers(&query(), vec![candidate]);
+    let scored = &result.candidates[0];
+    assert!(scored.weighted_score.is_some_and(f64::is_finite));
+    assert!(scored.pipeline_score.is_some_and(f64::is_finite));
+    let breakdown = scored.score_breakdown.as_ref().expect("score breakdown");
+    for key in [
+        "banditThompsonValue",
+        "banditExplorationBonus",
+        "banditPosteriorMean",
+        "banditUncertainty",
+        "banditMultiplier",
+    ] {
+        assert!(
+            breakdown.get(key).is_some_and(|value| value.is_finite()),
+            "{key} should stay finite"
+        );
+    }
+}
+
+#[test]
 fn fatigue_scorer_penalizes_repeated_exposure() {
     let mut query = query();
     let timestamp = Utc::now().to_rfc3339();
