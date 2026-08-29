@@ -557,6 +557,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             authorIds,
             limitPerAuthor: 2,
             lookbackDays: 7,
+            createdBefore: query.cursor,
         });
         const posts = materializedPosts.candidates;
 

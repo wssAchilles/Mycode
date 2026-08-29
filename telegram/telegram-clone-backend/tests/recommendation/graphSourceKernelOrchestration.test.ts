@@ -44,6 +44,7 @@ describe('GraphSource graph kernel orchestration', () => {
 
   it('combines social, recent, and bridge graph-kernel signals into ranked candidates', async () => {
     const query = createFeedQuery('viewer-1', 10);
+    query.cursor = new Date('2026-04-18T00:00:00.000Z');
     query.userFeatures = {
       followedUserIds: [],
       blockedUserIds: ['blocked-user'],
@@ -114,7 +115,7 @@ describe('GraphSource graph kernel orchestration', () => {
       recall: vi.fn().mockResolvedValue([]),
     };
 
-    vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([
+    const aggregate = vi.spyOn(Post as any, 'aggregate').mockReturnValue(aggregateResult([
       {
         _id: oid('507f191e810c19729de8b001'),
         authorId: 'author-1',
@@ -150,6 +151,7 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(graphKernelClient.contentAffinityNeighborsWithDiagnostics).toHaveBeenCalledOnce();
     expect(graphKernelClient.batch).not.toHaveBeenCalled();
     expect(legacyClient.recall).not.toHaveBeenCalled();
+    expect(aggregate.mock.calls[0][0][0].$match.createdAt.$lt).toEqual(query.cursor);
 
     expect(candidates).toHaveLength(2);
     expect(candidates[0].authorId).toBe('author-1');
@@ -761,6 +763,22 @@ describe('GraphSource graph kernel orchestration', () => {
       graphAuthorMaterializationRequestSchema.safeParse({
         authorIds: ['author-1'],
         lookbackDays: 181,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts an RFC3339 graph materializer continuation cursor', () => {
+    const createdBefore = '2026-08-28T12:00:00.000Z';
+    const parsed = graphAuthorMaterializationRequestSchema.parse({
+      authorIds: ['author-materializer-cursor-1'],
+      createdBefore,
+    });
+
+    expect(parsed.createdBefore).toEqual(new Date(createdBefore));
+    expect(
+      graphAuthorMaterializationRequestSchema.safeParse({
+        authorIds: ['author-materializer-cursor-1'],
+        createdBefore: 'not-a-timestamp',
       }).success,
     ).toBe(false);
   });

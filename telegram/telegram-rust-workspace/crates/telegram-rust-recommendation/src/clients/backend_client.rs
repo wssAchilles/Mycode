@@ -128,12 +128,24 @@ impl BackendRecommendationClient {
         limit_per_author: usize,
         lookback_days: usize,
     ) -> Result<ProviderResponse<GraphAuthorMaterializationResponse>> {
+        self.graph_author_candidates_with_cursor(author_ids, limit_per_author, lookback_days, None)
+            .await
+    }
+
+    pub async fn graph_author_candidates_with_cursor(
+        &self,
+        author_ids: &[String],
+        limit_per_author: usize,
+        lookback_days: usize,
+        created_before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<ProviderResponse<GraphAuthorMaterializationResponse>> {
         self.post_json(
             "/providers/graph/authors",
             &GraphAuthorMaterializationRequest {
                 author_ids: author_ids.to_vec(),
                 limit_per_author: Some(limit_per_author),
                 lookback_days: Some(lookback_days),
+                created_before,
             },
         )
         .await

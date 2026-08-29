@@ -82,7 +82,9 @@ impl GraphSourceRuntime {
             .enumerate()
             .map(|(index, aggregate)| (aggregate.user_id.clone(), (index, aggregate.clone())))
             .collect::<HashMap<_, _>>();
-        let materialized = self.materialize_graph_author_candidates(&author_ids).await;
+        let materialized = self
+            .materialize_graph_author_candidates(&author_ids, query.cursor)
+            .await;
         merge_provider_maps(
             &mut graph_queries.provider_calls,
             materialized.provider_calls,

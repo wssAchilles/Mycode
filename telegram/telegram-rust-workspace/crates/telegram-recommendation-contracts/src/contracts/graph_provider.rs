@@ -68,6 +68,8 @@ pub struct GraphAuthorMaterializationRequest {
     pub limit_per_author: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookback_days: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -393,11 +395,13 @@ impl<T> GraphKernelCandidatesResponse<T> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
     use serde_json::json;
 
     use super::{
-        GraphKernelBatchRequest, GraphKernelBatchResponse, GraphKernelCandidatesResponse,
-        GraphKernelNeighborCandidate, GraphKernelNeighborRequest, GraphKernelTelemetry,
+        GraphAuthorMaterializationRequest, GraphKernelBatchRequest, GraphKernelBatchResponse,
+        GraphKernelCandidatesResponse, GraphKernelNeighborCandidate, GraphKernelNeighborRequest,
+        GraphKernelTelemetry,
     };
 
     const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -811,5 +815,40 @@ mod tests {
         assert!(telemetry.per_kernel_candidate_counts.is_empty());
         assert!(telemetry.per_kernel_errors.is_empty());
         assert!(telemetry.budget_exhausted_kernels.is_empty());
+    }
+
+    #[test]
+    fn graph_author_materialization_cursor_uses_optional_camel_case_wire_field() {
+        let created_before = DateTime::parse_from_rfc3339("2026-08-28T12:00:00.000Z")
+            .expect("valid cursor")
+            .with_timezone(&chrono::Utc);
+        let request = GraphAuthorMaterializationRequest {
+            author_ids: vec!["author-1".to_string()],
+            limit_per_author: Some(2),
+            lookback_days: Some(7),
+            created_before: Some(created_before),
+        };
+        let value = serde_json::to_value(request).expect("serialize materialization request");
+
+        assert_eq!(
+            value
+                .get("createdBefore")
+                .and_then(serde_json::Value::as_str),
+            Some("2026-08-28T12:00:00Z")
+        );
+        assert!(value.get("created_before").is_none());
+
+        let legacy = GraphAuthorMaterializationRequest {
+            author_ids: vec!["author-1".to_string()],
+            limit_per_author: Some(2),
+            lookback_days: Some(7),
+            created_before: None,
+        };
+        assert!(
+            serde_json::to_value(legacy)
+                .expect("serialize legacy materialization request")
+                .get("createdBefore")
+                .is_none()
+        );
     }
 }

@@ -38,6 +38,8 @@ pub const GRAPH_DETAIL_MATERIALIZER_RETURNED_POST_COUNT_FIELD: &str =
     "materializerReturnedPostCount";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_KEY_MODE_FIELD: &str = "materializerCacheKeyMode";
 pub const GRAPH_MATERIALIZER_CACHE_KEY_MODE: &str = "rust_author_ids_limit_lookback_v1";
+pub const GRAPH_MATERIALIZER_CURSOR_CACHE_KEY_MODE: &str =
+    "rust_author_ids_limit_lookback_cursor_v2";
 pub const GRAPH_MATERIALIZER_CACHE_TTL_MS: i64 = 15_000;
 pub const GRAPH_MATERIALIZER_CACHE_MAX_ENTRIES: usize = 64;
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_TTL_MS_FIELD: &str = "materializerCacheTtlMs";
@@ -95,6 +97,26 @@ pub fn graph_materializer_cache_key(
         GRAPH_MATERIALIZER_CACHE_KEY_MODE,
         limit_per_author,
         lookback_days,
+        normalized_graph_author_ids(author_ids).join(",")
+    )
+}
+
+pub fn graph_materializer_cache_key_with_cursor(
+    author_ids: &[String],
+    limit_per_author: usize,
+    lookback_days: usize,
+    created_before_ms: Option<i64>,
+) -> String {
+    let Some(created_before_ms) = created_before_ms else {
+        return graph_materializer_cache_key(author_ids, limit_per_author, lookback_days);
+    };
+
+    format!(
+        "{}|limit={}|lookback={}|createdBeforeMs={}|authors={}",
+        GRAPH_MATERIALIZER_CURSOR_CACHE_KEY_MODE,
+        limit_per_author,
+        lookback_days,
+        created_before_ms,
         normalized_graph_author_ids(author_ids).join(","),
     )
 }
@@ -129,9 +151,9 @@ mod tests {
     use super::{
         GRAPH_DETAIL_PER_KERNEL_CANDIDATE_COUNTS_FIELD, GRAPH_REASON_ALL_KERNELS_EMPTY,
         GRAPH_UNKNOWN_KERNEL_SOURCE, graph_materializer_cache_key,
-        graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
-        normalized_graph_author_ids, string_array_to_json, string_map_to_json, u64_map_to_json,
-        usize_map_to_json,
+        graph_materializer_cache_key_with_cursor, graph_materializer_retry_limit_per_author,
+        graph_materializer_retry_lookback_days, normalized_graph_author_ids, string_array_to_json,
+        string_map_to_json, u64_map_to_json, usize_map_to_json,
     };
 
     #[test]
@@ -206,5 +228,28 @@ mod tests {
         );
         assert_eq!(graph_materializer_retry_limit_per_author(3, 20), 6);
         assert_eq!(graph_materializer_retry_lookback_days(180), 180);
+    }
+
+    #[test]
+    fn cursor_windows_have_distinct_cache_identity() {
+        let authors = ["author-a".to_string()];
+        let first = graph_materializer_cache_key_with_cursor(&authors, 3, 30, Some(1_000));
+        let second = graph_materializer_cache_key_with_cursor(&authors, 3, 30, Some(2_000));
+        let legacy = graph_materializer_cache_key(&authors, 3, 30);
+
+        assert_ne!(first, second);
+        assert!(first.contains("createdBeforeMs=1000"));
+        assert_eq!(
+            legacy,
+            "rust_author_ids_limit_lookback_v1|limit=3|lookback=30|authors=author-a"
+        );
+        assert_eq!(
+            graph_materializer_cache_key_with_cursor(&authors, 3, 30, None),
+            legacy
+        );
+        assert_ne!(
+            graph_materializer_cache_key_with_cursor(&authors, 3, 30, Some(1_000)),
+            legacy
+        );
     }
 }
