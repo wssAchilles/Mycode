@@ -163,6 +163,142 @@ describe('RecommendationAdapterService source batch contract', () => {
     }
   });
 
+  it('drains source details when a source rejects', async () => {
+    const service = new RecommendationAdapterService();
+    const pendingDetails = new Map<string, Record<string, unknown>>();
+    const query = createFeedQuery('viewer-source-failure', 20, false, {
+      requestId: 'adapter-source-failure',
+    });
+    const stageDetail = vi.fn((request: typeof query, _candidates: unknown[]) => {
+      const detail = pendingDetails.get(request.requestId);
+      pendingDetails.delete(request.requestId);
+      return detail;
+    });
+
+    (service as any).sourceCatalog = {
+      FailingSource: {
+        name: 'FailingSource',
+        enable: () => true,
+        getCandidates: async (request: typeof query) => {
+          pendingDetails.set(request.requestId, { recorded: true });
+          throw new Error('source boom');
+        },
+        stageDetail,
+      },
+    };
+
+    const result = await service.getSourceCandidates('FailingSource', query);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.errorClass).toBe('source_failed');
+    expect(pendingDetails.size).toBe(0);
+    expect(stageDetail).toHaveBeenCalledWith(query, []);
+  });
+
+  it('keeps candidates when stage detail cleanup throws', async () => {
+    const service = new RecommendationAdapterService();
+    const candidate = {
+      postId: 'post-stage-detail-error',
+      authorId: 'author-stage-detail-error',
+      content: 'candidate',
+      createdAt: new Date('2026-04-20T00:00:00.000Z'),
+      isReply: false,
+      isRepost: false,
+    };
+    const query = createFeedQuery('viewer-stage-detail-error', 20, false, {
+      requestId: 'adapter-stage-detail-error',
+    });
+    const stageDetail = vi.fn(() => {
+      throw new Error('detail boom');
+    });
+    (service as any).sourceCatalog = {
+      StableSource: {
+        name: 'StableSource',
+        enable: () => true,
+        getCandidates: async () => [candidate],
+        stageDetail,
+      },
+    };
+
+    const result = await service.getSourceCandidates('StableSource', query);
+
+    expect(result.candidates).toEqual([candidate]);
+    expect(result.errorClass).toBeUndefined();
+    expect(stageDetail).toHaveBeenCalledWith(query, [candidate]);
+  });
+
+  it('drains late source details after batch timeout for resolve and reject', async () => {
+    vi.useFakeTimers();
+    const pendingDetails = new Map<string, Record<string, unknown>>();
+    const query = createFeedQuery('viewer-late-source-details', 20, false, {
+      requestId: 'adapter-late-source-details',
+    });
+    const deferred = <T>() => {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      return { promise, resolve, reject };
+    };
+    const resolveGate = deferred<unknown[]>();
+    const rejectGate = deferred<unknown[]>();
+    const makeSource = (name: string, gate: ReturnType<typeof deferred<unknown[]>>) => {
+      const stageDetail = vi.fn((request: typeof query, _candidates: unknown[]) => {
+        const key = `${name}:${request.requestId}`;
+        const detail = pendingDetails.get(key);
+        pendingDetails.delete(key);
+        return detail;
+      });
+      return {
+        name,
+        enable: () => true,
+        getCandidates: async (request: typeof query) => {
+          pendingDetails.set(`${name}:${request.requestId}`, { recorded: true });
+          return gate.promise;
+        },
+        stageDetail,
+      };
+    };
+    const service = new RecommendationAdapterService();
+    (service as any).sourceBatchComponentTimeoutMs = 10;
+    (service as any).sourceCatalog = {
+      SlowResolveSource: makeSource('SlowResolveSource', resolveGate),
+      SlowRejectSource: makeSource('SlowRejectSource', rejectGate),
+    };
+
+    try {
+      const execution = service.getSourceCandidatesBatch(
+        ['SlowResolveSource', 'SlowRejectSource'],
+        query,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      const result = await execution;
+
+      expect(result.items.every((item) => item.timedOut)).toBe(true);
+      expect(pendingDetails.size).toBe(2);
+
+      resolveGate.resolve([]);
+      rejectGate.reject(new Error('late source boom'));
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(pendingDetails.size).toBe(0);
+      const [resolveSource, rejectSource] = [
+        (service as any).sourceCatalog.SlowResolveSource,
+        (service as any).sourceCatalog.SlowRejectSource,
+      ];
+      expect(resolveSource.stageDetail).toHaveBeenCalledWith(query, []);
+      expect(rejectSource.stageDetail).toHaveBeenCalledWith(query, []);
+    } finally {
+      resolveGate.resolve([]);
+      rejectGate.resolve([]);
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('counts prototype-like graph recall types as ordinary kernel sources', async () => {
     const service = new RecommendationAdapterService();
     const recallTypes = ['__proto__', 'constructor', 'toString'];

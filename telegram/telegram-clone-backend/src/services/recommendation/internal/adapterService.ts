@@ -31,7 +31,10 @@ import {
 } from '../contracts/rankingContract';
 import type { RecommendationQueryPatchPayload } from '../rust/contracts';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
+import { createChildLogger } from '../../../utils/logger';
 import { mergeSourceCandidates, type SourceCandidateBatch } from './merge/candidateMerge';
+
+const log = createChildLogger('recommendation:Adapter');
 
 export interface InternalStageExecution {
   name: string;
@@ -329,6 +332,15 @@ export class RecommendationAdapterService {
     }
 
     const start = Date.now();
+    const drainStageDetail = (candidates: FeedCandidate[]): Record<string, unknown> | undefined => {
+      try {
+        return source.stageDetail?.(query, candidates);
+      } catch (error) {
+        log.warn(`[Source ${source.name}] Stage detail cleanup failed: ${error}`);
+        return undefined;
+      }
+    };
+
     if (!source.enable(query)) {
       return {
         candidates: [],
@@ -347,7 +359,7 @@ export class RecommendationAdapterService {
       const candidates = await source.getCandidates(query);
       const detail: Record<string, unknown> = {
         recallSource: source.name,
-        ...(source.stageDetail?.(query, candidates) || {}),
+        ...(drainStageDetail(candidates) || {}),
       };
 
       if (source.name === 'GraphSource') {
@@ -367,6 +379,7 @@ export class RecommendationAdapterService {
         },
       };
     } catch (error: any) {
+      drainStageDetail([]);
       const errorClass = classifySourceError(error?.message);
       return {
         candidates: [],
