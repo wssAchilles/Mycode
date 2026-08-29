@@ -143,7 +143,7 @@ fn recommendation_result(stable_order_key: &str) -> RecommendationResultPayload 
         cursor: None,
         next_cursor: None,
         has_more: false,
-        served_state_version: "state-v1".to_string(),
+        served_state_version: "related_ids_v1".to_string(),
         stable_order_key: stable_order_key.to_string(),
         candidates: Vec::new(),
         summary: RecommendationSummaryPayload {
@@ -177,7 +177,7 @@ fn recommendation_result(stable_order_key: &str) -> RecommendationResultPayload 
                 cursor: None,
                 next_cursor: None,
                 has_more: false,
-                served_state_version: "state-v1".to_string(),
+                served_state_version: "related_ids_v1".to_string(),
                 stable_order_key: stable_order_key.to_string(),
                 duplicate_suppressed_count: 0,
                 cross_page_duplicate_count: 0,
