@@ -91,6 +91,13 @@ export class CircuitBreakerOpenError extends Error {
     }
 }
 
+export class FailClosedQueryHydratorError extends Error {
+    constructor(public readonly componentName: string) {
+        super(`Fail-closed query hydrator ${componentName} failed`);
+        this.name = 'FailClosedQueryHydratorError';
+    }
+}
+
 // ============================================
 // Circuit Breaker
 // ============================================
@@ -651,6 +658,9 @@ export class RecommendationPipeline<Q, C> {
                     state,
                 ).catch((error) => {
                     log.error(`[QueryHydrator ${hydrator.name}] Error: ${error}`);
+                    if (hydrator.failClosedOnError) {
+                        throw new FailClosedQueryHydratorError(hydrator.name);
+                    }
                     return stageQuery;
                 });
                 return { enabled: true, hydrated };

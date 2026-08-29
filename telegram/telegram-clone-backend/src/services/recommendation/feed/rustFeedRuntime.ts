@@ -7,6 +7,8 @@ import {
 } from '../clients/RustRecommendationClient';
 import {
     RANKED_CURSOR_ABSTENTION_MODE,
+    SAFETY_CONTEXT_ABSTENTION_MODE,
+    SAFETY_CONTEXT_UNAVAILABLE_REASON,
     deserializeRecommendationCandidates,
     serializeRecommendationQuery,
 } from '../rust/contracts';
@@ -22,6 +24,7 @@ import {
     type SpaceFeedDebugInfo,
 } from './debugInfo';
 import { recordRecommendationTrace } from '../observability/recommendationTrace';
+import { FailClosedQueryHydratorError } from '../framework/Pipeline';
 
 export interface RustFeedServingMeta {
     servingVersion?: string;
@@ -46,6 +49,7 @@ export interface FeedRuntimeResult {
     pageMeta?: FeedRuntimePageMeta;
     debugInfo: SpaceFeedDebugInfo;
     rustTraceForServedFeed?: RecommendationTracePayload;
+    safetyContextUnavailable?: boolean;
 }
 
 interface ResolveFeedRuntimeInput {
@@ -63,11 +67,18 @@ export async function resolveFeedRuntime(
     const rustRecommendationMode = getRustRecommendationMode();
     const runtime = getRecommendationRuntimeSemantics(rustRecommendationMode);
 
-    if (rustRecommendationMode === 'primary') {
-        return resolvePrimaryRustFeed(input, runtime);
-    }
+    try {
+        if (rustRecommendationMode === 'primary') {
+            return await resolvePrimaryRustFeed(input, runtime);
+        }
 
-    return resolveNodeBaselineFeed(input, runtime);
+        return await resolveNodeBaselineFeed(input, runtime);
+    } catch (error) {
+        if (error instanceof FailClosedQueryHydratorError) {
+            return buildSafetyContextUnavailableResult(input, runtime);
+        }
+        throw error;
+    }
 }
 
 async function resolvePrimaryRustFeed(
@@ -97,6 +108,18 @@ async function resolvePrimaryRustFeed(
 
     try {
         const rustResult = await getRustFeedCandidates(input, true, finalFeedQuery);
+        if (rustResult.summary.degradedReasons.includes(SAFETY_CONTEXT_UNAVAILABLE_REASON)) {
+            const serving = rustResult.summary.serving;
+            return buildSafetyContextUnavailableResult(input, runtime, rustResult.query, {
+                servingVersion: rustResult.servingVersion,
+                cursorMode: serving.cursorMode,
+                stableOrderKey: rustResult.stableOrderKey,
+                cursor: rustResult.cursor,
+                nextCursor: undefined,
+                servedStateVersion: rustResult.servedStateVersion,
+                hasMore: false,
+            });
+        }
         const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
 
         if (rustCandidates.length === 0) {
@@ -191,6 +214,36 @@ async function resolvePrimaryRustFeed(
             }),
         };
     }
+}
+
+function buildSafetyContextUnavailableResult(
+    input: ResolveFeedRuntimeInput,
+    runtime: RecommendationRuntimeSemantics,
+    finalFeedQuery = input.createBaseQuery(),
+    rustServing?: RustFeedServingMeta,
+): FeedRuntimeResult {
+    return {
+        feed: [],
+        finalFeedQuery,
+        safetyContextUnavailable: true,
+        pageMeta: {
+            hasMore: false,
+            continuationAbstained: true,
+            rustServing,
+        },
+        debugInfo: buildSpaceFeedDebugInfo([], {
+            requestId: input.requestId,
+            pipeline: runtime.runtimeMode === 'primary'
+                ? 'rust_primary_safety_context_abstention'
+                : 'node_safety_context_abstention',
+            runtimeMode: runtime.runtimeMode,
+            configuredServingOwner: runtime.configuredServingOwner,
+            servingOwner: runtime.configuredServingOwner,
+            fallbackOwner: runtime.fallbackOwner,
+            fallbackMode: SAFETY_CONTEXT_ABSTENTION_MODE,
+            degradedReasons: [SAFETY_CONTEXT_UNAVAILABLE_REASON],
+        }),
+    };
 }
 
 async function resolveNodeBaselineFeed(

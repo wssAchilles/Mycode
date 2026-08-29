@@ -18,6 +18,8 @@ import type {
 import type { EmbeddingContract } from '../contracts/embeddingContract';
 
 export const RANKED_CURSOR_ABSTENTION_MODE = 'ranked_cursor_abstention_v1' as const;
+export const SAFETY_CONTEXT_ABSTENTION_MODE = 'safety_context_abstention_v1' as const;
+export const SAFETY_CONTEXT_UNAVAILABLE_REASON = 'safety_context_unavailable' as const;
 
 type SerializedUserFeatures = Omit<UserFeatures, 'accountCreatedAt'> & {
   accountCreatedAt?: string;

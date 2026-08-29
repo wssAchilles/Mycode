@@ -886,6 +886,13 @@ class SpaceService {
             runBaselineFeed,
             withFeedTrendKeywords: (query) => this.withFeedTrendKeywords(query),
         });
+        if (runtimeResult.safetyContextUnavailable) {
+            return buildSpaceFeedPageResult([], limit, {
+                ...runtimeResult.pageMeta,
+                ...pageIdentity,
+                debug: runtimeResult.debugInfo,
+            });
+        }
         let feed = runtimeResult.feed;
         const pageMeta = runtimeResult.pageMeta;
         const debugInfo = runtimeResult.debugInfo;

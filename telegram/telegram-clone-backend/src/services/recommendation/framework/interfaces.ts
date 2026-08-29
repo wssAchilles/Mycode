@@ -96,6 +96,7 @@ export interface Source<Q, C> {
  */
 export interface QueryHydrator<Q> {
     readonly name: string;
+    readonly failClosedOnError?: boolean;
 
     enable(query: Q): boolean;
 

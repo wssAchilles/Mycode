@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 
+import Contact from '../../src/models/Contact';
+import UserSettings from '../../src/models/UserSettings';
 import { RecommendationPipeline } from '../../src/services/recommendation/framework/Pipeline';
 import { runStagedQueryHydrators } from '../../src/services/recommendation/framework/queryHydrationStages';
 import type {
@@ -10,6 +12,7 @@ import type {
 import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
 import { DuplicateFilter } from '../../src/services/recommendation/filters/DuplicateFilter';
 import { EngagementScorer } from '../../src/services/recommendation/scorers/EngagementScorer';
+import { UserFeaturesQueryHydrator } from '../../src/services/recommendation/hydrators/UserFeaturesQueryHydrator';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 import type { FeedCandidate } from '../../src/services/recommendation/types/FeedCandidate';
 import {
@@ -235,6 +238,60 @@ describe('RecommendationPipeline metadata contracts', () => {
         expect(sourceQuery.mutualFollowIds).toEqual(['author-2']);
         expect(sourceQuery.experimentContext.userId).toBe('public-stage-user');
         expect(sourceQuery.userStateContext.state).toBe('warm');
+    });
+
+    it('fails closed before sourcing when safety context is unavailable', async () => {
+        let failedSafetyRead: 'blocked' | 'mutedUsers' | 'mutedKeywords' | undefined = 'blocked';
+        const contactFind = vi.spyOn(Contact as any, 'findAll').mockImplementation(
+            async ({ where }: { where?: { status?: string } }) => {
+                if (failedSafetyRead === 'blocked' && where?.status === 'blocked') {
+                    throw new Error('blocked_store_unavailable');
+                }
+                return [];
+            },
+        );
+        const mutedUsers = vi.spyOn(UserSettings as any, 'getMutedUserIds').mockImplementation(async () => {
+            if (failedSafetyRead === 'mutedUsers') throw new Error('muted_users_store_unavailable');
+            return [];
+        });
+        const mutedKeywords = vi.spyOn(UserSettings as any, 'getMutedKeywords').mockImplementation(async () => {
+            if (failedSafetyRead === 'mutedKeywords') throw new Error('muted_keywords_store_unavailable');
+            return [];
+        });
+        const getCandidates = vi.fn().mockResolvedValue([
+            mkCandidate(oid('507f191e810c19729de87041')),
+        ]);
+        const pipeline = new RecommendationPipeline<any, Candidate>({ defaultResultSize: 1 })
+            .withQueryHydrator(new UserFeaturesQueryHydrator())
+            .withSource({
+                name: 'SafetyContextSource',
+                enable: () => true,
+                getCandidates,
+            });
+
+        try {
+            for (failedSafetyRead of ['blocked', 'mutedUsers', 'mutedKeywords'] as const) {
+                const failedQuery = createFeedQuery('safety-context-user', 1);
+                failedQuery.seenIds = ['skip-seen-read'];
+                await expect(pipeline.execute(failedQuery)).rejects.toMatchObject({
+                    name: 'FailClosedQueryHydratorError',
+                    componentName: 'UserFeaturesQueryHydrator',
+                });
+            }
+            expect(getCandidates).not.toHaveBeenCalled();
+
+            failedSafetyRead = undefined;
+            const healthyQuery = createFeedQuery('safety-context-user', 1);
+            healthyQuery.seenIds = ['skip-seen-read'];
+            const healthy = await pipeline.execute(healthyQuery);
+
+            expect(healthy.selectedCandidates).toHaveLength(1);
+            expect(getCandidates).toHaveBeenCalledOnce();
+        } finally {
+            contactFind.mockRestore();
+            mutedUsers.mockRestore();
+            mutedKeywords.mockRestore();
+        }
     });
 
     it('merges source batches before DuplicateFilter in the public fallback', async () => {

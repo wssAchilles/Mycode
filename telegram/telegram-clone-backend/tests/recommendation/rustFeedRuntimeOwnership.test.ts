@@ -175,6 +175,29 @@ describe('Rust feed runtime ownership', () => {
         expect(result.rustTraceForServedFeed).toBeUndefined();
     });
 
+    it('keeps a Rust safety-context abstention terminal', async () => {
+        mocks.getMode.mockReturnValue('primary');
+        const safetyResult = rustResult([], 'safety_context_abstention_v1');
+        safetyResult.summary.degradedReasons = ['safety_context_unavailable'];
+        mocks.getCandidates.mockResolvedValue(safetyResult);
+        const input = makeInput({ inNetworkOnly: true });
+
+        const result = await resolveFeedRuntime(input);
+
+        expect(result.feed).toEqual([]);
+        expect(result.safetyContextUnavailable).toBe(true);
+        expect(result.pageMeta).toMatchObject({
+            hasMore: false,
+            continuationAbstained: true,
+            rustServing: {
+                cursorMode: 'safety_context_abstention_v1',
+                hasMore: false,
+            },
+        });
+        expect(result.debugInfo.degradedReasons).toEqual(['safety_context_unavailable']);
+        expect(input.runBaselineFeed).not.toHaveBeenCalled();
+    });
+
     it('returns only Node page truth when Rust primary errors', async () => {
         mocks.getMode.mockReturnValue('primary');
         mocks.getCandidates.mockRejectedValue(new Error('rust unavailable'));

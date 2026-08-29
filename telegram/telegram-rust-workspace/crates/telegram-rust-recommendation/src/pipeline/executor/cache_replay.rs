@@ -1,4 +1,7 @@
-use telegram_pipeline_primitives::PIPELINE_TRACE_MODE_CACHE_REPLAY;
+use telegram_pipeline_primitives::{
+    PIPELINE_TRACE_MODE_CACHE_REPLAY, PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
+    PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK, query_hydrator_provider_key,
+};
 use telegram_serving_primitives::{
     PAGE_BUILD_LATENCY_KEY, RUST_SERVE_CACHE_STAGE_NAME, SERVE_CACHE_LATENCY_KEY,
 };
@@ -34,6 +37,7 @@ impl RecommendationPipeline {
         mut cached_result: RecommendationResultPayload,
         query: &RecommendationQueryPayload,
         query_fingerprint: &str,
+        mut query_telemetry: RunTelemetry,
         serve_cache_duration_ms: u64,
         page_build_duration_ms: u64,
     ) -> RecommendationResultPayload {
@@ -42,6 +46,63 @@ impl RecommendationPipeline {
         cached_result.summary.request_id = query.request_id.clone();
         cached_result.summary.serving.cursor = query.cursor;
         cached_result.summary.serving.serve_cache_hit = true;
+
+        let query_hydrators = &self.definition.query_hydrators;
+        let mut query_provider_keys = query_hydrators
+            .iter()
+            .map(|hydrator| query_hydrator_provider_key(hydrator))
+            .collect::<Vec<_>>();
+        query_provider_keys.extend([
+            PROVIDER_KEY_QUERY_HYDRATORS_BATCH.to_string(),
+            PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK.to_string(),
+        ]);
+        cached_result
+            .summary
+            .stages
+            .retain(|stage| !query_hydrators.contains(&stage.name));
+        cached_result
+            .summary
+            .stage_timings
+            .retain(|stage, _| !query_hydrators.contains(stage));
+        cached_result.summary.degraded_reasons.retain(|reason| {
+            !query_hydrators.iter().any(|hydrator| {
+                reason.starts_with(&format!("{hydrator}:"))
+                    || reason.starts_with(&format!("query:{hydrator}:"))
+            })
+        });
+        query_telemetry
+            .stages
+            .append(&mut cached_result.summary.stages);
+        cached_result.summary.stages = query_telemetry.stages;
+        cached_result
+            .summary
+            .stage_timings
+            .extend(query_telemetry.stage_timings);
+        cached_result
+            .summary
+            .stage_latency_ms
+            .extend(query_telemetry.stage_latency_ms);
+        cached_result
+            .summary
+            .degraded_reasons
+            .extend(query_telemetry.degraded_reasons);
+        cached_result
+            .summary
+            .provider_calls
+            .retain(|provider, _| !query_provider_keys.contains(provider));
+        cached_result
+            .summary
+            .provider_calls
+            .extend(query_telemetry.provider_calls);
+        cached_result
+            .summary
+            .provider_latency_ms
+            .retain(|provider, _| !query_provider_keys.contains(provider));
+        cached_result
+            .summary
+            .provider_latency_ms
+            .extend(query_telemetry.provider_latency_ms);
+
         enforce_ranked_cursor_abstention(&mut cached_result, query);
         if let Some(trace) = cached_result.summary.trace.as_mut() {
             trace.request_id = query.request_id.clone();

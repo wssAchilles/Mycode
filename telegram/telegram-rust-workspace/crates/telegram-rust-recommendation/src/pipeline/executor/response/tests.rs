@@ -1,26 +1,38 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use axum::{Json, Router, extract::State, routing::post};
 use chrono::{TimeZone, Utc};
-use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
-use telegram_pipeline_primitives::{
-    RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
-    RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+use telegram_component_primitives::{
+    query_hydrators::{MUTUAL_FOLLOW_QUERY_HYDRATOR, USER_FEATURES_QUERY_HYDRATOR},
+    selectors::RUST_TOP_K_SELECTOR,
 };
+use telegram_pipeline_primitives::{
+    EXECUTOR_LATENCY_QUERY_HYDRATORS, PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
+    PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK, RANKING_MODE_PHOENIX_STANDARDIZED,
+    RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2, RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+    query_hydrator_provider_key,
+};
+use telegram_rust_http_types::SuccessEnvelope;
 use telegram_serving_primitives::{
     PAGE_BUILD_LATENCY_KEY, SERVE_CACHE_POLICY_REASON_PENDING_EVALUATION,
 };
+use tokio::{net::TcpListener, task::JoinHandle};
 
 use crate::candidate_pipeline::definition::build_pipeline_definition;
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
+    QueryHydratorBatchRequest, QueryHydratorBatchResponse, QueryHydratorPatchResponse,
     RecommendationCandidatePayload, RecommendationGraphRetrievalPayload,
-    RecommendationQueryPayload, RecommendationRankingSummaryPayload,
-    RecommendationRetrievalSummaryPayload, RecommendationStagePayload,
+    RecommendationQueryPatchPayload, RecommendationQueryPayload,
+    RecommendationRankingSummaryPayload, RecommendationRetrievalSummaryPayload,
+    RecommendationStagePayload,
 };
 use crate::metrics::RecommendationMetrics;
 use crate::pipeline::builder::RecommendationPipelineBuilder;
+use crate::query_hydrators::stage_payload::{build_query_error_stage, query_stage_error};
+use crate::serving::policy::build_query_fingerprint;
 use crate::state::recent_store::RecentHotStore;
 
 use super::super::ranking_stage::RankingStageOutput;
@@ -28,8 +40,9 @@ use super::super::retrieval_stage::RetrievalStageOutput;
 use super::super::serving_stage::ServingStageOutput;
 use super::super::telemetry::RunTelemetry;
 use super::{
-    LiveRecommendationResultInput, build_live_recommendation_result,
-    build_ranked_cursor_abstention_result,
+    LiveRecommendationResultInput, SAFETY_CONTEXT_ABSTENTION_MODE,
+    SAFETY_CONTEXT_UNAVAILABLE_REASON, build_live_recommendation_result,
+    build_ranked_cursor_abstention_result, build_safety_context_abstention_result,
 };
 
 #[test]
@@ -226,6 +239,63 @@ fn builds_terminal_ranked_cursor_abstention_without_running_pipeline_stages() {
     );
 }
 
+#[test]
+fn builds_terminal_safety_context_abstention_with_query_telemetry() {
+    let config = test_config();
+    let definition = build_pipeline_definition(&config);
+    let query = RecommendationQueryPayload {
+        request_id: "req-safety-context-abstention".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ad".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 20,
+        ..RecommendationQueryPayload::default()
+    };
+    let mut telemetry = RunTelemetry::default();
+    telemetry
+        .provider_calls
+        .insert(USER_FEATURES_QUERY_HYDRATOR.to_string(), 1);
+    telemetry.stages.push(build_query_error_stage(
+        USER_FEATURES_QUERY_HYDRATOR,
+        SAFETY_CONTEXT_UNAVAILABLE_REASON,
+    ));
+
+    let result = build_safety_context_abstention_result(&config, &definition, &query, telemetry, 7);
+
+    assert!(result.candidates.is_empty());
+    assert!(result.next_cursor.is_none());
+    assert!(!result.has_more);
+    assert_eq!(
+        result.summary.serving.cursor_mode,
+        SAFETY_CONTEXT_ABSTENTION_MODE
+    );
+    assert_eq!(result.summary.retrieved_count, 0);
+    assert_eq!(result.summary.selected_count, 0);
+    assert_eq!(
+        result
+            .summary
+            .provider_calls
+            .get(USER_FEATURES_QUERY_HYDRATOR),
+        Some(&1)
+    );
+    assert_eq!(result.summary.stages.len(), 1);
+    assert_eq!(
+        query_stage_error(&result.summary.stages[0]),
+        Some(SAFETY_CONTEXT_UNAVAILABLE_REASON)
+    );
+    assert!(
+        result
+            .summary
+            .degraded_reasons
+            .contains(&SAFETY_CONTEXT_UNAVAILABLE_REASON.to_string())
+    );
+    assert!(
+        !result
+            .summary
+            .degraded_reasons
+            .contains(&"empty_selection".to_string())
+    );
+}
+
 #[tokio::test]
 async fn executor_abstains_before_cache_and_provider_work() {
     let mut config = test_config();
@@ -281,6 +351,219 @@ async fn executor_abstains_before_cache_and_provider_work() {
     );
 }
 
+#[tokio::test]
+async fn safety_context_failure_precedes_serve_cache_lookup() {
+    let (backend_url, server) = spawn_safety_failure_query_server().await;
+    let mut config = test_config();
+    config.backend_url = backend_url;
+    config.redis_url = "redis://127.0.0.1:1".to_string();
+    let definition = build_pipeline_definition(&config);
+    let recent_store = Arc::new(RecentHotStore::new_sharded(
+        config.recent_per_user_capacity,
+        config.recent_global_capacity,
+        config.recent_hot_shard_count,
+    ));
+    let metrics = Arc::new(tokio::sync::Mutex::new(RecommendationMetrics::default()));
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let pipeline =
+        RecommendationPipelineBuilder::new(backend_client, config.clone(), recent_store, metrics)
+            .build();
+    let query = RecommendationQueryPayload {
+        request_id: "req-safety-before-cache".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ae".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 20,
+        in_network_only: true,
+        ..RecommendationQueryPayload::default()
+    };
+    let fingerprint = build_query_fingerprint(&query);
+    let mut cached = build_ranked_cursor_abstention_result(&config, &definition, &query, 0);
+    cached.candidates = vec![candidate("cached-post")];
+    cached.summary.retrieved_count = 1;
+    cached.summary.selected_count = 1;
+    pipeline
+        .serve_cache
+        .store(&fingerprint, &cached)
+        .await
+        .expect("seed unsafe cache entry");
+    let before = pipeline.cache_control_plane_snapshot().serve_cache;
+
+    let result = pipeline.run(query).await.expect("safety abstention result");
+    server.abort();
+    let after = pipeline.cache_control_plane_snapshot().serve_cache;
+
+    assert!(result.candidates.is_empty());
+    assert!(!result.summary.serving.serve_cache_hit);
+    assert_eq!(
+        result.summary.serving.cursor_mode,
+        SAFETY_CONTEXT_ABSTENTION_MODE
+    );
+    assert!(
+        result
+            .summary
+            .degraded_reasons
+            .contains(&SAFETY_CONTEXT_UNAVAILABLE_REASON.to_string())
+    );
+    assert_eq!(
+        (
+            after.local_hit_count,
+            after.local_miss_count,
+            after.shared_hit_count,
+            after.shared_miss_count,
+        ),
+        (
+            before.local_hit_count,
+            before.local_miss_count,
+            before.shared_hit_count,
+            before.shared_miss_count,
+        )
+    );
+}
+
+#[tokio::test]
+async fn cache_replay_uses_current_query_stage_telemetry() {
+    let (backend_url, server) =
+        spawn_query_stage_server(QueryStageServerMode::NoncriticalFailure).await;
+    let mut config = test_config();
+    config.backend_url = backend_url;
+    config.redis_url = "redis://127.0.0.1:1".to_string();
+    let definition = build_pipeline_definition(&config);
+    let recent_store = Arc::new(RecentHotStore::new_sharded(
+        config.recent_per_user_capacity,
+        config.recent_global_capacity,
+        config.recent_hot_shard_count,
+    ));
+    let metrics = Arc::new(tokio::sync::Mutex::new(RecommendationMetrics::default()));
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let pipeline =
+        RecommendationPipelineBuilder::new(backend_client, config.clone(), recent_store, metrics)
+            .build();
+    let query = RecommendationQueryPayload {
+        request_id: "req-current-query-telemetry".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000af".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 20,
+        in_network_only: true,
+        ..RecommendationQueryPayload::default()
+    };
+    let fingerprint = build_query_fingerprint(&query);
+    let mut cached = build_ranked_cursor_abstention_result(&config, &definition, &query, 0);
+    cached.candidates = vec![candidate("cached-post")];
+    cached.summary.provider_calls = HashMap::from([
+        (PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK.to_string(), 9),
+        ("cached_retrieval_provider".to_string(), 3),
+    ]);
+    cached.summary.provider_latency_ms = HashMap::from([
+        (PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK.to_string(), 999),
+        ("cached_retrieval_provider".to_string(), 31),
+    ]);
+    cached
+        .summary
+        .stage_timings
+        .insert(MUTUAL_FOLLOW_QUERY_HYDRATOR.to_string(), 999);
+    cached
+        .summary
+        .stage_latency_ms
+        .insert(EXECUTOR_LATENCY_QUERY_HYDRATORS.to_string(), 999);
+    cached.summary.stages.push(build_query_error_stage(
+        MUTUAL_FOLLOW_QUERY_HYDRATOR,
+        "stale_query_error",
+    ));
+    cached.summary.degraded_reasons.extend([
+        format!("{MUTUAL_FOLLOW_QUERY_HYDRATOR}:stale_query_error"),
+        format!("query:{MUTUAL_FOLLOW_QUERY_HYDRATOR}:stale_query_error"),
+    ]);
+    pipeline
+        .serve_cache
+        .store(&fingerprint, &cached)
+        .await
+        .expect("seed cache entry");
+
+    let result = pipeline.run(query).await.expect("cached result");
+    server.abort();
+
+    assert!(result.summary.serving.serve_cache_hit);
+    assert_eq!(result.candidates[0].post_id, "cached-post");
+    assert_eq!(
+        result.summary.provider_calls.get(CURRENT_QUERY_PROVIDER),
+        Some(&1)
+    );
+    assert_eq!(
+        result
+            .summary
+            .provider_calls
+            .get("cached_retrieval_provider"),
+        Some(&3)
+    );
+    assert!(
+        !result
+            .summary
+            .provider_calls
+            .contains_key(PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK)
+    );
+    assert_eq!(
+        result
+            .summary
+            .provider_calls
+            .get(&query_hydrator_provider_key(MUTUAL_FOLLOW_QUERY_HYDRATOR)),
+        Some(&1)
+    );
+    assert!(
+        result
+            .summary
+            .provider_latency_ms
+            .contains_key(PROVIDER_KEY_QUERY_HYDRATORS_BATCH)
+    );
+    assert!(
+        !result
+            .summary
+            .provider_latency_ms
+            .contains_key(PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK)
+    );
+    assert_eq!(
+        result
+            .summary
+            .provider_latency_ms
+            .get("cached_retrieval_provider"),
+        Some(&31)
+    );
+    assert_eq!(
+        result
+            .summary
+            .stage_timings
+            .get(MUTUAL_FOLLOW_QUERY_HYDRATOR),
+        Some(&0)
+    );
+    assert_ne!(
+        result
+            .summary
+            .stage_latency_ms
+            .get(EXECUTOR_LATENCY_QUERY_HYDRATORS),
+        Some(&999)
+    );
+    let current_stage = result
+        .summary
+        .stages
+        .iter()
+        .filter(|stage| stage.name == MUTUAL_FOLLOW_QUERY_HYDRATOR)
+        .collect::<Vec<_>>();
+    assert_eq!(current_stage.len(), 1);
+    assert_eq!(
+        query_stage_error(current_stage[0]),
+        Some(CURRENT_QUERY_ERROR)
+    );
+    assert!(result.summary.degraded_reasons.contains(&format!(
+        "query:{MUTUAL_FOLLOW_QUERY_HYDRATOR}:{CURRENT_QUERY_ERROR}"
+    )));
+    assert!(
+        !result
+            .summary
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason.contains("stale_query_error"))
+    );
+}
+
 #[test]
 fn selector_report_contract_returns_unavailable_reason_when_stage_missing() {
     let contract = super::selector_report_contract(&[]);
@@ -290,6 +573,81 @@ fn selector_report_contract_returns_unavailable_reason_when_stage_missing() {
         contract.unavailable_reason.as_deref(),
         Some("selector_stage_missing")
     );
+}
+
+async fn spawn_safety_failure_query_server() -> (String, JoinHandle<()>) {
+    spawn_query_stage_server(QueryStageServerMode::SafetyFailure).await
+}
+
+const CURRENT_QUERY_PROVIDER: &str = "current_query_provider";
+const CURRENT_QUERY_ERROR: &str = "current_noncritical_error";
+
+#[derive(Clone, Copy)]
+enum QueryStageServerMode {
+    SafetyFailure,
+    NoncriticalFailure,
+}
+
+async fn query_stage_batch_handler(
+    State(mode): State<QueryStageServerMode>,
+    Json(request): Json<QueryHydratorBatchRequest>,
+) -> Json<SuccessEnvelope<QueryHydratorBatchResponse>> {
+    let items = request
+        .hydrator_names
+        .into_iter()
+        .map(|hydrator_name| QueryHydratorPatchResponse {
+            stage: match mode {
+                QueryStageServerMode::SafetyFailure
+                    if hydrator_name == USER_FEATURES_QUERY_HYDRATOR =>
+                {
+                    build_query_error_stage(
+                        USER_FEATURES_QUERY_HYDRATOR,
+                        SAFETY_CONTEXT_UNAVAILABLE_REASON,
+                    )
+                }
+                QueryStageServerMode::NoncriticalFailure
+                    if hydrator_name == MUTUAL_FOLLOW_QUERY_HYDRATOR =>
+                {
+                    build_query_error_stage(MUTUAL_FOLLOW_QUERY_HYDRATOR, CURRENT_QUERY_ERROR)
+                }
+                _ => RecommendationStagePayload {
+                    name: hydrator_name.clone(),
+                    enabled: true,
+                    duration_ms: 0,
+                    input_count: 1,
+                    output_count: 1,
+                    removed_count: None,
+                    detail: None,
+                },
+            },
+            hydrator_name,
+            query_patch: RecommendationQueryPatchPayload::default(),
+            provider_calls: HashMap::new(),
+            error_class: None,
+        })
+        .collect();
+    Json(SuccessEnvelope::ok(QueryHydratorBatchResponse {
+        items,
+        provider_calls: HashMap::from([(CURRENT_QUERY_PROVIDER.to_string(), 1)]),
+    }))
+}
+
+async fn spawn_query_stage_server(mode: QueryStageServerMode) -> (String, JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind query hydrator provider");
+    let address = listener.local_addr().expect("query provider address");
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/query-hydrators/batch", post(query_stage_batch_handler))
+                .with_state(mode),
+        )
+        .await
+        .expect("serve query hydrator provider");
+    });
+    (format!("http://{address}"), server)
 }
 
 fn test_config() -> RecommendationConfig {

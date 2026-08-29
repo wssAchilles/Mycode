@@ -74,6 +74,29 @@ describe('RecommendationAdapterService query hydrator patch contract', () => {
     expect(result.stage.detail?.ownedFields).toEqual(['userFeatures']);
   });
 
+  it('returns an explicit UserFeatures error stage for Rust fail-closed handling', async () => {
+    const service = new RecommendationAdapterService();
+    (service as any).queryHydratorCatalog = {
+      UserFeaturesQueryHydrator: {
+        name: 'UserFeaturesQueryHydrator',
+        enable: () => true,
+        hydrate: async () => {
+          throw new Error('blocked_store_unavailable');
+        },
+        update: (query: any) => query,
+      },
+    };
+
+    const result = await service.hydrateQueryPatch(
+      'UserFeaturesQueryHydrator',
+      createFeedQuery('viewer-safety-failure', 20),
+    );
+
+    expect(result.queryPatch).toEqual({});
+    expect(result.stage.name).toBe('UserFeaturesQueryHydrator');
+    expect(result.stage.detail?.error).toBe('blocked_store_unavailable');
+  });
+
   it('marks unauthorized field writes as a contract violation', async () => {
     const service = new RecommendationAdapterService();
     (service as any).queryHydratorCatalog = {

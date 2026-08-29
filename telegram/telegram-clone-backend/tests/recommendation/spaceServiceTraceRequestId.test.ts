@@ -168,6 +168,64 @@ describe('spaceService trace request ownership', () => {
         expect(getUserMap).not.toHaveBeenCalled();
     });
 
+    it('does not repopulate or trace a safety-context abstention', async () => {
+        mocks.resolveFeedRuntime.mockImplementationOnce(async (input) => ({
+            feed: [],
+            finalFeedQuery: input.createBaseQuery(),
+            safetyContextUnavailable: true,
+            pageMeta: {
+                hasMore: false,
+                continuationAbstained: true,
+            },
+            debugInfo: {
+                requestId: input.requestId,
+                pipeline: 'rust_primary_safety_context_abstention',
+                runtimeMode: 'primary',
+                configuredServingOwner: 'rust',
+                servingOwner: 'rust',
+                owner: 'rust',
+                fallbackOwner: 'node',
+                fallbackMode: 'safety_context_abstention_v1',
+                degradedReasons: ['safety_context_unavailable'],
+                selectedCount: 0,
+                sourceCounts: {},
+                generatedAt: '2026-07-15T12:00:00.000Z',
+            },
+        }));
+        const directFallback = vi.spyOn(spaceService as any, 'getInNetworkDirectFallback')
+            .mockResolvedValueOnce([]);
+        const getUserPosts = vi.spyOn(spaceService as any, 'getUserPosts')
+            .mockResolvedValueOnce([]);
+        const getUserMap = vi.spyOn(spaceService as any, 'getUserMap')
+            .mockResolvedValueOnce(new Map());
+        const recorder = vi.spyOn(spaceService as any, 'recordServedFeedTrace')
+            .mockResolvedValue(undefined);
+
+        const page = await spaceService.getFeedPage(
+            'trace-request-user',
+            2,
+            undefined,
+            true,
+            {
+                requestId: 'd7b474db-4d31-4a92-87f5-56e0df4d3a5d',
+                inNetworkOnly: true,
+            },
+        );
+
+        expect(page.candidates).toEqual([]);
+        expect(page.hasMore).toBe(false);
+        expect(page.debug).toMatchObject({
+            fallbackMode: 'safety_context_abstention_v1',
+            degradedReasons: ['safety_context_unavailable'],
+        });
+        expect(mocks.mixerGetFeed).not.toHaveBeenCalled();
+        expect(directFallback).not.toHaveBeenCalled();
+        expect(mocks.authorHydrate).not.toHaveBeenCalled();
+        expect(getUserPosts).not.toHaveBeenCalled();
+        expect(getUserMap).not.toHaveBeenCalled();
+        expect(recorder).not.toHaveBeenCalled();
+    });
+
     it('records the returned post-self page once with the independent policy feed', async () => {
         const selectedA = {
             postId: new mongoose.Types.ObjectId('507f191e810c19729de8c001'),

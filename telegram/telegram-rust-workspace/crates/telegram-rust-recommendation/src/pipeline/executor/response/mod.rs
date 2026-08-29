@@ -169,16 +169,69 @@ pub(super) fn build_live_recommendation_result(
     }
 }
 
+pub(super) const SAFETY_CONTEXT_ABSTENTION_MODE: &str = "safety_context_abstention_v1";
+pub(super) const SAFETY_CONTEXT_UNAVAILABLE_REASON: &str = "safety_context_unavailable";
+
+struct TerminalAbstentionInput<'a> {
+    config: &'a RecommendationConfig,
+    definition: &'a RecommendationPipelineDefinition,
+    query: &'a RecommendationQueryPayload,
+    telemetry: RunTelemetry,
+    reason: &'static str,
+    cursor_mode: &'static str,
+    page_build_duration_ms: u64,
+}
+
 pub(super) fn build_ranked_cursor_abstention_result(
     config: &RecommendationConfig,
     definition: &RecommendationPipelineDefinition,
     query: &RecommendationQueryPayload,
     page_build_duration_ms: u64,
 ) -> RecommendationResultPayload {
-    let stable_order_key = build_stable_order_key(&[], query.in_network_only);
-    let serving = build_live_serving_summary(LiveServingSummaryInput {
+    build_terminal_abstention_result(TerminalAbstentionInput {
+        config,
+        definition,
+        query,
+        telemetry: RunTelemetry::default(),
+        reason: "ranked_cursor_abstention",
         cursor_mode: RANKED_CURSOR_ABSTENTION_MODE,
-        cursor: query.cursor,
+        page_build_duration_ms,
+    })
+}
+
+pub(super) fn build_safety_context_abstention_result(
+    config: &RecommendationConfig,
+    definition: &RecommendationPipelineDefinition,
+    query: &RecommendationQueryPayload,
+    telemetry: RunTelemetry,
+    page_build_duration_ms: u64,
+) -> RecommendationResultPayload {
+    build_terminal_abstention_result(TerminalAbstentionInput {
+        config,
+        definition,
+        query,
+        telemetry,
+        reason: SAFETY_CONTEXT_UNAVAILABLE_REASON,
+        cursor_mode: SAFETY_CONTEXT_ABSTENTION_MODE,
+        page_build_duration_ms,
+    })
+}
+
+fn build_terminal_abstention_result(
+    input: TerminalAbstentionInput<'_>,
+) -> RecommendationResultPayload {
+    let mut telemetry = input.telemetry;
+    telemetry.degraded_reasons.push(input.reason.to_string());
+    dedup_strings(&mut telemetry.degraded_reasons);
+    telemetry.stage_latency_ms.insert(
+        PAGE_BUILD_LATENCY_KEY.to_string(),
+        input.page_build_duration_ms,
+    );
+
+    let stable_order_key = build_stable_order_key(&[], input.query.in_network_only);
+    let serving = build_live_serving_summary(LiveServingSummaryInput {
+        cursor_mode: input.cursor_mode,
+        cursor: input.query.cursor,
         next_cursor: None,
         has_more: false,
         stable_order_key: stable_order_key.clone(),
@@ -187,48 +240,45 @@ pub(super) fn build_ranked_cursor_abstention_result(
         suppression_reasons: HashMap::new(),
         page_remaining_count: 0,
         page_underfilled: true,
-        page_underfill_reason: Some("ranked_cursor_abstention".to_string()),
+        page_underfill_reason: Some(input.reason.to_string()),
     });
     let trace = build_recommendation_trace(
-        query,
+        input.query,
         &[],
         &[],
-        &definition.pipeline_version,
-        &definition.owner,
-        &definition.fallback_mode,
+        &input.definition.pipeline_version,
+        &input.definition.owner,
+        &input.definition.fallback_mode,
         false,
     );
     let summary = RecommendationSummaryPayload {
-        request_id: query.request_id.clone(),
-        stage: config.stage.clone(),
-        pipeline_version: definition.pipeline_version.clone(),
-        owner: definition.owner.clone(),
-        fallback_mode: definition.fallback_mode.clone(),
-        provider_calls: HashMap::new(),
-        provider_latency_ms: HashMap::new(),
+        request_id: input.query.request_id.clone(),
+        stage: input.config.stage.clone(),
+        pipeline_version: input.definition.pipeline_version.clone(),
+        owner: input.definition.owner.clone(),
+        fallback_mode: input.definition.fallback_mode.clone(),
+        provider_calls: telemetry.provider_calls,
+        provider_latency_ms: telemetry.provider_latency_ms,
         retrieved_count: 0,
         selected_count: 0,
         source_counts: HashMap::new(),
-        filter_drop_counts: HashMap::new(),
-        stage_timings: HashMap::new(),
-        stage_latency_ms: HashMap::from([(
-            PAGE_BUILD_LATENCY_KEY.to_string(),
-            page_build_duration_ms,
-        )]),
-        degraded_reasons: vec!["ranked_cursor_abstention".to_string()],
+        filter_drop_counts: telemetry.filter_drop_counts,
+        stage_timings: telemetry.stage_timings,
+        stage_latency_ms: telemetry.stage_latency_ms,
+        degraded_reasons: telemetry.degraded_reasons,
         recent_hot_applied: false,
         online_eval: build_online_eval(&[]),
         selector: RecommendationSelectorPayload {
-            oversample_factor: config.selector_oversample_factor,
-            max_size: config.selector_max_size,
-            final_limit: query.limit,
+            oversample_factor: input.config.selector_oversample_factor,
+            max_size: input.config.selector_max_size,
+            final_limit: input.query.limit,
             truncated: false,
             selector_report: None,
-            selector_report_unavailable_reason: Some("ranked_cursor_abstention".to_string()),
+            selector_report_unavailable_reason: Some(input.reason.to_string()),
         },
         serving,
         retrieval: RecommendationRetrievalSummaryPayload {
-            stage: "ranked_cursor_abstention".to_string(),
+            stage: input.reason.to_string(),
             total_candidates: 0,
             in_network_candidates: 0,
             out_of_network_candidates: 0,
@@ -245,7 +295,7 @@ pub(super) fn build_ranked_cursor_abstention_result(
             graph: RecommendationGraphRetrievalPayload::default(),
         },
         ranking: RecommendationRankingSummaryPayload {
-            stage: "ranked_cursor_abstention".to_string(),
+            stage: input.reason.to_string(),
             input_candidates: 0,
             hydrated_candidates: 0,
             filtered_candidates: 0,
@@ -257,14 +307,14 @@ pub(super) fn build_ranked_cursor_abstention_result(
             filter_drop_counts: HashMap::new(),
             degraded_reasons: Vec::new(),
         },
-        stages: Vec::new(),
+        stages: telemetry.stages,
         trace: Some(trace),
     };
 
     RecommendationResultPayload {
-        request_id: query.request_id.clone(),
+        request_id: input.query.request_id.clone(),
         serving_version: SERVING_VERSION.to_string(),
-        cursor: query.cursor,
+        cursor: input.query.cursor,
         next_cursor: None,
         has_more: false,
         served_state_version: SERVED_STATE_VERSION.to_string(),
