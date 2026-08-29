@@ -1063,7 +1063,7 @@ export class RecommendationPipeline<Q, C> {
         const timeoutMs = this.config.componentTimeoutMs;
         let timeout: ReturnType<typeof setTimeout> | undefined;
 
-        const runner = fn().catch((e) => {
+        const runner = Promise.resolve().then(fn).catch((e) => {
             error = e;
             throw e;
         });

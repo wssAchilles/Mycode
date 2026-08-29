@@ -750,6 +750,55 @@ describe('RecommendationPipeline metadata contracts', () => {
         }
     });
 
+    it('records synchronous half-open failures and permits a later probe', async () => {
+        vi.useFakeTimers();
+        try {
+            const metrics: PipelineMetrics[] = [];
+            let synchronousProbeCalls = 0;
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                onMetrics: (value) => metrics.push(value),
+                circuitBreaker: {
+                    failureThreshold: 1,
+                    resetTimeoutMs: 50,
+                },
+            }).withSource({
+                name: 'SynchronousFailureSource',
+                enable: () => true,
+                getCandidates: (query) => {
+                    if (query.requestId === 'req-trip-sync-failure') {
+                        return Promise.reject(new Error('expected initial failure'));
+                    }
+                    synchronousProbeCalls++;
+                    throw new Error('expected synchronous probe failure');
+                },
+            });
+
+            await pipeline.execute({ requestId: 'req-trip-sync-failure', limit: 20 });
+            await vi.advanceTimersByTimeAsync(50);
+            await pipeline.execute({ requestId: 'req-sync-failure-first', limit: 20 });
+            await vi.advanceTimersByTimeAsync(50);
+            await pipeline.execute({ requestId: 'req-sync-failure-second', limit: 20 });
+
+            expect(synchronousProbeCalls).toBe(2);
+            const firstProbeMetrics = metrics.find(({ requestId }) =>
+                requestId === 'req-sync-failure-first'
+            )!;
+            expect(firstProbeMetrics.components).toEqual([
+                expect.objectContaining({
+                    stage: 'Source',
+                    name: 'SynchronousFailureSource',
+                    error: 'Error: expected synchronous probe failure',
+                }),
+            ]);
+            expect(firstProbeMetrics.safety).toMatchObject({
+                circuitBreakerTrips: 1,
+                circuitBreakerSkips: 0,
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('ignores a success from a call started before the circuit opened', async () => {
         let markStaleStarted = () => {};
         const staleStarted = new Promise<void>((resolve) => {
