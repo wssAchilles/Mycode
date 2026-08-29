@@ -608,6 +608,62 @@ describe('RecommendationPipeline metadata contracts', () => {
         }
     });
 
+    it('drains source stage details after success and late timeout settlement', async () => {
+        vi.useFakeTimers();
+        let releaseSource = () => {};
+        let rejectSource = (_error: Error) => {};
+        try {
+            const pendingDetails = new Map<string, Record<string, unknown>>();
+            const stageDetail = vi.fn((query: Query) => {
+                const detail = pendingDetails.get(query.requestId);
+                pendingDetails.delete(query.requestId);
+                return detail;
+            });
+            const sourceGate = new Promise<Candidate[]>((resolve, reject) => {
+                releaseSource = () => resolve([]);
+                rejectSource = reject;
+            });
+            const pipeline = new RecommendationPipeline<Query, Candidate>({
+                componentTimeoutMs: 50,
+            }).withSource({
+                name: 'StageDetailSource',
+                enable: () => true,
+                getCandidates: (query) => {
+                    pendingDetails.set(query.requestId, { recorded: true });
+                    return query.requestId === 'req-stage-detail-success'
+                        ? Promise.resolve([])
+                        : sourceGate;
+                },
+                stageDetail,
+            });
+
+            await pipeline.execute({ requestId: 'req-stage-detail-success', limit: 20 });
+            expect(pendingDetails.size).toBe(0);
+            expect(stageDetail).toHaveBeenCalledWith(
+                expect.objectContaining({ requestId: 'req-stage-detail-success' }),
+                [],
+            );
+
+            const timedOutExecution = pipeline.execute({ requestId: 'req-stage-detail-timeout', limit: 20 });
+            await vi.advanceTimersByTimeAsync(50);
+            await timedOutExecution;
+            expect(stageDetail).toHaveBeenCalledTimes(1);
+            expect(pendingDetails.size).toBe(1);
+
+            rejectSource(new Error('late source failure'));
+            await vi.advanceTimersByTimeAsync(0);
+            expect(pendingDetails.size).toBe(0);
+            expect(stageDetail).toHaveBeenCalledWith(
+                expect.objectContaining({ requestId: 'req-stage-detail-timeout' }),
+                [],
+            );
+        } finally {
+            releaseSource();
+            await vi.advanceTimersByTimeAsync(0);
+            vi.useRealTimers();
+        }
+    });
+
     it('emits one terminal metric and skips side effects after a pipeline timeout', async () => {
         vi.useFakeTimers();
         try {

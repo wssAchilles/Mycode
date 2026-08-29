@@ -693,7 +693,24 @@ export class RecommendationPipeline<Q, C> {
                 return this.runComponent(
                     'Source',
                     source.name,
-                    () => source.getCandidates(query),
+                    () => {
+                        const sourceExecution = Promise.resolve().then(() => source.getCandidates(query));
+                        const drainStageDetail = (candidates: C[]): C[] => {
+                            try {
+                                source.stageDetail?.(query, candidates);
+                            } catch (error) {
+                                log.warn(`[Source ${source.name}] Stage detail cleanup failed: ${error}`);
+                            }
+                            return candidates;
+                        };
+                        return sourceExecution.then(
+                            (candidates) => drainStageDetail(candidates || []),
+                            (error) => {
+                                drainStageDetail([]);
+                                throw error;
+                            },
+                        );
+                    },
                     state,
                 )
                     .then((candidates) =>
