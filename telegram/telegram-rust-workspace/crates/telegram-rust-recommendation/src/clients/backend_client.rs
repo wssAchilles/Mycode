@@ -7,6 +7,9 @@ pub use telegram_rust_http_types::ProviderResponse;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
+use crate::clients::response_body::{
+    ResponseBodyError, error_body_preview, read_response_body_bounded,
+};
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageResponse, GraphAuthorMaterializationRequest,
@@ -324,17 +327,26 @@ impl BackendRecommendationClient {
             .await
             .with_context(|| format!("request backend recommendation adapter {url}"))?;
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .with_context(|| format!("read backend recommendation adapter body {url}"))?;
+        let body = match read_response_body_bounded(response).await {
+            Ok(body) => body,
+            Err(error @ ResponseBodyError::TooLarge { .. }) if !status.is_success() => {
+                return Err(anyhow!(
+                    "backend_recommendation_request_failed status={} path={} body={}",
+                    status,
+                    path,
+                    error_body_preview(&error.to_string())
+                ));
+            }
+            Err(error) => Err(error)
+                .with_context(|| format!("read backend recommendation adapter body {url}"))?,
+        };
 
         if !status.is_success() {
             return Err(anyhow!(
                 "backend_recommendation_request_failed status={} path={} body={}",
                 status,
                 path,
-                body
+                error_body_preview(&body)
             ));
         }
 

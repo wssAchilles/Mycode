@@ -8,6 +8,9 @@ use serde::de::DeserializeOwned;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+use crate::clients::response_body::{
+    ResponseBodyError, error_body_preview, read_response_body_bounded,
+};
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     GraphKernelBatchRequest, GraphKernelBatchResponse, GraphKernelBridgeCandidate,
@@ -347,24 +350,33 @@ impl GraphKernelClient {
                 }
             })?;
         let status = response.status();
-        let body = response.text().await.map_err(|error| {
-            if error.is_timeout() {
-                GraphKernelError::Timeout {
+        let body = match read_response_body_bounded(response).await {
+            Ok(body) => body,
+            Err(error @ ResponseBodyError::TooLarge { .. }) if !status.is_success() => {
+                return Err(GraphKernelError::HttpStatus {
                     path: path.to_string(),
+                    status,
+                    body: error_body_preview(&error.to_string()),
+                });
+            }
+            Err(error) => {
+                if error.is_timeout() {
+                    return Err(GraphKernelError::Timeout {
+                        path: path.to_string(),
+                    });
                 }
-            } else {
-                GraphKernelError::Unavailable {
+                return Err(GraphKernelError::Unavailable {
                     path: path.to_string(),
                     source: format!("read body {url}: {error}"),
-                }
+                });
             }
-        })?;
+        };
 
         if !status.is_success() {
             return Err(GraphKernelError::HttpStatus {
                 path: path.to_string(),
                 status,
-                body,
+                body: error_body_preview(&body),
             });
         }
 
@@ -413,6 +425,41 @@ mod tests {
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes()).await;
+        });
+        format!("http://{address}")
+    }
+
+    async fn spawn_declared_length_graph_response(status: &str, declared_length: usize) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let status = status.to_string();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept graph request");
+            let mut buffer = [0_u8; 2048];
+            let _ = stream.read(&mut buffer).await;
+            let response = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {declared_length}\r\nconnection: close\r\n\r\n"
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        format!("http://{address}")
+    }
+
+    async fn spawn_delayed_body_graph_response(delay_ms: u64) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept graph request");
+            let mut buffer = [0_u8; 2048];
+            let _ = stream.read(&mut buffer).await;
+            let response = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n";
+            let _ = stream.write_all(response.as_bytes()).await;
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            let _ = stream.write_all(b"{}").await;
         });
         format!("http://{address}")
     }
@@ -506,6 +553,55 @@ mod tests {
 
         assert!(matches!(error, GraphKernelError::HttpStatus { .. }));
         assert_eq!(error.class(), "http_status");
+    }
+
+    #[tokio::test]
+    async fn classifies_oversized_graph_kernel_body_as_unavailable() {
+        let base_url = spawn_declared_length_graph_response(
+            "200 OK",
+            super::super::response_body::MAX_RESPONSE_BODY_BYTES + 1,
+        )
+        .await;
+
+        let error = client(base_url, 1_000)
+            .social_neighbors("viewer", 1, &[])
+            .await
+            .expect_err("oversized response body");
+
+        assert!(matches!(error, GraphKernelError::Unavailable { .. }));
+        assert_eq!(error.class(), "unavailable");
+        assert!(error.to_string().contains("response body exceeds"));
+    }
+
+    #[tokio::test]
+    async fn preserves_graph_kernel_http_status_for_oversized_error_body() {
+        let base_url = spawn_declared_length_graph_response(
+            "503 Service Unavailable",
+            super::super::response_body::MAX_RESPONSE_BODY_BYTES + 1,
+        )
+        .await;
+
+        let error = client(base_url, 1_000)
+            .social_neighbors("viewer", 1, &[])
+            .await
+            .expect_err("oversized error response body");
+
+        assert!(matches!(error, GraphKernelError::HttpStatus { .. }));
+        assert_eq!(error.class(), "http_status");
+        assert!(error.to_string().contains("response body exceeds"));
+    }
+
+    #[tokio::test]
+    async fn classifies_graph_kernel_body_read_timeout() {
+        let base_url = spawn_delayed_body_graph_response(100).await;
+
+        let error = client(base_url, 10)
+            .social_neighbors("viewer", 1, &[])
+            .await
+            .expect_err("body read timeout");
+
+        assert!(matches!(error, GraphKernelError::Timeout { .. }));
+        assert_eq!(error.class(), "timeout");
     }
 
     #[tokio::test]
