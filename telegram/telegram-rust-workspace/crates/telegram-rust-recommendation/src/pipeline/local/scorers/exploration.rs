@@ -340,7 +340,7 @@ pub(super) fn apply_bandit_exploration(
     let lift = if eligible {
         plan.epsilon
             * (thompson_value * 0.32
-                + exploration_bonus * 0.28
+                + exploration_bonus * plan.uncertainty_weight
                 + novelty * 0.22
                 + trend_strength * 0.12
                 + deterministic_jitter * 0.06)

@@ -1621,6 +1621,35 @@ fn bandit_exploration_keeps_extreme_candidate_metrics_finite() {
 }
 
 #[test]
+fn bandit_uncertainty_weight_controls_positive_bonus() {
+    let score_with_weight = |weight| {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            bandit_uncertainty_weight: Some(weight),
+            ..RankingPolicyPayload::default()
+        });
+        let result = run_local_scorers(
+            &query,
+            vec![candidate("post-bandit-weight", "author-bandit-weight")],
+        );
+        let breakdown = result.candidates[0]
+            .score_breakdown
+            .as_ref()
+            .expect("score breakdown");
+        (
+            breakdown["banditExplorationBonus"],
+            breakdown["banditMultiplier"],
+        )
+    };
+
+    let (zero_bonus, zero_multiplier) = score_with_weight(0.0);
+    let (weighted_bonus, weighted_multiplier) = score_with_weight(0.7);
+    assert!(zero_bonus > 0.0, "fixture needs a positive bonus");
+    assert_eq!(zero_bonus, weighted_bonus);
+    assert!(weighted_multiplier > zero_multiplier);
+}
+
+#[test]
 fn fatigue_scorer_penalizes_repeated_exposure() {
     let mut query = query();
     let timestamp = Utc::now().to_rfc3339();
