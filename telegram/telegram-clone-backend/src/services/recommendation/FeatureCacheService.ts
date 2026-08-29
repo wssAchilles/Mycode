@@ -210,16 +210,21 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value) {
-                    const parsed = JSON.parse(l2Value) as IUserFeatureVector;
-                    result.set(userId, parsed);
-                    this.userEmbeddingL1.set(`${CONFIG.l2.keyPrefix}emb:${userId}`, parsed);
+                    try {
+                        const parsed = JSON.parse(l2Value) as IUserFeatureVector;
+                        result.set(userId, parsed);
+                        this.userEmbeddingL1.set(`${CONFIG.l2.keyPrefix}emb:${userId}`, parsed);
+                    } catch {
+                        missingFromL2.push(userId);
+                    }
                 } else {
                     missingFromL2.push(userId);
                 }
             }
         } catch {
             // Redis 不可用时所有缺失的都从 DB 读取
-            missingFromL2.push(...missingFromL1);
+            missingFromL2.length = 0;
+            missingFromL2.push(...missingFromL1.filter(userId => !result.has(userId)));
         }
 
         if (missingFromL2.length === 0) return result;
@@ -383,7 +388,10 @@ export class FeatureCacheService {
             }
         } catch {
             // 回退到逐个查询
-            for (const pair of missingFromL1) {
+            for (const pair of missingFromL1.filter(
+                ({ sourceUserId, targetUserId }) =>
+                    !result.has(`${sourceUserId}:${targetUserId}`)
+            )) {
                 const pairKey = `${pair.sourceUserId}:${pair.targetUserId}`;
                 const score = await RealGraphEdge.getEdgeScore(pair.sourceUserId, pair.targetUserId);
                 result.set(pairKey, score);
@@ -487,9 +495,13 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value) {
-                    const parsed = JSON.parse(l2Value) as IClusterDefinition;
-                    result.set(clusterId, parsed);
-                    this.clusterL1.set(`${CONFIG.l2.keyPrefix}cluster:${clusterId}`, parsed);
+                    try {
+                        const parsed = JSON.parse(l2Value) as IClusterDefinition;
+                        result.set(clusterId, parsed);
+                        this.clusterL1.set(`${CONFIG.l2.keyPrefix}cluster:${clusterId}`, parsed);
+                    } catch {
+                        missingFromL2.push(clusterId);
+                    }
                 } else {
                     missingFromL2.push(clusterId);
                 }
@@ -510,7 +522,9 @@ export class FeatureCacheService {
             }
         } catch {
             // 回退到 DB 查询
-            const dbResult = await ClusterDefinition.getClustersBatch(missingFromL1);
+            const unresolvedClusterIds = missingFromL1.filter(clusterId => !result.has(clusterId));
+            if (unresolvedClusterIds.length === 0) return result;
+            const dbResult = await ClusterDefinition.getClustersBatch(unresolvedClusterIds);
             for (const [clusterId, cluster] of dbResult) {
                 result.set(clusterId, cluster);
             }
