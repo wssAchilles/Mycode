@@ -32,14 +32,12 @@ pub(super) fn annotate_candidate_recall_evidence(
     let (same_lane_count, cross_lane_count) =
         secondary_lane_counts(primary_lane, candidate.secondary_recall_sources.as_deref());
 
-    if secondary_count > 0 {
-        insert_secondary_source_breakdown(
-            candidate,
-            secondary_count,
-            same_lane_count,
-            cross_lane_count,
-        );
-    }
+    insert_secondary_source_breakdown(
+        candidate,
+        secondary_count,
+        same_lane_count,
+        cross_lane_count,
+    );
 
     apply_merged_recall_evidence(
         candidate,

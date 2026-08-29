@@ -16,7 +16,10 @@ use telegram_pipeline_primitives::{
 };
 use telegram_rust_http_types::SuccessEnvelope;
 use telegram_source_primitives::{
-    RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD,
     RETRIEVAL_SOURCE_RANK_SCORE_FIELD, RETRIEVAL_SOURCE_SCORE_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
     SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
@@ -913,4 +916,40 @@ fn lane_merge_drops_non_finite_recall_evidence_values() {
     assert!(breakdown[RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD].is_finite());
     assert!(breakdown[RETRIEVAL_SOURCE_RANK_SCORE_FIELD].is_finite());
     assert_eq!(breakdown[RETRIEVAL_SOURCE_SCORE_FIELD], 0.7);
+}
+
+#[test]
+fn lane_merge_resets_stale_single_source_evidence_fields() {
+    let mut candidate = fixture_candidate("single-source-post", "author-1", "FollowingSource");
+    candidate.score = Some(0.7);
+    candidate.score_breakdown = Some(HashMap::from([
+        (RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD.to_string(), 9.0),
+        (RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD.to_string(), 8.0),
+        (RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD.to_string(), 7.0),
+        (RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD.to_string(), 6.0),
+        (RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(), 5.0),
+        (RETRIEVAL_CROSS_LANE_BONUS_FIELD.to_string(), 4.0),
+        (RETRIEVAL_MULTI_SOURCE_BONUS_FIELD.to_string(), 3.0),
+        ("retrievalDenseVectorScore".to_string(), 0.8),
+    ]));
+
+    let (merged, _, _) = merge_source_candidates(
+        &fixture_query(),
+        vec![("FollowingSource".to_string(), vec![candidate])],
+        &["FollowingSource".to_string()],
+    );
+
+    let merged = merged.first().expect("candidate should be preserved");
+    let breakdown = merged
+        .score_breakdown
+        .as_ref()
+        .expect("merge should preserve score breakdown");
+    assert_eq!(breakdown[RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD], 1.0);
+    assert_eq!(breakdown[RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_CROSS_LANE_BONUS_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_MULTI_SOURCE_BONUS_FIELD], 0.0);
+    assert_eq!(breakdown["retrievalDenseVectorScore"], 0.8);
 }
