@@ -132,9 +132,10 @@ app.get('/ready', async (_req, res) => {
 
   const services = [mongo, postgres, redisStatus, ai];
   const overallError = services.some((s) => s.status === 'error');
-  const degraded = services.some((s) => s.status === 'degraded');
   const controlPlane = runtimeControlPlane.snapshot();
   const capabilityOwners = buildNodeCapabilityOwnershipSummary();
+  const degraded = services.some((s) => s.status === 'degraded')
+    || !capabilityOwners.graphKernelConfig.valid;
 
   res.status(overallError ? 503 : degraded ? 206 : 200).json({
     status: overallError ? 'error' : degraded ? 'degraded' : 'ok',
@@ -146,6 +147,7 @@ app.get('/ready', async (_req, res) => {
       summary: controlPlane.summary,
       capabilitiesSummary: capabilityOwners.summary,
       nodeStrategicShape: capabilityOwners.nodeStrategicShape,
+      graphKernelConfig: capabilityOwners.graphKernelConfig,
     },
     timestamp: new Date().toISOString(),
     uptime: process.uptime()

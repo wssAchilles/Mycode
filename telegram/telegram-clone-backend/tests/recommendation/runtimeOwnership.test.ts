@@ -111,6 +111,21 @@ describe('recommendation runtime ownership', () => {
     );
   });
 
+  it('publishes an invalid graph kernel flag as a safe-disabled status', () => {
+    vi.stubEnv('CPP_GRAPH_KERNEL_ENABLED', 'treu');
+
+    const ownership = buildNodeCapabilityOwnershipSummary();
+    expect(ownership.graphKernelConfig).toMatchObject({
+      enabled: false,
+      valid: false,
+      error: 'invalid_boolean_env:CPP_GRAPH_KERNEL_ENABLED=treu: expected one of 1/0, true/false, yes/no, or on/off',
+    });
+    expect(ownership.capabilities.find((capability) => capability.capability === 'graph')).toMatchObject({
+      owner: 'node',
+      fallbackEnabled: false,
+    });
+  });
+
   it('keeps Node recommendation as the legacy baseline while Rust owns new algorithms', () => {
     expect(RECOMMENDATION_CANONICAL_ALGORITHM_OWNER).toBe('rust');
     expect(NODE_RECOMMENDATION_BASELINE_ROLE).toBe('legacy_baseline_fallback');

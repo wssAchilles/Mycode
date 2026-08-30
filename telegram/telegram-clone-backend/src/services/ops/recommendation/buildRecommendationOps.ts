@@ -15,6 +15,7 @@ import {
   type RecommendationRolloutEvidence,
 } from '../../recommendation/ops/rolloutEvidence';
 import { readGraphKernelOpsSummary } from '../../graphKernel/ops';
+import { readGraphKernelEnablement } from '../../graphKernel/contracts';
 import { getCapabilityRecord } from '../shared/capabilityRecord';
 import { readOptionalInt, readOptionalNumber, readOptionalString } from '../shared/queryParsing';
 
@@ -41,6 +42,7 @@ export async function buildRecommendationOps(
   rolloutPolicyConfig?: unknown,
 ) {
   const mode = getRustRecommendationMode();
+  const graphKernelConfig = readGraphKernelEnablement(process.env.CPP_GRAPH_KERNEL_ENABLED);
   const [rustRecommendation, graphKernel, traceSummary, rolloutEvidence] = await Promise.all([
     readRustRecommendationOpsSummary(),
     readGraphKernelOpsSummary(),
@@ -59,6 +61,7 @@ export async function buildRecommendationOps(
     traceSummary,
     rolloutEvidence,
     mode,
+    graphKernelConfig,
   });
 
   return {
@@ -90,9 +93,8 @@ export async function buildRecommendationOps(
         parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY || '256'), 10) || 256,
       recentPerUserCapacity:
         parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY || '64'), 10) || 64,
-      graphKernelEnabled: !['0', 'false', 'off', 'no'].includes(
-        String(process.env.CPP_GRAPH_KERNEL_ENABLED || 'true').trim().toLowerCase(),
-      ),
+      graphKernelEnabled: graphKernelConfig.enabled,
+      graphKernelConfig,
       graphKernelUrl: String(process.env.CPP_GRAPH_KERNEL_URL || 'http://graph_kernel:4300'),
     },
   };
@@ -104,6 +106,7 @@ async function buildRecommendationReadiness(input: {
   traceSummary: Awaited<ReturnType<typeof buildRecommendationTraceSummary>>;
   rolloutEvidence: RecommendationRolloutEvidence;
   mode: string;
+  graphKernelConfig: ReturnType<typeof readGraphKernelEnablement>;
 }) {
   const blockers: string[] = [];
   const nodeAdapter = await probeNodeAdapterHealth();
@@ -116,6 +119,9 @@ async function buildRecommendationReadiness(input: {
   }
   if (input.graphKernel && input.graphKernel.available === false) {
     blockers.push(`graph_unready:${input.graphKernel.error || 'unknown'}`);
+  }
+  if (!input.graphKernelConfig.valid) {
+    blockers.push('graph_kernel_config_invalid');
   }
 
   const traceSummary = input.traceSummary as any;
@@ -146,6 +152,7 @@ async function buildRecommendationReadiness(input: {
         available: input.graphKernel.available,
         url: input.graphKernel.url,
         error: input.graphKernel.error,
+        config: input.graphKernelConfig,
       },
     },
   };

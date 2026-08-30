@@ -148,3 +148,42 @@ export interface GraphKernelOpsSnapshot {
   refresh?: Record<string, unknown>;
   error?: string;
 }
+
+export interface GraphKernelEnablementStatus {
+  enabled: boolean;
+  valid: boolean;
+  error?: string;
+}
+
+const GRAPH_KERNEL_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const GRAPH_KERNEL_FALSE_VALUES = new Set(['0', 'false', 'no', 'off']);
+
+export function readGraphKernelEnablement(
+  value: unknown,
+  fallback = true,
+): GraphKernelEnablementStatus {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { enabled: fallback, valid: true };
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (GRAPH_KERNEL_TRUE_VALUES.has(normalized)) {
+    return { enabled: true, valid: true };
+  }
+  if (GRAPH_KERNEL_FALSE_VALUES.has(normalized)) {
+    return { enabled: false, valid: true };
+  }
+  return {
+    enabled: false,
+    valid: false,
+    error: `invalid_boolean_env:CPP_GRAPH_KERNEL_ENABLED=${String(value)}: expected one of 1/0, true/false, yes/no, or on/off`,
+  };
+}
+
+export function parseGraphKernelEnabled(value: unknown, fallback = true): boolean {
+  const status = readGraphKernelEnablement(value, fallback);
+  if (!status.valid) {
+    throw new Error(status.error);
+  }
+  return status.enabled;
+}

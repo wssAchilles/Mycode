@@ -1,3 +1,6 @@
+import {
+  readGraphKernelEnablement,
+} from './contracts';
 import type {
   GraphKernelAuthorCandidate,
   GraphKernelBatchQueryDiagnostics,
@@ -643,8 +646,7 @@ export class GraphKernelClient {
 let graphKernelClientInstance: GraphKernelClient | null = null;
 
 export function isGraphKernelEnabled(): boolean {
-  const value = String(process.env.CPP_GRAPH_KERNEL_ENABLED || 'true').trim().toLowerCase();
-  return !['0', 'false', 'off', 'no'].includes(value);
+  return readGraphKernelEnablement(process.env.CPP_GRAPH_KERNEL_ENABLED).enabled;
 }
 
 export function getGraphKernelClient(): GraphKernelClient | null {
