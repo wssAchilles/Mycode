@@ -408,10 +408,29 @@ export class FeatureCacheService {
         sourceUserId: string,
         targetUserId: string
     ): Promise<void> {
-        const cacheKey = `${CONFIG.l2.keyPrefix}rg:${sourceUserId}:${targetUserId}`;
-        this.realGraphL1.delete(cacheKey);
+        await this.invalidateEdgeScores([{ sourceUserId, targetUserId }]);
+    }
+
+    /**
+     * 批量失效边分数缓存
+     */
+    async invalidateEdgeScores(
+        pairs: Array<{ sourceUserId: string; targetUserId: string }>
+    ): Promise<void> {
+        const cacheKeys = Array.from(new Set(
+            pairs.map(({ sourceUserId, targetUserId }) =>
+                `${CONFIG.l2.keyPrefix}rg:${sourceUserId}:${targetUserId}`
+            )
+        ));
+
+        for (const cacheKey of cacheKeys) {
+            this.realGraphL1.delete(cacheKey);
+        }
+
         try {
-            await redis.del(cacheKey);
+            if (cacheKeys.length > 0) {
+                await redis.del(...cacheKeys);
+            }
         } catch {
             // 忽略
         }

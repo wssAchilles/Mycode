@@ -21,6 +21,7 @@ import RealGraphEdge, {
     REALGRAPH_PREDICTION_MODE,
 } from '../../models/RealGraphEdge';
 import { redis } from '../../config/redis';
+import { FeatureCacheService } from './FeatureCacheService';
 
 // ========== 配置常量 ==========
 const CONFIG = {
@@ -197,6 +198,17 @@ export class RealGraphService {
             if (cacheKeys.length > 0) {
                 await redis.del(...cacheKeys);
             }
+        } catch {
+            // 缓存失败不影响主流程
+        }
+
+        try {
+            await FeatureCacheService.getInstance().invalidateEdgeScores(
+                interactions.map(({ sourceUserId, targetUserId }) => ({
+                    sourceUserId,
+                    targetUserId,
+                })),
+            );
         } catch {
             // 缓存失败不影响主流程
         }
@@ -553,6 +565,15 @@ export class RealGraphService {
         const cacheKey = `${CONFIG.cache.keyPrefix}${sourceUserId}:${targetUserId}`;
         try {
             await redis.del(cacheKey);
+        } catch {
+            // 忽略缓存错误
+        }
+
+        try {
+            await FeatureCacheService.getInstance().invalidateEdgeScore(
+                sourceUserId,
+                targetUserId,
+            );
         } catch {
             // 忽略缓存错误
         }
