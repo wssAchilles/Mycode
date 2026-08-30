@@ -356,14 +356,13 @@ export class SimClustersService {
         const embedding = signal
             ? await UserFeatureVector.upsertEmbedding(userId, embeddings, version, signal)
             : await UserFeatureVector.upsertEmbedding(userId, embeddings, version);
-        signal?.throwIfAborted();
 
         // 清除当前 SimClusters 缓存和 FeatureCache 当前进程 L1/L2
         const cacheKey = `${CONFIG.cache.keyPrefix}${userId}`;
-        signal?.throwIfAborted();
         const invalidationResults = await Promise.allSettled([
             redis.del(cacheKey),
-            FeatureCacheService.getInstance().invalidateUserEmbedding(userId, signal),
+            // 写入已完成后必须清理缓存；取消信号只在清理完成后传播。
+            FeatureCacheService.getInstance().invalidateUserEmbedding(userId),
         ]);
         signal?.throwIfAborted();
         for (const result of invalidationResults) {

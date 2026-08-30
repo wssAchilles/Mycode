@@ -60,7 +60,7 @@ describe('SimClusters cancellation propagation', () => {
     mocks.jobRunUpdateOne.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
   });
 
-  it('passes signal through reads and stops cache mutations after an aborted upsert', async () => {
+  it('invalidates both caches when an upsert aborts after the write', async () => {
     const controller = new AbortController();
     const versionQuery = {
       lean: vi.fn(async () => null),
@@ -88,8 +88,8 @@ describe('SimClusters cancellation propagation', () => {
       1,
       controller.signal,
     );
-    expect(mocks.redisDel).not.toHaveBeenCalled();
-    expect(mocks.invalidateUserEmbedding).not.toHaveBeenCalled();
+    expect(mocks.redisDel).toHaveBeenCalledWith('sc:embed:user-1');
+    expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith('user-1');
   });
 
   it('passes signal through InterestedIn graph and embedding reads', async () => {
@@ -106,7 +106,7 @@ describe('SimClusters cancellation propagation', () => {
     expect(mocks.getUserEmbeddingsBatch).toHaveBeenCalledWith(['followed-user'], controller.signal);
   });
 
-  it('waits for in-flight cache invalidations and passes their abort signal', async () => {
+  it('waits for in-flight cache invalidations before propagating abort', async () => {
     const controller = new AbortController();
     let resolveRedis!: () => void;
     let resolveFeature!: () => void;
@@ -127,7 +127,7 @@ describe('SimClusters cancellation propagation', () => {
     controller.abort(new Error('lease lost during cache invalidation'));
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith('user-1', controller.signal);
+    expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith('user-1');
 
     resolveRedis();
     resolveFeature();

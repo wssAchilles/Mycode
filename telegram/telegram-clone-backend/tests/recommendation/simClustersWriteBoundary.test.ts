@@ -81,7 +81,7 @@ describe('SimClustersService write boundary', () => {
         expect(write).not.toHaveProperty('phoenixEmbeddingContract');
         expect(write).not.toHaveProperty('embeddingContract');
         expect(mocks.redisDel).toHaveBeenCalledWith('sc:embed:user-1');
-        expect(mocks.invalidateFeatureCache).toHaveBeenCalledWith('user-1', undefined);
+        expect(mocks.invalidateFeatureCache).toHaveBeenCalledWith('user-1');
         expect(mocks.upsertEmbedding.mock.invocationCallOrder[0])
             .toBeLessThan(mocks.redisDel.mock.invocationCallOrder[0]);
         expect(mocks.upsertEmbedding.mock.invocationCallOrder[0])
@@ -102,7 +102,7 @@ describe('SimClustersService write boundary', () => {
             await expect(service.computeAndStoreEmbedding('user-1')).rejects.toBe(invalidationError);
 
             expect(mocks.redisDel).toHaveBeenCalledWith('sc:embed:user-1');
-            expect(mocks.invalidateFeatureCache).toHaveBeenCalledWith('user-1', undefined);
+            expect(mocks.invalidateFeatureCache).toHaveBeenCalledWith('user-1');
         },
     );
 });
