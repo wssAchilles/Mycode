@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 
 import { recommendationAdapterService } from '../../src/services/recommendation/internal/adapterService';
+import { EngagementScorer } from '../../src/services/recommendation/scorers/EngagementScorer';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
 function candidate(extra?: Record<string, unknown>) {
@@ -57,5 +58,38 @@ describe('recommendation adapter scorer selection', () => {
         ['MissingScorer'],
       ),
     ).rejects.toThrow('unknown_scorer:MissingScorer');
+  });
+
+  it('records a provider contract error when a scorer returns the wrong cardinality', async () => {
+    const query = createFeedQuery('viewer-1', 20);
+    const score = vi.spyOn(EngagementScorer.prototype, 'score').mockResolvedValueOnce([]);
+
+    try {
+      const result = await recommendationAdapterService.scoreCandidates(
+        query,
+        [candidate()],
+        ['EngagementScorer'],
+      );
+
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]).toMatchObject({
+        postId: new mongoose.Types.ObjectId('507f191e810c19729de86001'),
+        content: 'scorer selection test',
+      });
+      expect(result.candidates[0].phoenixScores).toBeUndefined();
+      expect(result.stages).toHaveLength(1);
+      expect(result.stages[0]).toMatchObject({
+        name: 'EngagementScorer',
+        inputCount: 1,
+        outputCount: 1,
+        detail: {
+          error: 'scorer_contract_violation:EngagementScorer:length_mismatch:1:0',
+          errorClass: 'provider_contract_error',
+          scoredCount: 0,
+        },
+      });
+    } finally {
+      score.mockRestore();
+    }
   });
 });

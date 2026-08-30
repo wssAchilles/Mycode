@@ -636,6 +636,15 @@ export class RecommendationAdapterService {
           durationMs: Date.now() - start,
           inputCount: current.length,
           outputCount: current.length,
+          ...(scored.length !== current.length
+            ? {
+                detail: {
+                  error: `scorer_contract_violation:${scorer.name}:length_mismatch:${current.length}:${scored.length}`,
+                  errorClass: 'provider_contract_error',
+                  scoredCount: scored.length,
+                },
+              }
+            : {}),
         });
       } catch (error: any) {
         stages.push({
