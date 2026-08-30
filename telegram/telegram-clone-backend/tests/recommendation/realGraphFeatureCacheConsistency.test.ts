@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
     bulkWrite: vi.fn(),
     getEdgeScore: vi.fn(),
     applyDailyDecay: vi.fn(),
+    find: vi.fn(),
+    deleteMany: vi.fn(),
 }));
 
 vi.mock('../../src/config/redis', () => ({
@@ -24,6 +26,8 @@ vi.mock('../../src/models/RealGraphEdge', () => ({
         bulkWrite: mocks.bulkWrite,
         getEdgeScore: mocks.getEdgeScore,
         applyDailyDecay: mocks.applyDailyDecay,
+        find: mocks.find,
+        deleteMany: mocks.deleteMany,
     },
     InteractionType: {
         FOLLOW: 'follow',
@@ -53,7 +57,7 @@ vi.mock('../../src/models/RealGraphEdge', () => ({
 vi.mock('../../src/models/UserFeatureVector', () => ({ default: {} }));
 vi.mock('../../src/models/ClusterDefinition', () => ({ default: {} }));
 
-import { InteractionType } from '../../src/models/RealGraphEdge';
+import { DECAY_CONFIG, InteractionType } from '../../src/models/RealGraphEdge';
 import { FeatureCacheService } from '../../src/services/recommendation/FeatureCacheService';
 import { RealGraphService } from '../../src/services/recommendation/RealGraphService';
 
@@ -68,6 +72,8 @@ describe('RealGraph and FeatureCache consistency', () => {
         mocks.redisSetex.mockResolvedValue('OK');
         mocks.bulkWrite.mockResolvedValue({});
         mocks.applyDailyDecay.mockReset();
+        mocks.find.mockReset();
+        mocks.deleteMany.mockReset();
     });
 
     it('invalidates a warmed FeatureCache edge after a single interaction write', async () => {
@@ -166,5 +172,60 @@ describe('RealGraph and FeatureCache consistency', () => {
         });
         expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
         expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-6:target-6');
+    });
+
+    it('invalidates caches for stale edges removed by cleanup', async () => {
+        await featureCacheService.getEdgeScore('source-7', 'target-7');
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(1);
+
+        const staleEdge = {
+            _id: 'edge-7',
+            sourceUserId: 'source-7',
+            targetUserId: 'target-7',
+        };
+        mocks.find.mockReturnValue({
+            select: vi.fn().mockReturnThis(),
+            lean: vi.fn().mockReturnThis(),
+            setOptions: vi.fn().mockResolvedValue([staleEdge]),
+        });
+        mocks.deleteMany.mockResolvedValue({ deletedCount: 1 });
+
+        await expect(new RealGraphService().cleanupStaleEdges()).resolves.toBe(1);
+
+        expect(mocks.deleteMany).toHaveBeenCalledWith(
+            { _id: { $in: ['edge-7'] } },
+            expect.objectContaining({ signal: undefined }),
+        );
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('rg:score:source-7:target-7');
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-7:target-7');
+    });
+
+    it('invalidates cleanup caches before propagating an abort after deletion', async () => {
+        await featureCacheService.getEdgeScore('source-8', 'target-8');
+        const controller = new AbortController();
+        const staleEdge = {
+            _id: 'edge-8',
+            sourceUserId: 'source-8',
+            targetUserId: 'target-8',
+        };
+        mocks.find.mockReturnValue({
+            select: vi.fn().mockReturnThis(),
+            lean: vi.fn().mockReturnThis(),
+            setOptions: vi.fn().mockResolvedValue([staleEdge]),
+        });
+        mocks.deleteMany.mockImplementation(async () => {
+            controller.abort();
+            return { deletedCount: 1 };
+        });
+
+        await expect(new RealGraphService().cleanupStaleEdges(
+            DECAY_CONFIG.minRetainScore,
+            90,
+            controller.signal,
+        )).rejects.toMatchObject({ name: 'AbortError' });
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('rg:score:source-8:target-8');
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-8:target-8');
     });
 });

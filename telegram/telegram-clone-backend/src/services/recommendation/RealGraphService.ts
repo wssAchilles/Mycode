@@ -489,15 +489,35 @@ export class RealGraphService {
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - daysInactive);
 
-        const result = await RealGraphEdge.deleteMany({
+        const staleEdges = await RealGraphEdge.find({
             decayedSum: { $lt: minScore },
             lastInteractionAt: { $lt: cutoffDate },
-        }, { signal });
+        })
+            .select('_id sourceUserId targetUserId')
+            .lean()
+            .setOptions({ signal });
+        signal?.throwIfAborted();
+
+        if (staleEdges.length === 0) {
+            console.log('[RealGraph] Cleaned up 0 stale edges');
+            return 0;
+        }
+
+        let result: { deletedCount?: number };
+        try {
+            result = await RealGraphEdge.deleteMany(
+                { _id: { $in: staleEdges.map((edge) => edge._id) } },
+                { signal },
+            );
+        } finally {
+            // 删除成功或取消竞态后都清理已扫描边的缓存，避免保留幽灵分数
+            await this.invalidateCachesForPairs(staleEdges);
+        }
         signal?.throwIfAborted();
 
         console.log(`[RealGraph] Cleaned up ${result.deletedCount} stale edges`);
 
-        return result.deletedCount;
+        return result.deletedCount ?? 0;
     }
 
     /**
