@@ -788,6 +788,14 @@ export class RecommendationAdapterService {
     const orderedNames = componentNames
       .map((name) => String(name || '').trim())
       .filter((name) => name.length > 0);
+    const duplicateNames = orderedNames.filter(
+      (name, index) => orderedNames.indexOf(name) !== index,
+    );
+    if (duplicateNames.length > 0) {
+      throw new Error(
+        `duplicate_provider_hydrator:${Array.from(new Set(duplicateNames)).join(',')}`,
+      );
+    }
     const unknownNames = orderedNames.filter((name) => !catalog[name]);
     if (unknownNames.length > 0) {
       throw new Error(`unknown_hydrator:${unknownNames.join(',')}`);
