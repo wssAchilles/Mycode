@@ -34,6 +34,16 @@ export class RustRecommendationClient {
         .join('; ');
       throw new Error(`rust_recommendation_contract_violation: ${issues}`);
     }
+    if (
+      parsed.data.requestId !== query.requestId
+      || parsed.data.summary.requestId !== query.requestId
+      || (
+        parsed.data.summary.trace !== undefined
+        && parsed.data.summary.trace.requestId !== query.requestId
+      )
+    ) {
+      throw new Error('rust_recommendation_contract_violation: request_id_mismatch');
+    }
     return parsed.data;
   }
 }

@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { normalizeRustRecommendationPayload } from '../../src/services/recommendation/clients/RustRecommendationClient';
+import {
+  normalizeRustRecommendationPayload,
+  RustRecommendationClient,
+} from '../../src/services/recommendation/clients/RustRecommendationClient';
 import {
   deserializeRecommendationQuery,
   recommendationQueryPayloadSchema,
@@ -10,6 +13,51 @@ import {
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
 describe('RustRecommendationClient contract normalization', () => {
+  it('rejects a structurally valid response for a different request', async () => {
+    const client = new RustRecommendationClient('http://recommendation.test', 100);
+    const post = vi.spyOn((client as any).client, 'post').mockResolvedValue({
+      data: makeRustResultPayload('response-request'),
+    });
+
+    await expect(client.getCandidates({ requestId: 'query-request' } as any)).rejects.toThrow(
+      'rust_recommendation_contract_violation: request_id_mismatch',
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a response with a stale summary request ID', async () => {
+    const client = new RustRecommendationClient('http://recommendation.test', 100);
+    vi.spyOn((client as any).client, 'post').mockResolvedValue({
+      data: makeRustResultPayload('same-request', { summaryRequestId: 'stale-request' }),
+    });
+
+    await expect(client.getCandidates({ requestId: 'same-request' } as any)).rejects.toThrow(
+      'rust_recommendation_contract_violation: request_id_mismatch',
+    );
+  });
+
+  it('rejects a response with a stale trace request ID', async () => {
+    const client = new RustRecommendationClient('http://recommendation.test', 100);
+    vi.spyOn((client as any).client, 'post').mockResolvedValue({
+      data: makeRustResultPayload('same-request', { traceRequestId: 'stale-request' }),
+    });
+
+    await expect(client.getCandidates({ requestId: 'same-request' } as any)).rejects.toThrow(
+      'rust_recommendation_contract_violation: request_id_mismatch',
+    );
+  });
+
+  it('accepts a structurally valid response for the same request', async () => {
+    const client = new RustRecommendationClient('http://recommendation.test', 100);
+    vi.spyOn((client as any).client, 'post').mockResolvedValue({
+      data: makeRustResultPayload('same-request', { traceRequestId: 'same-request' }),
+    });
+
+    const result = await client.getCandidates({ requestId: 'same-request' } as any);
+
+    expect(result.requestId).toBe('same-request');
+  });
+
   it('preserves the server decision ID across the Node/Rust query boundary', () => {
     const query = createFeedQuery('viewer-identity', 20, false, {
       requestId: '0563d721-b38c-44a2-afc6-f0a52ebde0fa',
@@ -193,3 +241,113 @@ describe('RustRecommendationClient contract normalization', () => {
     }
   });
 });
+
+function makeRustResultPayload(
+  requestId: string,
+  options: { summaryRequestId?: string; traceRequestId?: string } = {},
+) {
+  return {
+    requestId,
+    servingVersion: 'rust_serving_v1',
+    hasMore: false,
+    servedStateVersion: 'related_ids_v1',
+    stableOrderKey: 'stable-order-key',
+    candidates: [],
+    summary: {
+      requestId: options.summaryRequestId ?? requestId,
+      stage: 'retrieval_ranking_v2',
+      pipelineVersion: 'xalgo_candidate_pipeline_v6',
+      owner: 'rust',
+      fallbackMode: 'none',
+      providerCalls: {},
+      retrievedCount: 0,
+      selectedCount: 0,
+      sourceCounts: {},
+      filterDropCounts: {},
+      stageTimings: {},
+      stageLatencyMs: {},
+      degradedReasons: [],
+      recentHotApplied: false,
+      selector: {
+        oversampleFactor: 1,
+        maxSize: 1,
+        finalLimit: 1,
+        truncated: false,
+      },
+      serving: {
+        servingVersion: 'rust_serving_v1',
+        cursorMode: 'created_at_desc_v1',
+        hasMore: false,
+        servedStateVersion: 'related_ids_v1',
+        stableOrderKey: 'stable-order-key',
+        duplicateSuppressedCount: 0,
+        crossPageDuplicateCount: 0,
+        suppressionReasons: {},
+        serveCacheHit: false,
+        stableOrderDrifted: false,
+        cacheKeyMode: 'normalized_query_v2',
+        cachePolicy: 'bounded_short_ttl_v1',
+        cachePolicyReason: 'first_page_stable',
+        pageRemainingCount: 0,
+        pageUnderfilled: false,
+      },
+      retrieval: {
+        stage: 'source_parallel_lane_merge_v6',
+        totalCandidates: 0,
+        inNetworkCandidates: 0,
+        outOfNetworkCandidates: 0,
+        mlRetrievedCandidates: 0,
+        recentHotCandidates: 0,
+        sourceCounts: {},
+        laneCounts: {},
+        mlSourceCounts: {},
+        stageTimings: {},
+        degradedReasons: [],
+        graph: {
+          totalCandidates: 0,
+          kernelCandidates: 0,
+          legacyCandidates: 0,
+          fallbackUsed: false,
+          emptyResult: true,
+          kernelSourceCounts: {},
+        },
+      },
+      ranking: {
+        stage: 'xalgo_stageful_ranking_v2',
+        inputCandidates: 0,
+        hydratedCandidates: 0,
+        filteredCandidates: 0,
+        scoredCandidates: 0,
+        mlEligibleCandidates: 0,
+        mlRankedCandidates: 0,
+        weightedCandidates: 0,
+        stageTimings: {},
+        filterDropCounts: {},
+        degradedReasons: [],
+      },
+      stages: [],
+      trace: options.traceRequestId ? makeRustTrace(options.traceRequestId) : undefined,
+    },
+  };
+}
+
+function makeRustTrace(requestId: string) {
+  return {
+    traceVersion: 'recommendation_trace_v1',
+    requestId,
+    pipelineVersion: 'xalgo_candidate_pipeline_v6',
+    owner: 'rust',
+    fallbackMode: 'none',
+    selectedCount: 0,
+    inNetworkCount: 0,
+    outOfNetworkCount: 0,
+    sourceCounts: [],
+    authorDiversity: 0,
+    replyRatio: 0,
+    averageScore: 0,
+    freshness: {},
+    candidates: [],
+    experimentKeys: [],
+    serveCacheHit: false,
+  };
+}
