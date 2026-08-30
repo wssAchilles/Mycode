@@ -25,6 +25,7 @@ import {
     isEmbeddingContractCompatible,
     type EmbeddingContract,
 } from '../contracts/embeddingContract';
+import { isSourceEnabledForQuery } from '../utils/sourceMixing';
 
 const FALLBACK_MAX_RESULTS = 80;
 const NEWS_ANN_TIMEOUT_MS = Math.max(
@@ -78,7 +79,7 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     enable(query: FeedQuery): boolean {
-        return !query.inNetworkOnly;
+        return !query.inNetworkOnly && isSourceEnabledForQuery(query, this.name);
     }
 
     stageDetail(query: FeedQuery, _candidates?: FeedCandidate[]): Record<string, unknown> | undefined {

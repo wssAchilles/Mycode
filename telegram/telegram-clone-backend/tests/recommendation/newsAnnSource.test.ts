@@ -17,6 +17,27 @@ describe('NewsAnnSource', () => {
         vi.unstubAllEnvs();
     });
 
+    it('honors the source-mixing policy for cold-start and in-network traffic', () => {
+        const source = new NewsAnnSource();
+        const query = createFeedQuery('user', 20);
+        query.userStateContext = {
+            state: 'cold_start',
+            reason: 'bootstrap',
+            followedCount: 0,
+            recentActionCount: 0,
+            recentPositiveActionCount: 0,
+            usableEmbedding: false,
+        };
+
+        expect(source.enable(query)).toBe(false);
+
+        query.userStateContext.state = 'warm';
+        expect(source.enable(query)).toBe(true);
+
+        query.inNetworkOnly = true;
+        expect(source.enable(query)).toBe(false);
+    });
+
     it('hydrates ANN externalIds only for observation and serves the recency fallback', async () => {
         vi.stubEnv('NEWS_ANN_SEMANTIC_CONTRACT_ENABLED', 'true');
         const q = createFeedQuery('user', 20);
