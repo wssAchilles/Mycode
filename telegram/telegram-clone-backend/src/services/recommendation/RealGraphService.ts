@@ -193,28 +193,7 @@ export class RealGraphService {
             );
         } finally {
             // 批量清除缓存，即使元数据重算失败也不能留下旧分数
-            const cacheKeys = interactions.map(i =>
-                `${CONFIG.cache.keyPrefix}${i.sourceUserId}:${i.targetUserId}`
-            );
-
-            try {
-                if (cacheKeys.length > 0) {
-                    await redis.del(...cacheKeys);
-                }
-            } catch {
-                // 缓存失败不影响主流程
-            }
-
-            try {
-                await FeatureCacheService.getInstance().invalidateEdgeScores(
-                    interactions.map(({ sourceUserId, targetUserId }) => ({
-                        sourceUserId,
-                        targetUserId,
-                    })),
-                );
-            } catch {
-                // 缓存失败不影响主流程
-            }
+            await this.invalidateCachesForPairs(interactions);
         }
     }
 
@@ -377,9 +356,13 @@ export class RealGraphService {
             };
 
             if (!dryRun) {
-                for (const edge of edges) {
-                    await this.writePredictionMetadata(edge);
-                    updated += 1;
+                try {
+                    for (const edge of edges) {
+                        await this.writePredictionMetadata(edge);
+                        updated += 1;
+                    }
+                } finally {
+                    await this.invalidateCachesForPairs(edges);
                 }
             }
         }
@@ -566,18 +549,28 @@ export class RealGraphService {
         sourceUserId: string,
         targetUserId: string
     ): Promise<void> {
-        const cacheKey = `${CONFIG.cache.keyPrefix}${sourceUserId}:${targetUserId}`;
+        await this.invalidateCachesForPairs([{ sourceUserId, targetUserId }]);
+    }
+
+    private async invalidateCachesForPairs(
+        pairs: Array<{ sourceUserId: string; targetUserId: string }>,
+    ): Promise<void> {
+        const cacheKeys = Array.from(new Set(
+            pairs.map(({ sourceUserId, targetUserId }) =>
+                `${CONFIG.cache.keyPrefix}${sourceUserId}:${targetUserId}`
+            )
+        ));
+
         try {
-            await redis.del(cacheKey);
+            if (cacheKeys.length > 0) {
+                await redis.del(...cacheKeys);
+            }
         } catch {
             // 忽略缓存错误
         }
 
         try {
-            await FeatureCacheService.getInstance().invalidateEdgeScore(
-                sourceUserId,
-                targetUserId,
-            );
+            await FeatureCacheService.getInstance().invalidateEdgeScores(pairs);
         } catch {
             // 忽略缓存错误
         }
