@@ -115,7 +115,8 @@ export class InNetworkTimelineService {
     }
 
     /**
-     * Read recent in-network postIds for a user from followed authors, merged by createdAt.
+     * Read recent in-network postIds for a user from followed authors, ordered by createdAt
+     * with deterministic post and author identity tie-breaks.
      */
     static async getMergedPostIdsForAuthors(options: {
         authorIds: string[];
@@ -201,15 +202,15 @@ export class InNetworkTimelineService {
             };
         }
 
-        const scored: Array<{ postId: string; score: number }> = [];
-        for (const [err, data] of res) {
+        const scored: Array<{ postId: string; authorId: string; score: number }> = [];
+        for (const [index, [err, data]] of res.entries()) {
             if (err || !Array.isArray(data)) continue;
             // WITHSCORES returns [member1, score1, member2, score2...]
             for (let i = 0; i + 1 < data.length; i += 2) {
                 const postId = String(data[i]);
                 const score = Number(data[i + 1]);
                 if (!postId || !Number.isFinite(score)) continue;
-                scored.push({ postId, score });
+                scored.push({ postId, authorId: authorIds[index] || '', score });
             }
         }
 
@@ -228,7 +229,12 @@ export class InNetworkTimelineService {
             };
         }
 
-        scored.sort((a, b) => b.score - a.score);
+        scored.sort((a, b) => {
+            if (a.score !== b.score) return b.score > a.score ? 1 : -1;
+            if (a.postId !== b.postId) return b.postId > a.postId ? 1 : -1;
+            if (a.authorId !== b.authorId) return b.authorId > a.authorId ? 1 : -1;
+            return 0;
+        });
 
         const uniquePostIds = new Set(scored.map((item) => item.postId));
         const seen = new Set<string>();

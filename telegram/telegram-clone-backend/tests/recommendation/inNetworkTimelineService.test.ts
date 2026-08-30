@@ -90,4 +90,28 @@ describe('InNetworkTimelineService write retention', () => {
     expect(result.postIds).toEqual(['post-valid']);
     expect(result.summary.scannedHitCount).toBe(1);
   });
+
+  it('orders equal-timestamp posts by identity before truncation', async () => {
+    mocks.pipeline.exec
+      .mockResolvedValueOnce([
+        [null, ['post-a', '1700000000000']],
+        [null, ['post-c', '1700000000000']],
+      ])
+      .mockResolvedValueOnce([
+        [null, ['post-c', '1700000000000']],
+        [null, ['post-a', '1700000000000']],
+      ]);
+
+    const first = await InNetworkTimelineService.getMergedPostIdsForAuthorsWithSummary({
+      authorIds: ['author-z', 'author-a'],
+      maxResults: 1,
+    });
+    const second = await InNetworkTimelineService.getMergedPostIdsForAuthorsWithSummary({
+      authorIds: ['author-a', 'author-z'],
+      maxResults: 1,
+    });
+
+    expect(first.postIds).toEqual(['post-c']);
+    expect(second.postIds).toEqual(['post-c']);
+  });
 });
