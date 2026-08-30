@@ -116,7 +116,7 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
             }
 
             const directPosts = await Post.find(mongoQuery)
-                .sort({ createdAt: -1 })
+                .sort({ createdAt: -1, _id: -1 })
                 .limit(MAX_RESULTS)
                 .lean();
 

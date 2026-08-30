@@ -80,4 +80,25 @@ describe('FollowingTimelineCache', () => {
     expect(result.filter((item) => item.authorId === 'author-a')).toHaveLength(2);
     expect(result.filter((item) => item.authorId === 'author-b')).toHaveLength(2);
   });
+
+  it('orders equal-timestamp posts by identity before returning the merged fallback', async () => {
+    const createdAt = new Date('2026-08-24T00:00:00.000Z');
+    const findSpy = mockFindResults([[
+      { _id: 'post-a', authorId: 'author-a', createdAt },
+      { _id: 'post-c', authorId: 'author-b', createdAt },
+    ]]);
+
+    const cache = new FollowingTimelineCache({
+      ttlMs: 60_000,
+      maxPerAuthor: 2,
+      maxAgeDays: 30,
+    });
+    const result = await cache.getPostsForAuthors(['author-b', 'author-a']);
+
+    expect(findSpy.mock.results[0]?.value.sort).toHaveBeenCalledWith({
+      createdAt: -1,
+      _id: -1,
+    });
+    expect(result.map((item) => item._id?.toString())).toEqual(['post-c', 'post-a']);
+  });
 });

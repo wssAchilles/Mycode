@@ -148,6 +148,10 @@ describe('FollowingSource', () => {
       sourcePath: 'mongo_direct_following_fallback',
       directFallbackOutputCount: 1,
     });
+    expect(findSpy.mock.results[1]?.value.sort).toHaveBeenCalledWith({
+      createdAt: -1,
+      _id: -1,
+    });
     expect(output).toHaveLength(1);
     expect(output[0].postId.toString()).toBe(postId.toString());
   });

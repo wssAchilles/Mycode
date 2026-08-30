@@ -53,7 +53,7 @@ export class FollowingTimelineCache {
                 isNews: { $ne: true },
                 deletedAt: null,
             })
-                .sort({ createdAt: -1 })
+                .sort({ createdAt: -1, _id: -1 })
                 .limit(globalLimit)
                 .lean();
 
@@ -80,7 +80,7 @@ export class FollowingTimelineCache {
                             isNews: { $ne: true },
                             deletedAt: null,
                         })
-                            .sort({ createdAt: -1 })
+                            .sort({ createdAt: -1, _id: -1 })
                             .limit(this.maxPerAuthor)
                             .lean();
                         return [authorId, posts as unknown as IPost[]] as const;
@@ -111,8 +111,15 @@ export class FollowingTimelineCache {
             result.push(...posts);
         }
 
-        // 按时间降序返回
-        return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        // 按时间降序返回，并用唯一帖子 ID 稳定同时间顺序
+        return result.sort((a, b) => {
+            const createdAtOrder = b.createdAt.getTime() - a.createdAt.getTime();
+            if (createdAtOrder !== 0) return createdAtOrder;
+            const leftId = String(a._id || '');
+            const rightId = String(b._id || '');
+            if (leftId === rightId) return 0;
+            return rightId > leftId ? 1 : -1;
+        });
     }
 
     private computeAgeCutoff(): Date {
