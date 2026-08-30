@@ -442,10 +442,12 @@ export class RealGraphService {
 
         while (batches < CONFIG.decayJob.maxDailyBatches) {
             signal?.throwIfAborted();
+            const affectedPairs: Array<{ sourceUserId: string; targetUserId: string }> = [];
             try {
                 const processed = await RealGraphEdge.applyDailyDecay(
                     CONFIG.decayJob.batchSize,
                     signal,
+                    (pair) => affectedPairs.push(pair),
                 );
                 signal?.throwIfAborted();
 
@@ -457,7 +459,6 @@ export class RealGraphService {
                 batches++;
 
                 console.log(`[RealGraph] Decay batch ${batches}: processed ${processed} edges`);
-
             } catch (error) {
                 signal?.throwIfAborted();
                 console.error('[RealGraph] Decay batch error:', error);
@@ -466,6 +467,8 @@ export class RealGraphService {
                 if (errors > 3) {
                     break; // 连续错误时停止
                 }
+            } finally {
+                await this.invalidateCachesForPairs(affectedPairs);
             }
         }
 

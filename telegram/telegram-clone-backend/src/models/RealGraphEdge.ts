@@ -339,7 +339,11 @@ interface RealGraphEdgeStatics {
      * 应用每日衰减 (定时任务调用)
      * 复刻 real-graph 的 rollup job
      */
-    applyDailyDecay(batchSize?: number, signal?: AbortSignal): Promise<number>;
+    applyDailyDecay(
+        batchSize?: number,
+        signal?: AbortSignal,
+        onProcessed?: (pair: { sourceUserId: string; targetUserId: string }) => void,
+    ): Promise<number>;
 
     /**
      * 计算衰减分数
@@ -456,6 +460,7 @@ RealGraphEdgeSchema.statics.getMutualScore = async function (
 RealGraphEdgeSchema.statics.applyDailyDecay = async function (
     batchSize: number = 1000,
     signal?: AbortSignal,
+    onProcessed?: (pair: { sourceUserId: string; targetUserId: string }) => void,
 ): Promise<number> {
     signal?.throwIfAborted();
     const yesterday = new Date();
@@ -519,6 +524,10 @@ RealGraphEdgeSchema.statics.applyDailyDecay = async function (
                 },
                 { signal },
             );
+            onProcessed?.({
+                sourceUserId: edge.sourceUserId,
+                targetUserId: edge.targetUserId,
+            });
             signal?.throwIfAborted();
             processedCount++;
         }

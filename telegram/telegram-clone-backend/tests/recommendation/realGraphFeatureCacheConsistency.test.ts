@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     recordInteraction: vi.fn(),
     bulkWrite: vi.fn(),
     getEdgeScore: vi.fn(),
+    applyDailyDecay: vi.fn(),
 }));
 
 vi.mock('../../src/config/redis', () => ({
@@ -22,6 +23,7 @@ vi.mock('../../src/models/RealGraphEdge', () => ({
         recordInteraction: mocks.recordInteraction,
         bulkWrite: mocks.bulkWrite,
         getEdgeScore: mocks.getEdgeScore,
+        applyDailyDecay: mocks.applyDailyDecay,
     },
     InteractionType: {
         FOLLOW: 'follow',
@@ -65,6 +67,7 @@ describe('RealGraph and FeatureCache consistency', () => {
         mocks.redisDel.mockResolvedValue(1);
         mocks.redisSetex.mockResolvedValue('OK');
         mocks.bulkWrite.mockResolvedValue({});
+        mocks.applyDailyDecay.mockReset();
     });
 
     it('invalidates a warmed FeatureCache edge after a single interaction write', async () => {
@@ -139,5 +142,29 @@ describe('RealGraph and FeatureCache consistency', () => {
         ])).rejects.toBe(metadataError);
         expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
         expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-4:target-4');
+    });
+
+    it('invalidates only the edges reported as successfully decayed', async () => {
+        await featureCacheService.getEdgeScore('source-6', 'target-6');
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(1);
+
+        mocks.applyDailyDecay
+            .mockImplementationOnce(async (
+                _batchSize: number,
+                _signal: AbortSignal | undefined,
+                onProcessed: (pair: { sourceUserId: string; targetUserId: string }) => void,
+            ) => {
+                onProcessed({ sourceUserId: 'source-6', targetUserId: 'target-6' });
+                return 1;
+            })
+            .mockResolvedValueOnce(0);
+
+        await expect(new RealGraphService().applyDailyDecay()).resolves.toEqual({
+            totalProcessed: 1,
+            batches: 1,
+            errors: 0,
+        });
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-6:target-6');
     });
 });
