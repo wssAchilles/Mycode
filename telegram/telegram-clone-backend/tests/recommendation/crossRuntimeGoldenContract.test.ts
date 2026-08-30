@@ -32,7 +32,7 @@ const manifestSchema = z.object({
     domain: z.string().min(1),
     version: z.string().min(1),
     fixtures: z.array(fixtureReferenceSchema).min(1),
-  })).length(9),
+  })).length(10),
 });
 
 const queryHydratorContractSchema = z.object({
@@ -201,7 +201,7 @@ describe('cross-runtime golden contracts', () => {
 
   it('validates manifest references, versions, and SHA-256 digests', () => {
     const manifest = manifestSchema.parse(JSON.parse(readFixture('cross_runtime_manifest.json')));
-    expect(manifest.domains).toHaveLength(9);
+    expect(manifest.domains).toHaveLength(10);
     const fixturePaths = manifest.domains.flatMap(
       ({ fixtures }) => fixtures.map(({ path: fixturePath }) => fixturePath),
     );
