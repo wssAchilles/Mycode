@@ -416,11 +416,29 @@ const experimentContextSchema = z.object({
   assignments: z.array(assignmentSchema),
 });
 
+const userSignalFeaturesSchema = z.object({
+  favoriteCount: z.number().int(),
+  retweetCount: z.number().int(),
+  replyCount: z.number().int(),
+  quoteCount: z.number().int(),
+  followCount: z.number().int(),
+  clickCount: z.number().int(),
+  videoViewCount: z.number().int(),
+  dwellTimeMs: z.number(),
+  engagementScore: z.number(),
+  explicitScore: z.number(),
+  implicitScore: z.number(),
+});
+
 const userFeaturesSchema = z.object({
   followedUserIds: z.array(z.string()),
   blockedUserIds: z.array(z.string()),
+  mutedUserIds: z.array(z.string()).optional(),
   mutedKeywords: z.array(z.string()),
+  mutedTopicIds: z.array(z.string()).optional(),
+  subscribedUserIds: z.array(z.string()).optional(),
   seenPostIds: z.array(z.string()),
+  followerIds: z.array(z.string()).optional(),
   followerCount: z.number().optional(),
   accountCreatedAt: z.string().optional(),
 });
@@ -534,6 +552,12 @@ export const recommendationQueryPayloadSchema = z.object({
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   experimentContext: experimentContextSchema.optional(),
   rankingPolicy: rankingPolicySchema.optional(),
+  userSignalFeatures: userSignalFeaturesSchema.optional(),
+  mutualFollowIds: z.array(z.string()).optional(),
+  interestedTopics: z.array(z.string()).optional(),
+  pastRequestTimestamps: z.array(rfc3339DateTimeSchema).optional(),
+  impressedPostIds: z.array(z.string()).optional(),
+  subscribedUserIds: z.array(z.string()).optional(),
 });
 
 export const recommendationQueryPatchPayloadSchema = z.object({
@@ -545,6 +569,12 @@ export const recommendationQueryPatchPayloadSchema = z.object({
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   experimentContext: experimentContextSchema.optional(),
   rankingPolicy: rankingPolicySchema.optional(),
+  userSignalFeatures: userSignalFeaturesSchema.optional(),
+  mutualFollowIds: z.array(z.string()).optional(),
+  interestedTopics: z.array(z.string()).optional(),
+  pastRequestTimestamps: z.array(rfc3339DateTimeSchema).optional(),
+  impressedPostIds: z.array(z.string()).optional(),
+  subscribedUserIds: z.array(z.string()).optional(),
 });
 
 export const recommendationCandidatePayloadSchema = z.object({
@@ -1211,6 +1241,19 @@ function envCsv(key: string): string[] | undefined {
 export function deserializeRecommendationQuery(
   payload: RecommendationQueryPayload,
 ): FeedQuery {
+  const userFeatures = payload.userFeatures
+    ? {
+        ...payload.userFeatures,
+        subscribedUserIds:
+          payload.subscribedUserIds && payload.subscribedUserIds.length > 0
+            ? payload.subscribedUserIds
+            : payload.userFeatures.subscribedUserIds,
+        accountCreatedAt: payload.userFeatures.accountCreatedAt
+          ? new Date(payload.userFeatures.accountCreatedAt)
+          : undefined,
+      }
+    : undefined;
+
   return {
     requestId: payload.requestId,
     decisionId: payload.decisionId,
@@ -1224,14 +1267,7 @@ export function deserializeRecommendationQuery(
     clientAppId: payload.clientAppId,
     countryCode: payload.countryCode,
     languageCode: payload.languageCode,
-    userFeatures: payload.userFeatures
-      ? {
-          ...payload.userFeatures,
-          accountCreatedAt: payload.userFeatures.accountCreatedAt
-            ? new Date(payload.userFeatures.accountCreatedAt)
-            : undefined,
-        }
-      : undefined,
+    userFeatures,
     embeddingContext: payload.embeddingContext
       ? {
           ...payload.embeddingContext,
@@ -1246,6 +1282,7 @@ export function deserializeRecommendationQuery(
     modelUserActionSequence: payload.modelUserActionSequence,
     experimentContext: restoreExperimentContext(payload.experimentContext),
     rankingPolicy: payload.rankingPolicy,
+    userSignalFeatures: payload.userSignalFeatures,
     mutualFollowIds: payload.mutualFollowIds,
     interestedTopics: payload.interestedTopics,
     demographics: payload.demographics,
@@ -1291,7 +1328,6 @@ export function serializeRecommendationQueryPatch(
     userSignalFeatures: patch.userSignalFeatures,
     mutualFollowIds: patch.mutualFollowIds,
     interestedTopics: patch.interestedTopics,
-    demographics: patch.demographics,
     pastRequestTimestamps: patch.pastRequestTimestamps,
     impressedPostIds: patch.impressedPostIds,
     subscribedUserIds: patch.subscribedUserIds,
@@ -1324,6 +1360,13 @@ export function deserializeRecommendationQueryPatch(
     modelUserActionSequence: patch.modelUserActionSequence,
     experimentContext: patch.experimentContext,
     rankingPolicy: patch.rankingPolicy,
+    userSignalFeatures: patch.userSignalFeatures,
+    mutualFollowIds: patch.mutualFollowIds,
+    interestedTopics: patch.interestedTopics,
+    demographics: patch.demographics,
+    pastRequestTimestamps: patch.pastRequestTimestamps,
+    impressedPostIds: patch.impressedPostIds,
+    subscribedUserIds: patch.subscribedUserIds,
   };
 }
 
