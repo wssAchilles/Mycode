@@ -98,6 +98,25 @@ describe('HttpAnnClient terminal attempts', () => {
         expect(post.mock.calls.length).toBeLessThan(6);
     });
 
+    it('aborts an in-flight request when its deadline expires', async () => {
+        vi.useFakeTimers();
+        const { client, post } = clientWithPost({ timeoutMs: 25 });
+        post.mockImplementation(() => new Promise(() => {}));
+
+        const pending = client.retrieve(request);
+        await vi.advanceTimersByTimeAsync(25);
+        const attempt = await pending;
+
+        expect(attempt).toMatchObject({
+            outcome: 'timeout',
+            requestedK: 200,
+            returnedK: 0,
+            candidates: [],
+        });
+        expect(post).toHaveBeenCalledTimes(1);
+        expect((post.mock.calls[0]?.[2] as { signal?: AbortSignal }).signal?.aborted).toBe(true);
+    });
+
     it.each(Object.keys(evidence) as Array<keyof typeof evidence>)(
         'rejects missing %s response evidence as invalid_response',
         async (field) => {

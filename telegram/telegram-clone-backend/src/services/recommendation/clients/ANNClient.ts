@@ -220,9 +220,14 @@ export class HttpAnnClient implements AnnClient {
             }
 
             try {
+                const controller = new AbortController();
                 const res = await this.withDeadline(
-                    this.client.post('', request, { timeout: remainingMs }),
+                    this.client.post('', request, {
+                        timeout: remainingMs,
+                        signal: controller.signal,
+                    }),
                     remainingMs,
+                    () => controller.abort(),
                 );
                 return classifyResponse(res.data, request, start);
             } catch (error: unknown) {
@@ -253,9 +258,16 @@ export class HttpAnnClient implements AnnClient {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    private withDeadline<T>(promise: Promise<T>, remainingMs: number): Promise<T> {
+    private withDeadline<T>(
+        promise: Promise<T>,
+        remainingMs: number,
+        onTimeout?: () => void,
+    ): Promise<T> {
         return new Promise<T>((resolve, reject) => {
-            const timer = setTimeout(() => reject(ANN_DEADLINE_EXCEEDED), remainingMs);
+            const timer = setTimeout(() => {
+                onTimeout?.();
+                reject(ANN_DEADLINE_EXCEEDED);
+            }, remainingMs);
             promise.then(
                 (value) => {
                     clearTimeout(timer);
