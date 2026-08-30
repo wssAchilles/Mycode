@@ -302,6 +302,42 @@ mod tests {
     }
 
     #[test]
+    fn cursor_rejects_candidate_universe_insert_or_delete_before_paging() {
+        let first = page_frozen(&IN_NETWORK_FIXTURE, CursorMode::InNetwork, 2, None)
+            .expect("first page should be evaluable");
+        let cursor = first
+            .next_cursor
+            .expect("first page should have a continuation");
+
+        let inserted = [
+            IN_NETWORK_FIXTURE[0],
+            IN_NETWORK_FIXTURE[1],
+            IN_NETWORK_FIXTURE[2],
+            IN_NETWORK_FIXTURE[3],
+            Candidate {
+                id: "post-inserted",
+                author_id: "author-3",
+                created_at_ms: TIED_TIMESTAMP - 1,
+                score: 1,
+            },
+        ];
+        assert_eq!(
+            page_frozen(&inserted, CursorMode::InNetwork, 2, Some(cursor)),
+            Err(CursorError::NotEvaluable)
+        );
+
+        let deleted = [
+            IN_NETWORK_FIXTURE[0],
+            IN_NETWORK_FIXTURE[1],
+            IN_NETWORK_FIXTURE[2],
+        ];
+        assert_eq!(
+            page_frozen(&deleted, CursorMode::InNetwork, 2, Some(cursor)),
+            Err(CursorError::NotEvaluable)
+        );
+    }
+
+    #[test]
     fn cursor_rejects_version_or_mode_drift_before_paging() {
         let first = page_frozen(&IN_NETWORK_FIXTURE, CursorMode::InNetwork, 2, None)
             .expect("first page should be evaluable");
