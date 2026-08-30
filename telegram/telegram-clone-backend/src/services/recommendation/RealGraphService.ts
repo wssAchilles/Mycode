@@ -111,10 +111,12 @@ export class RealGraphService {
             value
         );
 
-        await this.writePredictionMetadata(edge);
-
-        // 清除缓存
-        await this.invalidateCache(sourceUserId, targetUserId);
+        try {
+            await this.writePredictionMetadata(edge);
+        } finally {
+            // 清除缓存，即使预测元数据写入失败也不能留下旧分数
+            await this.invalidateCache(sourceUserId, targetUserId);
+        }
 
         return edge;
     }
@@ -181,36 +183,38 @@ export class RealGraphService {
             };
         });
 
-        await RealGraphEdge.bulkWrite(operations);
-        await this.recomputePredictionMetadataForPairs(
-            interactions.map((i) => ({
-                sourceUserId: i.sourceUserId,
-                targetUserId: i.targetUserId,
-            })),
-        );
-
-        // 批量清除缓存
-        const cacheKeys = interactions.map(i =>
-            `${CONFIG.cache.keyPrefix}${i.sourceUserId}:${i.targetUserId}`
-        );
-
         try {
-            if (cacheKeys.length > 0) {
-                await redis.del(...cacheKeys);
-            }
-        } catch {
-            // 缓存失败不影响主流程
-        }
-
-        try {
-            await FeatureCacheService.getInstance().invalidateEdgeScores(
-                interactions.map(({ sourceUserId, targetUserId }) => ({
-                    sourceUserId,
-                    targetUserId,
+            await RealGraphEdge.bulkWrite(operations);
+            await this.recomputePredictionMetadataForPairs(
+                interactions.map((i) => ({
+                    sourceUserId: i.sourceUserId,
+                    targetUserId: i.targetUserId,
                 })),
             );
-        } catch {
-            // 缓存失败不影响主流程
+        } finally {
+            // 批量清除缓存，即使元数据重算失败也不能留下旧分数
+            const cacheKeys = interactions.map(i =>
+                `${CONFIG.cache.keyPrefix}${i.sourceUserId}:${i.targetUserId}`
+            );
+
+            try {
+                if (cacheKeys.length > 0) {
+                    await redis.del(...cacheKeys);
+                }
+            } catch {
+                // 缓存失败不影响主流程
+            }
+
+            try {
+                await FeatureCacheService.getInstance().invalidateEdgeScores(
+                    interactions.map(({ sourceUserId, targetUserId }) => ({
+                        sourceUserId,
+                        targetUserId,
+                    })),
+                );
+            } catch {
+                // 缓存失败不影响主流程
+            }
         }
     }
 

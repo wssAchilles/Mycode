@@ -110,4 +110,34 @@ describe('RealGraph and FeatureCache consistency', () => {
         );
         expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
     });
+
+    it('invalidates the single-write cache when metadata persistence fails', async () => {
+        await featureCacheService.getEdgeScore('source-3', 'target-3');
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(1);
+
+        const service = new RealGraphService();
+        const metadataError = new Error('metadata write failed');
+        vi.spyOn(service as any, 'writePredictionMetadata').mockRejectedValue(metadataError);
+        mocks.recordInteraction.mockResolvedValue({});
+
+        await expect(service.recordInteraction('source-3', 'target-3', InteractionType.LIKE))
+            .rejects.toBe(metadataError);
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-3:target-3');
+    });
+
+    it('invalidates the batch cache when metadata recomputation fails', async () => {
+        await featureCacheService.getEdgeScore('source-4', 'target-4');
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(1);
+
+        const service = new RealGraphService();
+        const metadataError = new Error('metadata recompute failed');
+        vi.spyOn(service as any, 'recomputePredictionMetadataForPairs').mockRejectedValue(metadataError);
+
+        await expect(service.recordInteractionsBatch([
+            { sourceUserId: 'source-4', targetUserId: 'target-4', interactionType: InteractionType.LIKE },
+        ])).rejects.toBe(metadataError);
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-4:target-4');
+    });
 });
