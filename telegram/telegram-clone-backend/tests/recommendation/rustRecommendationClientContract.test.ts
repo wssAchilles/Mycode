@@ -58,6 +58,43 @@ describe('RustRecommendationClient contract normalization', () => {
     expect(result.requestId).toBe('same-request');
   });
 
+  it.each([
+    {
+      name: 'candidate createdAt',
+      mutate: (payload: any) => {
+        payload.candidates = [{
+          postId: '507f191e810c19729de8c001',
+          authorId: 'author-1',
+          content: 'candidate',
+          createdAt: 'not-a-date',
+          isReply: false,
+          isRepost: false,
+        }];
+      },
+    },
+    {
+      name: 'top-level nextCursor',
+      mutate: (payload: any) => {
+        payload.nextCursor = 'not-a-date';
+      },
+    },
+    {
+      name: 'serving summary nextCursor',
+      mutate: (payload: any) => {
+        payload.summary.serving.nextCursor = 'not-a-date';
+      },
+    },
+  ])('rejects an invalid RFC3339 date in $name', async ({ mutate }) => {
+    const client = new RustRecommendationClient('http://recommendation.test', 100);
+    const payload = makeRustResultPayload('same-request');
+    mutate(payload);
+    vi.spyOn((client as any).client, 'post').mockResolvedValue({ data: payload });
+
+    await expect(client.getCandidates({ requestId: 'same-request' } as any)).rejects.toThrow(
+      /rust_recommendation_contract_violation: .*Invalid ISO datetime/,
+    );
+  });
+
   it('preserves the server decision ID across the Node/Rust query boundary', () => {
     const query = createFeedQuery('viewer-identity', 20, false, {
       requestId: '0563d721-b38c-44a2-afc6-f0a52ebde0fa',

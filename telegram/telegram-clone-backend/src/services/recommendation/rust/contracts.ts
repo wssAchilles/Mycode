@@ -21,6 +21,8 @@ export const RANKED_CURSOR_ABSTENTION_MODE = 'ranked_cursor_abstention_v1' as co
 export const SAFETY_CONTEXT_ABSTENTION_MODE = 'safety_context_abstention_v1' as const;
 export const SAFETY_CONTEXT_UNAVAILABLE_REASON = 'safety_context_unavailable' as const;
 
+const rfc3339DateTimeSchema = z.string().datetime({ offset: true });
+
 type SerializedUserFeatures = Omit<UserFeatures, 'accountCreatedAt'> & {
   accountCreatedAt?: string;
 };
@@ -550,7 +552,7 @@ export const recommendationCandidatePayloadSchema = z.object({
   modelPostId: z.string().optional(),
   authorId: z.string().min(1),
   content: z.string(),
-  createdAt: z.string().min(1),
+  createdAt: rfc3339DateTimeSchema,
   conversationId: z.string().optional(),
   isReply: z.boolean(),
   replyToPostId: z.string().optional(),
@@ -742,7 +744,7 @@ const recommendationTracePayloadSchema = z.object({
     selectionPool: z.string().optional(),
     selectionReason: z.string().optional(),
     scoreBreakdown: z.record(z.string(), z.number()).optional(),
-    createdAt: z.string().min(1),
+    createdAt: rfc3339DateTimeSchema,
   })),
   experimentKeys: z.array(z.string()),
   userState: z.string().optional(),
@@ -766,7 +768,7 @@ const recommendationTracePayloadSchema = z.object({
       selectionPool: z.string().optional(),
       selectionReason: z.string().optional(),
       scoreBreakdown: z.record(z.string(), z.number()).optional(),
-      createdAt: z.string().min(1),
+      createdAt: rfc3339DateTimeSchema,
     })),
   }).optional(),
   serveCacheHit: z.boolean(),
@@ -834,8 +836,8 @@ export const recommendationSummaryPayloadSchema = z.object({
   serving: z.object({
     servingVersion: z.string().min(1),
     cursorMode: z.string().min(1),
-    cursor: z.string().optional(),
-    nextCursor: z.string().optional(),
+    cursor: rfc3339DateTimeSchema.optional(),
+    nextCursor: rfc3339DateTimeSchema.optional(),
     hasMore: z.boolean(),
     servedStateVersion: z.string().min(1),
     stableOrderKey: z.string().min(1),
@@ -860,8 +862,8 @@ export const recommendationSummaryPayloadSchema = z.object({
 export const recommendationResultPayloadSchema = z.object({
   requestId: z.string().min(1),
   servingVersion: z.string().min(1),
-  cursor: z.string().optional(),
-  nextCursor: z.string().optional(),
+  cursor: rfc3339DateTimeSchema.optional(),
+  nextCursor: rfc3339DateTimeSchema.optional(),
   hasMore: z.boolean(),
   servedStateVersion: z.string().min(1),
   stableOrderKey: z.string().min(1),
