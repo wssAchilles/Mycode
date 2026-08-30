@@ -299,6 +299,8 @@ fn sort_graph_candidates(candidates: &mut [RecommendationCandidatePayload]) {
             .partial_cmp(&right_rank)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| right.post_id.cmp(&left.post_id))
+            .then_with(|| right.author_id.cmp(&left.author_id))
     });
 }
 
@@ -457,17 +459,19 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use chrono::{DateTime, Utc};
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
 
     use crate::clients::graph_kernel_client::GraphKernelClient;
     use crate::contracts::{
         GraphKernelNeighborCandidate, GraphKernelQueryDiagnostics, GraphKernelQueryResult,
-        GraphKernelTelemetry, RecommendationQueryPayload,
+        GraphKernelTelemetry, RecommendationCandidatePayload, RecommendationQueryPayload,
     };
 
     use super::{
         GraphKernelQueryOutcome, query_graph_kernel_authors_with_budget, record_graph_query,
+        sort_graph_candidates,
     };
 
     fn neighbor_candidate() -> GraphKernelNeighborCandidate {
@@ -525,6 +529,63 @@ mod tests {
             feature_switches: HashMap::new(),
             ..RecommendationQueryPayload::default()
         }
+    }
+
+    fn sortable_candidate(
+        post_id: &str,
+        author_id: &str,
+        created_at: &str,
+        graph_rank: f64,
+    ) -> RecommendationCandidatePayload {
+        RecommendationCandidatePayload {
+            post_id: post_id.to_string(),
+            author_id: author_id.to_string(),
+            created_at: DateTime::parse_from_rfc3339(created_at)
+                .expect("valid candidate timestamp")
+                .with_timezone(&Utc),
+            score_breakdown: Some(HashMap::from([("graphKernelRank".to_string(), graph_rank)])),
+            ..RecommendationCandidatePayload::default()
+        }
+    }
+
+    #[test]
+    fn graph_candidates_use_identity_ties_after_rank_and_created_at() {
+        let candidates = vec![
+            sortable_candidate("post-a", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-b", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-old", "author-a", "2026-04-17T00:00:00Z", 1.0),
+            sortable_candidate("post-rank-zero", "author-z", "2026-04-16T00:00:00Z", 0.0),
+        ];
+
+        let mut sorted = candidates.clone();
+        sort_graph_candidates(&mut sorted);
+        let mut reversed = candidates;
+        reversed.reverse();
+        sort_graph_candidates(&mut reversed);
+
+        let expected = vec!["post-rank-zero", "post-b", "post-a", "post-old"];
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|candidate| candidate.post_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            reversed
+                .iter()
+                .map(|candidate| candidate.post_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+
+        let mut author_ties = vec![
+            sortable_candidate("post-tie", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-tie", "author-z", "2026-04-18T00:00:00Z", 1.0),
+        ];
+        sort_graph_candidates(&mut author_ties);
+        assert_eq!(author_ties[0].author_id, "author-z");
+        assert_eq!(author_ties[1].author_id, "author-a");
     }
 
     #[test]
