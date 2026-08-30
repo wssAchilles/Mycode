@@ -70,6 +70,20 @@ describe('recommendation internal route contract', () => {
     });
   });
 
+  it.each(['not-a-date', '0'] as const)('rejects an invalid cursor before retrieval: %s', async (cursor) => {
+    const retrieve = vi.spyOn(recommendationAdapterService, 'retrieveCandidates');
+    const response = await post('/internal/recommendation/retrieval', { ...query, cursor });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+    expect(retrieve).not.toHaveBeenCalled();
+  });
+
   it('keeps unknown query hydrator requests as structured 404 responses', async () => {
     const response = await post('/internal/recommendation/query-hydrators/batch', {
       hydratorNames: ['MissingQueryHydrator'],

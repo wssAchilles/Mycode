@@ -536,7 +536,7 @@ export const recommendationQueryPayloadSchema = z.object({
   decisionId: z.string().uuid(),
   userId: z.string().min(1),
   limit: z.number().int().min(1).max(100),
-  cursor: z.string().optional(),
+  cursor: rfc3339DateTimeSchema.optional(),
   inNetworkOnly: z.boolean(),
   seenIds: z.array(z.string()).max(200),
   servedIds: z.array(z.string()).max(200),
