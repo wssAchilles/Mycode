@@ -4,7 +4,6 @@ import mongoose from 'mongoose';
 const mocks = vi.hoisted(() => ({
     userFindAll: vi.fn(),
     postFind: vi.fn(),
-    postSnapshotCountDocuments: vi.fn(),
     jobRunCreate: vi.fn(),
     jobRunUpdateOne: vi.fn(),
     batchUpdateEmbeddings: vi.fn(),
@@ -26,12 +25,6 @@ vi.mock('../../src/models/User', () => ({
 vi.mock('../../src/models/Post', () => ({
     default: {
         find: mocks.postFind,
-    },
-}));
-
-vi.mock('../../src/models/PostFeatureSnapshot', () => ({
-    default: {
-        countDocuments: mocks.postSnapshotCountDocuments,
     },
 }));
 
@@ -104,8 +97,10 @@ describe('DailyRecommendationRefreshJob', () => {
             { _id: 'post-1', createdAt: new Date('2026-06-10T00:00:00.000Z') },
             { _id: 'post-2', createdAt: new Date('2026-06-09T00:00:00.000Z') },
         ])).mockReturnValueOnce(findPostsResult([]));
-        mocks.refreshSnapshotsByPostIds.mockResolvedValue(undefined);
-        mocks.postSnapshotCountDocuments.mockResolvedValue(10);
+        mocks.refreshSnapshotsByPostIds.mockResolvedValue(new Map([
+            ['post-1', {}],
+            ['post-2', {}],
+        ]));
         mocks.featureExportRun.mockResolvedValue({
             usersExported: 3,
             clustersExported: 12,
@@ -208,8 +203,12 @@ describe('DailyRecommendationRefreshJob', () => {
             }
             return findPostsResult([]);
         });
-        mocks.refreshSnapshotsByPostIds.mockResolvedValue(undefined);
-        mocks.postSnapshotCountDocuments.mockResolvedValue(3);
+        mocks.refreshSnapshotsByPostIds
+            .mockResolvedValueOnce(new Map([
+                [postIds[0].toString(), {}],
+                [postIds[1].toString(), {}],
+            ]))
+            .mockResolvedValueOnce(new Map([[postIds[2].toString(), {}]]));
         mocks.scanEmbeddingContractEvidence.mockResolvedValue({
             embeddingEvidence: embeddingEvidenceSummary,
         });
@@ -232,6 +231,33 @@ describe('DailyRecommendationRefreshJob', () => {
             ],
             deletedAt: null,
         });
+    });
+
+    it('reports only materialized snapshots when a post disappears during refresh', async () => {
+        const createdAt = new Date('2026-06-10T00:00:00.000Z');
+
+        mocks.jobRunCreate.mockResolvedValue({ _id: 'job-run-sparse-snapshot' });
+        mocks.bootstrapBackfill.mockResolvedValue({ scanned: 0, created: 0 });
+        mocks.userFindAll.mockResolvedValue([]);
+        mocks.applyDailyDecay.mockResolvedValue({ totalProcessed: 0 });
+        mocks.backfillPredictionMetadata.mockResolvedValue({ matched: 0, updated: 0, dryRun: false });
+        mocks.postFind
+            .mockReturnValueOnce(findPostsResult([{ _id: 'post-disappeared', createdAt }]))
+            .mockReturnValueOnce(findPostsResult([]));
+        mocks.refreshSnapshotsByPostIds.mockResolvedValue(new Map());
+        mocks.scanEmbeddingContractEvidence.mockResolvedValue({
+            embeddingEvidence: embeddingEvidenceSummary,
+        });
+
+        const result = await new DailyRecommendationRefreshJob().run({
+            trigger: 'manual',
+            userLimit: 1,
+            postDays: 7,
+            postBatchSize: 1,
+            skipFeatureExport: true,
+        });
+
+        expect(result.posts).toEqual({ scanned: 1, refreshed: 0 });
     });
 
     it('marks the job run as failed when a refresh step throws', async () => {

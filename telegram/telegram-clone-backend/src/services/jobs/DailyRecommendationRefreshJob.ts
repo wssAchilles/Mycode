@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { Op } from 'sequelize';
 import User from '../../models/User';
 import Post from '../../models/Post';
-import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
 import RecommendationJobRun from '../../models/RecommendationJobRun';
 import { simClustersService } from '../recommendation/SimClustersService';
 import { realGraphService } from '../recommendation/RealGraphService';
@@ -233,9 +232,9 @@ export class DailyRecommendationRefreshJob {
             if (posts.length === 0) break;
 
             const postIds = posts.map((post) => post._id as mongoose.Types.ObjectId);
-            await postFeatureSnapshotService.refreshSnapshotsByPostIds(postIds);
+            const refreshedSnapshots = await postFeatureSnapshotService.refreshSnapshotsByPostIds(postIds);
             scanned += posts.length;
-            refreshed += posts.length;
+            refreshed += refreshedSnapshots.size;
             const lastPost = posts[posts.length - 1];
             cursor = {
                 createdAt: new Date(lastPost.createdAt),
@@ -243,11 +242,7 @@ export class DailyRecommendationRefreshJob {
             };
         }
 
-        const totalSnapshots = await PostFeatureSnapshot.countDocuments();
-        return {
-            scanned,
-            refreshed: Math.min(refreshed, totalSnapshots),
-        };
+        return { scanned, refreshed };
     }
 
     get running(): boolean {
