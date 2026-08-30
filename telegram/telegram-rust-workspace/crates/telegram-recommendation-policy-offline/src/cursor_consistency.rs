@@ -302,6 +302,39 @@ mod tests {
     }
 
     #[test]
+    fn cursor_rejects_version_or_mode_drift_before_paging() {
+        let first = page_frozen(&IN_NETWORK_FIXTURE, CursorMode::InNetwork, 2, None)
+            .expect("first page should be evaluable");
+        let cursor = first
+            .next_cursor
+            .expect("first page should have a continuation");
+
+        let mut version_drift = cursor;
+        version_drift.version = cursor.version.wrapping_add(1);
+        assert_eq!(
+            page_frozen(
+                &IN_NETWORK_FIXTURE,
+                CursorMode::InNetwork,
+                2,
+                Some(version_drift)
+            ),
+            Err(CursorError::NotEvaluable)
+        );
+
+        let mut mode_drift = cursor;
+        mode_drift.mode = CursorMode::General;
+        assert_eq!(
+            page_frozen(
+                &IN_NETWORK_FIXTURE,
+                CursorMode::InNetwork,
+                2,
+                Some(mode_drift)
+            ),
+            Err(CursorError::NotEvaluable)
+        );
+    }
+
+    #[test]
     fn fixture_rejects_unbounded_or_duplicate_inputs_before_paging() {
         let duplicate = [IN_NETWORK_FIXTURE[0], IN_NETWORK_FIXTURE[0]];
         assert_eq!(
