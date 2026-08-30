@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(definition.ranking_ladder_version, "rust_ranking_ladder_v1");
         assert_eq!(
             definition.selector_policy_version,
-            "rust_top_k_selector_policy_v2"
+            "rust_top_k_selector_policy_v3"
         );
         assert_eq!(definition.fallback_mode, FALLBACK_MODE);
         assert_eq!(

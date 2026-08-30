@@ -5,7 +5,7 @@
       "domain": "replay-cases",
       "version": "recommendation_replay_v1",
       "fixtures": [
-        { "path": "replay_warm_user.json", "digest": "f38401e403656db5b20634b9300a59175d19890e6ad772d9ee8eed2ebb493233" },
+        { "path": "replay_warm_user.json", "digest": "d720e1a49cf96adb55e8796f1e4cbc30f2c4233237f8503beeab7fe5ca26ffa2" },
         { "path": "replay_user_state_matrix.json", "digest": "9e1ef8054e689e232567878c53bafc58ca11937eb94410bf07ca7e768d045cd7" }
       ]
     },

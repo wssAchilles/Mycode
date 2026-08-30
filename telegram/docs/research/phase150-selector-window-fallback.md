@@ -70,4 +70,5 @@ production randomized serving = disabled
   个而状态机只选择 3 个；修复后输出为 3，`required=2`、`relaxed=1`。
 - 只断言候选数量、作者约束和阶段计数；不产生 CTR、utility、propensity、support、
   qualification 或 promotion 证据。
-- selector policy version 不变，因为这是既有合同的 fail-closed 修复，不是排序策略升级。
+- selector policy version 升级为 `rust_top_k_selector_policy_v3`，仅用于隔离已有 serve-cache
+  结果；不代表排序策略或线上资格升级。

@@ -484,7 +484,7 @@ pub(crate) mod tests {
         assert!(
             !cache
                 .redis_key("fingerprint")
-                .contains("rust_top_k_selector_policy_v1")
+                .contains("rust_top_k_selector_policy_v2")
         );
     }
 }
