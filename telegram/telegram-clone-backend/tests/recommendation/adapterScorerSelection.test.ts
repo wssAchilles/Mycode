@@ -92,4 +92,31 @@ describe('recommendation adapter scorer selection', () => {
       score.mockRestore();
     }
   });
+
+  it('classifies scorer rejections while preserving the current candidates', async () => {
+    const query = createFeedQuery('viewer-1', 20);
+    const score = vi.spyOn(EngagementScorer.prototype, 'score')
+      .mockRejectedValueOnce(new Error('provider_unavailable'));
+
+    try {
+      const result = await recommendationAdapterService.scoreCandidates(
+        query,
+        [candidate()],
+        ['EngagementScorer'],
+      );
+
+      expect(result.candidates).toHaveLength(1);
+      expect(result.stages[0]).toMatchObject({
+        name: 'EngagementScorer',
+        inputCount: 1,
+        outputCount: 1,
+        detail: {
+          error: 'provider_unavailable',
+          errorClass: 'scorer_failed',
+        },
+      });
+    } finally {
+      score.mockRestore();
+    }
+  });
 });

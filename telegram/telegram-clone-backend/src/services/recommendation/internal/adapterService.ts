@@ -647,13 +647,14 @@ export class RecommendationAdapterService {
             : {}),
         });
       } catch (error: any) {
+        const errorClass = classifyScorerError(error?.message);
         stages.push({
           name: scorer.name,
           enabled: true,
           durationMs: Date.now() - start,
           inputCount: current.length,
           outputCount: current.length,
-          detail: { error: error?.message || 'scorer_failed' },
+          detail: { error: error?.message || 'scorer_failed', errorClass },
         });
       }
     }
@@ -1144,6 +1145,14 @@ function classifyCandidateHydratorError(message?: string): string {
     return 'provider_contract_error';
   }
   return 'candidate_hydrator_failed';
+}
+
+function classifyScorerError(message?: string): string {
+  const value = String(message || '').trim();
+  if (value.startsWith('provider_scorer_field_ownership_violation')) {
+    return 'provider_contract_error';
+  }
+  return 'scorer_failed';
 }
 
 function annotateDependencyStage(stage: InternalStageExecution, hydratorName: string): void {
