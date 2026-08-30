@@ -189,7 +189,7 @@ describe('strict replay request exporter', () => {
                     },
                 ],
                 replayPool: {
-                    poolKind: 'pre_selector_scored_topk_v1',
+                    poolKind: 'pre_selector_canonical_order_v2',
                     totalCount: 2,
                     truncated: false,
                     candidates: [
@@ -310,6 +310,8 @@ describe('strict replay request exporter', () => {
             expect(rawOutput).not.toContain('pool-author');
             expect(statSync(output).mode & 0o777).toBe(0o600);
             expect(request.requestAt).toBe(decisionAt);
+            expect(request.candidateSetKind).toBe('pre_selector_canonical_order_v2');
+            expect(request.candidateSetCompleteness).toBe('complete_v1');
             expect(request.candidates).toHaveLength(2);
             expect(request.candidates[0]).toMatchObject({
                 postId: servedPostId,
@@ -590,6 +592,56 @@ describe('strict replay request exporter', () => {
         }
     });
 
+    it('marks a canonical pool with a count mismatch as unverified', async () => {
+        const { trace } = await minimalTrace(1);
+        trace.replayPool.poolKind = 'pre_selector_canonical_order_v2';
+        trace.replayPool.totalCount = 2;
+        const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-count-mismatch-'));
+        const output = path.join(outputDirectory, 'requests.ndjson');
+        const originalArgv = process.argv;
+        const originalExitCode = process.exitCode;
+        const originalPseudonymKey = process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        runtime.traceAggregate.mockReturnValue(aggregation([trace]));
+        runtime.userActionFind.mockReturnValue(query([]));
+        process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = '78'.repeat(32);
+        process.argv = [
+            'node',
+            'exportRecsysReplayRequests.ts',
+            '--output',
+            output,
+            '--keyVersion',
+            'replay-test-key-v1',
+            '--captureEpochId',
+            'replay-test-epoch-v1',
+        ];
+        process.exitCode = undefined;
+
+        try {
+            vi.resetModules();
+            await import('../../src/scripts/exportRecsysReplayRequests');
+            await vi.waitFor(() => expect(runtime.disconnectReadOnlyMongo).toHaveBeenCalledOnce());
+            expect(process.exitCode).toBeUndefined();
+            expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+                candidateSetKind: 'pre_selector_canonical_order_v2',
+                candidateSetCompleteness: 'unverified_v1',
+            });
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            process.argv = originalArgv;
+            process.exitCode = originalExitCode;
+            if (originalPseudonymKey === undefined) {
+                delete process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX;
+            } else {
+                process.env.RECOMMENDATION_REPLAY_PSEUDONYM_KEY_HEX = originalPseudonymKey;
+            }
+            error.mockRestore();
+            log.mockRestore();
+            rmSync(outputDirectory, { recursive: true, force: true });
+        }
+    });
+
     it('reports reconciliation metadata when publication durability is unconfirmed', async () => {
         const { trace } = await minimalTrace(1);
         const outputDirectory = mkdtempSync(path.join(tmpdir(), 'recsys-replay-reconcile-'));
@@ -630,6 +682,10 @@ describe('strict replay request exporter', () => {
             expect(process.exitCode).toBe(1);
             expect(existsSync(output)).toBe(true);
             expect(statSync(output).mode & 0o777).toBe(0o600);
+            expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+                candidateSetKind: 'pre_selector_scored_topk_v1',
+                candidateSetCompleteness: 'unverified_v1',
+            });
             expect(error).toHaveBeenCalledWith(
                 '[ExportRecsysReplay] reconciliation_required:',
                 expect.objectContaining({

@@ -28,6 +28,7 @@ import {
 import { publishAtomicCanonicalNdjsonV1 } from '../services/recommendation/offlinePrediction/snapshotV2/atomicSink';
 import { attributeOutcomeV1 } from '../services/recommendation/outcomes/outcomeContractV1';
 import type { ReplayCandidateLabelSummary, ReplayRequestSnapshot } from '../services/recommendation/replay/contracts';
+import { RUST_CANONICAL_REPLAY_POOL_KIND } from '../services/recommendation/rust/contracts';
 import { connectReadOnlyMongo, disconnectReadOnlyMongo } from '../services/recommendation/training/readOnlyMongo';
 import { LABEL_ACTION_TYPES } from '../services/recommendation/utils/actionLabels';
 
@@ -376,7 +377,9 @@ async function main() {
             candidateSetKind: trace.replayPool?.poolKind || 'served_candidates_v1',
             candidateSetTotalCount: trace.replayPool?.totalCount ?? trace.candidates?.length ?? 0,
             candidateSetTruncated: trace.replayPool?.truncated === true,
-            candidateSetCompleteness: trace.replayPool && trace.replayPool.truncated !== true
+            candidateSetCompleteness: trace.replayPool?.poolKind === RUST_CANONICAL_REPLAY_POOL_KIND
+                && trace.replayPool.truncated !== true
+                && trace.replayPool.totalCount === traceCandidates.length
                 ? 'complete_v1'
                 : 'unverified_v1',
             shadowComparison: trace.shadowComparison || undefined,

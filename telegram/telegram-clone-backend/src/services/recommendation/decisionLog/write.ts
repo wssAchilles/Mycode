@@ -1,6 +1,9 @@
 import RecommendationTrace from '../../../models/RecommendationTrace';
 import type { SpaceFeedDebugInfo } from '../feed/debugInfo';
-import type { RecommendationTracePayload } from '../rust/contracts';
+import {
+  RUST_CANONICAL_REPLAY_POOL_KIND,
+  type RecommendationTracePayload,
+} from '../rust/contracts';
 import type { FeedCandidate } from '../types/FeedCandidate';
 import type { FeedQuery } from '../types/FeedQuery';
 import {
@@ -214,7 +217,11 @@ function buildRustCandidatePool(
   }
 
   const replayCountMatches = replayPool.candidates.length === replayPool.totalCount;
-  const complete = !replayPool.truncated && replayCountMatches && missingSelections.length === 0;
+  const poolOrderVerified = replayPool.poolKind === RUST_CANONICAL_REPLAY_POOL_KIND;
+  const complete = poolOrderVerified
+    && !replayPool.truncated
+    && replayCountMatches
+    && missingSelections.length === 0;
   return {
     candidates,
     totalCount: Math.max(replayPool.totalCount, candidates.length),
@@ -227,7 +234,9 @@ function buildRustCandidatePool(
           ? 'rust_replay_pool_truncated'
           : !replayCountMatches
             ? 'rust_replay_pool_count_mismatch'
-            : 'rust_replay_pool_missing_selected_candidate',
+            : missingSelections.length > 0
+              ? 'rust_replay_pool_missing_selected_candidate'
+              : 'rust_replay_pool_order_unverified',
       },
   };
 }

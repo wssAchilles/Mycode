@@ -20,6 +20,7 @@ import type { EmbeddingContract } from '../contracts/embeddingContract';
 export const RANKED_CURSOR_ABSTENTION_MODE = 'ranked_cursor_abstention_v1' as const;
 export const SAFETY_CONTEXT_ABSTENTION_MODE = 'safety_context_abstention_v1' as const;
 export const SAFETY_CONTEXT_UNAVAILABLE_REASON = 'safety_context_unavailable' as const;
+export const RUST_CANONICAL_REPLAY_POOL_KIND = 'pre_selector_canonical_order_v2' as const;
 
 const rfc3339DateTimeSchema = z.string().datetime({ offset: true });
 

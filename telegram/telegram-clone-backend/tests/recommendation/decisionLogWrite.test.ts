@@ -264,7 +264,7 @@ describe('recommendation decision log writer', () => {
         const rejectedB = candidate('507f191e810c19729de8c002', { score: 0.2 });
         const missingC = candidate('507f191e810c19729de8c003', { score: 0.8 });
         const completePool: RecommendationTraceReplayPoolPayload = {
-            poolKind: 'pre_selector_scored_topk_v1',
+            poolKind: 'pre_selector_canonical_order_v2',
             totalCount: 2,
             truncated: false,
             candidates: [replayCandidate(selectedA, 1), replayCandidate(rejectedB, 2)],
@@ -285,6 +285,15 @@ describe('recommendation decision log writer', () => {
         expect(complete.candidatePool.candidates.map((entry) => entry.poolRank)).toEqual([1, 2]);
         expect(complete.versions.pipeline).toEqual({ status: 'bound', version: 'pipeline-v7' });
         expect(complete.versions.strategy).toEqual({ status: 'bound', version: 'weighted-v1' });
+
+        const legacy = build([selectedA], {
+            ...completePool,
+            poolKind: 'pre_selector_scored_topk_v1',
+        });
+        expect(legacy.candidatePool.supportEvidence).toEqual({
+            status: 'incomplete',
+            reason: 'rust_replay_pool_order_unverified',
+        });
 
         const truncated = build([selectedA], { ...completePool, totalCount: 3, truncated: true });
         expect(truncated.candidatePool.supportEvidence.status).toBe('incomplete');

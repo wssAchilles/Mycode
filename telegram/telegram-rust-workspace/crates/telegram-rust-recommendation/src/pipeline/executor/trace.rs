@@ -9,10 +9,12 @@ use crate::contracts::{
     RecommendationTraceSourceCountPayload,
 };
 use crate::pipeline::local::context::ranking_policy_strategy_version;
+use crate::serving::stable_order::compare_candidates;
 use telegram_pipeline_primitives::{PIPELINE_TRACE_MODE_LIVE, PIPELINE_TRACE_VERSION};
 
 const TRACE_SELECTED_CANDIDATE_LIMIT: usize = 60;
 const TRACE_REPLAY_POOL_LIMIT: usize = 60;
+const TRACE_REPLAY_POOL_KIND: &str = "pre_selector_canonical_order_v2";
 
 pub(super) fn build_recommendation_trace(
     query: &RecommendationQueryPayload,
@@ -41,7 +43,7 @@ pub(super) fn build_recommendation_trace(
         .filter_map(trace_score)
         .collect::<Vec<_>>();
 
-    let replay_pool = trace_replay_pool(replay_candidates);
+    let replay_pool = trace_replay_pool(replay_candidates, query.in_network_only);
     let selected_fingerprint = trace_candidate_fingerprint(candidates);
     let replay_pool_fingerprint = replay_pool.fingerprint.clone();
 
@@ -87,20 +89,14 @@ pub(super) fn build_recommendation_trace(
 
 fn trace_replay_pool(
     replay_candidates: &[RecommendationCandidatePayload],
+    in_network_only: bool,
 ) -> RecommendationTraceReplayPoolPayload {
     let total_count = replay_candidates.len();
     let mut ordered = replay_candidates.iter().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| {
-        let right_score = trace_score(right).unwrap_or(f64::NEG_INFINITY);
-        let left_score = trace_score(left).unwrap_or(f64::NEG_INFINITY);
-        right_score
-            .partial_cmp(&left_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left.post_id.cmp(&right.post_id))
-    });
+    ordered.sort_by(|left, right| compare_candidates(left, right, in_network_only));
 
     RecommendationTraceReplayPoolPayload {
-        pool_kind: "pre_selector_scored_topk_v1".to_string(),
+        pool_kind: TRACE_REPLAY_POOL_KIND.to_string(),
         total_count,
         truncated: total_count > TRACE_REPLAY_POOL_LIMIT,
         fingerprint: trace_candidate_fingerprint(replay_candidates),
@@ -274,7 +270,7 @@ fn non_negative_seconds(duration: chrono::Duration) -> u64 {
 mod tests {
     use std::collections::HashMap;
 
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use telegram_pipeline_primitives::{PIPELINE_TRACE_MODE_LIVE, PIPELINE_TRACE_VERSION};
 
     use crate::contracts::{
@@ -284,7 +280,7 @@ mod tests {
     };
     use crate::runtime::versions::PIPELINE_VERSION;
 
-    use super::build_recommendation_trace;
+    use super::{build_recommendation_trace, trace_replay_pool};
 
     #[test]
     fn builds_rust_owned_recommendation_trace() {
@@ -392,7 +388,7 @@ mod tests {
                 .replay_pool
                 .as_ref()
                 .map(|pool| pool.pool_kind.as_str()),
-            Some("pre_selector_scored_topk_v1")
+            Some("pre_selector_canonical_order_v2")
         );
         assert_eq!(
             trace.replay_pool.as_ref().map(|pool| pool.total_count),
@@ -418,6 +414,52 @@ mod tests {
                 .and_then(|pool| pool.candidates.first())
                 .and_then(|candidate| candidate.score),
             Some(0.8)
+        );
+    }
+
+    #[test]
+    fn replay_pool_uses_mode_aware_canonical_order() {
+        let created_at = Utc
+            .timestamp_millis_opt(1_700_000_000_000)
+            .single()
+            .expect("valid timestamp");
+        let mut weighted_only = candidate("507f191e810c19729de8c001");
+        weighted_only.created_at = created_at;
+        weighted_only.weighted_score = Some(99.0);
+        weighted_only.pipeline_score = Some(99.0);
+        let mut lower_id = candidate("507f191e810c19729de8c002");
+        lower_id.created_at = created_at;
+        lower_id.score = Some(0.1);
+        let mut higher_id = candidate("507f191e810c19729de8c003");
+        higher_id.created_at = created_at;
+        higher_id.score = Some(0.1);
+
+        let pool = trace_replay_pool(&[weighted_only, lower_id, higher_id], false);
+
+        assert_eq!(
+            pool.candidates
+                .iter()
+                .map(|candidate| candidate.post_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "507f191e810c19729de8c003",
+                "507f191e810c19729de8c002",
+                "507f191e810c19729de8c001",
+            ]
+        );
+
+        let mut older_high_score = candidate("507f191e810c19729de8c004");
+        older_high_score.created_at = created_at;
+        older_high_score.score = Some(99.0);
+        let mut newer_low_score = candidate("507f191e810c19729de8c005");
+        newer_low_score.created_at = created_at + chrono::Duration::milliseconds(1);
+        newer_low_score.score = Some(0.01);
+
+        let in_network_pool = trace_replay_pool(&[older_high_score, newer_low_score], true);
+
+        assert_eq!(
+            in_network_pool.candidates[0].post_id,
+            "507f191e810c19729de8c005"
         );
     }
 
