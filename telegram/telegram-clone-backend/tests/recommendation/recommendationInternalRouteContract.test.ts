@@ -40,6 +40,15 @@ describe('recommendation internal route contract', () => {
     vi.restoreAllMocks();
   });
 
+  const post = (path: string, body: unknown) => fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer route-contract-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
   afterAll(async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => (
       error ? reject(error) : resolve()
@@ -52,19 +61,73 @@ describe('recommendation internal route contract', () => {
     vi.spyOn(recommendationAdapterService, 'retrieveCandidates')
       .mockRejectedValueOnce(new Error('retrieval_storage_failed'));
 
-    const response = await fetch(`${baseUrl}/internal/recommendation/retrieval`, {
-      method: 'POST',
-      headers: {
-        authorization: 'Bearer route-contract-token',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(query),
-    });
+    const response = await post('/internal/recommendation/retrieval', query);
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       success: false,
       error: { message: 'retrieval_storage_failed' },
+    });
+  });
+
+  it('keeps unknown query hydrator requests as structured 404 responses', async () => {
+    const response = await post('/internal/recommendation/query-hydrators/batch', {
+      hydratorNames: ['MissingQueryHydrator'],
+      query,
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: {
+        code: 'UNKNOWN_QUERY_HYDRATOR',
+        message: 'unknown_query_hydrator:MissingQueryHydrator',
+      },
+    });
+  });
+
+  it('forwards unexpected query hydrator failures to the global error middleware', async () => {
+    vi.spyOn(recommendationAdapterService, 'hydrateQueryPatches')
+      .mockRejectedValueOnce(new Error('query_hydrator_storage_failed'));
+
+    const response = await post('/internal/recommendation/query-hydrators/batch', {
+      hydratorNames: ['UserFeaturesQueryHydrator'],
+      query,
+    });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: { message: 'query_hydrator_storage_failed' },
+    });
+  });
+
+  it('keeps unknown source requests as structured 404 responses', async () => {
+    const response = await post('/internal/recommendation/sources/UnknownSource', query);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: {
+        code: 'UNKNOWN_SOURCE',
+        message: 'unknown_source:UnknownSource',
+      },
+    });
+  });
+
+  it('forwards unexpected source batch failures to the global error middleware', async () => {
+    vi.spyOn(recommendationAdapterService, 'getSourceCandidatesBatch')
+      .mockRejectedValueOnce(new Error('source_storage_failed'));
+
+    const response = await post('/internal/recommendation/sources/batch', {
+      sourceNames: ['PopularSource'],
+      query,
+    });
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: { message: 'source_storage_failed' },
     });
   });
 });

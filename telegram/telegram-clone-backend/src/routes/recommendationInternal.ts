@@ -142,6 +142,12 @@ router.post('/query-hydrators/batch', catchAsync(async (req, res) => {
       providerCalls: result.providerCalls,
     });
   } catch (error: any) {
+    if (
+      !(error instanceof Error)
+      || !error.message.startsWith('unknown_query_hydrator:')
+    ) {
+      throw error;
+    }
     return res.status(404).json({
       success: false,
       error: {
@@ -178,6 +184,12 @@ router.post('/query-hydrators/:hydratorName', catchAsync(async (req, res) => {
       errorClass: result.errorClass,
     });
   } catch (error: any) {
+    if (
+      !(error instanceof Error)
+      || !error.message.startsWith('unknown_query_hydrator:')
+    ) {
+      throw error;
+    }
     return res.status(404).json({
       success: false,
       error: {
@@ -242,6 +254,12 @@ router.post('/sources/batch', catchAsync(async (req, res) => {
       providerCalls: result.providerCalls,
     });
   } catch (error: any) {
+    if (
+      !(error instanceof Error)
+      || !error.message.startsWith('unknown_source:')
+    ) {
+      throw error;
+    }
     return res.status(404).json({
       success: false,
       error: {
@@ -280,6 +298,12 @@ router.post('/sources/:sourceName', catchAsync(async (req, res) => {
       errorClass: result.errorClass,
     });
   } catch (error: any) {
+    if (
+      !(error instanceof Error)
+      || !error.message.startsWith('unknown_source:')
+    ) {
+      throw error;
+    }
     return res.status(404).json({
       success: false,
       error: {
