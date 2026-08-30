@@ -611,6 +611,39 @@ fn selector_report_counts_required_and_relaxed_fill_separately() {
 }
 
 #[test]
+fn selector_does_not_bypass_author_cap_for_candidates_outside_window() {
+    let mut candidates = (1..=18)
+        .map(|index| {
+            candidate(
+                &format!("window-{index}"),
+                "author-repeat",
+                "interest",
+                false,
+                100.0 - index as f64,
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.extend((19..=21).map(|index| {
+        candidate(
+            &format!("tail-{index}"),
+            "author-repeat",
+            "interest",
+            false,
+            100.0 - index as f64,
+        )
+    }));
+    let output = select_candidates_with_report(&query("warm", 6), &candidates, 1, 20, 2);
+
+    assert_eq!(output.candidates.len(), 3);
+    assert_eq!(output.report.required_selected_count, 2);
+    assert_eq!(output.report.relaxed_selected_count, 1);
+    assert_eq!(output.report.selected_count, 3);
+    assert!(output.candidates.iter().all(|candidate| {
+        candidate.author_id == "author-repeat" && candidate.post_id.starts_with("window-")
+    }));
+}
+
+#[test]
 fn selector_prevents_single_source_takeover_when_alternatives_exist() {
     let selected = select_candidates(
         &query("warm", 6),
