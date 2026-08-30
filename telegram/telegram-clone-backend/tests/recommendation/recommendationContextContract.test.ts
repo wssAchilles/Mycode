@@ -48,6 +48,11 @@ describe('recommendation context response contract', () => {
 
         expect(response._recommendationContext).toEqual({
             requestId: 'req_1',
+            decisionId: undefined,
+            candidateNamespace: 'serving_post_id',
+            candidateId: '65f000000000000000000001',
+            servedPosition: 3,
+            positionContractVersion: 'served_position_1_based_v1',
             rank: 3,
             primarySource: 'GraphSource',
             secondarySources: ['TwoTowerSource'],
