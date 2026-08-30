@@ -115,7 +115,7 @@ export class RealGraphService {
             await this.writePredictionMetadata(edge);
         } finally {
             // 清除缓存，即使预测元数据写入失败也不能留下旧分数
-            await this.invalidateCache(sourceUserId, targetUserId);
+            await this.invalidateEdgeScoreCaches(sourceUserId, targetUserId);
         }
 
         return edge;
@@ -568,9 +568,9 @@ export class RealGraphService {
     /**
      * 清除缓存
      */
-    private async invalidateCache(
+    async invalidateEdgeScoreCaches(
         sourceUserId: string,
-        targetUserId: string
+        targetUserId: string,
     ): Promise<void> {
         await this.invalidateCachesForPairs([{ sourceUserId, targetUserId }]);
     }

@@ -96,6 +96,17 @@ describe('RealGraph and FeatureCache consistency', () => {
         expect(mocks.getEdgeScore).toHaveBeenCalledTimes(2);
     });
 
+    it('exposes cache invalidation for direct edge writes', async () => {
+        await featureCacheService.getEdgeScore('source-direct', 'target-direct');
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(1);
+
+        await new RealGraphService().invalidateEdgeScoreCaches('source-direct', 'target-direct');
+
+        expect(featureCacheService.getCacheStats().l1.realGraph).toBe(0);
+        expect(mocks.redisDel).toHaveBeenCalledWith('rg:score:source-direct:target-direct');
+        expect(mocks.redisDel).toHaveBeenCalledWith('fcs:rg:source-direct:target-direct');
+    });
+
     it('invalidates each distinct FeatureCache edge after a batch write', async () => {
         mocks.getEdgeScore
             .mockResolvedValueOnce(0.25)
