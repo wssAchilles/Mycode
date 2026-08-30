@@ -52,6 +52,16 @@ export function buildSpaceFeedPageResult(
         : typeof lastCreatedAt === 'string'
             ? new Date(lastCreatedAt).toISOString()
             : undefined;
+    const rawHasMore = continuationAbstained
+        ? false
+        : locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit);
+    const rawNextCursor = continuationAbstained
+        ? undefined
+        : locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor;
+    const effectiveCursor = typeof rawNextCursor === 'string' && rawNextCursor.trim().length > 0
+        ? rawNextCursor
+        : undefined;
+    const canContinue = rawHasMore && effectiveCursor !== undefined;
 
     return {
         requestId: pageMeta.requestId,
@@ -60,12 +70,8 @@ export function buildSpaceFeedPageResult(
         candidates,
         decisionActionCandidateIds: (pageMeta.decisionActionCandidateIds ?? [])
             .filter((candidateId) => servedCandidateIds.has(candidateId)),
-        hasMore: continuationAbstained
-            ? false
-            : locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit),
-        nextCursor: continuationAbstained
-            ? undefined
-            : locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor,
+        hasMore: canContinue,
+        nextCursor: canContinue ? effectiveCursor : undefined,
         servedIdsDelta,
         rustServing: pageMeta?.rustServing,
         debug: pageMeta?.debug,

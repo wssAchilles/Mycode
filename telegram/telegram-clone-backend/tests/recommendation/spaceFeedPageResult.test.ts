@@ -81,4 +81,35 @@ describe('buildSpaceFeedPageResult', () => {
         expect(page.hasMore).toBe(false);
         expect(page.nextCursor).toBeUndefined();
     });
+
+    it('fails closed when metadata claims more without a cursor', () => {
+        const page = buildSpaceFeedPageResult(
+            [],
+            1,
+            {
+                requestId: 'b44b0ce0-c7f6-4ae4-8f0c-7b4e3645c4e2',
+                decisionId: 'd6c8a84a-1110-4fba-9aaf-7d8a3bcf26f0',
+                hasMore: true,
+            },
+        );
+
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBeUndefined();
+    });
+
+    it('strips an orphan cursor when metadata says the page is complete', () => {
+        const page = buildSpaceFeedPageResult(
+            [candidate()],
+            1,
+            {
+                requestId: 'a4e0de2e-251d-4a6e-91e0-1f4ac9ce6f63',
+                decisionId: '4ff4bca0-4f50-46c6-8a88-7df8f88b3c95',
+                hasMore: false,
+                nextCursor: '2026-05-03T00:00:00.000Z',
+            },
+        );
+
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBeUndefined();
+    });
 });
