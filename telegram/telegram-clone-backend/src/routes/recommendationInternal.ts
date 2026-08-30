@@ -15,6 +15,7 @@ import { materializeGraphAuthorPostsWithDiagnostics } from '../services/recommen
 import { selfPostRescueRequestSchema } from '../services/recommendation/providers/selfPostRescue/contracts';
 import { materializeSelfPosts } from '../services/recommendation/providers/selfPostRescue/materializeSelfPosts';
 import { recommendationAdapterService } from '../services/recommendation/internal/adapterService';
+import { catchAsync } from '../middleware/errorHandler';
 
 const router = Router();
 
@@ -89,7 +90,7 @@ router.get('/health', (_req, res) => {
   });
 });
 
-router.post('/query', async (req, res) => {
+router.post('/query', catchAsync(async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -110,9 +111,9 @@ router.post('/query', async (req, res) => {
     query: serializeRecommendationQuery(query),
     stages,
   });
-});
+}));
 
-router.post('/query-hydrators/batch', async (req, res) => {
+router.post('/query-hydrators/batch', catchAsync(async (req, res) => {
   const parsed = queryHydratorBatchRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -149,9 +150,9 @@ router.post('/query-hydrators/batch', async (req, res) => {
       },
     });
   }
-});
+}));
 
-router.post('/query-hydrators/:hydratorName', async (req, res) => {
+router.post('/query-hydrators/:hydratorName', catchAsync(async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -185,9 +186,9 @@ router.post('/query-hydrators/:hydratorName', async (req, res) => {
       },
     });
   }
-});
+}));
 
-router.post('/retrieval', async (req, res) => {
+router.post('/retrieval', catchAsync(async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -209,9 +210,9 @@ router.post('/retrieval', async (req, res) => {
     stages: result.stages,
     summary: result.summary,
   });
-});
+}));
 
-router.post('/sources/batch', async (req, res) => {
+router.post('/sources/batch', catchAsync(async (req, res) => {
   const parsed = sourceBatchRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -249,9 +250,9 @@ router.post('/sources/batch', async (req, res) => {
       },
     });
   }
-});
+}));
 
-router.post('/sources/:sourceName', async (req, res) => {
+router.post('/sources/:sourceName', catchAsync(async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -287,9 +288,9 @@ router.post('/sources/:sourceName', async (req, res) => {
       },
     });
   }
-});
+}));
 
-router.post('/providers/graph/authors', async (req, res) => {
+router.post('/providers/graph/authors', catchAsync(async (req, res) => {
   const parsed = graphAuthorMaterializationRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -308,9 +309,9 @@ router.post('/providers/graph/authors', async (req, res) => {
     candidates: serializeRecommendationCandidates(result.candidates),
     diagnostics: result.diagnostics,
   });
-});
+}));
 
-router.post('/providers/self-posts', async (req, res) => {
+router.post('/providers/self-posts', catchAsync(async (req, res) => {
   const parsed = selfPostRescueRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -328,9 +329,9 @@ router.post('/providers/self-posts', async (req, res) => {
   return sendSuccess(res, {
     candidates: serializeRecommendationCandidates(candidates),
   });
-});
+}));
 
-router.post('/hydrate', async (req, res) => {
+router.post('/hydrate', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -353,9 +354,9 @@ router.post('/hydrate', async (req, res) => {
     candidates: serializeRecommendationCandidates(result.candidates),
     stages: result.stages,
   });
-});
+}));
 
-router.post('/filter', async (req, res) => {
+router.post('/filter', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -379,9 +380,9 @@ router.post('/filter', async (req, res) => {
     dropCounts: result.dropCounts,
     stages: result.stages,
   });
-});
+}));
 
-router.post('/score', async (req, res) => {
+router.post('/score', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -404,9 +405,9 @@ router.post('/score', async (req, res) => {
     candidates: serializeRecommendationCandidates(result.candidates),
     stages: result.stages,
   });
-});
+}));
 
-router.post('/ranking', async (req, res) => {
+router.post('/ranking', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -430,9 +431,9 @@ router.post('/ranking', async (req, res) => {
     dropCounts: result.dropCounts,
     summary: result.summary,
   });
-});
+}));
 
-router.post('/post-selection/hydrate', async (req, res) => {
+router.post('/post-selection/hydrate', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -455,9 +456,9 @@ router.post('/post-selection/hydrate', async (req, res) => {
     candidates: serializeRecommendationCandidates(result.candidates),
     stages: result.stages,
   });
-});
+}));
 
-router.post('/post-selection/filter', async (req, res) => {
+router.post('/post-selection/filter', catchAsync(async (req, res) => {
   const parsed = candidateStageRequestSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(422).json({
@@ -481,6 +482,6 @@ router.post('/post-selection/filter', async (req, res) => {
     dropCounts: result.dropCounts,
     stages: result.stages,
   });
-});
+}));
 
 export default router;
