@@ -52,6 +52,9 @@ export class UserSignalQueryHydrator implements QueryHydrator<FeedQuery> {
     }
 
     update(query: FeedQuery, hydrated: Partial<FeedQuery>): FeedQuery {
-        return { ...query, ...hydrated };
+        return {
+            ...query,
+            userSignalFeatures: hydrated.userSignalFeatures ?? query.userSignalFeatures,
+        };
     }
 }

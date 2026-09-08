@@ -470,6 +470,7 @@ mod tests {
                     "graph_kernel_request_failed".to_string(),
                 )]),
                 budget_exhausted_kernels: vec!["social_neighbors".to_string()],
+                ..GraphKernelTelemetry::default()
             },
             None,
         );

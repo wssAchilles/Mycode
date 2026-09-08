@@ -57,4 +57,15 @@ describe('dense embedding feature hashing', () => {
         const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
         expect(norm).toBeCloseTo(1, 6);
     });
+
+    it('fails closed when vectors have unequal dimensions', () => {
+        expect(cosineDenseEmbedding([1, 0], [1])).toBe(0);
+    });
+
+    it.each([
+        { label: 'NaN on the left', left: [1, Number.NaN], right: [1, 0] },
+        { label: 'Infinity on the right', left: [1, 0], right: [1, Number.POSITIVE_INFINITY] },
+    ])('fails closed for $label', ({ left, right }) => {
+        expect(cosineDenseEmbedding(left, right)).toBe(0);
+    });
 });

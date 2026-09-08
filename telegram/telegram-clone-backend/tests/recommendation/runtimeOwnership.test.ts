@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'fs';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
 import {
@@ -16,7 +16,9 @@ import {
   NODE_RECOMMENDATION_LEGACY_SELECTOR,
   NODE_RECOMMENDATION_PROVIDER_SCORERS,
   RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
+  getRecommendationRuntimeSemantics,
 } from '../../src/services/recommendation/contracts/runtimeOwnership';
+import { buildNodeCapabilityOwnershipSummary } from '../../src/services/controlPlane/capabilityOwners';
 import {
   assertNodeProviderScorerCandidateWrites,
   NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES,
@@ -62,6 +64,68 @@ function readWorkspaceScorerContract(): any {
 }
 
 describe('recommendation runtime ownership', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ['off', {
+      runtimeMode: 'off',
+      canonicalAlgorithmOwner: 'rust',
+      configuredServingOwner: 'node',
+      requestServingOwners: ['node'],
+    }],
+    ['shadow', {
+      runtimeMode: 'shadow',
+      canonicalAlgorithmOwner: 'rust',
+      configuredServingOwner: 'node',
+      requestServingOwners: ['node'],
+      evaluatedOwner: 'rust',
+    }],
+    ['primary', {
+      runtimeMode: 'primary',
+      canonicalAlgorithmOwner: 'rust',
+      configuredServingOwner: 'rust',
+      requestServingOwners: ['rust', 'node'],
+      fallbackOwner: 'node',
+    }],
+  ] as const)('publishes the %s runtime ownership contract', (mode, expected) => {
+    expect(getRecommendationRuntimeSemantics(mode)).toEqual(expected);
+
+    vi.stubEnv('RUST_RECOMMENDATION_MODE', mode);
+    const recommendation = buildNodeCapabilityOwnershipSummary().capabilities.find(
+      (capability) => capability.capability === 'recommendation',
+    );
+
+    expect(recommendation).toMatchObject({
+      owner: expected.configuredServingOwner,
+      canonicalAlgorithmOwner: 'rust',
+      configuredServingOwner: expected.configuredServingOwner,
+      requestServingOwners: expected.requestServingOwners,
+    });
+    expect(recommendation?.evaluatedOwner).toBe(
+      'evaluatedOwner' in expected ? expected.evaluatedOwner : undefined,
+    );
+    expect(recommendation?.fallbackOwner).toBe(
+      'fallbackOwner' in expected ? expected.fallbackOwner : undefined,
+    );
+  });
+
+  it('publishes an invalid graph kernel flag as a safe-disabled status', () => {
+    vi.stubEnv('CPP_GRAPH_KERNEL_ENABLED', 'treu');
+
+    const ownership = buildNodeCapabilityOwnershipSummary();
+    expect(ownership.graphKernelConfig).toMatchObject({
+      enabled: false,
+      valid: false,
+      error: 'invalid_boolean_env:CPP_GRAPH_KERNEL_ENABLED=treu: expected one of 1/0, true/false, yes/no, or on/off',
+    });
+    expect(ownership.capabilities.find((capability) => capability.capability === 'graph')).toMatchObject({
+      owner: 'node',
+      fallbackEnabled: false,
+    });
+  });
+
   it('keeps Node recommendation as the legacy baseline while Rust owns new algorithms', () => {
     expect(RECOMMENDATION_CANONICAL_ALGORITHM_OWNER).toBe('rust');
     expect(NODE_RECOMMENDATION_BASELINE_ROLE).toBe('legacy_baseline_fallback');

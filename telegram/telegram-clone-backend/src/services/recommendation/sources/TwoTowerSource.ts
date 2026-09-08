@@ -3,7 +3,7 @@
  * 第一阶段接入 embeddingContext 后，这里继续推进到“内容池召回”：
  * - 优先从 post_feature_snapshots 的 cluster pool 中取候选
  * - 再做 embedding/author/keyword 多信号排序
- * - 最后才回退到 ANN / 热门关键词近似
+ * - ANN 仅并行观察，serving 最后回退到热门关键词近似
  */
 
 import mongoose from 'mongoose';
@@ -11,7 +11,15 @@ import mongoose from 'mongoose';
 import Post from '../../../models/Post';
 import { postFeatureSnapshotService, type PostFeaturePoolEntry } from '../contentFeatures';
 import { Source } from '../framework';
-import { AnnClient, HttpAnnClient } from '../clients/ANNClient';
+import {
+    AnnAttempt,
+    AnnClient,
+    AnnComparison,
+    HttpAnnClient,
+    buildAnnEvaluationKs,
+    compareAnnAgainstExact,
+    retrieveAnnWithinBudget,
+} from '../clients/ANNClient';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import { FeedQuery, SparseEmbeddingEntry } from '../types/FeedQuery';
 import {
@@ -35,6 +43,7 @@ import {
 const MAX_RESULTS = 80;
 const CANDIDATE_POOL = 240;
 const MAX_HISTORY_POSTS = 200;
+const TWO_TOWER_ANN_TIMEOUT_MS = 3000;
 
 type TwoTowerPoolEntry = {
     post: any;
@@ -47,9 +56,19 @@ type TwoTowerPool = {
     priorityScore: number;
 };
 
+type AnnObservation = {
+    mode: 'observe_only';
+    reason?: 'client_not_configured' | 'request_contract_mismatch' | 'id_namespace_mismatch' | 'observation_failed';
+    attempt?: AnnAttempt;
+    validatedCount: number;
+    hydratedCount: number;
+    comparison: AnnComparison;
+};
+
 export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'TwoTowerSource';
     private annClient?: AnnClient;
+    private readonly stageDetails = new Map<string, Record<string, unknown>>();
 
     constructor(annClient?: AnnClient) {
         if (annClient) {
@@ -57,7 +76,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         } else if (process.env.ANN_ENDPOINT) {
             this.annClient = new HttpAnnClient({
                 endpoint: process.env.ANN_ENDPOINT,
-                timeoutMs: 3000,
+                timeoutMs: TWO_TOWER_ANN_TIMEOUT_MS,
             });
         }
     }
@@ -68,28 +87,39 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             && getSpaceFeedExperimentFlag(query, 'enable_two_tower_source', false);
     }
 
+    stageDetail(query: FeedQuery, _candidates?: FeedCandidate[]): Record<string, unknown> | undefined {
+        const detail = this.stageDetails.get(query.requestId);
+        this.stageDetails.delete(query.requestId);
+        return detail;
+    }
+
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
+        const annObservationPromise = this.observeAnnWithinDeadline(query);
         const pools = await this.loadCandidatePools(query);
-        if (pools.length === 0) {
-            return [];
-        }
+        let candidates: FeedCandidate[] = [];
+        let servedPath: 'local_embedding' | 'keyword_fallback' | 'empty' = 'empty';
 
         if (
+            pools.length > 0 &&
             getSpaceFeedExperimentFlag(query, 'enable_embedding_retrieval', true) &&
             hasUsableEmbeddingContext(query)
         ) {
-            const embeddingCandidates = await this.getEmbeddingCandidates(query, pools);
-            if (embeddingCandidates.length > 0) {
-                return embeddingCandidates;
+            candidates = await this.getEmbeddingCandidates(query, pools);
+            if (candidates.length > 0) {
+                servedPath = 'local_embedding';
             }
         }
 
-        const annCandidates = await this.getAnnCandidates(query);
-        if (annCandidates.length > 0) {
-            return annCandidates;
+        if (candidates.length === 0 && pools.length > 0) {
+            candidates = this.getKeywordFallbackCandidates(query, flattenCandidatePools(pools));
+            if (candidates.length > 0) {
+                servedPath = 'keyword_fallback';
+            }
         }
 
-        return this.getKeywordFallbackCandidates(flattenCandidatePools(pools));
+        const annObservation = await annObservationPromise;
+        this.stageDetails.set(query.requestId, { servedPath, annObservation });
+        return candidates;
     }
 
     private async loadCandidatePools(query: FeedQuery): Promise<TwoTowerPool[]> {
@@ -311,18 +341,62 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         return ranked.map((item) => item.candidate);
     }
 
-    private async getAnnCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
+    private async observeAnnWithinDeadline(query: FeedQuery): Promise<AnnObservation> {
+        const startedAt = Date.now();
+        const budgetMs = Math.max(1, resolveAnnBudgetMs(query, TWO_TOWER_ANN_TIMEOUT_MS));
+        const deadline = startedAt + budgetMs;
+        let timer: NodeJS.Timeout | undefined;
+        const observation = this.observeAnn(query, deadline, startedAt)
+            .catch(() => (
+                Date.now() >= deadline
+                    ? timedOutAnnObservation(query, startedAt)
+                    : failedAnnObservation(query)
+            ));
+        const timeout = new Promise<AnnObservation>((resolve) => {
+            timer = setTimeout(
+                () => resolve(timedOutAnnObservation(query, startedAt)),
+                Math.max(0, deadline - Date.now()),
+            );
+        });
+
+        try {
+            return await Promise.race([observation, timeout]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    private async observeAnn(
+        query: FeedQuery,
+        deadline: number,
+        startedAt: number,
+    ): Promise<AnnObservation> {
+        const evaluationKs = buildAnnEvaluationKs(query.limit);
+        const comparison = compareAnnAgainstExact({ evaluationKs, annIds: [] });
         if (!this.annClient) {
-            return [];
+            return {
+                mode: 'observe_only',
+                reason: 'client_not_configured',
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison,
+            };
         }
         if (!isEmbeddingContractCompatible(query.embeddingContext?.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)) {
-            return [];
+            return {
+                mode: 'observe_only',
+                reason: 'request_contract_mismatch',
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison,
+            };
         }
 
         const postIds = (query.userActionSequence || [])
             .map((action) => action.targetPostId)
             .filter(Boolean)
             .slice(0, MAX_HISTORY_POSTS)
+            .filter((id) => mongoose.Types.ObjectId.isValid(String(id)))
             .map((id) => new mongoose.Types.ObjectId(id as unknown as string));
 
         const historyKeywords: string[] = [];
@@ -333,63 +407,109 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             historyKeywords.push(...posts.flatMap((post: any) => post.keywords || []));
         }
 
-        try {
-            const annCandidates = await this.annClient.retrieve({
+        const embeddingContract = query.embeddingContext?.embeddingContract;
+        const requestedK = evaluationKs[evaluationKs.length - 1] || 200;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+            return timedOutAnnObservation(query, startedAt);
+        }
+        const attempt = await retrieveAnnWithinBudget(
+            this.annClient,
+            {
                 userId: query.userId,
                 keywords: historyKeywords,
                 historyPostIds: postIds.map((id) => id.toString()),
-                topK: MAX_RESULTS,
-                embeddingContract: query.embeddingContext?.embeddingContract,
-            });
-
-            const valid = annCandidates.filter((candidate) => /^[0-9a-fA-F]{24}$/.test(String(candidate.postId)));
-            if (valid.length === 0) {
-                throw new Error('ANN returned non-ObjectId ids; likely wrong corpus configured');
-            }
-
-            const ids = valid.map((candidate) => new mongoose.Types.ObjectId(candidate.postId));
-            const annPosts = await Post.find({
-                _id: { $in: ids },
-                isNews: { $ne: true },
-                deletedAt: null,
-            }).lean();
-            const postMap = new Map(annPosts.map((post: any) => [post._id.toString(), post]));
-
-            return valid
-                .map((candidate, index) => ({
-                    annCandidate: candidate,
-                    annRank: index + 1,
-                    post: postMap.get(candidate.postId),
-                }))
-                .filter((item) => Boolean(item.post))
-                .map(({ annCandidate, annRank, post }) => ({
-                    ...createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]),
-                    inNetwork: false,
-                    recallSource: this.name,
-                    retrievalLane: 'interest',
-                    interestPoolKind: 'ann_pool',
-                    _scoreBreakdown: {
-                        annRetrievalScore: annCandidate.score || 0,
-                        annRetrievalRank: annRank,
-                        annRetrievalTopK: MAX_RESULTS,
-                        retrievalPoolDense: 0,
-                        retrievalPoolCluster: 0,
-                        retrievalPoolLegacy: 0,
-                        retrievalPoolAnn: 1,
-                        retrievalPoolKeywordFallback: 0,
-                    },
-                }));
-        } catch (error) {
-            console.error('[TwoTowerSource] ANN retrieve failed, fallback local:', error);
-            return [];
+                topK: requestedK,
+                embeddingContract,
+                expectedEvidence: {
+                    embeddingSpace: embeddingContract?.embeddingSpace,
+                    retrievalEmbeddingDim: embeddingContract?.retrievalEmbeddingDim,
+                    modelVersion: embeddingContract?.modelVersion,
+                    artifactVersion: embeddingContract?.artifactVersion,
+                    idNamespace: 'mongo_object_id',
+                },
+            },
+            remainingMs,
+        );
+        if (Date.now() >= deadline) {
+            return timedOutAnnObservation(query, startedAt);
         }
+        const observedComparison = compareAnnAgainstExact({
+            evaluationKs,
+            annIds: attempt.candidates.map((candidate) => candidate.postId),
+            annEvidence: attempt.responseEvidence,
+        });
+        if (attempt.outcome !== 'success') {
+            return {
+                mode: 'observe_only',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+        if (attempt.responseEvidence?.idNamespace !== 'mongo_object_id') {
+            return {
+                mode: 'observe_only',
+                reason: 'id_namespace_mismatch',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+
+        const validIds = Array.from(new Set(
+            attempt.candidates
+                .map((candidate) => candidate.postId)
+                .filter((postId) => /^[0-9a-fA-F]{24}$/.test(postId)),
+        ));
+        if (validIds.length === 0) {
+            return {
+                mode: 'observe_only',
+                attempt,
+                validatedCount: 0,
+                hydratedCount: 0,
+                comparison: observedComparison,
+            };
+        }
+        const annPosts = await Post.find({
+            _id: { $in: validIds.map((postId) => new mongoose.Types.ObjectId(postId)) },
+            isNews: { $ne: true },
+            deletedAt: null,
+        }).lean();
+        if (Date.now() >= deadline) {
+            return timedOutAnnObservation(query, startedAt);
+        }
+        const hydratedIds = new Set(
+            annPosts
+                .map((post: any) => post?._id?.toString?.())
+                .filter((postId: string | undefined) => postId && validIds.includes(postId)),
+        );
+        return {
+            mode: 'observe_only',
+            attempt,
+            validatedCount: validIds.length,
+            hydratedCount: hydratedIds.size,
+            comparison: observedComparison,
+        };
     }
 
     private getKeywordFallbackCandidates(
+        query: FeedQuery,
         pools: Array<{ entry: TwoTowerPoolEntry; poolKind: EmbeddingRecallPoolKind; priorityScore: number }>,
     ): FeedCandidate[] {
-        const keywordUniverse = pools.flatMap(({ entry }) => entry.post.keywords || []);
-        const userVec = buildEmbedding(keywordUniverse.slice(0, 40));
+        const userKeywords = [
+            ...(query.interestedTopics ?? []),
+            ...(query.userActionSequence ?? []).flatMap((action) =>
+                Array.isArray(action?.targetKeywords) ? action.targetKeywords : [],
+            ),
+        ]
+            .filter((keyword): keyword is string => typeof keyword === 'string')
+            .map((keyword) => keyword.trim().toLowerCase())
+            .filter(Boolean)
+            .slice(0, 40);
+        const userVec = buildEmbedding(userKeywords);
 
         return pools
             .map(({ entry: { post }, poolKind, priorityScore }) => {
@@ -461,7 +581,10 @@ function recencyPrior(createdAt: Date): number {
 function buildEmbedding(keywords: string[]): Map<string, number> {
     const vec = new Map<string, number>();
     for (const keyword of keywords) {
-        vec.set(keyword, (vec.get(keyword) || 0) + 1);
+        if (typeof keyword !== 'string') continue;
+        const normalizedKeyword = keyword.trim().toLowerCase();
+        if (!normalizedKeyword) continue;
+        vec.set(normalizedKeyword, (vec.get(normalizedKeyword) || 0) + 1);
     }
     const norm = Math.sqrt(
         Array.from(vec.values()).reduce((sum, value) => sum + value * value, 0) || 1,
@@ -522,4 +645,40 @@ function poolPriorityScore(
         default:
             return health === 'missing' ? 1 : 0.72;
     }
+}
+
+function resolveAnnBudgetMs(query: FeedQuery, fallbackMs: number): number {
+    const policyBudget = Number(query.rankingPolicy?.sourceBatchTimeoutMs);
+    return Number.isFinite(policyBudget) && policyBudget > 0
+        ? Math.round(policyBudget)
+        : fallbackMs;
+}
+
+function failedAnnObservation(query: FeedQuery): AnnObservation {
+    const evaluationKs = buildAnnEvaluationKs(query.limit);
+    return {
+        mode: 'observe_only',
+        reason: 'observation_failed',
+        validatedCount: 0,
+        hydratedCount: 0,
+        comparison: compareAnnAgainstExact({ evaluationKs, annIds: [] }),
+    };
+}
+
+function timedOutAnnObservation(query: FeedQuery, startedAt: number): AnnObservation {
+    const evaluationKs = buildAnnEvaluationKs(query.limit);
+    const requestedK = evaluationKs[evaluationKs.length - 1] || 200;
+    return {
+        mode: 'observe_only',
+        attempt: {
+            outcome: 'timeout',
+            requestedK,
+            returnedK: 0,
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            candidates: [],
+        },
+        validatedCount: 0,
+        hydratedCount: 0,
+        comparison: compareAnnAgainstExact({ evaluationKs, annIds: [] }),
+    };
 }

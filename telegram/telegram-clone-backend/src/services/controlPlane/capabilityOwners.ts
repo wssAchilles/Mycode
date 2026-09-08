@@ -4,8 +4,13 @@ import {
   buildRealtimeRuntimeSemantics,
   readRealtimeRolloutStage,
 } from '../realtimeProtocol/contracts';
-import type { GraphKernelOpsSnapshot } from '../graphKernel/contracts';
+import {
+  readGraphKernelEnablement,
+  type GraphKernelEnablementStatus,
+  type GraphKernelOpsSnapshot,
+} from '../graphKernel/contracts';
 import { getRustRecommendationMode } from '../recommendation/clients/RustRecommendationClient';
+import { getRecommendationRuntimeSemantics } from '../recommendation/contracts/runtimeOwnership';
 
 export type CapabilityOwnerName = 'realtime' | 'recommendation' | 'platform' | 'graph';
 export type CapabilityRuntimeOwner = 'node' | 'rust' | 'go' | 'cpp';
@@ -18,6 +23,11 @@ export interface CapabilityOwnerRecord {
   fallbackMode: string;
   primarySurface: string[];
   controlPlanePath: string;
+  canonicalAlgorithmOwner?: CapabilityRuntimeOwner;
+  configuredServingOwner?: CapabilityRuntimeOwner;
+  requestServingOwners?: readonly CapabilityRuntimeOwner[];
+  evaluatedOwner?: CapabilityRuntimeOwner;
+  fallbackOwner?: CapabilityRuntimeOwner;
 }
 
 export interface NodeCapabilityOwnershipSummary {
@@ -27,6 +37,7 @@ export interface NodeCapabilityOwnershipSummary {
     mode: 'api_control_fallback_plane';
   };
   capabilities: CapabilityOwnerRecord[];
+  graphKernelConfig: GraphKernelEnablementStatus;
   summary: string;
 }
 
@@ -34,13 +45,6 @@ type BuildCapabilityOwnershipInput = {
   consumer?: DeliveryConsumerOpsSnapshot;
   graphKernel?: GraphKernelOpsSnapshot;
 };
-
-function readBool(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined || value === null || value.trim() === '') {
-    return fallback;
-  }
-  return !['0', 'false', 'off', 'no'].includes(value.trim().toLowerCase());
-}
 
 function readRuntimeString(
   runtime: Record<string, unknown> | undefined,
@@ -58,8 +62,10 @@ export function buildNodeCapabilityOwnershipSummary(
   const realtimeCatalog = buildRealtimeTransportCatalog(realtimeStage);
   const realtimeRuntime = buildRealtimeRuntimeSemantics(realtimeStage);
   const recommendationMode = getRustRecommendationMode();
+  const recommendationRuntime = getRecommendationRuntimeSemantics(recommendationMode);
   const consumerRuntime = (input.consumer?.runtime || {}) as Record<string, unknown>;
-  const graphKernelEnabled = readBool(process.env.CPP_GRAPH_KERNEL_ENABLED, true);
+  const graphKernelConfig = readGraphKernelEnablement(process.env.CPP_GRAPH_KERNEL_ENABLED);
+  const graphKernelEnabled = graphKernelConfig.enabled;
   const graphFallbackMode = !graphKernelEnabled
     ? 'node_primary'
     : input.graphKernel
@@ -102,17 +108,24 @@ export function buildNodeCapabilityOwnershipSummary(
     },
     {
       capability: 'recommendation',
-      owner: recommendationMode === 'off' ? 'node' : 'rust',
+      owner: recommendationRuntime.configuredServingOwner,
+      canonicalAlgorithmOwner: recommendationRuntime.canonicalAlgorithmOwner,
+      configuredServingOwner: recommendationRuntime.configuredServingOwner,
+      requestServingOwners: recommendationRuntime.requestServingOwners,
+      evaluatedOwner: recommendationRuntime.evaluatedOwner,
+      fallbackOwner: recommendationRuntime.fallbackOwner,
       nodeRole:
         recommendationMode === 'off'
           ? ['recommendation_primary', 'api_adapter']
-          : ['provider_surface', 'api_adapter', 'shadow_compare'],
-      fallbackEnabled: recommendationMode !== 'primary',
+          : recommendationMode === 'shadow'
+            ? ['recommendation_primary', 'api_adapter', 'shadow_compare']
+            : ['provider_surface', 'api_adapter', 'legacy_baseline_fallback'],
+      fallbackEnabled: recommendationMode === 'primary',
       fallbackMode:
         recommendationMode === 'primary'
-          ? 'rust_primary'
+          ? 'rust_primary_with_node_fallback'
           : recommendationMode === 'shadow'
-            ? 'shadow_compare'
+            ? 'rust_shadow_evaluation'
             : 'node_primary',
       primarySurface: ['/recommendation/candidates', '/internal/recommendation/*'],
       controlPlanePath: '/api/ops/recommendation',
@@ -145,9 +158,10 @@ export function buildNodeCapabilityOwnershipSummary(
     'Summary:',
     '- Node strategic shape: public_rest_api, auth, uploads, data_access, control_plane, fallback_adapters',
     `- Realtime owner: ${capabilities[0].owner} (${capabilities[0].fallbackMode})`,
-    `- Recommendation owner: ${capabilities[1].owner} (${capabilities[1].fallbackMode})`,
+    `- Recommendation algorithm owner: ${recommendationRuntime.canonicalAlgorithmOwner}; configured serving owner: ${capabilities[1].owner}; request serving owners: ${recommendationRuntime.requestServingOwners.join(',')} (${capabilities[1].fallbackMode})`,
     `- Platform owner: ${capabilities[2].owner} (${capabilities[2].fallbackMode})`,
     `- Graph owner: ${capabilities[3].owner} (${capabilities[3].fallbackMode})`,
+    `- Graph configuration: ${graphKernelConfig.valid ? 'valid' : graphKernelConfig.error}`,
   ].join('\n');
 
   return {
@@ -164,6 +178,7 @@ export function buildNodeCapabilityOwnershipSummary(
       mode: 'api_control_fallback_plane',
     },
     capabilities,
+    graphKernelConfig,
     summary,
   };
 }

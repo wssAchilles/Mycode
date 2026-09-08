@@ -8,7 +8,7 @@ import { SideEffect } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { extractExperimentKeys } from '../utils/experimentKeys';
-import { recordRecommendationEvents } from '../events';
+import { recordRecommendationEvents, SERVED_POSITION_CONTRACT_VERSION } from '../events';
 
 /**
  * 曝光去重缓存
@@ -107,11 +107,12 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
             // 批量记录曝光
             const impressions = newCandidates.map((candidate) => ({
                 userId: query.userId,
-                eventType: 'impression' as const,
+                eventType: 'delivery' as const,
                 targetId: candidate.postId,
                 targetAuthorId: candidate.authorId,
                 requestId: query.requestId,
-                position: rankByPostId.get(candidate.postId.toString()),
+                servedPosition: rankByPostId.get(candidate.postId.toString()),
+                positionContractVersion: SERVED_POSITION_CONTRACT_VERSION,
                 score: this.toFiniteNumber(candidate.score),
                 weightedScore: this.toFiniteNumber(candidate.weightedScore),
                 inNetwork: candidate.inNetwork === true,

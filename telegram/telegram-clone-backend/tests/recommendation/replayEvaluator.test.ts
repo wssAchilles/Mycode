@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { evaluateReplayRequests } from '../../src/services/recommendation/replay/evaluator';
 import { rerankReplayCandidates } from '../../src/services/recommendation/replay/variantScorer';
-import type { ReplayRequestSnapshot } from '../../src/services/recommendation/replay/contracts';
+import type {
+    ReplayRequestSnapshot,
+    ReplayVariantName,
+} from '../../src/services/recommendation/replay/contracts';
 
 function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequestSnapshot {
     return {
@@ -34,6 +37,7 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
         candidateSetKind: 'pre_selector_scored_topk_v1',
         candidateSetTotalCount: 8,
         candidateSetTruncated: true,
+        candidateSetCompleteness: 'unverified_v1',
         candidates: [
             {
                 postId: '507f191e810c19729de87071',
@@ -113,6 +117,13 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
 }
 
 describe('recommendation replay evaluator', () => {
+    it('rejects unknown variants instead of silently replaying the baseline', () => {
+        expect(() => rerankReplayCandidates(
+            buildRequest(),
+            'unknown_variant_v1' as ReplayVariantName,
+        )).toThrow('unsupported_replay_variant');
+    });
+
     it('hybrid replay variant promotes embedding-matched engaged candidates over popular fallback', () => {
         const ranked = rerankReplayCandidates(buildRequest(), 'hybrid_signal_blend_v1');
 
@@ -122,23 +133,120 @@ describe('recommendation replay evaluator', () => {
     });
 
     it('reports positive ranking deltas when replay variant lifts engaged content', () => {
-        const summary = evaluateReplayRequests([buildRequest()], 2, 'hybrid_signal_blend_v1');
+        const summary = evaluateReplayRequests([buildRequest({
+            candidateSetTotalCount: 2,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+        })], 2, 'hybrid_signal_blend_v1');
 
         expect(summary.requests).toBe(1);
         expect(summary.variantMetrics.averageNdcgAtK).toBeGreaterThan(summary.baseline.averageNdcgAtK);
         expect(summary.variantMetrics.averageMrrAtK).toBeGreaterThan(summary.baseline.averageMrrAtK);
         expect(summary.averageEngagedRankLift).toBeGreaterThan(0);
         expect(summary.candidateSet.averageObservedCandidates).toBe(2);
-        expect(summary.candidateSet.averageTotalCandidates).toBe(8);
-        expect(summary.candidateSet.truncationRate).toBe(1);
+        expect(summary.candidateSet.averageTotalCandidates).toBe(2);
+        expect(summary.candidateSet.truncationRate).toBe(0);
         expect(summary.byCandidateSetKind.pre_selector_scored_topk_v1).toMatchObject({
+            requests: 1,
+            averageObservedCandidates: 2,
+            averageTotalCandidates: 2,
+            truncationRate: 0,
+        });
+        expect(summary.bySelectedSource.EmbeddingAuthorSource.variantShareAtK).toBeGreaterThan(0);
+        expect(summary.requestDiffLeaders.improved[0]?.requestId).toBe('req-replay-1');
+    });
+
+    it('isolates prototype-like dynamic grouping keys', () => {
+        let summary: ReturnType<typeof evaluateReplayRequests> | undefined;
+
+        expect(() => {
+            summary = evaluateReplayRequests([buildRequest({
+                userState: '__proto__',
+                pipelineVersion: 'constructor',
+                candidateSetKind: 'toString',
+            })], 1, 'baseline_rank_v1');
+        }).not.toThrow();
+
+        expect(Object.prototype.hasOwnProperty.call(summary!.byUserState, '__proto__')).toBe(true);
+        expect(summary!.byUserState['__proto__']).toMatchObject({ requests: 1 });
+        expect(Object.prototype.hasOwnProperty.call(summary!.byPipeline, 'constructor')).toBe(true);
+        expect(summary!.byPipeline.constructor).toMatchObject({ requests: 1 });
+        expect(Object.prototype.hasOwnProperty.call(summary!.byCandidateSetKind, 'toString')).toBe(true);
+        expect(summary!.byCandidateSetKind.toString).toEqual({
             requests: 1,
             averageObservedCandidates: 2,
             averageTotalCandidates: 8,
             truncationRate: 1,
         });
-        expect(summary.bySelectedSource.EmbeddingAuthorSource.variantShareAtK).toBeGreaterThan(0);
-        expect(summary.requestDiffLeaders.improved[0]?.requestId).toBe('req-replay-1');
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
+
+    it('preserves prototype-like recall sources in selected-source metrics', () => {
+        const base = buildRequest();
+        const summary = evaluateReplayRequests([buildRequest({
+            candidateSetTotalCount: 3,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+            candidates: [
+                {
+                    ...base.candidates[0],
+                    postId: '507f191e810c19729de87081',
+                    modelPostId: '507f191e810c19729de87081',
+                    recallSource: '__proto__',
+                    baselineRank: 1,
+                },
+                {
+                    ...base.candidates[1],
+                    postId: '507f191e810c19729de87082',
+                    modelPostId: '507f191e810c19729de87082',
+                    recallSource: 'constructor',
+                    baselineRank: 2,
+                },
+                {
+                    ...base.candidates[0],
+                    postId: '507f191e810c19729de87083',
+                    modelPostId: '507f191e810c19729de87083',
+                    recallSource: 'toString',
+                    baselineRank: 3,
+                },
+            ],
+        })], 3, 'baseline_rank_v1');
+
+        for (const key of ['__proto__', 'constructor', 'toString']) {
+            expect(summary.bySelectedSource[key]).toMatchObject({
+                baselineShareAtK: 1 / 3,
+                variantShareAtK: 1 / 3,
+            });
+        }
+    });
+
+    it('treats prototype-like source priors as unknown sources', () => {
+        const base = buildRequest();
+        const ranked = rerankReplayCandidates(buildRequest({
+            candidates: [{
+                ...base.candidates[0],
+                recallSource: '__proto__',
+            }],
+            candidateSetTotalCount: 1,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+        }), 'hybrid_signal_blend_v1');
+
+        expect(Number.isFinite(ranked[0].replayScore)).toBe(true);
+        expect(ranked[0].replayScoreProvenance).toBe('derived_signal_blend_v1');
+    });
+
+    it('labels trace ranking that falls back to baseline rank', () => {
+        const base = buildRequest();
+        const { score: _score, weightedScore: _weightedScore, pipelineScore: _pipelineScore, ...scoreless } = {
+            ...base.candidates[0],
+        };
+        const ranked = rerankReplayCandidates(buildRequest({
+            candidates: [scoreless],
+        }), 'trace_final_score_v1');
+
+        expect(ranked[0].replayScore).toBe(-1);
+        expect(ranked[0].replayScoreProvenance).toBe('fallback_baseline_rank_v1');
     });
 
     it('industrial guardrail variant demotes negative repeats and promotes trend-linked news', () => {
@@ -264,5 +372,172 @@ describe('recommendation replay evaluator', () => {
             candidatesWithFeedbackRate: 1,
             attributedFeedbackRate: 1,
         });
+    });
+
+    it('excludes strict non-observed rows from feedback metrics while retaining legacy labels', () => {
+        const legacy = buildRequest();
+        const strict = buildRequest({
+            requestId: 'req-strict-censored',
+            candidates: [{
+                ...buildRequest().candidates[0],
+                labels: undefined,
+                outcomeContractV1: {
+                    contractVersion: 'outcome_contract_v1',
+                    decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                    actionKey: {
+                        candidateNamespace: 'serving_post_id',
+                        candidateId: '507f191e810c19729de87071',
+                        servedPosition: 1,
+                    },
+                    decisionAt: '2026-05-01T12:00:00.000Z',
+                    impressionAt: '2026-05-01T12:00:05.000Z',
+                    horizonMs: 60_000,
+                    observedThrough: '2026-05-01T12:00:30.000Z',
+                    labelAvailability: {
+                        follow: 'unavailable_in_v1',
+                        mute: 'unavailable_in_v1',
+                    },
+                    status: 'censored',
+                    reason: 'observation_window_incomplete',
+                },
+            }],
+        });
+
+        const legacySummary = evaluateReplayRequests(
+            [legacy],
+            2,
+            'baseline_rank_v1',
+        );
+        const summary = evaluateReplayRequests(
+            [legacy, strict],
+            2,
+            'baseline_rank_v1',
+        );
+
+        expect(summary.requests).toBe(2);
+        expect(summary.baseline.clickHitRateAtK).toBe(
+            legacySummary.baseline.clickHitRateAtK,
+        );
+        expect(summary.baseline.engagementHitRateAtK).toBe(
+            legacySummary.baseline.engagementHitRateAtK,
+        );
+        expect(summary.baseline.averageNdcgAtK).toBe(
+            legacySummary.baseline.averageNdcgAtK,
+        );
+    });
+
+    it('does not compact strict feedback ranks when attribution support is incomplete', () => {
+        const base = buildRequest();
+        const request = buildRequest({
+            requestId: 'req-incomplete-strict-support',
+            candidates: [
+                {
+                    ...base.candidates[0],
+                    labels: undefined,
+                    outcomeContractV1: {
+                        contractVersion: 'outcome_contract_v1',
+                        decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                        actionKey: {
+                            candidateNamespace: 'serving_post_id',
+                            candidateId: base.candidates[0].postId,
+                            servedPosition: 1,
+                        },
+                        decisionAt: '2026-05-01T12:00:00.000Z',
+                        impressionAt: '2026-05-01T12:00:05.000Z',
+                        horizonMs: 60_000,
+                        observedThrough: '2026-05-01T12:00:30.000Z',
+                        labelAvailability: {
+                            follow: 'unavailable_in_v1',
+                            mute: 'unavailable_in_v1',
+                        },
+                        status: 'censored',
+                        reason: 'observation_window_incomplete',
+                    },
+                },
+                {
+                    ...base.candidates[1],
+                    labels: undefined,
+                    outcomeContractV1: {
+                        contractVersion: 'outcome_contract_v1',
+                        decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                        actionKey: {
+                            candidateNamespace: 'serving_post_id',
+                            candidateId: base.candidates[1].postId,
+                            servedPosition: 2,
+                        },
+                        decisionAt: '2026-05-01T12:00:00.000Z',
+                        impressionAt: '2026-05-01T12:00:05.000Z',
+                        horizonMs: 60_000,
+                        observedThrough: '2026-05-01T12:01:05.000Z',
+                        labelAvailability: {
+                            follow: 'unavailable_in_v1',
+                            mute: 'unavailable_in_v1',
+                        },
+                        status: 'observed',
+                        labels: {
+                            ...base.candidates[1].labels!,
+                            click: true,
+                            engagement: true,
+                        },
+                    },
+                },
+            ],
+        });
+
+        const summary = evaluateReplayRequests([request], 1, 'baseline_rank_v1');
+
+        expect(summary.baseline.clickHitRateAtK).toBe(0);
+        expect(summary.baseline.averageNdcgAtK).toBe(0);
+        expect(summary.averageClickedRankLift).toBe(0);
+        expect(summary.requestDiffLeaders).toEqual({ improved: [], regressed: [] });
+        expect(summary.baseline.averageAuthorDiversityAtK).toBe(1);
+    });
+
+    it('uses observed outcome labels instead of contradictory legacy labels', () => {
+        const base = buildRequest();
+        const candidate = base.candidates[0];
+        const request = buildRequest({
+            requestId: 'req-strict-label-authority',
+            candidateSetTotalCount: 1,
+            candidateSetTruncated: false,
+            candidateSetCompleteness: 'complete_v1',
+            candidates: [{
+                ...candidate,
+                labels: {
+                    ...candidate.labels!,
+                    click: false,
+                    engagement: false,
+                },
+                outcomeContractV1: {
+                    contractVersion: 'outcome_contract_v1',
+                    decisionId: '75b6e4ce-4b79-45b1-b4b7-18f945bbebad',
+                    actionKey: {
+                        candidateNamespace: 'serving_post_id',
+                        candidateId: candidate.postId,
+                        servedPosition: 1,
+                    },
+                    decisionAt: '2026-05-01T12:00:00.000Z',
+                    impressionAt: '2026-05-01T12:00:05.000Z',
+                    horizonMs: 60_000,
+                    observedThrough: '2026-05-01T12:01:05.000Z',
+                    labelAvailability: {
+                        follow: 'unavailable_in_v1',
+                        mute: 'unavailable_in_v1',
+                    },
+                    status: 'observed',
+                    labels: {
+                        ...base.candidates[1].labels!,
+                        click: true,
+                        engagement: true,
+                    },
+                },
+            }],
+        });
+
+        const summary = evaluateReplayRequests([request], 1, 'baseline_rank_v1');
+
+        expect(summary.baseline.clickHitRateAtK).toBe(1);
+        expect(summary.baseline.engagementHitRateAtK).toBe(1);
+        expect(summary.baseline.averageNdcgAtK).toBe(1);
     });
 });

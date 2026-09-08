@@ -149,6 +149,9 @@ export interface UserBehaviorEvent {
         recommendationSource?: string; // 兼容旧调用方的召回源字段
         position?: number; // 在 feed 中的位置
         requestId?: string; // 推荐请求 ID
+        decisionId?: string; // 服务端决策 ID
+        candidateNamespace?: 'serving_post_id' | 'model_post_id';
+        candidateId?: string;
         recommendationScore?: number; // 推荐分数
         selectionPool?: string; // selector 分桶
         selectionReason?: string; // selector 选择原因

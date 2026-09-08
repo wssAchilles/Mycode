@@ -1,0 +1,204 @@
+{
+  "fixtureVersion": "randomized_slate_development_fixture_v2",
+  "sourceFixturePath": "randomized_slate_simulation_v1.json",
+  "sourceFixtureSha256": "51a2c8d8ba3bf910ede869fa645244246e081fa4d8fc4e326d055a27fb188aaf",
+  "inputSha256": "1718ced2cfa29eeca3e878ba2e2a1a7dae20de4e6f4790e02accd280e51110ea",
+  "epochId": "phase25-development-epoch",
+  "revealedDevelopmentSeedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "seedCommitmentSha256": "8246535983f251621fa5ab2ab479f464cdbb220b6f3f30f6e257128ce3a29774",
+  "expected": {
+    "contractVersion": "randomized_slate_development_receipt_v2",
+    "status": "simulated",
+    "policy": {
+      "policyId": "eligible_pool_epsilon_plackett_luce_v1",
+      "policyVersion": "epsilon-pl-v1",
+      "configVersion": "phase8-fixture-v1",
+      "epsilon": 0.2,
+      "temperature": 1.0,
+      "slateSize": 3
+    },
+    "policyConfigSha256": "d508c7e3945693b8ef5ca8c9feedb6b2cfc26b190e58017041a03acf277edb39",
+    "policyArithmeticVersion": "rust_epsilon_plackett_luce_binary64_v1",
+    "baselineOrderVersion": "decision_pool_rank_then_identity_v1",
+    "probabilitySemantics": "conditional_on_prior_slate_prefix_v1",
+    "rngProtocol": "hkdf-sha256+rfc8439-chacha20+open53/v1",
+    "commitmentPurpose": "development_reveal_consistency_only_v1",
+    "epochId": "phase25-development-epoch",
+    "revealedDevelopmentSeedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "seedCommitmentSha256": "8246535983f251621fa5ab2ab479f464cdbb220b6f3f30f6e257128ce3a29774",
+    "rngContextSha256": "8f0dadc75170e72c44427712e33b19cb63ca1ac67958c370aa77e5a2bbea6119",
+    "decisionFingerprint": {
+      "decisionId": "8d3dd5de-a2c1-47e2-bafb-91bf557cf4ab",
+      "sha256": "b0bfef8c9567b69b52db231d8a3721e5f2d0244c3c0d6fd5cf5cb859834bc8d3"
+    },
+    "candidatePoolFingerprint": {
+      "sha256": "d4fba714a86f3818d3fa0d50cd718bbb3ad23cfd1fbec86774c7cd3d62cc0077"
+    },
+    "orderedActions": [
+      {
+        "actionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c001",
+          "servedPosition": 1
+        },
+        "deterministicTopActionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c001",
+          "servedPosition": 1
+        },
+        "selectedWasDeterministicTop": true,
+        "prefixSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "remainingSupportSha256": "285023a304c43191d5f316457c606340957511a44203736130ac2fd89d2e880e",
+        "remainingCandidateCount": 3,
+        "distributionSha256": "89576a4c51f8e30d06c8269c91ab63fedc7bc7a96ff2615286ee191fb2272e05",
+        "plackettLuceProbability": 0.09003057317038046,
+        "conditionalSelectionProbability": 0.8180061146340761,
+        "conditionalLogProbability": -0.20088546730454587,
+        "selectedIntervalLowerInclusive": 0.0,
+        "selectedIntervalUpperExclusive": 0.8180061146340761,
+        "randomTranscript": {
+          "startByteOffset": 0,
+          "rawWordsHex": [
+            "9208317b56638857"
+          ],
+          "acceptedUnsigned53": "2306205613787223",
+          "uniformDraw": 0.25604025719463663
+        }
+      },
+      {
+        "actionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c002",
+          "servedPosition": 2
+        },
+        "deterministicTopActionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c002",
+          "servedPosition": 2
+        },
+        "selectedWasDeterministicTop": true,
+        "prefixSha256": "363be0f0dc025c6fb33635741fe7c83cdd74ba430927a11eebd781c0c10fb7c8",
+        "remainingSupportSha256": "55941b97bb5b474c5374fe0fa01969a232515ebcbecf6607c7bcaf64ffd1151b",
+        "remainingCandidateCount": 2,
+        "distributionSha256": "02caa3e0617a8f0701f8fc9f3f06833920581e3654d4df3f88f362cdb079e35b",
+        "plackettLuceProbability": 0.7310585786300049,
+        "conditionalSelectionProbability": 0.946211715726001,
+        "conditionalLogProbability": -0.05528893399110252,
+        "selectedIntervalLowerInclusive": 0.0,
+        "selectedIntervalUpperExclusive": 0.946211715726001,
+        "randomTranscript": {
+          "startByteOffset": 8,
+          "rawWordsHex": [
+            "1d0593bc67d2d6be"
+          ],
+          "acceptedUnsigned53": "1569812288558782",
+          "uniformDraw": 0.174284174709747
+        }
+      },
+      {
+        "actionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c003",
+          "servedPosition": 3
+        },
+        "deterministicTopActionKey": {
+          "candidateNamespace": "serving_post_id",
+          "candidateId": "507f191e810c19729de8c003",
+          "servedPosition": 3
+        },
+        "selectedWasDeterministicTop": true,
+        "prefixSha256": "8b3b94a871140af963038d734ddd07b3aab816e94aa4f32d0422f8a98bb65d2a",
+        "remainingSupportSha256": "53cfbe76867c869cecb407bfea675e25f153dc3f5186e9cdb8e1efac149c636f",
+        "remainingCandidateCount": 1,
+        "distributionSha256": "404fe1290f18d0187cb2ea7fb253044e56e916e1539edffbdc7ab538d13e6178",
+        "plackettLuceProbability": 1.0,
+        "conditionalSelectionProbability": 1.0,
+        "conditionalLogProbability": 0.0,
+        "selectedIntervalLowerInclusive": 0.0,
+        "selectedIntervalUpperExclusive": 1.0,
+        "randomTranscript": {
+          "startByteOffset": 16,
+          "rawWordsHex": [
+            "81733d65a5ce5ae2"
+          ],
+          "acceptedUnsigned53": "5415531340258018",
+          "uniformDraw": 0.6012447584533585
+        }
+      }
+    ],
+    "orderedJointProbability": {
+      "status": "finite_positive",
+      "logJointConditionalSelectionProbability": -0.2561744012956484,
+      "jointConditionalSelectionProbability": 0.7740069692022691
+    },
+    "supportDiagnostics": {
+      "sourceCandidateCount": 4,
+      "eligibleCandidateCount": 3,
+      "excludedIneligibleCandidateCount": 1,
+      "sampledCount": 3,
+      "withoutReplacement": true
+    },
+    "numericalDiagnostics": {
+      "probabilityMassTolerance": 1e-12,
+      "maxProbabilityMassError": 1.11022302462515650e-16,
+      "steps": [
+        {
+          "servedPosition": 1,
+          "remainingCandidateCount": 3,
+          "plackettLuceProbabilityMass": 0.99999999999999989,
+          "mixedProbabilityMass": 1.0,
+          "probabilityMassError": 1.11022302462515650e-16
+        },
+        {
+          "servedPosition": 2,
+          "remainingCandidateCount": 2,
+          "plackettLuceProbabilityMass": 1.0,
+          "mixedProbabilityMass": 1.0,
+          "probabilityMassError": 0.0
+        },
+        {
+          "servedPosition": 3,
+          "remainingCandidateCount": 1,
+          "plackettLuceProbabilityMass": 1.0,
+          "mixedProbabilityMass": 1.0,
+          "probabilityMassError": 0.0
+        }
+      ]
+    },
+    "resourceReceipt": {
+      "limitsVersion": "randomized_slate_development_resource_limits_v1",
+      "rawInputAdmission": "admitted_before_parse_v1",
+      "algorithmAdmission": "admitted_before_rng_and_policy_v1",
+      "maximumRawInputBytes": 33554432,
+      "maximumOutputCanonicalBytes": 33554432,
+      "maximumHashBytes": 536870912,
+      "maximumAlgorithmAllocationBytes": 134217728,
+      "maximumCandidateWorkUnits": 5000000,
+      "rawInputBytes": 2802,
+      "sourceDecisionCanonicalBytes": 2556,
+      "policyConfigCanonicalBytes": 241,
+      "candidateCount": 4,
+      "eligibleCandidateCount": 3,
+      "slateSize": 3,
+      "baselineSortPasses": 1,
+      "baselineSortItems": 3,
+      "baselineSortComparisonUpperBound": 9,
+      "distributionEntryEvaluations": 6,
+      "selectionComparisonUpperBound": 6,
+      "removalShiftUpperBound": 3,
+      "candidateWorkUnits": 24,
+      "maximumRngWords": 12,
+      "maximumRngBytes": 96,
+      "plannedOutputCanonicalBytesUpperBound": 1062659,
+      "plannedHashBytesUpperBound": 12799126,
+      "plannedAlgorithmAllocationBytesUpperBound": 1066680,
+      "actualRngWords": 3,
+      "actualRngBytes": 24,
+      "actualOutputCanonicalBytes": 7814
+    },
+    "evidenceKind": "simulated_propensity",
+    "servable": false,
+    "realDatasetEligible": false,
+    "transcriptSha256": "e31870c6648d46ffc80a4d67c0c1614936b215fdf8881fedf0108e8859f7097b"
+  }
+}

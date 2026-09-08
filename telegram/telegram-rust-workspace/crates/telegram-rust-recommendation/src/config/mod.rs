@@ -53,17 +53,21 @@ impl RecommendationConfig {
                 .unwrap_or_else(|| "redis://redis:6379".to_string()),
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
             timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 9000)?,
-            graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true),
+            graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true)?,
             graph_kernel_url: read_env("CPP_GRAPH_KERNEL_URL")
                 .unwrap_or_else(|| "http://graph_kernel:4300".to_string()),
             graph_kernel_timeout_ms: parse_env("CPP_GRAPH_KERNEL_TIMEOUT_MS", 1200)?,
-            graph_materializer_limit_per_author: parse_env(
+            graph_materializer_limit_per_author: parse_bounded_env(
                 "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LIMIT_PER_AUTHOR",
                 2,
+                1,
+                8,
             )?,
-            graph_materializer_lookback_days: parse_env(
+            graph_materializer_lookback_days: parse_bounded_env(
                 "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LOOKBACK_DAYS",
                 7,
+                1,
+                180,
             )?,
             stage: read_env("RUST_RECOMMENDATION_STAGE")
                 .unwrap_or_else(|| RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string()),
@@ -85,7 +89,7 @@ impl RecommendationConfig {
             recent_source_enabled: parse_bool_env(
                 "RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED",
                 true,
-            ),
+            )?,
             source_order: parse_csv_env(
                 "RUST_RECOMMENDATION_SOURCE_ORDER",
                 &[
@@ -97,22 +101,22 @@ impl RecommendationConfig {
                     "ColdStartSource",
                 ],
             ),
-            graph_source_enabled: parse_bool_env("RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED", true),
-            serve_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SERVE_CACHE_ENABLED", true),
+            graph_source_enabled: parse_bool_env("RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED", true)?,
+            serve_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SERVE_CACHE_ENABLED", true)?,
             serve_cache_ttl_secs: parse_env("RUST_RECOMMENDATION_SERVE_CACHE_TTL_SECS", 45)?,
             serve_cache_prefix: read_env("RUST_RECOMMENDATION_SERVE_CACHE_PREFIX")
                 .unwrap_or_else(|| "recommendation:serve:v1".to_string()),
             cache_singleflight_enabled: parse_bool_env(
                 "RUST_RECOMMENDATION_CACHE_SINGLEFLIGHT_ENABLED",
                 false,
-            ),
+            )?,
             cache_local_capacity: parse_env("RUST_RECOMMENDATION_CACHE_LOCAL_CAPACITY", 4096)?,
             serving_author_soft_cap: parse_env("RUST_RECOMMENDATION_SERVING_AUTHOR_SOFT_CAP", 2)?,
-            news_trends_cache_enabled: parse_bool_env("NEWS_TRENDS_RUST_CACHE_ENABLED", true),
+            news_trends_cache_enabled: parse_bool_env("NEWS_TRENDS_RUST_CACHE_ENABLED", true)?,
             news_trends_cache_ttl_secs: parse_env("NEWS_TRENDS_RUST_CACHE_TTL_SECS", 60)?,
             news_trends_cache_prefix: read_env("NEWS_TRENDS_RUST_CACHE_PREFIX")
                 .unwrap_or_else(|| "news:trends:rust:v1".to_string()),
-            source_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SOURCE_CACHE_ENABLED", true),
+            source_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SOURCE_CACHE_ENABLED", true)?,
             source_cache_ttl_secs: parse_env("RUST_RECOMMENDATION_SOURCE_CACHE_TTL_SECS", 300)?,
             source_cache_prefix: read_env("RUST_RECOMMENDATION_SOURCE_CACHE_PREFIX")
                 .unwrap_or_else(|| "recommendation:source:v1".to_string()),
@@ -140,10 +144,41 @@ where
     }
 }
 
-fn parse_bool_env(key: &str, default: bool) -> bool {
+fn parse_bounded_env<T>(key: &str, default: T, minimum: T, maximum: T) -> Result<T>
+where
+    T: std::str::FromStr + Copy + std::fmt::Display + PartialOrd,
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    let value = parse_env(key, default)?;
+    validate_bounded(key, value, minimum, maximum)
+}
+
+fn validate_bounded<T>(key: &str, value: T, minimum: T, maximum: T) -> Result<T>
+where
+    T: Copy + std::fmt::Display + PartialOrd,
+{
+    if value < minimum || value > maximum {
+        return Err(anyhow!(
+            "{key}={value} must be between {minimum} and {maximum}"
+        ));
+    }
+    Ok(value)
+}
+
+fn parse_bool_env(key: &str, default: bool) -> Result<bool> {
     match read_env(key) {
-        Some(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        None => default,
+        Some(value) => parse_bool_value(key, &value),
+        None => Ok(default),
+    }
+}
+
+fn parse_bool_value(key: &str, value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(anyhow!(
+            "failed to parse {key}={value}: expected one of 1/0, true/false, yes/no, or on/off"
+        )),
     }
 }
 
@@ -164,5 +199,47 @@ fn parse_csv_env(key: &str, default: &[&str]) -> Vec<String> {
             }
         }
         None => default.iter().map(|entry| (*entry).to_string()).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_bool_value, validate_bounded};
+
+    #[test]
+    fn boolean_values_follow_the_cross_runtime_contract() {
+        for value in ["1", "true", "yes", "on", " TRUE "] {
+            assert!(parse_bool_value("TEST_BOOL", value).unwrap());
+        }
+        for value in ["0", "false", "no", "off", " OFF "] {
+            assert!(!parse_bool_value("TEST_BOOL", value).unwrap());
+        }
+    }
+
+    #[test]
+    fn boolean_values_reject_unknown_tokens() {
+        let error = parse_bool_value("CPP_GRAPH_KERNEL_ENABLED", "treu")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("failed to parse CPP_GRAPH_KERNEL_ENABLED=treu"));
+        assert!(error.contains("expected one of"));
+    }
+
+    #[test]
+    fn materializer_bounds_accept_contract_edges() {
+        assert_eq!(validate_bounded("limit", 1, 1, 8).unwrap(), 1);
+        assert_eq!(validate_bounded("limit", 8, 1, 8).unwrap(), 8);
+        assert_eq!(validate_bounded("days", 1, 1, 180).unwrap(), 1);
+        assert_eq!(validate_bounded("days", 180, 1, 180).unwrap(), 180);
+    }
+
+    #[test]
+    fn materializer_bounds_reject_contract_violations() {
+        let below = validate_bounded("limit", 0, 1, 8).unwrap_err().to_string();
+        let above = validate_bounded("days", 181, 1, 180)
+            .unwrap_err()
+            .to_string();
+        assert!(below.contains("limit=0 must be between 1 and 8"));
+        assert!(above.contains("days=181 must be between 1 and 180"));
     }
 }

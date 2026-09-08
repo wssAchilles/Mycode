@@ -1,8 +1,14 @@
 import mongoose from 'mongoose';
+import { createHash } from 'crypto';
 import RecommendationTrace from '../../../models/RecommendationTrace';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { FeedQuery } from '../types/FeedQuery';
 import type { RecommendationTracePayload } from '../rust/contracts';
+import type {
+    RecommendationPrimaryFallbackReason,
+    RecommendationRuntimeMode,
+    RecommendationRuntimeOwner,
+} from '../contracts/runtimeOwnership';
 import { extractExperimentKeys } from '../utils/experimentKeys';
 
 const MAX_TRACE_CANDIDATES = Math.max(
@@ -13,6 +19,17 @@ const MAX_TRACE_REPLAY_POOL_CANDIDATES = Math.max(
     MAX_TRACE_CANDIDATES,
     parseInt(String(process.env.RECOMMENDATION_TRACE_MAX_REPLAY_POOL_CANDIDATES || '120'), 10) || 120,
 );
+const SERVED_RUNTIME_TRUTH_FIELDS = [
+    'pipeline',
+    'runtimeMode',
+    'servingOwner',
+    'fallbackReason',
+    'owner',
+    'fallbackMode',
+    'degradedReasons',
+    'shadowComparison',
+    'serving',
+] as const;
 
 export interface RecommendationTraceShadowComparisonInput {
     overlapCount: number;
@@ -23,6 +40,7 @@ export interface RecommendationTraceShadowComparisonInput {
 
 export interface RecommendationTraceServingInput {
     servingVersion?: string;
+    cursorMode?: string;
     stableOrderKey?: string;
     cursor?: string;
     nextCursor?: string;
@@ -33,12 +51,16 @@ export interface RecommendationTraceServingInput {
 export interface RecommendationTraceRuntimeInput {
     productSurface?: string;
     pipeline?: string;
+    runtimeMode?: RecommendationRuntimeMode;
+    servingOwner?: RecommendationRuntimeOwner;
+    fallbackReason?: RecommendationPrimaryFallbackReason;
     owner?: string;
     fallbackMode?: string;
     degradedReasons?: string[];
     shadowComparison?: RecommendationTraceShadowComparisonInput;
     serving?: RecommendationTraceServingInput;
     rustTrace?: RecommendationTracePayload;
+    replayCandidates?: FeedCandidate[];
 }
 
 type StoredTraceCandidate = {
@@ -76,7 +98,16 @@ export async function recordRecommendationTrace(
     selectedCandidates: FeedCandidate[],
     runtime: RecommendationTraceRuntimeInput = {},
 ): Promise<void> {
-    if (!isTraceEnabled() || !query.requestId || selectedCandidates.length === 0) {
+    const replayCandidates = runtime.replayCandidates ?? [];
+    if (
+        !isRecommendationTraceEnabled()
+        || !query.requestId
+        || (
+            selectedCandidates.length === 0
+            && replayCandidates.length === 0
+            && !(runtime.runtimeMode && runtime.servingOwner)
+        )
+    ) {
         return;
     }
 
@@ -91,6 +122,7 @@ export async function recordRecommendationTrace(
 
     const update: Record<string, unknown> = {
         requestId: query.requestId,
+        decisionId: query.decisionId,
         userId: query.userId,
         productSurface: runtime.productSurface || 'space_feed',
         selectedCount: selectedCandidates.length,
@@ -109,9 +141,9 @@ export async function recordRecommendationTrace(
             .slice(0, MAX_TRACE_CANDIDATES)
             .map((candidate, index) => traceCandidate(candidate, index + 1)),
         experimentKeys: extractExperimentKeys(query),
-        createdAt: new Date(now),
     };
 
+    setIfDefined(update, 'clientRequestId', query.clientRequestId);
     setIfDefined(update, 'pipeline', runtime.pipeline);
     setIfDefined(update, 'owner', runtime.owner);
     setIfDefined(update, 'fallbackMode', runtime.fallbackMode);
@@ -120,11 +152,50 @@ export async function recordRecommendationTrace(
     setIfDefined(update, 'serving', sanitizeServing(runtime.serving));
     setIfDefined(update, 'userState', query.userStateContext?.state);
     setIfDefined(update, 'embeddingQualityScore', query.embeddingContext?.qualityScore);
+    const replayPool = buildNodeReplayPool(replayCandidates);
+    if (replayPool) {
+        update.replayPool = replayPool;
+        update.replayPoolFingerprint = replayPool.fingerprint;
+    }
     applyRustTrace(update, runtime.rustTrace);
+    setIfDefined(update, 'runtimeMode', runtime.runtimeMode);
+    setIfDefined(update, 'servingOwner', runtime.servingOwner);
+    setIfDefined(update, 'fallbackReason', runtime.fallbackReason);
+    if (runtime.servingOwner) {
+        update.owner = runtime.servingOwner;
+    }
+
+    const servedRuntimeWrite = runtime.runtimeMode !== undefined && runtime.servingOwner !== undefined;
+    const set = servedRuntimeWrite
+        ? Object.fromEntries(
+            SERVED_RUNTIME_TRUTH_FIELDS
+                .filter((field) => update[field] !== undefined)
+                .map((field) => [field, update[field]]),
+        )
+        : update;
+    if (servedRuntimeWrite) {
+        set.decisionId = query.decisionId;
+        setIfDefined(set, 'clientRequestId', query.clientRequestId);
+    }
+    const setOnInsert: Record<string, unknown> = { createdAt: new Date(now) };
+    if (servedRuntimeWrite) {
+        Object.assign(
+            setOnInsert,
+            Object.fromEntries(
+                Object.entries(update).filter(([field]) => !(field in set)),
+            ),
+        );
+    }
 
     await RecommendationTrace.findOneAndUpdate(
-        { requestId: query.requestId },
-        { $set: update },
+        {
+            requestId: query.requestId,
+            $or: [
+                { decisionId: { $exists: false } },
+                { decisionId: query.decisionId },
+            ],
+        },
+        { $set: set, $setOnInsert: setOnInsert },
         { upsert: true },
     );
 }
@@ -239,21 +310,24 @@ function sanitizeRustReplayPool(
     replayPool?: RecommendationTracePayload['replayPool'],
 ): StoredTraceReplayPool | undefined {
     if (!replayPool) return undefined;
+    const totalCount = Math.max(0, Math.round(replayPool.totalCount || 0));
+    const candidates = sanitizeRustCandidates(
+        replayPool.candidates,
+        [],
+        MAX_TRACE_REPLAY_POOL_CANDIDATES,
+    );
     return {
         poolKind: replayPool.poolKind,
-        totalCount: Math.max(0, Math.round(replayPool.totalCount || 0)),
-        truncated: replayPool.truncated === true,
+        totalCount,
+        truncated: replayPool.truncated === true
+            || candidates.length < Math.max(totalCount, replayPool.candidates.length),
         fingerprint: replayPool.fingerprint,
-        candidates: sanitizeRustCandidates(
-            replayPool.candidates,
-            [],
-            MAX_TRACE_REPLAY_POOL_CANDIDATES,
-        ),
+        candidates,
     };
 }
 
-function isTraceEnabled(): boolean {
-    return String(process.env.RECOMMENDATION_TRACE_ENABLED || 'true').toLowerCase() !== 'false';
+export function isRecommendationTraceEnabled(): boolean {
+    return process.env.RECOMMENDATION_TRACE_ENABLED === 'true';
 }
 
 function buildSourceCounts(candidates: FeedCandidate[]) {
@@ -306,6 +380,57 @@ function traceCandidate(candidate: FeedCandidate, rank: number) {
         explainSignals: finiteBreakdown(candidate.recommendationExplain?.signals),
         createdAt: candidate.createdAt,
     };
+}
+
+function buildNodeReplayPool(candidates?: FeedCandidate[]): StoredTraceReplayPool | undefined {
+    if (!candidates || candidates.length === 0) return undefined;
+    const ordered = candidates.slice().sort((left, right) => {
+        const scoreDifference = traceScore(right) - traceScore(left);
+        return scoreDifference !== 0
+            ? scoreDifference
+            : left.postId.toString().localeCompare(right.postId.toString());
+    });
+    const fingerprint = traceCandidateFingerprint(candidates);
+    return {
+        poolKind: 'pre_selector_scored_topk_v1',
+        totalCount: candidates.length,
+        truncated: candidates.length > MAX_TRACE_REPLAY_POOL_CANDIDATES,
+        fingerprint,
+        candidates: ordered
+            .slice(0, MAX_TRACE_REPLAY_POOL_CANDIDATES)
+            .map((candidate, index) => traceCandidate(candidate, index + 1)),
+    };
+}
+
+function traceCandidateFingerprint(candidates: FeedCandidate[]): string {
+    const fields = candidates.map((candidate) => [
+        candidate.postId.toString(),
+        candidate.modelPostId,
+        candidate.authorId,
+        candidate.recallSource,
+        candidate.selectionPool,
+        candidate.selectionReason,
+        quantizedScore(traceScore(candidate)),
+        quantizedScore(candidate.weightedScore),
+        quantizedScore(candidate._pipelineScore),
+    ]);
+    return createHash('sha256')
+        .update(JSON.stringify([candidates.length, fields]))
+        .digest('hex')
+        .slice(0, 16);
+}
+
+function traceScore(candidate: FeedCandidate): number {
+    return toFiniteNumber(candidate.score)
+        ?? toFiniteNumber(candidate._pipelineScore)
+        ?? toFiniteNumber(candidate.weightedScore)
+        ?? 0;
+}
+
+function quantizedScore(score: number | undefined): number {
+    return typeof score === 'number' && Number.isFinite(score)
+        ? Math.round(score * 1_000_000)
+        : 0;
 }
 
 function finiteBreakdown(value?: Record<string, number>): Record<string, number> | undefined {
@@ -364,6 +489,7 @@ function sanitizeServing(value?: RecommendationTraceServingInput): Recommendatio
     if (!value) return undefined;
     const serving: RecommendationTraceServingInput = {};
     setIfDefined(serving as Record<string, unknown>, 'servingVersion', value.servingVersion);
+    setIfDefined(serving as Record<string, unknown>, 'cursorMode', value.cursorMode);
     setIfDefined(serving as Record<string, unknown>, 'stableOrderKey', value.stableOrderKey);
     setIfDefined(serving as Record<string, unknown>, 'cursor', value.cursor);
     setIfDefined(serving as Record<string, unknown>, 'nextCursor', value.nextCursor);

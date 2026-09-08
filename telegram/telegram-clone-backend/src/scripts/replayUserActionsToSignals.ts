@@ -37,7 +37,7 @@ async function main() {
     console.log(JSON.stringify(result, null, 2));
 }
 
-async function replayUserActionsToSignals(options: {
+export async function replayUserActionsToSignals(options: {
     dryRun: boolean;
     limit: number;
     batchSize: number;
@@ -47,18 +47,28 @@ async function replayUserActionsToSignals(options: {
     let signalCandidates = 0;
     let insertedSignals = 0;
     let realGraphInteractions = 0;
-    let cursor: Date | undefined;
+    let cursor: { timestamp: Date; id: mongoose.Types.ObjectId } | undefined;
 
     while (scanned < options.limit) {
         const query: Record<string, unknown> = {
             action: { $in: Object.values(ActionType) },
             targetPostId: { $exists: true, $ne: null },
         };
-        if (options.since || cursor) {
-            query.timestamp = {
-                ...(options.since ? { $gte: options.since } : {}),
-                ...(cursor ? { $lt: cursor } : {}),
-            };
+        if (cursor) {
+            query.$or = [
+                {
+                    timestamp: {
+                        ...(options.since ? { $gte: options.since } : {}),
+                        $lt: cursor.timestamp,
+                    },
+                },
+                {
+                    timestamp: cursor.timestamp,
+                    _id: { $lt: cursor.id },
+                },
+            ];
+        } else if (options.since) {
+            query.timestamp = { $gte: options.since };
         }
 
         const actions = await UserAction.find(query)
@@ -67,7 +77,11 @@ async function replayUserActionsToSignals(options: {
         if (actions.length === 0) break;
 
         scanned += actions.length;
-        cursor = actions[actions.length - 1].timestamp;
+        const lastAction = actions[actions.length - 1];
+        cursor = {
+            timestamp: lastAction.timestamp,
+            id: lastAction._id as mongoose.Types.ObjectId,
+        };
 
         const interactions: Array<{
             sourceUserId: string;
@@ -226,22 +240,24 @@ function ttlDays(signalType: SignalType): number {
     return 7;
 }
 
-main()
-    .catch((error) => {
-        console.error('[ReplayUserActionsToSignals] failed:', error);
-        process.exitCode = 1;
-    })
-    .finally(async () => {
-        try {
-            mongoose.connection.removeAllListeners('disconnected');
-            mongoose.connection.removeAllListeners('error');
-            await mongoose.disconnect();
-        } catch {
-            // ignore
-        }
-        try {
-            redis.disconnect();
-        } catch {
-            // ignore
-        }
-    });
+if (require.main === module) {
+    main()
+        .catch((error) => {
+            console.error('[ReplayUserActionsToSignals] failed:', error);
+            process.exitCode = 1;
+        })
+        .finally(async () => {
+            try {
+                mongoose.connection.removeAllListeners('disconnected');
+                mongoose.connection.removeAllListeners('error');
+                await mongoose.disconnect();
+            } catch {
+                // ignore
+            }
+            try {
+                redis.disconnect();
+            } catch {
+                // ignore
+            }
+        });
+}

@@ -272,6 +272,7 @@ mod tests {
         );
         let query = RecommendationQueryPayload {
             request_id: "req-boundary-1".to_string(),
+            decision_id: "942282e1-f2d4-4522-bbd2-fe5678279154".to_string(),
             user_id: "viewer-1".to_string(),
             limit: 2,
             cursor: None,

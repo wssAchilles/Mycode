@@ -1,9 +1,28 @@
-export type ReplayVariantName =
-    | 'baseline_rank_v1'
-    | 'trace_final_score_v1'
-    | 'trace_weighted_score_v1'
-    | 'hybrid_signal_blend_v1'
-    | 'industrial_guardrail_blend_v1';
+import type { OutcomeContractV1 } from '../outcomes/outcomeContractV1';
+
+export const REPLAY_VARIANT_NAMES = Object.freeze([
+    'baseline_rank_v1',
+    'trace_final_score_v1',
+    'trace_weighted_score_v1',
+    'hybrid_signal_blend_v1',
+    'industrial_guardrail_blend_v1',
+] as const);
+
+export type ReplayVariantName = typeof REPLAY_VARIANT_NAMES[number];
+
+export const REPLAY_SCORE_PROVENANCE_NAMES = Object.freeze([
+    'baseline_rank_v1',
+    'native_score_v1',
+    'native_weighted_score_v1',
+    'fallback_weighted_score_v1',
+    'fallback_score_v1',
+    'fallback_pipeline_score_v1',
+    'fallback_baseline_rank_v1',
+    'derived_signal_blend_v1',
+    'derived_guardrail_blend_v1',
+] as const);
+
+export type ReplayScoreProvenance = typeof REPLAY_SCORE_PROVENANCE_NAMES[number];
 
 export interface ReplayCandidateLabelSummary {
     click: boolean;
@@ -45,11 +64,13 @@ export interface ReplayCandidateSnapshot {
     evidence?: string[];
     explainSignals?: Record<string, number>;
     createdAt?: string;
-    labels: ReplayCandidateLabelSummary;
+    outcomeContractV1?: OutcomeContractV1;
+    labels?: ReplayCandidateLabelSummary;
 }
 
 export interface ReplayRequestSnapshot {
     requestId: string;
+    decisionId?: string;
     userId: string;
     requestAt: string;
     productSurface: string;
@@ -77,6 +98,7 @@ export interface ReplayRequestSnapshot {
     candidateSetKind?: string;
     candidateSetTotalCount?: number;
     candidateSetTruncated?: boolean;
+    candidateSetCompleteness?: 'complete_v1' | 'unverified_v1';
     shadowComparison?: {
         overlapCount: number;
         overlapRatio: number;
@@ -89,6 +111,28 @@ export interface ReplayRequestSnapshot {
 export interface ReplayRankingCandidate extends ReplayCandidateSnapshot {
     replayScore: number;
     replayRank: number;
+    replayScoreProvenance: ReplayScoreProvenance;
+}
+
+export type ReplayMetricEligibilityStatus = 'complete' | 'partial' | 'not_evaluable';
+
+export type ReplayMetricEligibilityReason =
+    | 'missing_feedback'
+    | 'candidate_set_truncated'
+    | 'candidate_set_completeness_unverified'
+    | 'score_provenance_unavailable';
+
+export interface ReplayMetricEligibilitySummary {
+    contractVersion: 'replay_metric_eligibility_v2';
+    status: ReplayMetricEligibilityStatus;
+    reasons: ReplayMetricEligibilityReason[];
+    eligibleRequestDenominator: number;
+    eligibleCandidateDenominator: number;
+    observedRequestDenominator: number;
+    observedCandidateDenominator: number;
+    excludedRequestCount: number;
+    excludedObservedCandidateCount: number;
+    observedCandidateSetOnly: boolean;
 }
 
 export interface ReplayRankingMetrics {
@@ -101,6 +145,7 @@ export interface ReplayRankingMetrics {
     averageMrrAtK: number;
     averageRecallAtK: number;
     averageNegativeRateAtK: number;
+    metricEligibility: ReplayMetricEligibilitySummary;
 }
 
 export interface ReplayBucketSummary {
@@ -133,6 +178,16 @@ export interface ReplayAttributionCoverageSummary {
     attributedFeedbackRate: number;
 }
 
+export interface ReplayScoreProvenanceSummary {
+    contractVersion: 'replay_score_provenance_v1';
+    variant: ReplayVariantName;
+    requests: number;
+    candidates: number;
+    requestsWithFallback: number;
+    requestsMissingNativeScore: number;
+    scoreSourceCounts: Record<ReplayScoreProvenance, number>;
+}
+
 export interface LoggingReadinessSummary {
     totalRequests: number;
     requestsMissingRank: number;
@@ -157,12 +212,16 @@ export interface ReplayEvaluationSummary {
     candidateSet: ReplayCandidateSetSummary;
     attributionCoverage: ReplayAttributionCoverageSummary;
     loggingReadiness: LoggingReadinessSummary;
+    scoreProvenance: ReplayScoreProvenanceSummary;
     baseline: ReplayRankingMetrics;
     variantMetrics: ReplayRankingMetrics;
     delta: ReplayRankingMetrics;
     averageOverlapAtK: number;
     averageEngagedRankLift: number;
     averageClickedRankLift: number;
+    eligibleRankLiftRequestDenominator: number;
+    engagedRankLiftRequestDenominator: number;
+    clickedRankLiftRequestDenominator: number;
     byUserState: Record<string, ReplayBucketSummary>;
     byPipeline: Record<string, ReplayBucketSummary>;
     byCandidateSetKind: Record<string, ReplayCandidateSetKindSummary>;

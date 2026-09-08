@@ -12,9 +12,9 @@ use telegram_ranking_primitives::{
 };
 
 use super::helpers::{
-    build_stage, candidate_keyword_set, clamp01, cross_page_pressure, keyword_overlap_ratio,
-    merge_breakdown, recent_action_token_overlap, request_source_key, request_topic_key,
-    served_context_count,
+    build_stage, candidate_keyword_set, clamp01, cross_page_pressure, finite_score_product,
+    keyword_overlap_ratio, merge_breakdown, recent_action_token_overlap, request_source_key,
+    request_topic_key, served_context_count,
 };
 
 pub(super) fn fatigue_scorer(
@@ -64,7 +64,7 @@ pub(super) fn apply_fatigue(
             + cross_page_pressure * 0.1,
     );
     let multiplier = (1.0 - fatigue_strength * 0.34).clamp(0.6, 1.0);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, FATIGUE_STRENGTH_FIELD, fatigue_strength);
@@ -179,7 +179,7 @@ pub(super) fn apply_session_suppression(
             + trend_topic_pressure,
     );
     let multiplier = (1.0 - suppression * 0.42).clamp(0.58, 1.0);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "sessionSuppressionStrength", suppression);

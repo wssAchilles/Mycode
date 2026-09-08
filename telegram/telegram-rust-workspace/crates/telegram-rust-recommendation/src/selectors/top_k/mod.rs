@@ -121,13 +121,7 @@ pub fn select_candidates_with_report(
     let deferred_reason_counts =
         selection.blocking_reason_counts(window, &constraints, soft_caps.relaxed());
     let relaxed_deferred_reason_counts = deferred_reason_counts.clone();
-    let output = build_selector_output(
-        &sorted,
-        window,
-        window_size,
-        selection.selection_order,
-        target_size,
-    );
+    let output = build_selector_output(&sorted, window, selection.selection_order, target_size);
     let selected_count = output.len();
 
     let output = SelectorSelectionOutput {

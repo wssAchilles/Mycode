@@ -5,6 +5,11 @@ use anyhow::Result;
 use chrono::Duration;
 use moka::sync::Cache;
 use redis::AsyncCommands;
+use telegram_selector_primitives::SELECTOR_POLICY_VERSION;
+use telegram_serving_primitives::{
+    CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE,
+    SERVED_STATE_VERSION, SERVING_VERSION,
+};
 
 use crate::contracts::RecommendationResultPayload;
 
@@ -122,11 +127,14 @@ impl ServeCache {
 
         let key = self.redis_key(fingerprint);
         if let Some(result) = self.memory.get(&key) {
-            self.stats.local_hit_count.fetch_add(1, Ordering::Relaxed);
-            return ServeCacheGetResult {
-                result: Some(result),
-                tier: ServeCacheHitTier::Local,
-            };
+            if cache_result_matches_contract(&result) {
+                self.stats.local_hit_count.fetch_add(1, Ordering::Relaxed);
+                return ServeCacheGetResult {
+                    result: Some(result),
+                    tier: ServeCacheHitTier::Local,
+                };
+            }
+            self.memory.invalidate(&key);
         }
         self.stats.local_miss_count.fetch_add(1, Ordering::Relaxed);
 
@@ -135,6 +143,7 @@ impl ServeCache {
             && let Ok(value) = connection.get::<_, Option<String>>(&key).await
             && let Some(value) = value
             && let Ok(result) = serde_json::from_str::<RecommendationResultPayload>(&value)
+            && cache_result_matches_contract(&result)
         {
             self.memory.insert(key, result.clone());
             self.stats.shared_hit_count.fetch_add(1, Ordering::Relaxed);
@@ -168,21 +177,29 @@ impl ServeCache {
             store_result.drifted = existing_result.stable_order_key != result.stable_order_key;
         }
 
+        let mut redis_error = None;
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let _: () = connection
+            let result: redis::RedisResult<()> = connection
                 .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
-                .await?;
+                .await;
+            if let Err(error) = result {
+                redis_error = Some(error);
+            }
         }
 
         self.memory.insert(key, result.clone());
+
+        if let Some(error) = redis_error {
+            return Err(error.into());
+        }
 
         Ok(store_result)
     }
 
     fn redis_key(&self, fingerprint: &str) -> String {
-        format!("{}:{fingerprint}", self.prefix)
+        format!("{}:{}:{fingerprint}", self.prefix, SELECTOR_POLICY_VERSION)
     }
 
     pub fn snapshot(&self) -> ServeCacheSnapshot {
@@ -202,9 +219,25 @@ impl ServeCache {
     }
 }
 
+fn cache_result_matches_contract(result: &RecommendationResultPayload) -> bool {
+    let serving = &result.summary.serving;
+    result.serving_version == SERVING_VERSION
+        && serving.serving_version == SERVING_VERSION
+        && result.served_state_version == SERVED_STATE_VERSION
+        && serving.served_state_version == SERVED_STATE_VERSION
+        && (serving.cursor_mode == CURSOR_MODE
+            || serving.cursor_mode == RANKED_CURSOR_ABSTENTION_MODE)
+        && serving.cache_key_mode == CACHE_KEY_MODE
+        && serving.cache_policy == CACHE_POLICY_MODE
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::ServeCache;
+    use super::{
+        CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE,
+        SELECTOR_POLICY_VERSION,
+    };
+    use super::{ServeCache, ServeCacheHitTier};
     use crate::contracts::{
         RecommendationGraphRetrievalPayload, RecommendationOnlineEvaluationPayload,
         RecommendationRankingSummaryPayload, RecommendationResultPayload,
@@ -220,7 +253,7 @@ pub(crate) mod tests {
             cursor: None,
             next_cursor: None,
             has_more: false,
-            served_state_version: "state-v1".to_string(),
+            served_state_version: "related_ids_v1".to_string(),
             stable_order_key: stable_order_key.to_string(),
             candidates: Vec::new(),
             summary: RecommendationSummaryPayload {
@@ -254,7 +287,7 @@ pub(crate) mod tests {
                     cursor: None,
                     next_cursor: None,
                     has_more: false,
-                    served_state_version: "state-v1".to_string(),
+                    served_state_version: "related_ids_v1".to_string(),
                     stable_order_key: stable_order_key.to_string(),
                     duplicate_suppressed_count: 0,
                     cross_page_duplicate_count: 0,
@@ -378,5 +411,80 @@ pub(crate) mod tests {
         assert_eq!(snapshot.shared_miss_count, 1);
         assert_eq!(snapshot.local_hit_count, 1);
         assert_eq!(snapshot.shared_hit_count, 0);
+    }
+
+    #[tokio::test]
+    async fn rejects_cached_results_with_stale_serving_contract() {
+        let mut stale_serving = test_result("stale-serving");
+        stale_serving.serving_version = "rust_serving_v0".to_string();
+        let mut stale_state = test_result("stale-state");
+        stale_state.served_state_version = "related_ids_v0".to_string();
+        let mut stale_summary_serving = test_result("stale-summary-serving");
+        stale_summary_serving.summary.serving.serving_version = "rust_serving_v0".to_string();
+        let mut stale_summary_state = test_result("stale-summary-state");
+        stale_summary_state.summary.serving.served_state_version = "related_ids_v0".to_string();
+        let mut stale_cursor = test_result("stale-cursor");
+        stale_cursor.summary.serving.cursor_mode = "created_at_desc_v0".to_string();
+        let mut stale_key = test_result("stale-key");
+        stale_key.summary.serving.cache_key_mode = "normalized_query_v1".to_string();
+        let mut stale_policy = test_result("stale-policy");
+        stale_policy.summary.serving.cache_policy = "bounded_short_ttl_v0".to_string();
+
+        for (index, result) in [
+            stale_serving,
+            stale_state,
+            stale_summary_serving,
+            stale_summary_state,
+            stale_cursor,
+            stale_key,
+            stale_policy,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let cache = test_cache(60, 16);
+            let key = format!("stale-{index}");
+            cache
+                .store(&key, &result)
+                .await
+                .expect("store stale result");
+            let lookup = cache.get(&key).await;
+            assert_eq!(lookup.tier, ServeCacheHitTier::Miss);
+            assert!(lookup.result.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn accepts_current_contract_and_ranked_abstention_mode() {
+        let cache = test_cache(60, 16);
+        let mut result = test_result("current");
+        result.summary.serving.cursor_mode = RANKED_CURSOR_ABSTENTION_MODE.to_string();
+        result.summary.serving.cache_key_mode = CACHE_KEY_MODE.to_string();
+        result.summary.serving.cache_policy = CACHE_POLICY_MODE.to_string();
+        assert_eq!(
+            result.summary.serving.cursor_mode,
+            RANKED_CURSOR_ABSTENTION_MODE
+        );
+        assert_eq!(CURSOR_MODE, "created_at_desc_v1");
+
+        cache.store("current", &result).await.expect("store result");
+        let lookup = cache.get("current").await;
+        assert_eq!(lookup.tier, ServeCacheHitTier::Local);
+        assert!(lookup.result.is_some());
+    }
+
+    #[test]
+    fn cache_key_is_namespaced_by_selector_policy_version() {
+        let cache = test_cache(60, 16);
+
+        assert_eq!(
+            cache.redis_key("fingerprint"),
+            format!("recommendation:serve:test:{SELECTOR_POLICY_VERSION}:fingerprint")
+        );
+        assert!(
+            !cache
+                .redis_key("fingerprint")
+                .contains("rust_top_k_selector_policy_v2")
+        );
     }
 }

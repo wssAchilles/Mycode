@@ -15,7 +15,11 @@
  */
 
 import mongoose, { Document, Schema, Model } from 'mongoose';
-import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../services/recommendation/contracts/embeddingContract';
+import {
+    isVectorCompatibleWithContract,
+    type EmbeddingContract,
+} from '../services/recommendation/contracts/embeddingContract';
+import { isCompleteEmbeddingContract } from '../services/recommendation/contracts/embeddingContractEvidence';
 
 // ========== 稀疏向量元素类型 ==========
 export interface SparseVectorElement {
@@ -59,10 +63,13 @@ export interface IUserFeatureVector extends Document {
     // Two-Tower 用户嵌入 (64 维)
     // 来源: Two-Tower 模型用户塔输出
     twoTowerEmbedding?: number[];
+    twoTowerEmbeddingContract?: EmbeddingContract;
+    twoTowerEmbeddingQuarantineReason?: string;
 
     // Phoenix 用户嵌入 (256 维)
     // 来源: Phoenix 模型用户表示层
     phoenixEmbedding?: number[];
+    phoenixEmbeddingContract?: EmbeddingContract;
 
     // TwHIN 嵌入 (可选, 图神经网络输出)
     twhinEmbedding?: number[];
@@ -112,6 +119,20 @@ const SparseVectorElementSchema = new Schema<SparseVectorElement>(
     { _id: false }
 );
 
+const EmbeddingContractSchema = new Schema<EmbeddingContract>(
+    {
+        embeddingSpace: { type: String, required: true },
+        dimensions: Number,
+        retrievalEmbeddingDim: { type: Number, required: true },
+        rankingEmbeddingDim: { type: Number, required: true },
+        modelVersion: { type: String, required: true },
+        artifactVersion: { type: String, required: true },
+        producer: { type: String, required: true },
+        semantic: { type: Boolean, required: true },
+    },
+    { _id: false }
+);
+
 const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
     {
         userId: {
@@ -138,10 +159,13 @@ const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
             type: [Number],
             default: undefined,
         },
+        twoTowerEmbeddingContract: EmbeddingContractSchema,
+        twoTowerEmbeddingQuarantineReason: String,
         phoenixEmbedding: {
             type: [Number],
             default: undefined,
         },
+        phoenixEmbeddingContract: EmbeddingContractSchema,
         twhinEmbedding: {
             type: [Number],
             default: undefined,
@@ -217,7 +241,10 @@ interface UserFeatureVectorStatics {
      * 批量获取用户嵌入
      * 复刻 SimClusters 的 InterestedInStore.multiGet()
      */
-    getUserEmbeddingsBatch(userIds: string[]): Promise<Map<string, IUserFeatureVector>>;
+    getUserEmbeddingsBatch(
+        userIds: string[],
+        signal?: AbortSignal,
+    ): Promise<Map<string, IUserFeatureVector>>;
 
     /**
      * 更新或创建用户嵌入
@@ -226,7 +253,8 @@ interface UserFeatureVectorStatics {
     upsertEmbedding(
         userId: string,
         embeddings: Partial<IUserFeatureVector>,
-        version: number
+        version: number,
+        signal?: AbortSignal,
     ): Promise<IUserFeatureVector>;
 
     /**
@@ -254,12 +282,14 @@ UserFeatureVectorSchema.statics.getUserEmbedding = async function (
 
 // 批量获取
 UserFeatureVectorSchema.statics.getUserEmbeddingsBatch = async function (
-    userIds: string[]
+    userIds: string[],
+    signal?: AbortSignal,
 ): Promise<Map<string, IUserFeatureVector>> {
     const docs = await this.find({
         userId: { $in: userIds },
         expiresAt: { $gt: new Date() }
-    });
+    }).setOptions({ signal });
+    signal?.throwIfAborted();
 
     const result = new Map<string, IUserFeatureVector>();
     for (const doc of docs) {
@@ -268,28 +298,80 @@ UserFeatureVectorSchema.statics.getUserEmbeddingsBatch = async function (
     return result;
 };
 
+const hasOwn = (value: object, field: PropertyKey): boolean => (
+    Object.prototype.hasOwnProperty.call(value, field)
+);
+
+const WRITABLE_EMBEDDING_FIELDS = [
+    'interestedInClusters',
+    'knownForCluster',
+    'knownForScore',
+    'producerEmbedding',
+    'twoTowerEmbedding',
+    'twoTowerEmbeddingContract',
+    'phoenixEmbedding',
+    'phoenixEmbeddingContract',
+    'modelVersion',
+    'artifactVersion',
+    'modelProfile',
+    'embeddingDim',
+    'qualityScore',
+] as const;
+
+function assertDenseEmbeddingWrite(
+    embeddings: Partial<IUserFeatureVector>,
+    vectorField: 'twoTowerEmbedding' | 'phoenixEmbedding',
+    contractField: 'twoTowerEmbeddingContract' | 'phoenixEmbeddingContract',
+): void {
+    const hasVector = hasOwn(embeddings, vectorField);
+    const hasContract = hasOwn(embeddings, contractField);
+    if (!hasVector && !hasContract) return;
+
+    const vector = embeddings[vectorField];
+    const contract = embeddings[contractField];
+    if (!hasVector
+        || !hasContract
+        || !isCompleteEmbeddingContract(contract)
+        || !isVectorCompatibleWithContract(vector, contract)) {
+        throw new Error(`${vectorField}_contract_invalid`);
+    }
+}
+
 // 更新或创建
 UserFeatureVectorSchema.statics.upsertEmbedding = async function (
     userId: string,
     embeddings: Partial<IUserFeatureVector>,
-    version: number
+    version: number,
+    signal?: AbortSignal,
 ): Promise<IUserFeatureVector> {
+    signal?.throwIfAborted();
+    if (hasOwn(embeddings, 'embeddingContract')) {
+        throw new Error('legacy_embedding_contract_not_writable');
+    }
+    for (const field of ['twoTowerEmbeddingQuarantineReason', 'twhinEmbedding'] as const) {
+        if (hasOwn(embeddings, field)) {
+            throw new Error(`unsupported_user_embedding_write:${field}`);
+        }
+    }
+    assertDenseEmbeddingWrite(embeddings, 'twoTowerEmbedding', 'twoTowerEmbeddingContract');
+    assertDenseEmbeddingWrite(embeddings, 'phoenixEmbedding', 'phoenixEmbeddingContract');
+
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const $set: Record<string, unknown> = {};
+    for (const field of WRITABLE_EMBEDDING_FIELDS) {
+        if (hasOwn(embeddings, field)) {
+            $set[field] = embeddings[field];
+        }
+    }
+    Object.assign($set, { version, computedAt: now, expiresAt });
 
     const doc = await this.findOneAndUpdate(
         { userId },
-        {
-            $set: {
-                ...embeddings,
-                embeddingContract: embeddings.embeddingContract || DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
-                version,
-                computedAt: now,
-                expiresAt,
-            }
-        },
-        { upsert: true, new: true }
+        { $set },
+        { upsert: true, new: true, runValidators: true, signal }
     );
+    signal?.throwIfAborted();
 
     return doc;
 };

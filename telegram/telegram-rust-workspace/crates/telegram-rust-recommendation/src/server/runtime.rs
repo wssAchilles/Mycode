@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(runtime.ranking_score_role_version, "ranking_score_role_v1");
         assert_eq!(
             runtime.selector_policy_version,
-            "rust_top_k_selector_policy_v1"
+            "rust_top_k_selector_policy_v3"
         );
         assert_eq!(
             runtime.selector_audit_version,

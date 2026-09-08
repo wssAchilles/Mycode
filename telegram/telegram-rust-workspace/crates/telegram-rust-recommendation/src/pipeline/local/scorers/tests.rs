@@ -24,12 +24,15 @@ use telegram_source_primitives::{
 
 use crate::contracts::query::RankingPolicyPayload;
 use crate::contracts::{
-    CandidateNewsMetadataPayload, EmbeddingContextPayload, PhoenixScoresPayload,
-    RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
+    ActionScoresPayload, CandidateNewsMetadataPayload, EmbeddingContextPayload,
+    PhoenixScoresPayload, RankingSignalsPayload, RecommendationCandidatePayload,
+    RecommendationQueryPayload, UserStateContextPayload,
 };
 
+use super::helpers::compute_weighted_score;
 use super::ownership::candidate_field_write_names_for_stage;
 use super::runner::{local_scoring_execution_passes, run_local_scorers_without_fusion};
+use super::weighted::{apply_weighted_score, weighted_score_plan};
 use super::{
     local_ranking_adjustment_group_specs, local_ranking_ladder_specs, run_local_scorers,
     validate_local_ranking_adjustment_registry, validate_local_ranking_ladder,
@@ -179,6 +182,7 @@ fn local_ranking_ladder_specs_match_candidate_field_write_registry() {
 fn query() -> RecommendationQueryPayload {
     RecommendationQueryPayload {
         request_id: "req-local-scorers".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 20,
         cursor: None,
@@ -291,6 +295,184 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+    }
+}
+
+const WEIGHTED_SCORE_GOLDEN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../telegram-recommendation-fixtures/fixtures/weighted_score_golden.json"
+));
+
+fn fixture_number(value: &serde_json::Value, key: &str) -> f64 {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or_default()
+}
+
+fn optional_fixture_number(value: &serde_json::Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(serde_json::Value::as_f64)
+}
+
+fn weighted_fixture_candidate(case: &serde_json::Value) -> RecommendationCandidatePayload {
+    let input = &case["input"];
+    let heuristic = &input["heuristicScores"];
+    let view_count = 100.0;
+    let comment_count = fixture_number(heuristic, "replyProxy") * 8.0;
+    let repost_count = fixture_number(heuristic, "repostProxy") * 6.0;
+    let like_count = fixture_number(heuristic, "engagementRate") * 0.12 * view_count
+        - comment_count * 2.0
+        - repost_count * 3.0;
+    let mut candidate = candidate(
+        case["name"].as_str().expect("weighted fixture case name"),
+        "weighted-fixture-author",
+    );
+
+    candidate.content = "x".repeat((fixture_number(heuristic, "contentProxy") * 280.0) as usize);
+    candidate.like_count = Some(like_count);
+    candidate.comment_count = Some(comment_count);
+    candidate.repost_count = Some(repost_count);
+    candidate.view_count = Some(view_count);
+    candidate.has_image = Some(fixture_number(heuristic, "clickProxy") == 0.18);
+    candidate.has_video = Some(false);
+    candidate.video_duration_sec = optional_fixture_number(input, "videoDurationSec");
+    candidate.author_affinity_score = Some(fixture_number(heuristic, "followProxy"));
+    candidate.phoenix_scores = input
+        .get("phoenixScores")
+        .map(|scores| PhoenixScoresPayload {
+            like_score: optional_fixture_number(scores, "like"),
+            reply_score: optional_fixture_number(scores, "reply"),
+            repost_score: optional_fixture_number(scores, "repost"),
+            quote_score: optional_fixture_number(scores, "quote"),
+            click_score: optional_fixture_number(scores, "click"),
+            quoted_click_score: optional_fixture_number(scores, "quotedClick"),
+            profile_click_score: optional_fixture_number(scores, "profileClick"),
+            dwell_score: optional_fixture_number(scores, "dwell"),
+            dwell_time: optional_fixture_number(scores, "dwellTime"),
+            share_score: optional_fixture_number(scores, "share"),
+            share_via_dm_score: optional_fixture_number(scores, "shareViaDm"),
+            share_via_copy_link_score: optional_fixture_number(scores, "shareViaCopyLink"),
+            photo_expand_score: optional_fixture_number(scores, "photoExpand"),
+            follow_author_score: optional_fixture_number(scores, "followAuthor"),
+            video_quality_view_score: optional_fixture_number(scores, "videoQualityView"),
+            not_interested_score: optional_fixture_number(scores, "notInterested"),
+            dismiss_score: optional_fixture_number(scores, "dismiss"),
+            block_author_score: optional_fixture_number(scores, "blockAuthor"),
+            block_score: optional_fixture_number(scores, "block"),
+            mute_author_score: optional_fixture_number(scores, "muteAuthor"),
+            report_score: optional_fixture_number(scores, "report"),
+        });
+    candidate.action_scores = input
+        .get("actionScores")
+        .map(|scores| serde_json::from_value::<ActionScoresPayload>(scores.clone()))
+        .transpose()
+        .expect("weighted fixture action scores");
+    candidate.ranking_signals = Some(RankingSignalsPayload {
+        relevance: fixture_number(input, "signalPrior") / 0.32,
+        ..RankingSignalsPayload::default()
+    });
+    candidate.score_breakdown = Some(HashMap::from([
+        (
+            "retrievalAuthorPrior".to_string(),
+            fixture_number(heuristic, "retrievalSupport") / 0.45,
+        ),
+        (
+            "retrievalEvidenceConfidence".to_string(),
+            fixture_number(input, "evidencePrior") / 0.28,
+        ),
+    ]));
+    candidate.weighted_score = None;
+    candidate.pipeline_score = None;
+    candidate
+}
+
+fn assert_fixture_close(case_name: &str, field: &str, actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= 1e-8,
+        "{case_name}.{field}: expected {expected}, got {actual}"
+    );
+}
+
+#[test]
+fn weighted_golden_covers_candidate_input_and_apply_path() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(WEIGHTED_SCORE_GOLDEN).expect("parse weighted fixture");
+
+    for case in fixture["cases"].as_array().expect("weighted fixture cases") {
+        let case_name = case["name"].as_str().expect("weighted fixture case name");
+        let expected = &case["expected"];
+        let mut candidate = weighted_fixture_candidate(case);
+        let summary = compute_weighted_score(&candidate);
+
+        assert_fixture_close(
+            case_name,
+            "baseRawScore",
+            summary.base_raw_score,
+            fixture_number(expected, "baseRawScore"),
+        );
+        assert_fixture_close(
+            case_name,
+            "positiveScore",
+            summary.positive_score,
+            fixture_number(expected, "positiveScore"),
+        );
+        assert_fixture_close(
+            case_name,
+            "negativeScore",
+            summary.negative_score,
+            fixture_number(expected, "negativeScore"),
+        );
+        assert_fixture_close(
+            case_name,
+            "evidenceScore",
+            summary.evidence_score,
+            fixture_number(expected, "evidenceScore"),
+        );
+        assert_fixture_close(
+            case_name,
+            "evidencePrior",
+            summary.evidence_prior,
+            fixture_number(&case["input"], "evidencePrior"),
+        );
+        assert_fixture_close(
+            case_name,
+            "signalPrior",
+            summary.signal_prior,
+            fixture_number(&case["input"], "signalPrior"),
+        );
+        assert_fixture_close(
+            case_name,
+            "rawScore",
+            summary.raw_score,
+            fixture_number(expected, "rawScore"),
+        );
+
+        let expected_mode = expected["inputMode"].as_str().expect("weighted input mode");
+        assert_eq!(
+            summary.action_scores_used,
+            expected_mode == "action",
+            "{case_name}"
+        );
+        assert_eq!(
+            summary.heuristic_fallback_used,
+            expected_mode == "heuristic",
+            "{case_name}"
+        );
+
+        apply_weighted_score(&mut candidate, &weighted_score_plan());
+        let expected_normalized = fixture_number(expected, "normalizedWeightedScore");
+        assert_fixture_close(
+            case_name,
+            "weightedScore",
+            candidate.weighted_score.expect("weighted score"),
+            expected_normalized,
+        );
+        assert_fixture_close(
+            case_name,
+            "pipelineScore",
+            candidate.pipeline_score.expect("pipeline score"),
+            expected_normalized,
+        );
     }
 }
 
@@ -973,7 +1155,7 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .as_ref()
             .and_then(|detail| detail.get("normalizationPositiveWeightSum"))
             .and_then(|value| value.as_f64()),
-        Some(30.15)
+        Some(30.55)
     );
     assert_eq!(
         weighted_stage
@@ -1348,6 +1530,24 @@ fn lightweight_phoenix_uses_trend_news_and_source_quality_priors() {
 }
 
 #[test]
+fn popularity_does_not_reward_negative_engagement_totals() {
+    let mut candidate = candidate("post-negative-count", "author-negative-count");
+    candidate.like_count = Some(-2.0);
+    candidate.comment_count = Some(0.0);
+    candidate.repost_count = Some(0.0);
+    candidate.view_count = Some(100.0);
+
+    let result = run_local_scorers(&query(), vec![candidate]);
+    assert_eq!(
+        result.candidates[0]
+            .ranking_signals
+            .expect("ranking signals")
+            .popularity,
+        0.0
+    );
+}
+
+#[test]
 fn stale_single_click_does_not_overboost_author_affinity() {
     let mut query = query();
     query.user_action_sequence = Some(vec![HashMap::from([
@@ -1402,6 +1602,69 @@ fn exploration_scorer_marks_quality_novel_candidates() {
             .unwrap_or(1.0)
             > 1.0
     );
+}
+
+#[test]
+fn bandit_exploration_keeps_extreme_candidate_metrics_finite() {
+    let mut candidate = candidate("post-extreme-bandit", "author-extreme");
+    candidate.like_count = Some(f64::MAX);
+    candidate.comment_count = Some(f64::MAX);
+    candidate.repost_count = Some(f64::MAX);
+    candidate.view_count = Some(f64::MAX);
+    candidate.action_scores = Some(ActionScoresPayload {
+        like: f64::MAX,
+        reply: f64::MAX,
+        repost: f64::MAX,
+        dwell: f64::MAX,
+        ..ActionScoresPayload::default()
+    });
+
+    let result = run_local_scorers(&query(), vec![candidate]);
+    let scored = &result.candidates[0];
+    assert!(scored.weighted_score.is_some_and(f64::is_finite));
+    assert!(scored.pipeline_score.is_some_and(f64::is_finite));
+    let breakdown = scored.score_breakdown.as_ref().expect("score breakdown");
+    for key in [
+        "banditThompsonValue",
+        "banditExplorationBonus",
+        "banditPosteriorMean",
+        "banditUncertainty",
+        "banditMultiplier",
+    ] {
+        assert!(
+            breakdown.get(key).is_some_and(|value| value.is_finite()),
+            "{key} should stay finite"
+        );
+    }
+}
+
+#[test]
+fn bandit_uncertainty_weight_controls_positive_bonus() {
+    let score_with_weight = |weight| {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            bandit_uncertainty_weight: Some(weight),
+            ..RankingPolicyPayload::default()
+        });
+        let result = run_local_scorers(
+            &query,
+            vec![candidate("post-bandit-weight", "author-bandit-weight")],
+        );
+        let breakdown = result.candidates[0]
+            .score_breakdown
+            .as_ref()
+            .expect("score breakdown");
+        (
+            breakdown["banditExplorationBonus"],
+            breakdown["banditMultiplier"],
+        )
+    };
+
+    let (zero_bonus, zero_multiplier) = score_with_weight(0.0);
+    let (weighted_bonus, weighted_multiplier) = score_with_weight(0.7);
+    assert!(zero_bonus > 0.0, "fixture needs a positive bonus");
+    assert_eq!(zero_bonus, weighted_bonus);
+    assert!(weighted_multiplier > zero_multiplier);
 }
 
 #[test]

@@ -21,6 +21,7 @@ import RealGraphEdge, {
     REALGRAPH_PREDICTION_MODE,
 } from '../../models/RealGraphEdge';
 import { redis } from '../../config/redis';
+import { FeatureCacheService } from './FeatureCacheService';
 
 // ========== 配置常量 ==========
 const CONFIG = {
@@ -110,10 +111,12 @@ export class RealGraphService {
             value
         );
 
-        await this.writePredictionMetadata(edge);
-
-        // 清除缓存
-        await this.invalidateCache(sourceUserId, targetUserId);
+        try {
+            await this.writePredictionMetadata(edge);
+        } finally {
+            // 清除缓存，即使预测元数据写入失败也不能留下旧分数
+            await this.invalidateEdgeScoreCaches(sourceUserId, targetUserId);
+        }
 
         return edge;
     }
@@ -180,25 +183,17 @@ export class RealGraphService {
             };
         });
 
-        await RealGraphEdge.bulkWrite(operations);
-        await this.recomputePredictionMetadataForPairs(
-            interactions.map((i) => ({
-                sourceUserId: i.sourceUserId,
-                targetUserId: i.targetUserId,
-            })),
-        );
-
-        // 批量清除缓存
-        const cacheKeys = interactions.map(i =>
-            `${CONFIG.cache.keyPrefix}${i.sourceUserId}:${i.targetUserId}`
-        );
-
         try {
-            if (cacheKeys.length > 0) {
-                await redis.del(...cacheKeys);
-            }
-        } catch {
-            // 缓存失败不影响主流程
+            await RealGraphEdge.bulkWrite(operations);
+            await this.recomputePredictionMetadataForPairs(
+                interactions.map((i) => ({
+                    sourceUserId: i.sourceUserId,
+                    targetUserId: i.targetUserId,
+                })),
+            );
+        } finally {
+            // 批量清除缓存，即使元数据重算失败也不能留下旧分数
+            await this.invalidateCachesForPairs(interactions);
         }
     }
 
@@ -319,29 +314,55 @@ export class RealGraphService {
             };
         let matched = 0;
         let updated = 0;
-        let cursor: Date | undefined;
+        let cursor: { updatedAt: Date; id: IRealGraphEdge['_id'] } | undefined;
 
         while (matched < limit) {
-            const updatedAtQuery = {
-                ...(options?.since ? { $gte: options.since } : {}),
-                ...(cursor ? { $lt: cursor } : {}),
-            };
-            const pageQuery = {
-                ...query,
-                ...(Object.keys(updatedAtQuery).length > 0 ? { updatedAt: updatedAtQuery } : {}),
-            };
+            const pageQuery: Record<string, unknown> = { ...query };
+            if (cursor) {
+                const cursorQuery = {
+                    $or: [
+                        {
+                            updatedAt: {
+                                ...(options?.since ? { $gte: options.since } : {}),
+                                $lt: cursor.updatedAt,
+                            },
+                        },
+                        {
+                            updatedAt: cursor.updatedAt,
+                            _id: { $lt: cursor.id },
+                        },
+                    ],
+                };
+                if (pageQuery.$or) {
+                    const metadataQuery = pageQuery.$or;
+                    delete pageQuery.$or;
+                    pageQuery.$and = [{ $or: metadataQuery }, cursorQuery];
+                } else {
+                    pageQuery.$or = cursorQuery.$or;
+                }
+            } else if (options?.since) {
+                pageQuery.updatedAt = { $gte: options.since };
+            }
             const edges = await RealGraphEdge.find(pageQuery)
                 .sort({ updatedAt: -1, _id: -1 })
                 .limit(Math.min(batchSize, limit - matched));
             if (edges.length === 0) break;
 
             matched += edges.length;
-            cursor = edges[edges.length - 1].updatedAt;
+            const lastEdge = edges[edges.length - 1];
+            cursor = {
+                updatedAt: lastEdge.updatedAt,
+                id: lastEdge._id,
+            };
 
             if (!dryRun) {
-                for (const edge of edges) {
-                    await this.writePredictionMetadata(edge);
-                    updated += 1;
+                try {
+                    for (const edge of edges) {
+                        await this.writePredictionMetadata(edge);
+                        updated += 1;
+                    }
+                } finally {
+                    await this.invalidateCachesForPairs(edges);
                 }
             }
         }
@@ -410,7 +431,7 @@ export class RealGraphService {
      * 2. 重置每日计数
      * 3. 更新预测分数
      */
-    async applyDailyDecay(): Promise<{
+    async applyDailyDecay(signal?: AbortSignal): Promise<{
         totalProcessed: number;
         batches: number;
         errors: number;
@@ -420,10 +441,15 @@ export class RealGraphService {
         let errors = 0;
 
         while (batches < CONFIG.decayJob.maxDailyBatches) {
+            signal?.throwIfAborted();
+            const affectedPairs: Array<{ sourceUserId: string; targetUserId: string }> = [];
             try {
                 const processed = await RealGraphEdge.applyDailyDecay(
-                    CONFIG.decayJob.batchSize
+                    CONFIG.decayJob.batchSize,
+                    signal,
+                    (pair) => affectedPairs.push(pair),
                 );
+                signal?.throwIfAborted();
 
                 if (processed === 0) {
                     break; // 没有更多需要处理的边
@@ -433,14 +459,16 @@ export class RealGraphService {
                 batches++;
 
                 console.log(`[RealGraph] Decay batch ${batches}: processed ${processed} edges`);
-
             } catch (error) {
+                signal?.throwIfAborted();
                 console.error('[RealGraph] Decay batch error:', error);
                 errors++;
 
                 if (errors > 3) {
                     break; // 连续错误时停止
                 }
+            } finally {
+                await this.invalidateCachesForPairs(affectedPairs);
             }
         }
 
@@ -454,19 +482,42 @@ export class RealGraphService {
      */
     async cleanupStaleEdges(
         minScore: number = DECAY_CONFIG.minRetainScore,
-        daysInactive: number = 90
+        daysInactive: number = 90,
+        signal?: AbortSignal,
     ): Promise<number> {
+        signal?.throwIfAborted();
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - daysInactive);
 
-        const result = await RealGraphEdge.deleteMany({
+        const staleEdges = await RealGraphEdge.find({
             decayedSum: { $lt: minScore },
             lastInteractionAt: { $lt: cutoffDate },
-        });
+        })
+            .select('_id sourceUserId targetUserId')
+            .lean()
+            .setOptions({ signal });
+        signal?.throwIfAborted();
+
+        if (staleEdges.length === 0) {
+            console.log('[RealGraph] Cleaned up 0 stale edges');
+            return 0;
+        }
+
+        let result: { deletedCount?: number };
+        try {
+            result = await RealGraphEdge.deleteMany(
+                { _id: { $in: staleEdges.map((edge) => edge._id) } },
+                { signal },
+            );
+        } finally {
+            // 删除成功或取消竞态后都清理已扫描边的缓存，避免保留幽灵分数
+            await this.invalidateCachesForPairs(staleEdges);
+        }
+        signal?.throwIfAborted();
 
         console.log(`[RealGraph] Cleaned up ${result.deletedCount} stale edges`);
 
-        return result.deletedCount;
+        return result.deletedCount ?? 0;
     }
 
     /**
@@ -517,13 +568,32 @@ export class RealGraphService {
     /**
      * 清除缓存
      */
-    private async invalidateCache(
+    async invalidateEdgeScoreCaches(
         sourceUserId: string,
-        targetUserId: string
+        targetUserId: string,
     ): Promise<void> {
-        const cacheKey = `${CONFIG.cache.keyPrefix}${sourceUserId}:${targetUserId}`;
+        await this.invalidateCachesForPairs([{ sourceUserId, targetUserId }]);
+    }
+
+    private async invalidateCachesForPairs(
+        pairs: Array<{ sourceUserId: string; targetUserId: string }>,
+    ): Promise<void> {
+        const cacheKeys = Array.from(new Set(
+            pairs.map(({ sourceUserId, targetUserId }) =>
+                `${CONFIG.cache.keyPrefix}${sourceUserId}:${targetUserId}`
+            )
+        ));
+
         try {
-            await redis.del(cacheKey);
+            if (cacheKeys.length > 0) {
+                await redis.del(...cacheKeys);
+            }
+        } catch {
+            // 忽略缓存错误
+        }
+
+        try {
+            await FeatureCacheService.getInstance().invalidateEdgeScores(pairs);
         } catch {
             // 忽略缓存错误
         }

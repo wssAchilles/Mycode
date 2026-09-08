@@ -4,6 +4,7 @@
  */
 
 import mongoose from 'mongoose';
+import { v4 as uuidv4 } from 'uuid';
 import Post, { IPost, MediaType } from '../models/Post';
 import Like from '../models/Like';
 import Repost, { RepostType } from '../models/Repost';
@@ -25,6 +26,11 @@ import { UserInteractionHydrator } from './recommendation/hydrators/UserInteract
 import { AuthorDiversityScorer } from './recommendation/scorers';
 import type { RecommendationTracePayload } from './recommendation/rust/contracts';
 import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
+import {
+    buildRecommendationDecisionLogV1,
+    isRecommendationDecisionLogV1Enabled,
+    persistRecommendationDecisionLogV1,
+} from './recommendation/decisionLog/write';
 import { attachRecommendationExplain } from './recommendation/explain/candidateExplain';
 import {
     buildSpaceFeedDebugInfo,
@@ -132,6 +138,7 @@ class SpaceService {
         includeSelf: boolean = false,
         options?: {
             requestId?: string;
+            clientRequestId?: string;
             seenIds?: string[];
             servedIds?: string[];
             isBottomRequest?: boolean;
@@ -705,6 +712,7 @@ class SpaceService {
         includeSelf: boolean = false,
         options?: {
             requestId?: string;
+            clientRequestId?: string;
             seenIds?: string[];
             servedIds?: string[];
             isBottomRequest?: boolean;
@@ -716,14 +724,17 @@ class SpaceService {
     ): Promise<SpaceFeedPageResult> {
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
         const inNetworkOnly = options?.inNetworkOnly ?? false;
-        const requestId =
-            options?.requestId ??
-            createFeedQuery(userId, limit, inNetworkOnly).requestId;
+        const requestId = options?.requestId ?? uuidv4();
+        const decisionId = uuidv4();
+        const clientRequestId = options?.clientRequestId;
+        const pageIdentity = { requestId, decisionId, clientRequestId };
 
         const createBaseQuery = () =>
             createFeedQuery(userId, limit, inNetworkOnly, {
                 cursor,
                 requestId,
+                decisionId,
+                clientRequestId,
                 seenIds: options?.seenIds ?? [],
                 servedIds: options?.servedIds ?? [],
                 isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
@@ -735,7 +746,9 @@ class SpaceService {
         const runLocalMixerFeed = async (): Promise<FeedCandidate[]> => {
             const mixer = getSpaceFeedMixer({ debug: true });
             return mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
-                requestId: options?.requestId,
+                requestId,
+                decisionId,
+                clientRequestId,
                 seenIds: options?.seenIds,
                 servedIds: options?.servedIds,
                 isBottomRequest: options?.isBottomRequest,
@@ -873,6 +886,13 @@ class SpaceService {
             runBaselineFeed,
             withFeedTrendKeywords: (query) => this.withFeedTrendKeywords(query),
         });
+        if (runtimeResult.safetyContextUnavailable) {
+            return buildSpaceFeedPageResult([], limit, {
+                ...runtimeResult.pageMeta,
+                ...pageIdentity,
+                debug: runtimeResult.debugInfo,
+            });
+        }
         let feed = runtimeResult.feed;
         const pageMeta = runtimeResult.pageMeta;
         const debugInfo = runtimeResult.debugInfo;
@@ -904,85 +924,99 @@ class SpaceService {
         }
 
         feed = attachRecommendationExplain(feed, finalFeedQuery);
+        const policyFeed = feed;
+        let finalServedCandidates = policyFeed;
+        let finalDebugInfo = debugInfo;
+        const terminalCursorAbstention = cursor !== undefined
+            && pageMeta?.continuationAbstained === true;
 
+        if (includeSelf && !terminalCursorAbstention) {
+            const selfLimit = Math.min(5, limit);
+            const [selfPosts, userMap] = await Promise.all([
+                this.getUserPosts(userId, selfLimit, cursor),
+                this.getUserMap([userId]),
+            ]);
+
+            if (selfPosts.length > 0) {
+                const user = userMap.get(userId);
+                const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
+                    const base = createFeedCandidate(post.toObject());
+                    return {
+                        ...base,
+                        authorUsername: user?.username || 'Unknown',
+                        authorAvatarUrl: user?.avatarUrl ?? undefined,
+                        isLikedByUser: false,
+                        isRepostedByUser: false,
+                    };
+                });
+                const merged = [...selfCandidates, ...policyFeed].sort((a, b) => {
+                    return b.createdAt.getTime() - a.createdAt.getTime();
+                });
+                const seen = new Set<string>();
+                finalServedCandidates = [];
+                for (const item of merged) {
+                    const id = item.postId.toString();
+                    if (!id || seen.has(id)) continue;
+                    seen.add(id);
+                    finalServedCandidates.push(item);
+                    if (finalServedCandidates.length > limit) break;
+                }
+                finalDebugInfo = buildSpaceFeedDebugInfo(finalServedCandidates.slice(0, limit), {
+                    requestId: debugInfo?.requestId,
+                    pipeline: debugInfo?.pipeline || 'node_baseline',
+                    runtimeMode: debugInfo.runtimeMode,
+                    configuredServingOwner: debugInfo.configuredServingOwner,
+                    servingOwner: debugInfo.servingOwner,
+                    evaluatedOwner: debugInfo.evaluatedOwner,
+                    fallbackOwner: debugInfo.fallbackOwner,
+                    fallbackReason: debugInfo.fallbackReason,
+                    fallbackMode: debugInfo?.fallbackMode,
+                    degradedReasons: debugInfo?.degradedReasons,
+                    shadowComparison: debugInfo?.shadowComparison,
+                });
+            }
+        }
+
+        const policyCandidateIds = new Set(policyFeed.map((candidate) => candidate.postId.toString()));
+        const decisionActionCandidateIds = Array.from(new Set(
+            finalServedCandidates
+                .map((candidate) => candidate.postId.toString())
+                .filter((candidateId) => policyCandidateIds.has(candidateId)),
+        ));
+        const page = buildSpaceFeedPageResult(finalServedCandidates, limit, {
+            ...pageMeta,
+            decisionActionCandidateIds,
+            debug: finalDebugInfo,
+            ...pageIdentity,
+        });
+        const decisionAt = new Date();
         void this.recordServedFeedTrace(
             finalFeedQuery,
-            feed,
-            debugInfo,
-            pageMeta?.rustServing,
+            policyFeed,
+            page.candidates,
+            finalDebugInfo,
+            page.rustServing,
             rustTraceForServedFeed,
+            decisionAt,
         );
-
-        if (!includeSelf) {
-            return buildSpaceFeedPageResult(feed, limit, {
-                ...pageMeta,
-                debug: debugInfo,
-            });
-        }
-
-        const selfLimit = Math.min(5, limit);
-        const [selfPosts, userMap] = await Promise.all([
-            this.getUserPosts(userId, selfLimit, cursor),
-            this.getUserMap([userId]),
-        ]);
-
-        if (selfPosts.length === 0) {
-            return buildSpaceFeedPageResult(feed, limit, {
-                ...pageMeta,
-                debug: debugInfo,
-            });
-        }
-
-        const user = userMap.get(userId);
-        const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
-            const base = createFeedCandidate(post.toObject());
-            return {
-                ...base,
-                authorUsername: user?.username || 'Unknown',
-                authorAvatarUrl: user?.avatarUrl ?? undefined,
-                isLikedByUser: false,
-                isRepostedByUser: false,
-            };
-        });
-
-        const merged = [...selfCandidates, ...feed].sort((a, b) => {
-            return b.createdAt.getTime() - a.createdAt.getTime();
-        });
-
-        const seen = new Set<string>();
-        const result: FeedCandidate[] = [];
-
-        for (const item of merged) {
-            const id = item.postId.toString();
-            if (!id || seen.has(id)) continue;
-            seen.add(id);
-            result.push(item);
-            if (result.length >= limit) break;
-        }
-
-        return buildSpaceFeedPageResult(result, limit, {
-            ...pageMeta,
-            debug: buildSpaceFeedDebugInfo(result, {
-                requestId: debugInfo?.requestId,
-                pipeline: debugInfo?.pipeline || 'node_baseline',
-                owner: debugInfo?.owner,
-                fallbackMode: debugInfo?.fallbackMode,
-                degradedReasons: debugInfo?.degradedReasons,
-                shadowComparison: debugInfo?.shadowComparison,
-            }),
-        });
+        return page;
     }
 
     private async recordServedFeedTrace(
         query: FeedQuery,
-        feed: FeedCandidate[],
-        debugInfo?: SpaceFeedPageResult['debug'],
-        serving?: SpaceFeedPageResult['rustServing'],
-        rustTrace?: RecommendationTracePayload,
+        policyFeed: FeedCandidate[],
+        finalServedCandidates: FeedCandidate[],
+        debugInfo: SpaceFeedPageResult['debug'] | undefined,
+        serving: SpaceFeedPageResult['rustServing'] | undefined,
+        rustTrace: RecommendationTracePayload | undefined,
+        decisionAt: Date,
     ): Promise<void> {
         try {
-            await recordRecommendationTrace(query, feed, {
+            await recordRecommendationTrace(query, policyFeed, {
                 pipeline: debugInfo?.pipeline,
+                runtimeMode: debugInfo?.runtimeMode,
+                servingOwner: debugInfo?.servingOwner,
+                fallbackReason: debugInfo?.fallbackReason,
                 owner: debugInfo?.owner,
                 fallbackMode: debugInfo?.fallbackMode,
                 degradedReasons: debugInfo?.degradedReasons,
@@ -992,6 +1026,24 @@ class SpaceService {
             });
         } catch (error) {
             log.warn({ err: (error as any)?.message || error }, '[SpaceService] recommendation trace skipped');
+        }
+
+        if (!isRecommendationDecisionLogV1Enabled()) return;
+        try {
+            const decisionLog = buildRecommendationDecisionLogV1({
+                query,
+                policyCandidates: policyFeed,
+                finalServedCandidates,
+                debugInfo,
+                rustTrace,
+                decisionAt,
+            });
+            await persistRecommendationDecisionLogV1(decisionLog);
+        } catch (error) {
+            log.warn({
+                code: (error as any)?.code,
+                err: (error as any)?.message || error,
+            }, '[SpaceService] recommendation decision log skipped');
         }
     }
 

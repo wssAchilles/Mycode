@@ -33,11 +33,15 @@ function clamp01(value: number): number {
     return value;
 }
 
-function freshnessDecay(createdAt?: Date | string): number {
+export function freshnessDecayAt(
+    createdAt: Date | string | number | undefined,
+    referenceAt: Date | string | number,
+): number {
     if (!createdAt) return 0;
     const timestamp = new Date(createdAt).getTime();
-    if (!Number.isFinite(timestamp)) return 0;
-    const ageHours = Math.max(0, (Date.now() - timestamp) / (1000 * 60 * 60));
+    const referenceTimestamp = new Date(referenceAt).getTime();
+    if (!Number.isFinite(timestamp) || !Number.isFinite(referenceTimestamp)) return 0;
+    const ageHours = Math.max(0, (referenceTimestamp - timestamp) / (1000 * 60 * 60));
     return clamp01(Math.exp(-ageHours / 72));
 }
 
@@ -56,7 +60,10 @@ function setFeature(target: SocialPhoenixFeatureMap, key: string, value: number)
     target[key] = value;
 }
 
-export function buildSocialPhoenixFeatureMap(input: SocialPhoenixFeatureInput): SocialPhoenixFeatureMap {
+export function buildSocialPhoenixFeatureMapAt(
+    input: SocialPhoenixFeatureInput,
+    referenceAt: Date | string | number,
+): SocialPhoenixFeatureMap {
     const features: SocialPhoenixFeatureMap = {};
     const resolvedUserState = input.userState || 'unknown';
     const resolvedRecallSource = input.recallSource || 'unknown';
@@ -74,7 +81,7 @@ export function buildSocialPhoenixFeatureMap(input: SocialPhoenixFeatureInput): 
     setFeature(features, 'retrieval_keyword', clamp01(input.retrievalKeywordScore || 0));
     setFeature(features, 'engagement_prior', resolvedEngagementPrior);
     setFeature(features, 'snapshot_quality', clamp01(input.retrievalSnapshotQuality || 0));
-    setFeature(features, 'freshness', freshnessDecay(input.createdAt));
+    setFeature(features, 'freshness', freshnessDecayAt(input.createdAt, referenceAt));
     setFeature(features, 'has_image', input.hasImage ? 1 : 0);
     setFeature(features, 'has_video', input.hasVideo ? 1 : 0);
     setFeature(features, 'has_media', input.hasImage || input.hasVideo ? 1 : 0);
@@ -84,6 +91,10 @@ export function buildSocialPhoenixFeatureMap(input: SocialPhoenixFeatureInput): 
     setFeature(features, `user_state:${resolvedUserState}`, 1);
 
     return features;
+}
+
+export function buildSocialPhoenixFeatureMap(input: SocialPhoenixFeatureInput): SocialPhoenixFeatureMap {
+    return buildSocialPhoenixFeatureMapAt(input, Date.now());
 }
 
 export function buildSocialPhoenixFeatureMapFromCandidate(

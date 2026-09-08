@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU64};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,27 @@ pub struct SparseEmbeddingEntryPayload {
     pub score: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingContractPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_space: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<NonZeroU64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieval_embedding_dim: Option<NonZeroU64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking_embedding_dim: Option<NonZeroU64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub producer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingContextPayload {
@@ -72,6 +93,8 @@ pub struct EmbeddingContextPayload {
     pub usable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_contract: Option<EmbeddingContractPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +230,7 @@ pub struct RankingPolicyPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryPayload {
     pub request_id: String,
+    pub decision_id: String,
     pub user_id: String,
     pub limit: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -316,6 +340,7 @@ mod tests {
     fn query(seen_ids: Vec<String>, feature_seen_ids: Vec<String>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-query-contract".to_string(),
+            decision_id: "d7778f92-ab47-47f5-a262-f470c3a98156".to_string(),
             user_id: "viewer-1".to_string(),
             limit: 20,
             cursor: None,
@@ -362,6 +387,19 @@ mod tests {
             query(Vec::new(), vec!["feature-seen".to_string()]).effective_seen_ids(),
             vec!["feature-seen".to_string()]
         );
+    }
+
+    #[test]
+    fn serde_requires_and_preserves_decision_id() {
+        let value = serde_json::to_value(query(Vec::new(), Vec::new())).expect("serialize query");
+        assert_eq!(
+            value.get("decisionId").and_then(serde_json::Value::as_str),
+            Some("d7778f92-ab47-47f5-a262-f470c3a98156")
+        );
+
+        let mut missing = value;
+        missing.as_object_mut().unwrap().remove("decisionId");
+        assert!(serde_json::from_value::<RecommendationQueryPayload>(missing).is_err());
     }
 
     #[test]

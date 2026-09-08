@@ -319,8 +319,16 @@ impl RecommendationCandidatePayload {
 
     pub fn primary_score(&self) -> f64 {
         self.score
-            .or(self.pipeline_score)
-            .or(self.weighted_score)
+            .into_iter()
+            .chain(self.pipeline_score)
+            .chain(self.weighted_score)
+            .find(|value| value.is_finite())
+            .unwrap_or_default()
+    }
+
+    pub fn final_score(&self) -> f64 {
+        self.score
+            .filter(|value| value.is_finite())
             .unwrap_or_default()
     }
 }
@@ -519,6 +527,16 @@ mod tests {
         );
         assert_eq!(payload.canonical_merge_key(), "news:external:external-1");
         assert_eq!(payload.primary_score(), 0.6);
+
+        payload.score = Some(f64::NAN);
+        assert_eq!(payload.primary_score(), 0.6);
+        payload.pipeline_score = Some(f64::INFINITY);
+        assert_eq!(payload.primary_score(), 0.4);
+        payload.weighted_score = Some(f64::NEG_INFINITY);
+        assert_eq!(payload.primary_score(), 0.0);
+        assert_eq!(payload.final_score(), 0.0);
+        payload.score = Some(-0.2);
+        assert_eq!(payload.final_score(), -0.2);
 
         payload.news_metadata = Some(CandidateNewsMetadataPayload {
             source_url: Some("https://www.example.com/a?b=1#frag".to_string()),

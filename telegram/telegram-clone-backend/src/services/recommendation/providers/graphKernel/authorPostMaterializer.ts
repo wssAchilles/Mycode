@@ -8,6 +8,7 @@ export interface GraphAuthorPostMaterializerOptions {
   authorIds: string[];
   limitPerAuthor?: number;
   lookbackDays?: number;
+  createdBefore?: Date;
 }
 
 export interface GraphAuthorPostMaterializerDiagnostics {
@@ -32,6 +33,7 @@ const DEFAULT_LOOKBACK_DAYS = 7;
 const MATERIALIZER_CACHE_TTL_MS = 15_000;
 const MATERIALIZER_CACHE_MAX_ENTRIES = 128;
 const MATERIALIZER_CACHE_KEY_MODE = 'author_ids_limit_lookback_v1';
+const MATERIALIZER_CURSOR_CACHE_KEY_MODE = 'author_ids_limit_lookback_cursor_v2';
 
 const materializerCache = new Map<
   string,
@@ -58,8 +60,14 @@ function uniqueAuthorIds(authorIds: string[]): string[] {
   return ordered;
 }
 
-function buildCacheKey(authorIds: string[], limitPerAuthor: number, lookbackDays: number): string {
-  return `${limitPerAuthor}:${lookbackDays}:${authorIds.join(',')}`;
+function buildCacheKey(
+  authorIds: string[],
+  limitPerAuthor: number,
+  lookbackDays: number,
+  createdBefore?: Date,
+): string {
+  const baseKey = `${limitPerAuthor}:${lookbackDays}:${authorIds.join(',')}`;
+  return createdBefore ? `${baseKey}:${createdBefore.getTime()}` : baseKey;
 }
 
 function cloneCandidates(candidates: FeedCandidate[]): FeedCandidate[] {
@@ -115,6 +123,7 @@ function buildDiagnostics(
   returnedPostCount: number,
   queryDurationMs: number,
   cacheHit: boolean,
+  cacheKeyMode: string,
 ): GraphAuthorPostMaterializerDiagnostics {
   return {
     requestedAuthorCount,
@@ -122,7 +131,7 @@ function buildDiagnostics(
     returnedPostCount,
     queryDurationMs,
     cacheHit,
-    cacheKeyMode: MATERIALIZER_CACHE_KEY_MODE,
+    cacheKeyMode,
     cacheTtlMs: MATERIALIZER_CACHE_TTL_MS,
     cacheEntryCount: materializerCache.size,
     cacheEvictionCount: materializerCacheEvictionCount,
@@ -134,6 +143,10 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
 ): Promise<GraphAuthorPostMaterializerResult> {
   const requestedAuthorCount = Array.isArray(options.authorIds) ? options.authorIds.length : 0;
   const authorIds = uniqueAuthorIds(options.authorIds);
+  const createdBefore = options.createdBefore;
+  const cacheKeyMode = createdBefore
+    ? MATERIALIZER_CURSOR_CACHE_KEY_MODE
+    : MATERIALIZER_CACHE_KEY_MODE;
 
   const limitPerAuthor = Math.max(
     1,
@@ -146,11 +159,11 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
   if (authorIds.length === 0) {
     return {
       candidates: [],
-      diagnostics: buildDiagnostics(requestedAuthorCount, 0, 0, 0, false),
+      diagnostics: buildDiagnostics(requestedAuthorCount, 0, 0, 0, false, cacheKeyMode),
     };
   }
 
-  const cacheKey = buildCacheKey(authorIds, limitPerAuthor, lookbackDays);
+  const cacheKey = buildCacheKey(authorIds, limitPerAuthor, lookbackDays, createdBefore);
   const cachedCandidates = readCachedCandidates(cacheKey);
   if (cachedCandidates) {
     return {
@@ -161,6 +174,7 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
         cachedCandidates.length,
         0,
         true,
+        cacheKeyMode,
       ),
     };
   }
@@ -174,7 +188,10 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
         authorId: { $in: authorIds },
         isNews: { $ne: true },
         deletedAt: null,
-        createdAt: { $gte: createdAfter },
+        createdAt: {
+          $gte: createdAfter,
+          ...(createdBefore ? { $lt: createdBefore } : {}),
+        },
       },
     },
     {
@@ -210,7 +227,7 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
     },
     { $unwind: '$posts' },
     { $replaceRoot: { newRoot: '$posts' } },
-  ]);
+  ]).allowDiskUse(true);
   const queryDurationMs = Math.max(0, Date.now() - queryStartedAt);
   const candidates = (posts as Array<Parameters<typeof createFeedCandidate>[0]>).map((post) =>
     createFeedCandidate(post),
@@ -225,6 +242,7 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
       candidates.length,
       queryDurationMs,
       false,
+      cacheKeyMode,
     ),
   };
 }

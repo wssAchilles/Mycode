@@ -172,4 +172,48 @@ describe('recommendation trace summary', () => {
             { reason: 'ranking:PhoenixScorer:empty_ml_ranking', count: 1 },
         ]);
     });
+
+    it('keeps prototype-like trace dimensions as ordinary buckets', async () => {
+        const traces = [{
+            requestId: 'req-special-keys',
+            pipeline: 'rust_primary',
+            pipelineVersion: '__proto__',
+            strategyVersion: 'constructor',
+            traceVersion: 'toString',
+            owner: 'rust',
+            fallbackMode: 'none',
+            degradedReasons: [],
+            selectedCount: 2,
+            userState: 'warm',
+            experimentKeys: ['__proto__', 'constructor', 'toString'],
+            candidates: new Array(2).fill({}),
+            replayPool: {
+                poolKind: '__proto__',
+                totalCount: 2,
+                truncated: false,
+                candidates: new Array(2).fill({}),
+            },
+            createdAt: '2026-04-23T00:00:00.000Z',
+        }];
+        const chain: any = {
+            select: vi.fn(() => chain),
+            sort: vi.fn(() => chain),
+            limit: vi.fn(() => chain),
+            lean: vi.fn().mockResolvedValue(traces),
+        };
+        mocks.find.mockReturnValue(chain);
+
+        const summary = await buildRecommendationTraceSummary();
+
+        expect(summary.byPipelineVersion.__proto__).toMatchObject({ requests: 1 });
+        expect(summary.byStrategyVersion.constructor).toMatchObject({ requests: 1 });
+        expect(summary.byTraceVersion.toString).toMatchObject({ requests: 1 });
+        expect(summary.byCandidateSetKind.__proto__).toMatchObject({ requests: 1 });
+        for (const key of ['__proto__', 'constructor', 'toString']) {
+            expect(summary.byExperimentKey[key]).toMatchObject({ requests: 1 });
+        }
+        expect(Object.prototype).not.toHaveProperty('requests');
+        expect(Object).not.toHaveProperty('requests');
+        expect(Object.prototype.toString).not.toHaveProperty('requests');
+    });
 });

@@ -4,7 +4,11 @@ import type { SpaceFeedDebugInfo } from './debugInfo';
 import type { RustFeedServingMeta } from './rustFeedRuntime';
 
 export interface SpaceFeedPageResult {
+    requestId: string;
+    decisionId: string;
+    clientRequestId?: string;
     candidates: FeedCandidate[];
+    decisionActionCandidateIds: string[];
     hasMore: boolean;
     nextCursor?: string;
     servedIdsDelta: string[];
@@ -12,11 +16,19 @@ export interface SpaceFeedPageResult {
     debug?: SpaceFeedDebugInfo;
 }
 
+type SpaceFeedPageMeta = Pick<SpaceFeedPageResult, 'requestId' | 'decisionId'>
+    & Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta' | 'requestId' | 'decisionId'>>
+    & { continuationAbstained?: boolean };
+
 export function buildSpaceFeedPageResult(
     candidates: FeedCandidate[],
     limit: number,
-    pageMeta?: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>>,
+    pageMeta: SpaceFeedPageMeta,
 ): SpaceFeedPageResult {
+    const locallyTruncated = candidates.length > limit;
+    const continuationAbstained = pageMeta.continuationAbstained === true;
+    candidates = candidates.slice(0, limit);
+    const servedCandidateIds = new Set(candidates.map((candidate) => candidate.postId.toString()));
     const servedIdsDelta: string[] = [];
     const servedSeen = new Set<string>();
 
@@ -40,11 +52,26 @@ export function buildSpaceFeedPageResult(
         : typeof lastCreatedAt === 'string'
             ? new Date(lastCreatedAt).toISOString()
             : undefined;
+    const rawHasMore = continuationAbstained
+        ? false
+        : locallyTruncated || (pageMeta?.hasMore ?? candidates.length >= limit);
+    const rawNextCursor = continuationAbstained
+        ? undefined
+        : locallyTruncated ? derivedNextCursor : pageMeta?.nextCursor ?? derivedNextCursor;
+    const effectiveCursor = typeof rawNextCursor === 'string' && rawNextCursor.trim().length > 0
+        ? rawNextCursor
+        : undefined;
+    const canContinue = rawHasMore && effectiveCursor !== undefined;
 
     return {
+        requestId: pageMeta.requestId,
+        decisionId: pageMeta.decisionId,
+        clientRequestId: pageMeta.clientRequestId,
         candidates,
-        hasMore: pageMeta?.hasMore ?? candidates.length >= limit,
-        nextCursor: pageMeta?.nextCursor ?? derivedNextCursor,
+        decisionActionCandidateIds: (pageMeta.decisionActionCandidateIds ?? [])
+            .filter((candidateId) => servedCandidateIds.has(candidateId)),
+        hasMore: canContinue,
+        nextCursor: canContinue ? effectiveCursor : undefined,
         servedIdsDelta,
         rustServing: pageMeta?.rustServing,
         debug: pageMeta?.debug,

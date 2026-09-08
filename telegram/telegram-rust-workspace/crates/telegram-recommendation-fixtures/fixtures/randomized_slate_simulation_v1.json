@@ -1,0 +1,230 @@
+{
+  "expected": {
+    "baselineOrderVersion": "decision_pool_rank_then_identity_v1",
+    "candidatePoolFingerprint": {
+      "sha256": "d4fba714a86f3818d3fa0d50cd718bbb3ad23cfd1fbec86774c7cd3d62cc0077"
+    },
+    "contractVersion": "randomized_slate_simulation_v1",
+    "decisionFingerprint": {
+      "decisionId": "8d3dd5de-a2c1-47e2-bafb-91bf557cf4ab",
+      "sha256": "b0bfef8c9567b69b52db231d8a3721e5f2d0244c3c0d6fd5cf5cb859834bc8d3"
+    },
+    "evidenceKind": "simulated_propensity",
+    "numericalDiagnostics": {
+      "maxProbabilityMassError": 1.11022302462515654e-16,
+      "probabilityMassTolerance": 1e-12,
+      "steps": [
+        {
+          "mixedProbabilityMass": 1.0,
+          "plackettLuceProbabilityMass": 0.99999999999999988,
+          "probabilityMassError": 1.11022302462515654e-16,
+          "remainingCandidateCount": 3,
+          "servedPosition": 1
+        },
+        {
+          "mixedProbabilityMass": 1.0,
+          "plackettLuceProbabilityMass": 1.0,
+          "probabilityMassError": 0.0,
+          "remainingCandidateCount": 2,
+          "servedPosition": 2
+        },
+        {
+          "mixedProbabilityMass": 1.0,
+          "plackettLuceProbabilityMass": 1.0,
+          "probabilityMassError": 0.0,
+          "remainingCandidateCount": 1,
+          "servedPosition": 3
+        }
+      ]
+    },
+    "orderedActions": [
+      {
+        "actionKey": {
+          "candidateId": "507f191e810c19729de8c002",
+          "candidateNamespace": "serving_post_id",
+          "servedPosition": 1
+        },
+        "conditionalSelectionProbability": 0.13304819115496436,
+        "plackettLuceProbability": 0.6652409557748218,
+        "selectedWasDeterministicTop": false
+      },
+      {
+        "actionKey": {
+          "candidateId": "507f191e810c19729de8c003",
+          "candidateNamespace": "serving_post_id",
+          "servedPosition": 2
+        },
+        "conditionalSelectionProbability": 0.14621171572600097,
+        "plackettLuceProbability": 0.7310585786300049,
+        "selectedWasDeterministicTop": false
+      },
+      {
+        "actionKey": {
+          "candidateId": "507f191e810c19729de8c001",
+          "candidateNamespace": "serving_post_id",
+          "servedPosition": 3
+        },
+        "conditionalSelectionProbability": 1.0,
+        "plackettLuceProbability": 1.0,
+        "selectedWasDeterministicTop": true
+      }
+    ],
+    "policy": {
+      "configVersion": "phase8-fixture-v1",
+      "epsilon": 0.2,
+      "policyId": "eligible_pool_epsilon_plackett_luce_v1",
+      "policyVersion": "epsilon-pl-v1",
+      "slateSize": 3,
+      "temperature": 1.0
+    },
+    "probabilitySemantics": "conditional_on_prior_slate_prefix_v1",
+    "servable": false,
+    "simulationSha256": "b5e6b1aad394dc84e95a43f6ca65a3a7fd36d5b192f6d62e034b5e4106fded92",
+    "status": "simulated",
+    "supportDiagnostics": {
+      "eligibleCandidateCount": 3,
+      "excludedIneligibleCandidateCount": 1,
+      "sampledCount": 3,
+      "sourceCandidateCount": 4,
+      "withoutReplacement": true
+    }
+  },
+  "fixtureVersion": "randomized_slate_simulation_fixture_v1",
+  "input": {
+    "config": {
+      "configVersion": "phase8-fixture-v1",
+      "epsilon": 0.2,
+      "policyId": "eligible_pool_epsilon_plackett_luce_v1",
+      "policyVersion": "epsilon-pl-v1",
+      "slateSize": 3,
+      "temperature": 1.0
+    },
+    "contractVersion": "randomized_slate_simulation_input_v1",
+    "sourceDecisionLog": {
+      "actions": [
+        {
+          "actionKey": {
+            "candidateId": "507f191e810c19729de8c001",
+            "candidateNamespace": "serving_post_id",
+            "servedPosition": 1
+          },
+          "behaviorPropensity": {
+            "reason": "deterministic_top_k_no_logged_probability",
+            "status": "not_evaluable_deterministic"
+          },
+          "selectionRank": 1
+        }
+      ],
+      "behaviorPolicy": {
+        "policyId": "rust_top_k",
+        "policyVersion": {
+          "status": "bound",
+          "version": "rust_top_k_v1"
+        }
+      },
+      "behaviorPolicyKind": "deterministic_top_k",
+      "candidatePool": {
+        "candidatePoolSha256": "d4fba714a86f3818d3fa0d50cd718bbb3ad23cfd1fbec86774c7cd3d62cc0077",
+        "candidates": [
+          {
+            "candidateId": "507f191e810c19729de8c001",
+            "candidateNamespace": "serving_post_id",
+            "eligible": true,
+            "objectiveEvidence": [],
+            "poolRank": 1,
+            "score": 0.0,
+            "selected": true,
+            "selectionRank": 1,
+            "served": true,
+            "servedPosition": 1
+          },
+          {
+            "candidateId": "507f191e810c19729de8c002",
+            "candidateNamespace": "serving_post_id",
+            "eligible": true,
+            "objectiveEvidence": [],
+            "poolRank": 2,
+            "score": 2.0,
+            "selected": false,
+            "selectionRank": null,
+            "served": false,
+            "servedPosition": null
+          },
+          {
+            "candidateId": "507f191e810c19729de8c003",
+            "candidateNamespace": "serving_post_id",
+            "eligible": true,
+            "objectiveEvidence": [],
+            "poolRank": 3,
+            "score": 1.0,
+            "selected": false,
+            "selectionRank": null,
+            "served": false,
+            "servedPosition": null
+          },
+          {
+            "candidateId": "507f191e810c19729de8c004",
+            "candidateNamespace": "serving_post_id",
+            "eligible": false,
+            "objectiveEvidence": [],
+            "poolRank": 4,
+            "score": 100.0,
+            "selected": false,
+            "selectionRank": null,
+            "served": false,
+            "servedPosition": null
+          }
+        ],
+        "supportEvidence": {
+          "status": "complete"
+        },
+        "totalCount": 4,
+        "truncated": false
+      },
+      "clientRequestId": "client-phase7-1",
+      "contractVersion": "recommendation_decision_log_v1",
+      "decisionAt": "2026-07-16T08:00:00Z",
+      "decisionId": "8d3dd5de-a2c1-47e2-bafb-91bf557cf4ab",
+      "fallbackReason": null,
+      "positionContractVersion": "served_position_1_based_v1",
+      "requestId": "ce65f95a-c904-4c31-a28b-02bb61b14d75",
+      "servingOwner": "rust",
+      "versions": {
+        "artifact": {
+          "reason": "no_model_artifact",
+          "status": "unavailable"
+        },
+        "graph": {
+          "reason": "graph_not_used",
+          "status": "unavailable"
+        },
+        "index": {
+          "reason": "exact_retrieval",
+          "status": "unavailable"
+        },
+        "model": {
+          "reason": "no_model_artifact",
+          "status": "unavailable"
+        },
+        "pipeline": {
+          "status": "bound",
+          "version": "pipeline-v7"
+        },
+        "policy": {
+          "status": "bound",
+          "version": "rust_top_k_v1"
+        },
+        "strategy": {
+          "status": "bound",
+          "version": "weighted-v1"
+        }
+      }
+    },
+    "sourceDecisionLogSha256": "b0bfef8c9567b69b52db231d8a3721e5f2d0244c3c0d6fd5cf5cb859834bc8d3",
+    "uniformDraws": [
+      0.9,
+      0.9,
+      0.5
+    ]
+  }
+}

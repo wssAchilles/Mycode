@@ -33,9 +33,6 @@ func (c Config) Validate() error {
 	if c.MongoInQueryChunkSize <= 0 {
 		return fmt.Errorf("mongo in-query chunk size must be positive")
 	}
-	if c.PlatformReplayScanCount <= 0 {
-		return fmt.Errorf("platform replay scan count must be positive")
-	}
 	if c.ConsumerWorkerCount <= 0 {
 		return fmt.Errorf("consumer worker count must be positive")
 	}

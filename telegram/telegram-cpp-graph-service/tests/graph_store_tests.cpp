@@ -1,11 +1,15 @@
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <semaphore>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -81,6 +85,7 @@ telegram::graph::config::ServiceConfig test_config() {
       .backend_timeout_ms = 1000,
       .snapshot_refresh_secs = 60,
       .snapshot_page_size = 100,
+      .snapshot_generation_v2_enabled = false,
       .min_edge_score = 0.0,
       .max_neighbors_per_user = 100,
       .max_branching_factor = 10,
@@ -220,6 +225,80 @@ TEST(GraphStoreTest, QueryDiagnosticsIncludeSnapshotAndExecutionFields) {
   EXPECT_EQ(traversal.snapshot_version, "test-snapshot");
   EXPECT_NE(traversal.snapshot_loaded_at, std::chrono::system_clock::time_point{});
   EXPECT_GE(traversal.frontier_max_size, 1u);
+}
+
+TEST(GraphStoreTest, BatchQueriesSharePinnedSnapshotAcrossConcurrentPublish) {
+  std::binary_semaphore snapshot_pinned{0};
+  std::binary_semaphore snapshot_published{0};
+  std::atomic<bool> first_clock_read{true};
+  std::atomic<bool> synchronization_timed_out{false};
+  GraphStore store(GraphStore::QueryClock{
+      [&snapshot_pinned, &snapshot_published, &first_clock_read, &synchronization_timed_out] {
+        if (first_clock_read.exchange(false)) {
+          snapshot_pinned.release();
+          if (!snapshot_published.try_acquire_for(std::chrono::seconds(5))) {
+            synchronization_timed_out.store(true);
+          }
+        }
+        return std::chrono::steady_clock::now();
+      }});
+  const auto original_loaded_at = std::chrono::system_clock::now();
+  store.replace_snapshot(
+      {
+          edge("u1", "u2", 0.2),
+          edge("u1", "u3", 0.9),
+          edge("u1", "u4", 0.5),
+          edge("u2", "u5", 0.7),
+      },
+      10,
+      "test-snapshot",
+      original_loaded_at);
+
+  std::thread publisher([&store, &snapshot_pinned, &snapshot_published, &synchronization_timed_out] {
+    if (!snapshot_pinned.try_acquire_for(std::chrono::seconds(5))) {
+      synchronization_timed_out.store(true);
+      return;
+    }
+    store.replace_snapshot(
+        {
+            edge("u1", "u2", 0.2),
+            edge("u1", "u3", 0.9),
+            edge("u1", "u4", 0.5),
+            edge("u2", "u5", 0.7),
+        },
+        10,
+        "test-snapshot-01",
+        std::chrono::system_clock::now());
+    snapshot_published.release();
+  });
+
+  const auto batch = store.batch(telegram::graph::core::GraphBatchQuery{
+      .user_id = "u1",
+      .direct_limit = 3,
+      .bridge_limit = 3,
+      .max_depth = 3,
+      .max_branching_factor = 10,
+      .max_visited_nodes = 100,
+      .max_candidates = 100,
+      .excluded_user_ids = {"u1"},
+  });
+  publisher.join();
+
+  EXPECT_FALSE(synchronization_timed_out.load());
+  ASSERT_TRUE(batch.has_value());
+  const auto& result = batch.value();
+  EXPECT_EQ(result.snapshot_version, "test-snapshot");
+  EXPECT_EQ(result.snapshot_loaded_at, original_loaded_at);
+  EXPECT_EQ(result.social_neighbors.snapshot_version, result.snapshot_version);
+  EXPECT_EQ(result.recent_engagers.snapshot_version, result.snapshot_version);
+  EXPECT_EQ(result.bridge_users.snapshot_version, result.snapshot_version);
+  EXPECT_EQ(result.co_engagers.snapshot_version, result.snapshot_version);
+  EXPECT_EQ(result.content_affinity_neighbors.snapshot_version, result.snapshot_version);
+  EXPECT_EQ(result.social_neighbors.snapshot_loaded_at, result.snapshot_loaded_at);
+  EXPECT_EQ(result.recent_engagers.snapshot_loaded_at, result.snapshot_loaded_at);
+  EXPECT_EQ(result.bridge_users.snapshot_loaded_at, result.snapshot_loaded_at);
+  EXPECT_EQ(result.co_engagers.snapshot_loaded_at, result.snapshot_loaded_at);
+  EXPECT_EQ(result.content_affinity_neighbors.snapshot_loaded_at, result.snapshot_loaded_at);
 }
 
 TEST(GraphStoreTest, NeighborLimitZeroKeepsAvailableCount) {
@@ -557,6 +636,28 @@ TEST(GraphStoreTest, MultiHopReportsBudgetExhaustion) {
   EXPECT_TRUE(result.budget_exhausted);
 }
 
+TEST(GraphStoreTest, MultiHopReportsExactInspectedEdgeCount) {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          edge("u1", "u2", 0.9),
+          edge("u1", "u3", 0.8),
+          edge("u2", "u4", 0.7),
+          edge("u2", "u5", 0.6),
+          edge("u3", "u6", 0.5),
+          edge("u3", "u7", 0.4),
+      },
+      10,
+      "scanned-edge-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.multi_hop_candidates("u1", 10, 2, 10, 100, 100, {}, true);
+
+  EXPECT_EQ(result.visited_count, 2u);
+  EXPECT_EQ(result.scanned_count, 6u);
+  EXPECT_EQ(result.candidates.size(), 4u);
+}
+
 TEST(GraphStoreTest, MultiHopPrioritizesHigherScorePathsWithinVisitBudget) {
   GraphStore store;
   store.replace_snapshot(
@@ -765,9 +866,157 @@ TEST(GraphHandlerTest, GraphDiagnosticsExposeSnapshotAndExecutionFields) {
   EXPECT_TRUE(diagnostics.contains("snapshotLoadedAtMs"));
   EXPECT_EQ(diagnostics.at("prunedCount"), 0);
   EXPECT_EQ(diagnostics.at("frontierMaxSize"), 0);
+  EXPECT_TRUE(diagnostics.contains("scannedCount"));
+  EXPECT_TRUE(diagnostics.contains("visitedCount"));
   EXPECT_EQ(diagnostics.at("budgetExhausted"), false);
   EXPECT_TRUE(diagnostics.contains("emptyReason"));
   EXPECT_TRUE(diagnostics.at("emptyReason").is_null());
+}
+
+TEST(GraphHandlerTest, TruncationDoesNotSetTraversalBudgetExhausted) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+
+  const auto response = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/social-neighbors",
+      .body = R"({"userId":"u1","limit":1})",
+  });
+  const auto diagnostics = nlohmann::json::parse(response.body).at("data").at("diagnostics");
+
+  EXPECT_EQ(response.status_code, 200);
+  EXPECT_GT(diagnostics.at("truncatedCount").get<std::size_t>(), 0u);
+  EXPECT_EQ(diagnostics.at("budgetExhausted"), false);
+}
+
+TEST(GraphHandlerTest, BatchRequiresExplicitSizeFields) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+  struct InvalidSizeField {
+    const char* name;
+    bool is_null;
+  };
+  constexpr std::array<InvalidSizeField, 6> cases{{
+      {"directLimit", false},
+      {"directLimit", true},
+      {"bridgeLimit", false},
+      {"bridgeLimit", true},
+      {"maxDepth", false},
+      {"maxDepth", true},
+  }};
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(
+        testing::Message() << test_case.name << (test_case.is_null ? " null" : " missing"));
+    auto payload = nlohmann::json{
+        {"userId", "u1"},
+        {"directLimit", 2},
+        {"bridgeLimit", 3},
+        {"maxDepth", 3},
+    };
+    if (test_case.is_null) {
+      payload[test_case.name] = nullptr;
+    } else {
+      payload.erase(test_case.name);
+    }
+
+    const auto response = handler(telegram::graph::http::HttpRequest{
+        .method = "POST",
+        .path = "/graph/batch",
+        .body = payload.dump(),
+    });
+    const auto body = nlohmann::json::parse(response.body);
+
+    EXPECT_EQ(response.status_code, 400);
+    EXPECT_EQ(body.at("error").at("code"), "INVALID_REQUEST");
+  }
+}
+
+TEST(GraphHandlerTest, BatchResponseContainsFiveKernelsWithOneSnapshotIdentity) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+
+  const auto response = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/batch",
+      .body = R"({"userId":"u1","directLimit":2,"bridgeLimit":3,"maxDepth":3,"excludeUserIds":["blocked-user"]})",
+  });
+  const auto data = nlohmann::json::parse(response.body).at("data");
+
+  ASSERT_EQ(response.status_code, 200);
+  ASSERT_EQ(data.at("snapshotVersion"), "test-snapshot");
+  ASSERT_TRUE(data.contains("snapshotLoadedAtMs"));
+  for (const auto* key : {
+           "socialNeighbors",
+           "recentEngagers",
+           "bridgeUsers",
+           "coEngagers",
+           "contentAffinityNeighbors",
+       }) {
+    const auto& result = data.at(key);
+    ASSERT_TRUE(result.contains("candidates"));
+    const auto& diagnostics = result.at("diagnostics");
+    EXPECT_EQ(diagnostics.at("snapshotVersion"), data.at("snapshotVersion"));
+    EXPECT_EQ(diagnostics.at("snapshotLoadedAtMs"), data.at("snapshotLoadedAtMs"));
+    EXPECT_TRUE(diagnostics.contains("scannedCount"));
+    EXPECT_TRUE(diagnostics.contains("visitedCount"));
+  }
+}
+
+TEST(GraphHandlerTest, BatchReportsIndependentPerKernelDurationsToDiagnosticsAndMetrics) {
+  constexpr std::array<std::int64_t, 10> tick_ms{0, 2, 2, 5, 5, 9, 9, 14, 14, 20};
+  auto tick_index = std::make_shared<std::size_t>(0);
+  GraphStore store(GraphStore::QueryClock{
+      [tick_index, tick_ms](void) {
+        const auto index = (*tick_index)++;
+        return std::chrono::steady_clock::time_point{
+            std::chrono::milliseconds(tick_ms.at(index))};
+      }});
+  store.replace_snapshot(
+      {
+          edge("u1", "u2", 0.2),
+          edge("u1", "u3", 0.9),
+          edge("u2", "u4", 0.7),
+      },
+      10,
+      "timed-batch-snapshot",
+      std::chrono::system_clock::now());
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+
+  const auto response = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/batch",
+      .body = R"({"userId":"u1","directLimit":2,"bridgeLimit":3,"maxDepth":3})",
+  });
+  const auto data = nlohmann::json::parse(response.body).at("data");
+  const auto ops = metrics.ops_payload(config, store.metadata());
+  const auto& summaries = ops.at("requests").at("kernelRouteSummary");
+  struct ExpectedDuration {
+    const char* response_key;
+    const char* metric_key;
+    std::uint64_t duration_ms;
+  };
+  const std::array<ExpectedDuration, 5> expected{
+      ExpectedDuration{"socialNeighbors", "social_neighbors", 2u},
+      ExpectedDuration{"recentEngagers", "recent_engagers", 3u},
+      ExpectedDuration{"bridgeUsers", "bridge_users", 4u},
+      ExpectedDuration{"coEngagers", "co_engagers", 5u},
+      ExpectedDuration{"contentAffinityNeighbors", "content_affinity_neighbors", 6u},
+  };
+
+  ASSERT_EQ(response.status_code, 200);
+  for (const auto& [response_key, metric_key, duration_ms] : expected) {
+    EXPECT_EQ(data.at(response_key).at("diagnostics").at("queryDurationMs"), duration_ms);
+    EXPECT_EQ(summaries.at(metric_key).at("p99Ms"), duration_ms);
+  }
 }
 
 TEST(OpsPayloadTest, ReportsHttpRuntimeMetrics) {

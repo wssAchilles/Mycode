@@ -10,5 +10,10 @@ serde_json.workspace = true
 telegram-component-primitives.workspace = true
 telegram-recommendation-contracts.workspace = true
 
+[dev-dependencies]
+sha2 = "0.10"
+telegram-ranking-primitives.workspace = true
+telegram-recommendation-policy-offline.workspace = true
+
 [lints]
 workspace = true

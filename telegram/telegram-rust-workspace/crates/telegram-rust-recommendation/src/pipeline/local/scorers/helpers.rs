@@ -21,4 +21,4 @@ pub(super) use signals::{
     compute_content_quality, compute_weighted_score, engagement_multiplier, evidence_multiplier,
     exploration_risk, freshness_multiplier,
 };
-pub(super) use stage_builder::{build_stage, merge_breakdown};
+pub(super) use stage_builder::{build_stage, finite_score_product, merge_breakdown};

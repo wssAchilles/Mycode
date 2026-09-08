@@ -84,6 +84,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             authorIds,
             limitPerAuthor: CONFIG.limitPerAuthor,
             lookbackDays: CONFIG.lookbackDays,
+            createdBefore: query.cursor,
         });
         if (materialized.length === 0) {
             return [];

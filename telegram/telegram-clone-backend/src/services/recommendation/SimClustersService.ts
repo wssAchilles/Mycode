@@ -19,6 +19,7 @@ import UserFeatureVector, {
 import ClusterDefinition, { IClusterDefinition } from '../../models/ClusterDefinition';
 import RealGraphEdge from '../../models/RealGraphEdge';
 import { redis } from '../../config/redis';
+import { FeatureCacheService } from './FeatureCacheService';
 
 // ========== 配置常量 ==========
 const CONFIG = {
@@ -126,12 +127,18 @@ export class SimClustersService {
      * 
      * 复刻 SimClusters 的 U = A × V (InterestedIn = Follow × KnownFor)
      */
-    async computeInterestedIn(userId: string): Promise<SparseVectorElement[]> {
+    async computeInterestedIn(
+        userId: string,
+        signal?: AbortSignal,
+    ): Promise<SparseVectorElement[]> {
+        signal?.throwIfAborted();
         // Step 1: 获取用户的 Top 关注 (使用 RealGraph 分数加权)
         const followEdges = await RealGraphEdge.getTopConnections(
             userId,
-            CONFIG.interestedIn.maxFollows
+            CONFIG.interestedIn.maxFollows,
+            signal,
         );
+        signal?.throwIfAborted();
 
         if (followEdges.length === 0) {
             return [];
@@ -141,13 +148,15 @@ export class SimClustersService {
         const followedUserIds = followEdges.map(e => e.targetUserId);
 
         // 批量查询用户的 KnownFor
-        const userVectors = await UserFeatureVector.getUserEmbeddingsBatch(followedUserIds);
+        const userVectors = await UserFeatureVector.getUserEmbeddingsBatch(followedUserIds, signal);
+        signal?.throwIfAborted();
 
         // Step 3: 聚合计算 InterestedIn
         // 公式: InterestedIn[c] = Σ(follow_weight[u] × KnownFor[u, c])
         const clusterScores = new Map<number, number>();
 
         for (const edge of followEdges) {
+            signal?.throwIfAborted();
             const userVec = userVectors.get(edge.targetUserId);
             if (!userVec) continue;
 
@@ -197,7 +206,11 @@ export class SimClustersService {
      * 
      * 复刻 SimClusters 的 Producer Embedding 计算
      */
-    async computeProducerEmbedding(userId: string): Promise<SparseVectorElement[]> {
+    async computeProducerEmbedding(
+        userId: string,
+        signal?: AbortSignal,
+    ): Promise<SparseVectorElement[]> {
+        signal?.throwIfAborted();
         // Step 1: 获取用户的粉丝 (入边)
         const followerEdges = await RealGraphEdge.find({
             targetUserId: userId,
@@ -205,7 +218,9 @@ export class SimClustersService {
         })
             .sort({ decayedSum: -1 })
             .limit(CONFIG.producer.maxFollowers)
+            .setOptions({ signal })
             .lean();
+        signal?.throwIfAborted();
 
         if (followerEdges.length === 0) {
             return [];
@@ -213,13 +228,15 @@ export class SimClustersService {
 
         // Step 2: 获取粉丝的 InterestedIn 嵌入
         const followerIds = followerEdges.map(e => e.sourceUserId);
-        const followerVectors = await UserFeatureVector.getUserEmbeddingsBatch(followerIds);
+        const followerVectors = await UserFeatureVector.getUserEmbeddingsBatch(followerIds, signal);
+        signal?.throwIfAborted();
 
         // Step 3: 聚合粉丝的兴趣
         const vectors: SparseVectorElement[][] = [];
         const weights: number[] = [];
 
         for (const edge of followerEdges) {
+            signal?.throwIfAborted();
             const vec = followerVectors.get(edge.sourceUserId);
             if (vec && vec.interestedInClusters.length > 0) {
                 vectors.push(vec.interestedInClusters);
@@ -278,15 +295,43 @@ export class SimClustersService {
         return embedding;
     }
 
+    /** 清除完整用户嵌入缓存 */
+    async invalidateUserEmbeddingCache(userId: string): Promise<void> {
+        await redis.del(`${CONFIG.cache.keyPrefix}${userId}`);
+    }
+
     /**
      * 计算并存储用户嵌入
      */
-    async computeAndStoreEmbedding(userId: string): Promise<IUserFeatureVector> {
+    async computeAndStoreEmbedding(
+        userId: string,
+        signal?: AbortSignal,
+    ): Promise<IUserFeatureVector> {
+        signal?.throwIfAborted();
         // 并行计算 InterestedIn 和 ProducerEmbedding
-        const [interestedIn, producerEmbedding] = await Promise.all([
-            this.computeInterestedIn(userId),
-            this.computeProducerEmbedding(userId),
-        ]);
+        let interestedIn: SparseVectorElement[];
+        let producerEmbedding: SparseVectorElement[];
+        if (signal) {
+            const computations = await Promise.allSettled([
+                this.computeInterestedIn(userId, signal),
+                this.computeProducerEmbedding(userId, signal),
+            ]);
+            signal.throwIfAborted();
+            const rejected = computations.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            );
+            if (rejected) {
+                throw rejected.reason;
+            }
+            [interestedIn, producerEmbedding] = computations.map(
+                (result) => (result as PromiseFulfilledResult<SparseVectorElement[]>).value,
+            );
+        } else {
+            [interestedIn, producerEmbedding] = await Promise.all([
+                this.computeInterestedIn(userId),
+                this.computeProducerEmbedding(userId),
+            ]);
+        }
 
         // 确定 KnownFor (取 producerEmbedding 中分数最高的)
         let knownForCluster: number | undefined;
@@ -301,28 +346,33 @@ export class SimClustersService {
         const qualityScore = Math.min(1, (interestedIn.length + producerEmbedding.length) / 50);
 
         // 获取当前版本号
-        const existing = await UserFeatureVector.findOne({ userId }).lean();
+        const existing = await UserFeatureVector.findOne({ userId }, null, { signal }).lean();
+        signal?.throwIfAborted();
         const version = (existing?.version || 0) + 1;
 
         // 更新存储
-        const embedding = await UserFeatureVector.upsertEmbedding(
-            userId,
-            {
-                interestedInClusters: interestedIn,
-                producerEmbedding,
-                knownForCluster,
-                knownForScore,
-                qualityScore,
-            },
-            version
-        );
+        const embeddings = {
+            interestedInClusters: interestedIn,
+            producerEmbedding,
+            knownForCluster,
+            knownForScore,
+            qualityScore,
+        };
+        const embedding = signal
+            ? await UserFeatureVector.upsertEmbedding(userId, embeddings, version, signal)
+            : await UserFeatureVector.upsertEmbedding(userId, embeddings, version);
 
-        // 清除缓存
-        const cacheKey = `${CONFIG.cache.keyPrefix}${userId}`;
-        try {
-            await redis.del(cacheKey);
-        } catch {
-            // 忽略缓存错误
+        // 清除当前 SimClusters 缓存和 FeatureCache 当前进程 L1/L2
+        const invalidationResults = await Promise.allSettled([
+            this.invalidateUserEmbeddingCache(userId),
+            // 写入已完成后必须清理缓存；取消信号只在清理完成后传播。
+            FeatureCacheService.getInstance().invalidateUserEmbedding(userId),
+        ]);
+        signal?.throwIfAborted();
+        for (const result of invalidationResults) {
+            if (result.status === 'rejected') {
+                throw result.reason;
+            }
         }
 
         return embedding;

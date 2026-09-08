@@ -58,22 +58,27 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
         const ids = timelineRead.postIds;
 
         if (ids.length > 0) {
-            const objIds = ids.map((id) => new mongoose.Types.ObjectId(id));
-            const posts = await Post.find({
-                _id: { $in: objIds },
-                isNews: { $ne: true },
-                deletedAt: null,
-            }).lean();
+            const validIds = ids.filter((id) => mongoose.isValidObjectId(id));
+            if (validIds.length > 0) {
+                const objIds = validIds.map((id) => new mongoose.Types.ObjectId(id));
+                const posts = await Post.find({
+                    _id: { $in: objIds },
+                    isNews: { $ne: true },
+                    deletedAt: null,
+                }).lean();
 
-            // Mongo $in does not preserve order, so re-order by Redis timeline order
-            const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
-            const ordered = ids.map((id) => postMap.get(id)).filter(Boolean) as any[];
-            this.recordStageDetail(query, this.buildStageDetail('redis_author_timeline', timelineRead.summary));
+                // Mongo $in does not preserve order, so re-order by Redis timeline order
+                const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
+                const ordered = validIds.map((id) => postMap.get(id)).filter(Boolean) as any[];
+                if (ordered.length > 0) {
+                    this.recordStageDetail(query, this.buildStageDetail('redis_author_timeline', timelineRead.summary));
 
-            return ordered.map((post) => ({
-                ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
-                inNetwork: true,
-            }));
+                    return ordered.map((post) => ({
+                        ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
+                        inNetwork: true,
+                    }));
+                }
+            }
         }
 
         // Fallback: shared in-process cache that still scans Mongo (kept for compatibility until backfill)
@@ -111,7 +116,7 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
             }
 
             const directPosts = await Post.find(mongoQuery)
-                .sort({ createdAt: -1 })
+                .sort({ createdAt: -1, _id: -1 })
                 .limit(MAX_RESULTS)
                 .lean();
 

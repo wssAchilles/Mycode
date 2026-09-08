@@ -191,15 +191,18 @@ impl RecommendationSourceOrchestrator {
         let mut uncached_entries = Vec::new();
         for (index, source_name) in enabled_entries {
             if is_cacheable(&source_name) && self.source_cache.enabled() {
-                let hit = self.source_cache.get(&source_name, &query.user_id).await;
+                let hit = self.source_cache.get_for_query(&source_name, query).await;
                 if let Some(candidates) = hit.candidates {
                     let provider_key =
                         telegram_pipeline_primitives::source_provider_key(&source_name);
+                    let mut stage = build_cached_source_stage(&source_name, candidates.len());
+                    let mut candidates = candidates;
+                    apply_source_policy(query, &source_name, &mut stage, &mut candidates);
                     cached_results.push((
                         index,
                         SourceExecution {
                             source_name: source_name.clone(),
-                            stage: build_cached_source_stage(&source_name, candidates.len()),
+                            stage,
                             candidates,
                             provider_calls: HashMap::from([(provider_key, 0)]),
                             provider_latency_ms: HashMap::new(),
@@ -268,11 +271,11 @@ impl RecommendationSourceOrchestrator {
                 for execution in items_by_name.values() {
                     if is_cacheable(&execution.source_name) && !execution.candidates.is_empty() {
                         let source_name = execution.source_name.clone();
-                        let user_id = query.user_id.clone();
+                        let cache_key = self.source_cache.query_cache_key(&source_name, query);
                         let candidates = execution.candidates.clone();
                         let cache = self.source_cache.clone();
                         tokio::spawn(async move {
-                            let _ = cache.store(&source_name, &user_id, &candidates).await;
+                            let _ = cache.store_for_key(&cache_key, &candidates).await;
                         });
                     }
                 }
@@ -323,16 +326,19 @@ impl RecommendationSourceOrchestrator {
         disabled_results: Vec<(usize, SourceExecution)>,
     ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
         let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
+        let query_shared = Arc::new(query.clone());
         let mut join_set = JoinSet::new();
 
         for (index, source_name) in source_entries {
             let backend_client = self.backend_client.clone();
-            let query = query.clone();
+            let query = Arc::clone(&query_shared);
             let semaphore = semaphore.clone();
             join_set.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.expect("source semaphore");
                 let started_at = Instant::now();
-                let response = backend_client.source_candidates(&source_name, &query).await;
+                let response = backend_client
+                    .source_candidates(&source_name, query.as_ref())
+                    .await;
                 let provider_key = source_provider_key(&source_name);
                 (
                     index,
@@ -357,7 +363,17 @@ impl RecommendationSourceOrchestrator {
         while let Some(joined) = join_set.join_next().await {
             let (index, source_name, duration_ms, result) = joined.expect("source join task");
             let mut execution = match result {
-                Ok(source_execution) => source_execution,
+                Ok(source_execution) => {
+                    if is_cacheable(&source_name) && !source_execution.candidates.is_empty() {
+                        let cache_key = self.source_cache.query_cache_key(&source_name, query);
+                        let candidates = source_execution.candidates.clone();
+                        let cache = self.source_cache.clone();
+                        tokio::spawn(async move {
+                            let _ = cache.store_for_key(&cache_key, &candidates).await;
+                        });
+                    }
+                    source_execution
+                }
                 Err(error) => {
                     build_failed_source_execution(&source_name, &error.to_string(), duration_ms)
                 }

@@ -14,6 +14,7 @@ use super::authors::{
     GraphKernelAuthorAggregate, aggregate_graph_kernel_authors, apply_graph_metadata,
 };
 use super::materialization::{MaterializerRetryDetail, MaterializerTelemetry};
+use super::shadow::schedule_graph_kernel_batch_shadow_compare;
 use super::{
     DEFAULT_BRIDGE_LIMIT, DEFAULT_BRIDGE_MAX_DEPTH, DEFAULT_DIRECT_LIMIT, GraphSourceRuntime,
 };
@@ -37,11 +38,11 @@ struct GraphKernelQueryOutcome<T> {
     error: Option<GraphKernelError>,
 }
 
-struct GraphAuthorQueryResult {
-    author_aggregates: Vec<GraphKernelAuthorAggregate>,
-    provider_calls: HashMap<String, usize>,
-    query_errors: Vec<String>,
-    telemetry: GraphKernelTelemetry,
+pub(super) struct GraphAuthorQueryResult {
+    pub(super) author_aggregates: Vec<GraphKernelAuthorAggregate>,
+    pub(super) provider_calls: HashMap<String, usize>,
+    pub(super) query_errors: Vec<String>,
+    pub(super) telemetry: GraphKernelTelemetry,
 }
 
 impl GraphSourceRuntime {
@@ -51,11 +52,12 @@ impl GraphSourceRuntime {
         query: &RecommendationQueryPayload,
     ) -> Result<DirectGraphCandidatesResult> {
         let mut graph_queries = query_graph_kernel_authors_with_budget(
-            graph_kernel_client,
+            graph_kernel_client.clone(),
             query,
             self.graph_provider_budget_ms,
         )
         .await;
+        schedule_graph_kernel_batch_shadow_compare(&graph_kernel_client, query, &mut graph_queries);
         if graph_queries.author_aggregates.is_empty() {
             return Ok(DirectGraphCandidatesResult {
                 candidates: Vec::new(),
@@ -80,7 +82,9 @@ impl GraphSourceRuntime {
             .enumerate()
             .map(|(index, aggregate)| (aggregate.user_id.clone(), (index, aggregate.clone())))
             .collect::<HashMap<_, _>>();
-        let materialized = self.materialize_graph_author_candidates(&author_ids).await;
+        let materialized = self
+            .materialize_graph_author_candidates(&author_ids, query.cursor)
+            .await;
         merge_provider_maps(
             &mut graph_queries.provider_calls,
             materialized.provider_calls,
@@ -140,7 +144,7 @@ impl GraphSourceRuntime {
     }
 }
 
-async fn query_graph_kernel_authors_with_budget(
+pub(super) async fn query_graph_kernel_authors_with_budget(
     graph_kernel_client: GraphKernelClient,
     query: &RecommendationQueryPayload,
     graph_provider_budget_ms: u64,
@@ -295,6 +299,8 @@ fn sort_graph_candidates(candidates: &mut [RecommendationCandidatePayload]) {
             .partial_cmp(&right_rank)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| right.post_id.cmp(&left.post_id))
+            .then_with(|| right.author_id.cmp(&left.author_id))
     });
 }
 
@@ -340,6 +346,10 @@ fn record_graph_query<T>(
         return Vec::new();
     };
 
+    telemetry
+        .per_kernel_returned_counts
+        .insert(kernel_key.to_string(), result.candidates.len());
+
     if let Some(diagnostics) = result.diagnostics.as_ref() {
         telemetry
             .per_kernel_candidate_counts
@@ -351,11 +361,24 @@ fn record_graph_query<T>(
             .per_kernel_available_counts
             .insert(kernel_key.to_string(), diagnostics.available_count);
         telemetry
-            .per_kernel_returned_counts
-            .insert(kernel_key.to_string(), diagnostics.candidate_count);
-        telemetry
             .per_kernel_truncated_counts
             .insert(kernel_key.to_string(), diagnostics.truncated_count);
+        telemetry
+            .per_kernel_scanned_counts
+            .insert(kernel_key.to_string(), diagnostics.scanned_count);
+        telemetry
+            .per_kernel_visited_counts
+            .insert(kernel_key.to_string(), diagnostics.visited_count);
+        if let Some(snapshot_version) = diagnostics.snapshot_version.as_ref() {
+            telemetry
+                .per_kernel_snapshot_versions
+                .insert(kernel_key.to_string(), snapshot_version.clone());
+        }
+        if let Some(snapshot_loaded_at_ms) = diagnostics.snapshot_loaded_at_ms {
+            telemetry
+                .per_kernel_snapshot_loaded_at_ms
+                .insert(kernel_key.to_string(), snapshot_loaded_at_ms);
+        }
         telemetry
             .per_kernel_latency_ms
             .insert(kernel_key.to_string(), diagnostics.query_duration_ms);
@@ -417,7 +440,7 @@ fn classify_empty_kernel_reason(telemetry: &GraphKernelTelemetry) -> String {
     "all_kernels_empty".to_string()
 }
 
-fn collect_excluded_user_ids(query: &RecommendationQueryPayload) -> Vec<String> {
+pub(super) fn collect_excluded_user_ids(query: &RecommendationQueryPayload) -> Vec<String> {
     let mut excluded = HashSet::from([query.user_id.clone()]);
     if let Some(user_features) = query.user_features.as_ref() {
         for blocked_user_id in &user_features.blocked_user_ids {
@@ -436,13 +459,42 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use chrono::{DateTime, Utc};
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
 
     use crate::clients::graph_kernel_client::GraphKernelClient;
-    use crate::contracts::RecommendationQueryPayload;
+    use crate::contracts::{
+        GraphKernelNeighborCandidate, GraphKernelQueryDiagnostics, GraphKernelQueryResult,
+        GraphKernelTelemetry, RecommendationCandidatePayload, RecommendationQueryPayload,
+    };
 
-    use super::query_graph_kernel_authors_with_budget;
+    use super::{
+        GraphKernelQueryOutcome, query_graph_kernel_authors_with_budget, record_graph_query,
+        sort_graph_candidates,
+    };
+
+    fn neighbor_candidate() -> GraphKernelNeighborCandidate {
+        GraphKernelNeighborCandidate {
+            user_id: "author-1".to_string(),
+            score: 0.9,
+            interaction_probability: None,
+            engagement_score: None,
+            recentness_score: None,
+            relation_kinds: Vec::new(),
+        }
+    }
+
+    fn diagnostics(candidate_count: usize) -> GraphKernelQueryDiagnostics {
+        serde_json::from_value(serde_json::json!({
+            "kernel": "social_neighbors",
+            "queryDurationMs": 1,
+            "candidateCount": candidate_count,
+            "empty": false,
+            "emptyReason": null
+        }))
+        .expect("parse graph query diagnostics")
+    }
 
     async fn spawn_hanging_graph_server() -> String {
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -471,11 +523,128 @@ mod tests {
     fn query() -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-budget".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer-1".to_string(),
             limit: 20,
             feature_switches: HashMap::new(),
             ..RecommendationQueryPayload::default()
         }
+    }
+
+    fn sortable_candidate(
+        post_id: &str,
+        author_id: &str,
+        created_at: &str,
+        graph_rank: f64,
+    ) -> RecommendationCandidatePayload {
+        RecommendationCandidatePayload {
+            post_id: post_id.to_string(),
+            author_id: author_id.to_string(),
+            created_at: DateTime::parse_from_rfc3339(created_at)
+                .expect("valid candidate timestamp")
+                .with_timezone(&Utc),
+            score_breakdown: Some(HashMap::from([("graphKernelRank".to_string(), graph_rank)])),
+            ..RecommendationCandidatePayload::default()
+        }
+    }
+
+    #[test]
+    fn graph_candidates_use_identity_ties_after_rank_and_created_at() {
+        let candidates = vec![
+            sortable_candidate("post-a", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-b", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-old", "author-a", "2026-04-17T00:00:00Z", 1.0),
+            sortable_candidate("post-rank-zero", "author-z", "2026-04-16T00:00:00Z", 0.0),
+        ];
+
+        let mut sorted = candidates.clone();
+        sort_graph_candidates(&mut sorted);
+        let mut reversed = candidates;
+        reversed.reverse();
+        sort_graph_candidates(&mut reversed);
+
+        let expected = vec!["post-rank-zero", "post-b", "post-a", "post-old"];
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|candidate| candidate.post_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            reversed
+                .iter()
+                .map(|candidate| candidate.post_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+
+        let mut author_ties = vec![
+            sortable_candidate("post-tie", "author-a", "2026-04-18T00:00:00Z", 1.0),
+            sortable_candidate("post-tie", "author-z", "2026-04-18T00:00:00Z", 1.0),
+        ];
+        sort_graph_candidates(&mut author_ties);
+        assert_eq!(author_ties[0].author_id, "author-z");
+        assert_eq!(author_ties[1].author_id, "author-a");
+    }
+
+    #[test]
+    fn record_graph_query_counts_returned_candidates_without_diagnostics() {
+        let mut provider_calls = HashMap::new();
+        let mut query_errors = Vec::new();
+        let mut telemetry = GraphKernelTelemetry::default();
+
+        let candidates = record_graph_query(
+            GraphKernelQueryOutcome {
+                label: "social-neighbors",
+                result: Some(GraphKernelQueryResult {
+                    candidates: vec![neighbor_candidate()],
+                    diagnostics: None,
+                }),
+                error: None,
+            },
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            telemetry.per_kernel_returned_counts.get("social_neighbors"),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn record_graph_query_ignores_wrong_diagnostic_candidate_count_for_returned_count() {
+        let mut provider_calls = HashMap::new();
+        let mut query_errors = Vec::new();
+        let mut telemetry = GraphKernelTelemetry::default();
+
+        record_graph_query(
+            GraphKernelQueryOutcome {
+                label: "social-neighbors",
+                result: Some(GraphKernelQueryResult {
+                    candidates: vec![neighbor_candidate()],
+                    diagnostics: Some(diagnostics(99)),
+                }),
+                error: None,
+            },
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
+
+        assert_eq!(
+            telemetry
+                .per_kernel_candidate_counts
+                .get("social_neighbors"),
+            Some(&99)
+        );
+        assert_eq!(
+            telemetry.per_kernel_returned_counts.get("social_neighbors"),
+            Some(&1)
+        );
     }
 
     #[tokio::test]

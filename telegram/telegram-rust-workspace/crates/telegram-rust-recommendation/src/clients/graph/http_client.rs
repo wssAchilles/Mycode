@@ -5,6 +5,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 
+use crate::clients::response_body::{
+    ResponseBodyError, error_body_preview, read_response_body_bounded,
+};
+
 use super::GraphClient;
 use super::types::{
     BridgeCandidate, BridgeRequest, GraphKernelCandidatesResponse, GraphQueryResult,
@@ -56,17 +60,25 @@ impl HttpGraphClient {
             .with_context(|| format!("request graph kernel {url}"))?;
 
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .with_context(|| format!("read graph kernel body {url}"))?;
+        let body = match read_response_body_bounded(response).await {
+            Ok(body) => body,
+            Err(error @ ResponseBodyError::TooLarge { .. }) if !status.is_success() => {
+                return Err(anyhow!(
+                    "graph_kernel_request_failed status={} path={} body={}",
+                    status,
+                    path,
+                    error_body_preview(&error.to_string())
+                ));
+            }
+            Err(error) => Err(error).with_context(|| format!("read graph kernel body {url}"))?,
+        };
 
         if !status.is_success() {
             return Err(anyhow!(
                 "graph_kernel_request_failed status={} path={} body={}",
                 status,
                 path,
-                body
+                error_body_preview(&body)
             ));
         }
 

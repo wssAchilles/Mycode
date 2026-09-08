@@ -130,12 +130,32 @@ describe('news recommendation bridge', () => {
             targetId: 'news_1',
             productSurface: 'news_feed',
             requestId: 'req_news_1',
-            position: 2,
+            servedPosition: 2,
+            positionContractVersion: 'served_position_1_based_v1',
             recommendationSource: 'NewsAnnSource',
             isNews: true,
             modelPostId: 'news_1',
             targetUrl: 'https://example.com/news/1',
             targetKeywords: ['recsys', 'ranking'],
         }));
+    });
+
+    it('does not guess a base for invalid internal news ranks', async () => {
+        mocks.newsArticleFindByPk.mockResolvedValue(null);
+
+        for (const rank of [-1, 1.5, Number.NaN]) {
+            await newsService.recordRecommendationFeedback({
+                userId: 'user_1',
+                newsId: 'news_1',
+                eventType: 'click',
+                rank,
+            });
+        }
+
+        for (const [event] of mocks.recordRecommendationEvent.mock.calls) {
+            expect(event.position).toBeUndefined();
+            expect(event.servedPosition).toBeUndefined();
+            expect(event.positionContractVersion).toBeUndefined();
+        }
     });
 });

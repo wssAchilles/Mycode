@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	stdhttp "net/http"
@@ -18,6 +19,7 @@ import (
 type replayOperator interface {
 	BuildSummary(ctx context.Context) (platformreplay.Summary, error)
 	Drain(ctx context.Context, request platformreplay.DrainRequest) (platformreplay.DrainResult, error)
+	Ready(ctx context.Context) error
 }
 
 // ConsumerStateProvider exposes the consumer's lifecycle state for the /ops endpoint.
@@ -34,7 +36,17 @@ func New(
 	consumerState ConsumerStateProvider,
 ) *stdhttp.Server {
 	mux := stdhttp.NewServeMux()
-	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if cfg.PlatformReplayWorkerEnabled {
+			if replay == nil {
+				writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{"ok": false, "error": "platform_replay_worker_unavailable"})
+				return
+			}
+			if err := replay.Ready(r.Context()); err != nil {
+				writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+		}
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
 			"ok":            true,
 			"service":       "telegram-go-delivery-consumer",
@@ -44,20 +56,20 @@ func New(
 	})
 	mux.HandleFunc("/ops/summary", opshandlers.Summary(cfg, state))
 	mux.HandleFunc("/ops/platform/replay/summary", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if replay == nil {
+		if !cfg.PlatformReplayWorkerEnabled || replay == nil {
+			mode := "disabled"
+			if cfg.PlatformReplayWorkerEnabled {
+				mode = "continuous"
+			}
 			writeJSON(w, stdhttp.StatusOK, platformreplay.Summary{
+				Enabled:      cfg.PlatformReplayWorkerEnabled,
 				Available:    false,
 				StreamKey:    cfg.PlatformReplayStreamKey,
 				CompletedKey: platformreplay.CompletedKey(cfg.PlatformReplayStreamKey),
 				Runtime: platformreplay.SummaryRuntime{
-					Owner:                       "go",
-					SingleTopicDrainConcurrency: platformreplay.SingleTopicDrainConcurrency,
-					CrossTopicDrainConcurrency:  platformreplay.CrossTopicDrainConcurrency,
+					Owner: "go",
+					Mode:  mode,
 				},
-				Totals: platformreplay.SummaryTotals{
-					StatusCounts: map[string]int{},
-				},
-				Topics: map[string]platformreplay.TopicSummary{},
 			})
 			return
 		}
@@ -74,7 +86,7 @@ func New(
 		writeJSON(w, stdhttp.StatusOK, payload)
 	})
 	mux.HandleFunc("/ops/platform/replay/drain", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if cfg.InternalToken != "" && r.Header.Get("X-Internal-Token") != cfg.InternalToken {
+		if cfg.InternalToken == "" || r.Header.Get("X-Internal-Token") != cfg.InternalToken {
 			writeJSON(w, stdhttp.StatusForbidden, map[string]any{"error": "forbidden"})
 			return
 		}
@@ -84,17 +96,23 @@ func New(
 			})
 			return
 		}
+		if !cfg.PlatformReplayWorkerEnabled {
+			writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{
+				"error": "platform_replay_worker_disabled",
+			})
+			return
+		}
 		if replay == nil {
 			writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{
-				"error": "platform_replay_operator_unavailable",
+				"error": "platform_replay_worker_unavailable",
 			})
 			return
 		}
 
-		var request platformreplay.DrainRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		request, err := decodeReplayDrainRequest(r.Body)
+		if err != nil {
 			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{
-				"error": "invalid_json_body",
+				"error": err.Error(),
 			})
 			return
 		}
@@ -102,15 +120,17 @@ func New(
 		result, err := replay.Drain(r.Context(), request)
 		if err != nil {
 			status := stdhttp.StatusInternalServerError
-			if errors.Is(err, platformreplay.ErrUnsupportedReplayStatus) {
+			if errors.Is(err, platformreplay.ErrInvalidReplayLimit) {
 				status = stdhttp.StatusBadRequest
+			} else if errors.Is(err, platformreplay.ErrWorkerUnavailable) || errors.Is(err, platformreplay.ErrRedisUnavailable) {
+				status = stdhttp.StatusServiceUnavailable
 			}
 			writeJSON(w, status, map[string]any{
 				"error": err.Error(),
 			})
 			return
 		}
-		writeJSON(w, stdhttp.StatusOK, result)
+		writeJSON(w, stdhttp.StatusAccepted, result)
 	})
 	mux.HandleFunc("/ops/platform/probe", opshandlers.PlatformProbe(cfg, state, replay))
 	mux.HandleFunc("/ops/consumer", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
@@ -130,6 +150,36 @@ func New(
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+}
+
+func decodeReplayDrainRequest(body io.Reader) (platformreplay.DrainRequest, error) {
+	fields := map[string]json.RawMessage{}
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(&fields); err != nil && !errors.Is(err, io.EOF) {
+		return platformreplay.DrainRequest{}, errors.New("invalid_json_body")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return platformreplay.DrainRequest{}, errors.New("invalid_json_body")
+	}
+	if _, exists := fields["topic"]; exists {
+		return platformreplay.DrainRequest{}, errors.New("legacy_replay_filters_unsupported")
+	}
+	if _, exists := fields["status"]; exists {
+		return platformreplay.DrainRequest{}, errors.New("legacy_replay_filters_unsupported")
+	}
+	for field := range fields {
+		if field != "limit" {
+			return platformreplay.DrainRequest{}, fmt.Errorf("unsupported_field: %s", field)
+		}
+	}
+	request := platformreplay.DrainRequest{}
+	if raw, exists := fields["limit"]; exists {
+		if err := json.Unmarshal(raw, &request.Limit); err != nil || request.Limit <= 0 {
+			return platformreplay.DrainRequest{}, platformreplay.ErrInvalidReplayLimit
+		}
+	}
+	return request, nil
 }
 
 func requestLogger(next stdhttp.Handler, logger *log.Logger) stdhttp.Handler {

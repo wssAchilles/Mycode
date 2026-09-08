@@ -12,6 +12,7 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_STREAM_KEY", "chat:delivery:test")
 	t.Setenv("DELIVERY_CONSUMER_PLATFORM_STREAM_KEY", "platform:test")
 	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY", "platform:test:replay")
+	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_WORKER_ENABLED", "true")
 	t.Setenv("DELIVERY_CONSUMER_GROUP", "go-phase6")
 	t.Setenv("DELIVERY_CONSUMER_CONSUMER_NAME", "worker-a")
 	t.Setenv("DELIVERY_CONSUMER_EXECUTION_MODE", "shadow")
@@ -34,7 +35,6 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_WAKE_PUBLISH_MODE", "batch")
 	t.Setenv("DELIVERY_CONSUMER_WAKE_BATCH_SIZE", "40")
 	t.Setenv("DELIVERY_CONSUMER_PRIMARY_POISON_THRESHOLD", "4")
-	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", "6000")
 	t.Setenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR", "127.0.0.1:6060")
 	t.Setenv("DELIVERY_CONSUMER_WORKER_COUNT", "4")
 	t.Setenv("DELIVERY_CONSUMER_ACK_BATCH_SIZE", "16")
@@ -58,6 +58,9 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.PlatformReplayStreamKey != "platform:test:replay" {
 		t.Fatalf("unexpected platform replay stream key: %s", cfg.PlatformReplayStreamKey)
+	}
+	if !cfg.PlatformReplayWorkerEnabled {
+		t.Fatalf("expected explicit replay worker authorization")
 	}
 	if cfg.ReadCount != 33 {
 		t.Fatalf("unexpected read count: %d", cfg.ReadCount)
@@ -85,9 +88,6 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.PprofBindAddr != "127.0.0.1:6060" {
 		t.Fatalf("unexpected pprof bind addr: %s", cfg.PprofBindAddr)
-	}
-	if cfg.PlatformReplayScanCount != 6000 {
-		t.Fatalf("unexpected platform replay scan count: %d", cfg.PlatformReplayScanCount)
 	}
 	if cfg.ConsumerWorkerCount != 4 || cfg.AckBatchSize != 16 {
 		t.Fatalf("unexpected consumer worker/ack config: %#v", cfg)
@@ -181,6 +181,7 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_STREAM_KEY",
 		"DELIVERY_CONSUMER_PLATFORM_STREAM_KEY",
 		"DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY",
+		"DELIVERY_CONSUMER_PLATFORM_REPLAY_WORKER_ENABLED",
 		"DELIVERY_CONSUMER_GROUP",
 		"DELIVERY_CONSUMER_CONSUMER_NAME",
 		"DELIVERY_CONSUMER_EXECUTION_MODE",
@@ -203,7 +204,6 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_WAKE_PUBLISH_MODE",
 		"DELIVERY_CONSUMER_WAKE_BATCH_SIZE",
 		"DELIVERY_CONSUMER_PRIMARY_POISON_THRESHOLD",
-		"DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT",
 		"DELIVERY_CONSUMER_PPROF_BIND_ADDR",
 		"DELIVERY_CONSUMER_DRY_RUN",
 		"DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE",
@@ -231,6 +231,9 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.PlatformReplayStreamKey != defaultPlatformReplayStreamKey {
 		t.Fatalf("expected default platform replay stream key, got %s", cfg.PlatformReplayStreamKey)
+	}
+	if cfg.PlatformReplayWorkerEnabled {
+		t.Fatalf("expected replay worker to default disabled")
 	}
 	if cfg.ConsumerGroup != defaultConsumerGroup {
 		t.Fatalf("expected default group, got %s", cfg.ConsumerGroup)
@@ -280,9 +283,6 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	if cfg.MongoEnsureIndexes {
 		t.Fatalf("expected mongo index ensure to default false")
 	}
-	if cfg.PlatformReplayScanCount != defaultPlatformReplayScanCount {
-		t.Fatalf("unexpected default platform replay scan count")
-	}
 	if cfg.PprofBindAddr != "" {
 		t.Fatalf("expected pprof bind addr to default empty")
 	}
@@ -292,8 +292,8 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	if cfg.MaxRecipientsPerChunk != defaultChunkMax {
 		t.Fatalf("unexpected default chunk max")
 	}
-	if cfg.SyncWakeExecutionMode != "publish" || cfg.PresenceExecutionMode != "publish" || cfg.NotificationExecutionMode != "publish" {
-		t.Fatalf("expected platform topics to default to publish, got %#v", cfg)
+	if cfg.SyncWakeExecutionMode != "shadow" || cfg.PresenceExecutionMode != "shadow" || cfg.NotificationExecutionMode != "shadow" {
+		t.Fatalf("expected platform topics to default to shadow, got %#v", cfg)
 	}
 	if !cfg.DryRun {
 		t.Fatalf("expected dry-run default true")

@@ -5,7 +5,8 @@ use chrono::{DateTime, Duration, Utc};
 use telegram_source_primitives::{
     GRAPH_MATERIALIZER_CACHE_KEY_MODE as MATERIALIZER_CACHE_KEY_MODE,
     GRAPH_MATERIALIZER_CACHE_MAX_ENTRIES as MATERIALIZER_CACHE_MAX_ENTRIES,
-    GRAPH_MATERIALIZER_CACHE_TTL_MS as MATERIALIZER_CACHE_TTL_MS, graph_materializer_cache_key,
+    GRAPH_MATERIALIZER_CACHE_TTL_MS as MATERIALIZER_CACHE_TTL_MS,
+    GRAPH_MATERIALIZER_CURSOR_CACHE_KEY_MODE, graph_materializer_cache_key_with_cursor,
     graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
     normalized_graph_author_ids,
 };
@@ -127,19 +128,26 @@ impl GraphSourceRuntime {
     pub(super) async fn materialize_graph_author_candidates(
         &self,
         author_ids: &[String],
+        created_before: Option<chrono::DateTime<Utc>>,
     ) -> GraphMaterializationResult {
         let mut provider_calls = HashMap::new();
         let mut provider_latency_ms = HashMap::new();
         let mut retry = MaterializerRetryDetail::default();
         let mut telemetry = MaterializerTelemetry::default();
-        let mut cache_key = graph_materializer_cache_key(
+        let mut cache_key = graph_materializer_cache_key_with_cursor(
             author_ids,
             self.materializer_limit_per_author,
             self.materializer_lookback_days,
+            created_before.map(|value| value.timestamp_millis()),
         );
 
         if let Some(cache_hit) = self.materializer_cache.get(&cache_key, Utc::now()).await {
-            annotate_materializer_cache_hit(&mut telemetry, author_ids, &cache_hit);
+            annotate_materializer_cache_hit(
+                &mut telemetry,
+                author_ids,
+                &cache_hit,
+                created_before.is_some(),
+            );
             return GraphMaterializationResult {
                 telemetry,
                 candidates: cache_hit.candidates,
@@ -152,10 +160,11 @@ impl GraphSourceRuntime {
 
         let mut candidates = match self
             .backend_client
-            .graph_author_candidates(
+            .graph_author_candidates_with_cursor(
                 author_ids,
                 self.materializer_limit_per_author,
                 self.materializer_lookback_days,
+                created_before,
             )
             .await
         {
@@ -199,11 +208,21 @@ impl GraphSourceRuntime {
             let retry_lookback = retry
                 .lookback_days
                 .unwrap_or(self.materializer_lookback_days);
-            cache_key = graph_materializer_cache_key(author_ids, retry_limit, retry_lookback);
+            cache_key = graph_materializer_cache_key_with_cursor(
+                author_ids,
+                retry_limit,
+                retry_lookback,
+                created_before.map(|value| value.timestamp_millis()),
+            );
 
             if let Some(cache_hit) = self.materializer_cache.get(&cache_key, Utc::now()).await {
                 retry.recovered = !cache_hit.candidates.is_empty();
-                annotate_materializer_cache_hit(&mut telemetry, author_ids, &cache_hit);
+                annotate_materializer_cache_hit(
+                    &mut telemetry,
+                    author_ids,
+                    &cache_hit,
+                    created_before.is_some(),
+                );
                 return GraphMaterializationResult {
                     telemetry,
                     candidates: cache_hit.candidates,
@@ -216,7 +235,12 @@ impl GraphSourceRuntime {
 
             match self
                 .backend_client
-                .graph_author_candidates(author_ids, retry_limit, retry_lookback)
+                .graph_author_candidates_with_cursor(
+                    author_ids,
+                    retry_limit,
+                    retry_lookback,
+                    created_before,
+                )
                 .await
             {
                 Ok(response) => {
@@ -257,6 +281,7 @@ impl GraphSourceRuntime {
                 candidates.len(),
                 entry_count,
                 eviction_count,
+                created_before.is_some(),
             );
         }
 
@@ -275,6 +300,7 @@ fn annotate_materializer_cache_hit(
     telemetry: &mut MaterializerTelemetry,
     author_ids: &[String],
     cache_hit: &MaterializerCacheLookup,
+    cursor_scoped: bool,
 ) {
     telemetry.query_duration_ms.get_or_insert(0);
     telemetry.provider_latency_ms.get_or_insert(0);
@@ -282,7 +308,14 @@ fn annotate_materializer_cache_hit(
     telemetry.requested_author_count = Some(author_ids.len());
     telemetry.unique_author_count = Some(normalized_graph_author_ids(author_ids).len());
     telemetry.returned_post_count = Some(cache_hit.candidates.len());
-    telemetry.cache_key_mode = Some(MATERIALIZER_CACHE_KEY_MODE.to_string());
+    telemetry.cache_key_mode = Some(
+        if cursor_scoped {
+            GRAPH_MATERIALIZER_CURSOR_CACHE_KEY_MODE
+        } else {
+            MATERIALIZER_CACHE_KEY_MODE
+        }
+        .to_string(),
+    );
     telemetry.cache_ttl_ms = Some(MATERIALIZER_CACHE_TTL_MS as u64);
     telemetry.cache_entry_count = Some(cache_hit.entry_count);
     telemetry.cache_eviction_count = Some(cache_hit.eviction_count);
@@ -294,6 +327,7 @@ fn annotate_materializer_cache_store(
     returned_post_count: usize,
     entry_count: usize,
     eviction_count: u64,
+    cursor_scoped: bool,
 ) {
     telemetry.cache_hit.get_or_insert(false);
     telemetry
@@ -305,9 +339,13 @@ fn annotate_materializer_cache_store(
     telemetry
         .returned_post_count
         .get_or_insert(returned_post_count);
-    telemetry
-        .cache_key_mode
-        .get_or_insert_with(|| MATERIALIZER_CACHE_KEY_MODE.to_string());
+    telemetry.cache_key_mode.get_or_insert_with(|| {
+        if cursor_scoped {
+            GRAPH_MATERIALIZER_CURSOR_CACHE_KEY_MODE.to_string()
+        } else {
+            MATERIALIZER_CACHE_KEY_MODE.to_string()
+        }
+    });
     telemetry
         .cache_ttl_ms
         .get_or_insert(MATERIALIZER_CACHE_TTL_MS as u64);
@@ -340,6 +378,8 @@ fn oldest_cache_key(entries: &HashMap<String, MaterializerCacheEntry>) -> Option
 
 #[cfg(test)]
 mod tests {
+    use telegram_source_primitives::graph_materializer_cache_key;
+
     use super::*;
 
     #[test]

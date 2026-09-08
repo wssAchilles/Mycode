@@ -2,12 +2,15 @@ import mongoose from 'mongoose';
 import { Op } from 'sequelize';
 import User from '../../models/User';
 import Post from '../../models/Post';
-import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
 import RecommendationJobRun from '../../models/RecommendationJobRun';
 import { simClustersService } from '../recommendation/SimClustersService';
 import { realGraphService } from '../recommendation/RealGraphService';
 import { registeredUserFeatureBootstrapService } from '../recommendation/users';
 import { postFeatureSnapshotService } from '../recommendation/contentFeatures';
+import {
+    scanEmbeddingContractEvidence,
+    type PersistedEmbeddingEvidenceSummary,
+} from '../ops/recommendation/embeddingEvidenceAudit';
 import { featureExportJob } from './FeatureExportJob';
 
 type Trigger = 'cron' | 'manual' | 'script';
@@ -43,6 +46,7 @@ export interface DailyRecommendationRefreshResult {
         postsExported: number;
         durationMs: number;
     };
+    embeddingEvidence: PersistedEmbeddingEvidenceSummary;
 }
 
 const CONFIG = {
@@ -62,16 +66,17 @@ export class DailyRecommendationRefreshJob {
 
         this.isRunning = true;
         const startedAt = new Date();
-        const runDoc = await RecommendationJobRun.create({
-            jobName: 'daily_recommendation_refresh',
-            status: 'running',
-            startedAt,
-            trigger: options.trigger ?? 'cron',
-            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
-            summary: {},
-        });
+        let runDoc: { _id: unknown } | undefined;
 
         try {
+            runDoc = await RecommendationJobRun.create({
+                jobName: 'daily_recommendation_refresh',
+                status: 'running',
+                startedAt,
+                trigger: options.trigger ?? 'cron',
+                releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
+                summary: {},
+            });
             const result = await this.execute(options);
             const finishedAt = new Date();
             await RecommendationJobRun.updateOne(
@@ -87,18 +92,20 @@ export class DailyRecommendationRefreshJob {
             );
             return result;
         } catch (error) {
-            const finishedAt = new Date();
-            await RecommendationJobRun.updateOne(
-                { _id: runDoc._id },
-                {
-                    $set: {
-                        status: 'failed',
-                        finishedAt,
-                        durationMs: finishedAt.getTime() - startedAt.getTime(),
-                        error: error instanceof Error ? error.message : String(error),
+            if (runDoc) {
+                const finishedAt = new Date();
+                await RecommendationJobRun.updateOne(
+                    { _id: runDoc._id },
+                    {
+                        $set: {
+                            status: 'failed',
+                            finishedAt,
+                            durationMs: finishedAt.getTime() - startedAt.getTime(),
+                            error: error instanceof Error ? error.message : String(error),
+                        },
                     },
-                },
-            );
+                );
+            }
             throw error;
         } finally {
             this.isRunning = false;
@@ -126,6 +133,7 @@ export class DailyRecommendationRefreshJob {
         const featureExport = options.skipFeatureExport
             ? undefined
             : await featureExportJob.run();
+        const { embeddingEvidence } = await scanEmbeddingContractEvidence({ limit: undefined });
 
         return {
             users: {
@@ -142,6 +150,7 @@ export class DailyRecommendationRefreshJob {
             },
             posts: postRefresh,
             featureExport,
+            embeddingEvidence,
         };
     }
 
@@ -199,13 +208,18 @@ export class DailyRecommendationRefreshJob {
         const createdAfter = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         let scanned = 0;
         let refreshed = 0;
-        let cursor: Date | undefined;
+        let cursor: { createdAt: Date; id: mongoose.Types.ObjectId } | undefined;
 
         while (true) {
             const query: Record<string, unknown> = {
-                createdAt: cursor
-                    ? { $gte: createdAfter, $lt: cursor }
-                    : { $gte: createdAfter },
+                ...(cursor
+                    ? {
+                        $or: [
+                            { createdAt: { $gte: createdAfter, $lt: cursor.createdAt } },
+                            { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+                        ],
+                    }
+                    : { createdAt: { $gte: createdAfter } }),
                 deletedAt: null,
             };
 
@@ -218,17 +232,17 @@ export class DailyRecommendationRefreshJob {
             if (posts.length === 0) break;
 
             const postIds = posts.map((post) => post._id as mongoose.Types.ObjectId);
-            await postFeatureSnapshotService.refreshSnapshotsByPostIds(postIds);
+            const refreshedSnapshots = await postFeatureSnapshotService.refreshSnapshotsByPostIds(postIds);
             scanned += posts.length;
-            refreshed += posts.length;
-            cursor = new Date(posts[posts.length - 1].createdAt);
+            refreshed += refreshedSnapshots.size;
+            const lastPost = posts[posts.length - 1];
+            cursor = {
+                createdAt: new Date(lastPost.createdAt),
+                id: lastPost._id as mongoose.Types.ObjectId,
+            };
         }
 
-        const totalSnapshots = await PostFeatureSnapshot.countDocuments();
-        return {
-            scanned,
-            refreshed: Math.min(refreshed, totalSnapshots),
-        };
+        return { scanned, refreshed };
     }
 
     get running(): boolean {

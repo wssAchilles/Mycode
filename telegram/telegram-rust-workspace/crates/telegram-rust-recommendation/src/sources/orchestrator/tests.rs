@@ -16,7 +16,11 @@ use telegram_pipeline_primitives::{
 };
 use telegram_rust_http_types::SuccessEnvelope;
 use telegram_source_primitives::{
-    RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
+    RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD,
+    RETRIEVAL_SOURCE_RANK_SCORE_FIELD, RETRIEVAL_SOURCE_SCORE_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
     SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
     SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS,
@@ -86,6 +90,7 @@ fn fixture_config(base_url: String) -> RecommendationConfig {
 fn fixture_query() -> RecommendationQueryPayload {
     RecommendationQueryPayload {
         request_id: "req-phase-33".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit: 20,
         cursor: None,
@@ -508,6 +513,190 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
 }
 
 #[tokio::test]
+async fn caches_successful_individual_source_after_batch_failure() {
+    let (base_url, server_handle) = spawn_source_server().await;
+    let mut config = fixture_config(base_url);
+    config.redis_url = "not-a-redis-url".to_string();
+    config.source_order = vec!["FollowingSource".to_string()];
+    config.source_cache_enabled = true;
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:batch-fallback");
+    let query = fixture_query();
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache.clone(),
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&query, &[])
+        .await
+        .expect("retrieve fallback source candidates");
+    assert_eq!(response.candidates.len(), 1);
+    assert_eq!(
+        response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&1)
+    );
+
+    let mut cached_candidates = None;
+    for _ in 0..20 {
+        if let Some(candidates) = source_cache
+            .get_for_query("FollowingSource", &query)
+            .await
+            .candidates
+        {
+            cached_candidates = Some(candidates);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(cached_candidates.as_ref().map(Vec::len), Some(1));
+
+    let cached_response = orchestrator
+        .retrieve_candidates(&query, &[])
+        .await
+        .expect("retrieve cached fallback source candidates");
+    assert_eq!(cached_response.candidates.len(), 1);
+    assert!(
+        cached_response
+            .stages
+            .iter()
+            .any(|stage| stage.name == "FollowingSource_cached")
+    );
+    assert_eq!(
+        cached_response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&0)
+    );
+
+    server_handle.abort();
+    let _ = server_handle.await;
+}
+
+#[tokio::test]
+async fn applies_source_policy_on_cached_source_hits() {
+    let mut config = fixture_config("http://127.0.0.1:1".to_string());
+    config.source_order = vec!["FollowingSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:policy");
+    source_cache
+        .store_for_query(
+            "FollowingSource",
+            &fixture_query(),
+            &[fixture_candidate(
+                "post-cached",
+                "author-cached",
+                "FollowingSource",
+            )],
+        )
+        .await
+        .expect("seed source cache");
+
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&fixture_query(), &[])
+        .await
+        .expect("retrieve cached source candidates");
+
+    assert_eq!(response.candidates.len(), 1);
+    assert_eq!(
+        response.candidates[0].retrieval_lane.as_deref(),
+        Some("in_network")
+    );
+    assert!(response.candidates[0].recall_evidence.is_some());
+
+    let stage = response
+        .stages
+        .iter()
+        .find(|stage| stage.name == "FollowingSource_cached")
+        .expect("cached source stage");
+    assert_eq!(stage.output_count, 1);
+    assert_eq!(
+        stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("sourceCacheHit")),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        response
+            .provider_calls
+            .get(&source_provider_key("FollowingSource")),
+        Some(&0)
+    );
+}
+
+#[tokio::test]
+async fn does_not_reuse_source_cache_across_cursor_queries() {
+    let mut config = fixture_config("http://127.0.0.1:1".to_string());
+    config.source_order = vec!["FollowingSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let source_cache = SourceCache::new(&config.redis_url, true, 300, "test:cursor");
+    let first_query = fixture_query();
+    source_cache
+        .store_for_query(
+            "FollowingSource",
+            &first_query,
+            &[fixture_candidate(
+                "post-first-page",
+                "author-followed",
+                "FollowingSource",
+            )],
+        )
+        .await
+        .expect("seed source cache");
+
+    let mut continuation_query = first_query;
+    continuation_query.cursor = Some(
+        DateTime::parse_from_rfc3339("2026-04-16T00:00:00.000Z")
+            .expect("valid cursor")
+            .with_timezone(&Utc),
+    );
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7, 500),
+        config.source_order.clone(),
+        false,
+        4,
+        source_cache,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&continuation_query, &[])
+        .await
+        .expect("retrieve continuation candidates");
+
+    assert!(response.candidates.is_empty());
+    assert!(
+        response
+            .stages
+            .iter()
+            .all(|stage| stage.name != "FollowingSource_cached")
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_failure_counts
+            .get("FollowingSource"),
+        Some(&1)
+    );
+}
+
+#[tokio::test]
 async fn classifies_empty_source_success_without_failure_or_disabled_counts() {
     let (base_url, server_handle) = spawn_empty_source_server().await;
     let mut config = fixture_config(base_url);
@@ -687,4 +876,80 @@ fn lane_merge_deduplicates_multi_source_hits_and_preserves_secondary_evidence() 
         Some(1)
     );
     assert!(source_merge_detail_contract_violations(Some(&detail)).is_empty());
+}
+
+#[test]
+fn lane_merge_drops_non_finite_recall_evidence_values() {
+    let mut candidate = fixture_candidate("evidence-post", "author-1", "FollowingSource");
+    candidate.score = Some(0.7);
+    candidate.recall_evidence = Some(crate::contracts::RecallEvidencePayload {
+        primary_source: Some("FollowingSource".to_string()),
+        primary_lane: Some("social".to_string()),
+        source_rank: Some(f64::INFINITY),
+        source_rank_score: Some(f64::NAN),
+        source_score: Some(f64::NAN),
+        source_count: f64::NAN,
+        same_lane_source_count: f64::INFINITY,
+        cross_lane_source_count: f64::NEG_INFINITY,
+        confidence: f64::NAN,
+    });
+
+    let (merged, _, _) = merge_source_candidates(
+        &fixture_query(),
+        vec![("FollowingSource".to_string(), vec![candidate])],
+        &["FollowingSource".to_string()],
+    );
+
+    let merged = merged.first().expect("candidate should be preserved");
+    let evidence = merged
+        .recall_evidence
+        .as_ref()
+        .expect("merged candidate should expose recall evidence");
+    assert!(evidence.source_rank.is_none());
+    assert!(evidence.source_rank_score.is_none());
+    assert_eq!(evidence.source_score, Some(0.7));
+    assert!(evidence.confidence.is_finite());
+    let breakdown = merged
+        .score_breakdown
+        .as_ref()
+        .expect("merge should create score breakdown");
+    assert!(breakdown[RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD].is_finite());
+    assert!(breakdown[RETRIEVAL_SOURCE_RANK_SCORE_FIELD].is_finite());
+    assert_eq!(breakdown[RETRIEVAL_SOURCE_SCORE_FIELD], 0.7);
+}
+
+#[test]
+fn lane_merge_resets_stale_single_source_evidence_fields() {
+    let mut candidate = fixture_candidate("single-source-post", "author-1", "FollowingSource");
+    candidate.score = Some(0.7);
+    candidate.score_breakdown = Some(HashMap::from([
+        (RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD.to_string(), 9.0),
+        (RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD.to_string(), 8.0),
+        (RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD.to_string(), 7.0),
+        (RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD.to_string(), 6.0),
+        (RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(), 5.0),
+        (RETRIEVAL_CROSS_LANE_BONUS_FIELD.to_string(), 4.0),
+        (RETRIEVAL_MULTI_SOURCE_BONUS_FIELD.to_string(), 3.0),
+        ("retrievalDenseVectorScore".to_string(), 0.8),
+    ]));
+
+    let (merged, _, _) = merge_source_candidates(
+        &fixture_query(),
+        vec![("FollowingSource".to_string(), vec![candidate])],
+        &["FollowingSource".to_string()],
+    );
+
+    let merged = merged.first().expect("candidate should be preserved");
+    let breakdown = merged
+        .score_breakdown
+        .as_ref()
+        .expect("merge should preserve score breakdown");
+    assert_eq!(breakdown[RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD], 1.0);
+    assert_eq!(breakdown[RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_CROSS_LANE_BONUS_FIELD], 0.0);
+    assert_eq!(breakdown[RETRIEVAL_MULTI_SOURCE_BONUS_FIELD], 0.0);
+    assert_eq!(breakdown["retrievalDenseVectorScore"], 0.8);
 }

@@ -126,6 +126,7 @@ mod tests {
     fn query_with_subscriber(is_subscriber: bool) -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-subscription-filter".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "viewer-1".to_string(),
             limit: 20,
             cursor: None,

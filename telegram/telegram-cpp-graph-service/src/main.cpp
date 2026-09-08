@@ -55,17 +55,30 @@ int main() {
     tg_ops::GraphServiceMetrics metrics;
     auto http_runtime_metrics = std::make_shared<tg_http::HttpRuntimeMetrics>();
     metrics.attach_http_runtime_metrics(http_runtime_metrics);
-    tg_snapshot::SnapshotLoader loader(
-        config,
-        tg_snapshot::BackendSnapshotClient(
-            config.backend_snapshot_url,
-            config.internal_token,
-            config.backend_timeout_ms),
-        store,
-        metrics);
+    std::unique_ptr<tg_snapshot::SnapshotRefresher> loader;
+    if (config.snapshot_generation_v2_enabled) {
+      loader = std::make_unique<tg_snapshot::GenerationSnapshotLoader>(
+          config.snapshot_page_size,
+          config.max_neighbors_per_user,
+          std::make_shared<tg_snapshot::BackendGenerationClient>(
+              config.backend_snapshot_url,
+              config.internal_token,
+              config.backend_timeout_ms),
+          store,
+          metrics);
+    } else {
+      loader = std::make_unique<tg_snapshot::SnapshotLoader>(
+          config,
+          tg_snapshot::BackendSnapshotClient(
+              config.backend_snapshot_url,
+              config.internal_token,
+              config.backend_timeout_ms),
+          store,
+          metrics);
+    }
 
     try {
-      loader.refresh_once();
+      loader->refresh_once();
       std::cout << "[graph-kernel] bootstrap snapshot loaded" << std::endl;
     } catch (const std::exception& error) {
       std::cerr << "[graph-kernel] bootstrap snapshot failed: " << error.what() << std::endl;
@@ -76,7 +89,7 @@ int main() {
         std::this_thread::sleep_for(std::chrono::seconds(config.snapshot_refresh_secs));
         if (stop_token.stop_requested()) break;
         try {
-          loader.refresh_once();
+          loader->refresh_once();
           std::cout << "[graph-kernel] snapshot refreshed" << std::endl;
         } catch (const std::exception& error) {
           std::cerr << "[graph-kernel] snapshot refresh failed: " << error.what() << std::endl;

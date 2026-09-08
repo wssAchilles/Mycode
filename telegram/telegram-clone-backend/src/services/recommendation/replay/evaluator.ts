@@ -4,15 +4,25 @@ import type {
     ReplayCandidateSnapshot,
     ReplayEvaluationSummary,
     LoggingReadinessSummary,
+    ReplayMetricEligibilitySummary,
     ReplayRankingCandidate,
     ReplayRankingMetrics,
     ReplayRequestDelta,
     ReplayRequestSnapshot,
+    ReplayScoreProvenance,
+    ReplayScoreProvenanceSummary,
     ReplayVariantName,
 } from './contracts';
-import { rerankReplayCandidates } from './variantScorer';
+import { REPLAY_SCORE_PROVENANCE_NAMES } from './contracts';
+import { hasNativeReplayScore, rerankReplayCandidates } from './variantScorer';
 
 type RankingSummary = {
+    hasCompleteAttribution: boolean;
+    candidateSetComplete: boolean;
+    candidateSetReason: ReplayMetricEligibilitySummary['reasons'][number] | null;
+    scoreProvenanceComplete: boolean;
+    strictMetricsEligible: boolean;
+    candidateCount: number;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -30,10 +40,21 @@ type RankingSummary = {
 type BucketAccumulator = {
     requests: number;
     baseline: MetricAccumulator;
+    pairedBaseline: MetricAccumulator;
     variant: MetricAccumulator;
 };
 
 type MetricAccumulator = {
+    requests: number;
+    candidates: number;
+    feedbackRequests: number;
+    feedbackCandidates: number;
+    missingFeedbackRequests: number;
+    missingFeedbackCandidates: number;
+    scoreProvenanceUnavailableRequests: number;
+    truncatedRequests: number;
+    truncatedCandidates: number;
+    candidateSetReasons: Set<ReplayMetricEligibilitySummary['reasons'][number]>;
     clickHit: number;
     engagementHit: number;
     negativeHit: number;
@@ -52,6 +73,20 @@ type CandidateSetAccumulator = {
     truncatedRequests: number;
 };
 
+type CandidateSetAssessment = {
+    complete: boolean;
+    reason: ReplayMetricEligibilitySummary['reasons'][number] | null;
+};
+
+type ScoreProvenanceAccumulator = {
+    variant: ReplayVariantName;
+    requests: number;
+    candidates: number;
+    requestsWithFallback: number;
+    requestsMissingNativeScore: number;
+    scoreSourceCounts: Record<ReplayScoreProvenance, number>;
+};
+
 export function evaluateReplayRequests(
     requests: ReplayRequestSnapshot[],
     topK: number,
@@ -61,10 +96,12 @@ export function evaluateReplayRequests(
     const candidateCount = requests.reduce((sum, request) => sum + request.candidates.length, 0);
 
     const baselineTotals = createMetricAccumulator();
+    const pairedBaselineTotals = createMetricAccumulator();
     const variantTotals = createMetricAccumulator();
-    const byUserState: Record<string, BucketAccumulator> = {};
-    const byPipeline: Record<string, BucketAccumulator> = {};
-    const byCandidateSetKind: Record<string, CandidateSetAccumulator> = {};
+    const scoreProvenance = createScoreProvenanceAccumulator(variant);
+    const byUserState = Object.create(null) as Record<string, BucketAccumulator>;
+    const byPipeline = Object.create(null) as Record<string, BucketAccumulator>;
+    const byCandidateSetKind = Object.create(null) as Record<string, CandidateSetAccumulator>;
     const sourceSelection = new Map<string, { baseline: number; variant: number }>();
     const requestDiffs: ReplayRequestDelta[] = [];
     let overlapAtKSum = 0;
@@ -74,6 +111,7 @@ export function evaluateReplayRequests(
     let engagedRankLiftCount = 0;
     let clickedRankLiftSum = 0;
     let clickedRankLiftCount = 0;
+    let eligibleRankLiftRequestCount = 0;
     let observedCandidateSum = 0;
     let totalCandidateSum = 0;
     let truncatedRequestCount = 0;
@@ -104,27 +142,53 @@ export function evaluateReplayRequests(
                 ...candidate,
                 replayScore: -candidate.baselineRank,
                 replayRank: index + 1,
+                replayScoreProvenance: 'baseline_rank_v1' as const,
             }));
         const variantRanking = rerankReplayCandidates(request, variant);
+        const scoreProvenanceComplete = request.candidates.every((candidate) => (
+            hasNativeReplayScore(candidate, variant)
+        ));
+        addScoreProvenance(scoreProvenance, variantRanking, scoreProvenanceComplete);
 
-        const baselineSummary = summarizeRanking(baselineRanking, request.candidates, topK);
-        const variantSummary = summarizeRanking(variantRanking, request.candidates, topK);
+        const candidateSetAssessment = assessCandidateSet(request);
+        const baselineSummary = summarizeRanking(
+            baselineRanking,
+            request.candidates,
+            topK,
+            candidateSetAssessment,
+            true,
+        );
+        const variantSummary = summarizeRanking(
+            variantRanking,
+            request.candidates,
+            topK,
+            candidateSetAssessment,
+            scoreProvenanceComplete,
+        );
+        const pairedBaselineSummary: RankingSummary = {
+            ...baselineSummary,
+            scoreProvenanceComplete:
+                baselineSummary.scoreProvenanceComplete && variantSummary.scoreProvenanceComplete,
+            strictMetricsEligible:
+                baselineSummary.strictMetricsEligible && variantSummary.strictMetricsEligible,
+        };
         baselineSelectedTotal += Math.min(topK, baselineRanking.length);
         variantSelectedTotal += Math.min(topK, variantRanking.length);
 
         addRankingSummary(baselineTotals, baselineSummary);
+        addRankingSummary(pairedBaselineTotals, pairedBaselineSummary);
         addRankingSummary(variantTotals, variantSummary);
 
         const userStateKey = request.userState || '__unknown__';
         const pipelineKey = request.pipelineVersion || request.pipeline || '__unknown__';
         const candidateSetKind = request.candidateSetKind || '__unknown__';
-        addBucketSummary(byUserState, userStateKey, baselineSummary, variantSummary);
-        addBucketSummary(byPipeline, pipelineKey, baselineSummary, variantSummary);
+        addBucketSummary(byUserState, userStateKey, baselineSummary, pairedBaselineSummary, variantSummary);
+        addBucketSummary(byPipeline, pipelineKey, baselineSummary, pairedBaselineSummary, variantSummary);
         addCandidateSetSummary(byCandidateSetKind, candidateSetKind, request);
 
         observedCandidateSum += request.candidates.length;
         totalCandidateSum += request.candidateSetTotalCount ?? request.candidates.length;
-        if (request.candidateSetTruncated === true) {
+        if (candidateSetAssessment.reason === 'candidate_set_truncated') {
             truncatedRequestCount += 1;
         }
 
@@ -141,40 +205,44 @@ export function evaluateReplayRequests(
 
         overlapAtKSum += overlapAtK(baselineRanking, variantRanking, topK);
 
-        const engagedLift = rankLift(
-            request.candidates.filter((candidate) => candidate.labels.engagement),
-            baselineRanking,
-            variantRanking,
-        );
-        if (engagedLift.count > 0) {
-            engagedRankLiftSum += engagedLift.totalLift / engagedLift.count;
-            engagedRankLiftCount += 1;
-        }
+        if (baselineSummary.strictMetricsEligible && variantSummary.strictMetricsEligible) {
+            eligibleRankLiftRequestCount += 1;
+            const engagedLift = rankLift(
+                request.candidates.filter((candidate) => attributedLabels(candidate)?.engagement),
+                baselineRanking,
+                variantRanking,
+            );
+            if (engagedLift.count > 0) {
+                engagedRankLiftSum += engagedLift.totalLift / engagedLift.count;
+                engagedRankLiftCount += 1;
+            }
 
-        const clickedLift = rankLift(
-            request.candidates.filter((candidate) => candidate.labels.click),
-            baselineRanking,
-            variantRanking,
-        );
-        if (clickedLift.count > 0) {
-            clickedRankLiftSum += clickedLift.totalLift / clickedLift.count;
-            clickedRankLiftCount += 1;
-        }
+            const clickedLift = rankLift(
+                request.candidates.filter((candidate) => attributedLabels(candidate)?.click),
+                baselineRanking,
+                variantRanking,
+            );
+            if (clickedLift.count > 0) {
+                clickedRankLiftSum += clickedLift.totalLift / clickedLift.count;
+                clickedRankLiftCount += 1;
+            }
 
-        requestDiffs.push({
-            requestId: request.requestId,
-            userState: request.userState,
-            pipeline: pipelineKey,
-            baselineNdcgAtK: baselineSummary.ndcgAtK,
-            variantNdcgAtK: variantSummary.ndcgAtK,
-            deltaNdcgAtK: variantSummary.ndcgAtK - baselineSummary.ndcgAtK,
-            baselineRecallAtK: baselineSummary.recallAtK,
-            variantRecallAtK: variantSummary.recallAtK,
-        });
+            requestDiffs.push({
+                requestId: request.requestId,
+                userState: request.userState,
+                pipeline: pipelineKey,
+                baselineNdcgAtK: baselineSummary.ndcgAtK,
+                variantNdcgAtK: variantSummary.ndcgAtK,
+                deltaNdcgAtK: variantSummary.ndcgAtK - baselineSummary.ndcgAtK,
+                baselineRecallAtK: baselineSummary.recallAtK,
+                variantRecallAtK: variantSummary.recallAtK,
+            });
+        }
     }
 
-    const baseline = finalizeMetrics(baselineTotals, requestCount);
-    const variantMetrics = finalizeMetrics(variantTotals, requestCount);
+    const baseline = finalizeMetrics(baselineTotals);
+    const pairedBaseline = finalizeMetrics(pairedBaselineTotals);
+    const variantMetrics = finalizeMetrics(variantTotals);
 
     const bySelectedSource = Object.fromEntries(
         Array.from(sourceSelection.entries())
@@ -215,12 +283,16 @@ export function evaluateReplayRequests(
             attributedFeedbackRate: attributedFeedbackCandidates / Math.max(1, candidatesWithFeedback),
         },
         loggingReadiness,
+        scoreProvenance: finalizeScoreProvenance(scoreProvenance),
         baseline,
         variantMetrics,
-        delta: diffMetrics(variantMetrics, baseline),
+        delta: diffMetrics(variantMetrics, pairedBaseline),
         averageOverlapAtK: overlapAtKSum / Math.max(1, requestCount),
         averageEngagedRankLift: engagedRankLiftSum / Math.max(1, engagedRankLiftCount),
         averageClickedRankLift: clickedRankLiftSum / Math.max(1, clickedRankLiftCount),
+        eligibleRankLiftRequestDenominator: eligibleRankLiftRequestCount,
+        engagedRankLiftRequestDenominator: engagedRankLiftCount,
+        clickedRankLiftRequestDenominator: clickedRankLiftCount,
         byUserState: finalizeBuckets(byUserState),
         byPipeline: finalizeBuckets(byPipeline),
         byCandidateSetKind: finalizeCandidateSetBuckets(byCandidateSetKind),
@@ -285,50 +357,107 @@ function hasFeedbackJoinKey(candidate: ReplayCandidateSnapshot): boolean {
     );
 }
 
+function attributedLabels(candidate: ReplayCandidateSnapshot) {
+    if (!candidate.outcomeContractV1) return candidate.labels;
+    return candidate.outcomeContractV1.status === 'observed'
+        ? candidate.outcomeContractV1.labels
+        : undefined;
+}
+
 function candidateHasFeedback(candidate: ReplayCandidateSnapshot): boolean {
-    return candidate.labels.click
-        || candidate.labels.like
-        || candidate.labels.reply
-        || candidate.labels.repost
-        || candidate.labels.quote
-        || candidate.labels.share
-        || candidate.labels.dismiss
-        || candidate.labels.blockAuthor
-        || candidate.labels.report
-        || candidate.labels.dwellTimeMs > 0;
+    const labels = attributedLabels(candidate);
+    return Boolean(labels && (
+        labels.click
+        || labels.like
+        || labels.reply
+        || labels.repost
+        || labels.quote
+        || labels.share
+        || labels.dismiss
+        || labels.blockAuthor
+        || labels.report
+        || labels.dwellTimeMs > 0
+    ));
+}
+
+function assessCandidateSet(request: ReplayRequestSnapshot): CandidateSetAssessment {
+    if (request.candidateSetCompleteness !== 'complete_v1') {
+        return {
+            complete: false,
+            reason: 'candidate_set_completeness_unverified',
+        };
+    }
+    if (request.candidateSetTruncated === true) {
+        return {
+            complete: false,
+            reason: 'candidate_set_truncated',
+        };
+    }
+    const totalCount = request.candidateSetTotalCount;
+    if (
+        typeof totalCount !== 'number'
+        || !Number.isInteger(totalCount)
+        || totalCount < 0
+        || totalCount !== request.candidates.length
+    ) {
+        return {
+            complete: false,
+            reason: 'candidate_set_truncated',
+        };
+    }
+    return { complete: true, reason: null };
 }
 
 function summarizeRanking(
     ranking: ReplayRankingCandidate[],
     allCandidates: ReplayCandidateSnapshot[],
     topK: number,
+    candidateSetAssessment: CandidateSetAssessment,
+    scoreProvenanceComplete: boolean,
 ): RankingSummary {
     const rows = ranking.slice(0, topK);
+    const hasCompleteAttribution = allCandidates.length > 0
+        && allCandidates.every((candidate) => attributedLabels(candidate) !== undefined);
+    const strictMetricsEligible = hasCompleteAttribution
+        && candidateSetAssessment.complete
+        && scoreProvenanceComplete;
+    const feedbackCandidates = strictMetricsEligible ? allCandidates : [];
+    const feedbackRows = strictMetricsEligible ? rows : [];
     const uniqueAuthors = new Set(rows.map((candidate) => candidate.authorId).filter(Boolean));
     const sourceCounts = rows.reduce<Record<string, number>>((acc, candidate) => {
         acc[candidate.recallSource] = (acc[candidate.recallSource] || 0) + 1;
         return acc;
-    }, {});
-    const totalRelevant = allCandidates.filter((candidate) => candidate.labels.engagement).length;
-    const engagedRanks = rows
-        .filter((candidate) => candidate.labels.engagement)
+    }, Object.create(null) as Record<string, number>);
+    const totalRelevant = feedbackCandidates.filter((candidate) => (
+        attributedLabels(candidate)?.engagement
+    )).length;
+    const engagedRanks = feedbackRows
+        .filter((candidate) => attributedLabels(candidate)?.engagement)
         .map((candidate) => candidate.replayRank);
-    const clickedRanks = rows
-        .filter((candidate) => candidate.labels.click)
+    const clickedRanks = feedbackRows
+        .filter((candidate) => attributedLabels(candidate)?.click)
         .map((candidate) => candidate.replayRank);
 
     return {
-        clickHit: rows.some((candidate) => candidate.labels.click) ? 1 : 0,
-        engagementHit: rows.some((candidate) => candidate.labels.engagement) ? 1 : 0,
-        negativeHit: rows.some((candidate) => candidate.labels.negative) ? 1 : 0,
+        hasCompleteAttribution,
+        candidateSetComplete: candidateSetAssessment.complete,
+        candidateSetReason: candidateSetAssessment.reason,
+        scoreProvenanceComplete,
+        strictMetricsEligible,
+        candidateCount: allCandidates.length,
+        clickHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.click) ? 1 : 0,
+        engagementHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.engagement) ? 1 : 0,
+        negativeHit: feedbackRows.some((candidate) => attributedLabels(candidate)?.negative) ? 1 : 0,
         authorDiversity: uniqueAuthors.size / Math.max(1, rows.length),
         oonRatio: rows.filter((candidate) => candidate.inNetwork === false).length / Math.max(1, rows.length),
-        ndcgAtK: ndcgAtK(rows, allCandidates, topK),
-        mrrAtK: mrrAtK(rows),
+        ndcgAtK: ndcgAtK(feedbackRows, feedbackCandidates, topK),
+        mrrAtK: mrrAtK(feedbackRows),
         recallAtK: totalRelevant > 0
-            ? rows.filter((candidate) => candidate.labels.engagement).length / totalRelevant
+            ? feedbackRows.filter((candidate) => attributedLabels(candidate)?.engagement).length / totalRelevant
             : 0,
-        negativeRateAtK: rows.filter((candidate) => candidate.labels.negative).length / Math.max(1, rows.length),
+        negativeRateAtK: feedbackRows.filter((candidate) => (
+            attributedLabels(candidate)?.negative
+        )).length / Math.max(1, feedbackRows.length),
         sourceCounts,
         engagedAverageRank: averageRank(engagedRanks),
         clickedAverageRank: averageRank(clickedRanks),
@@ -357,13 +486,14 @@ function discountedGain(rows: ReplayCandidateSnapshot[]): number {
 }
 
 function relevance(candidate: ReplayCandidateSnapshot): number {
-    if (candidate.labels.engagement) return 1;
-    if (candidate.labels.click) return 0.35;
+    const labels = attributedLabels(candidate);
+    if (labels?.engagement) return 1;
+    if (labels?.click) return 0.35;
     return 0;
 }
 
 function mrrAtK(rows: ReplayCandidateSnapshot[]): number {
-    const firstRelevantIndex = rows.findIndex((row) => row.labels.engagement);
+    const firstRelevantIndex = rows.findIndex((row) => attributedLabels(row)?.engagement);
     return firstRelevantIndex >= 0 ? 1 / (firstRelevantIndex + 1) : 0;
 }
 
@@ -407,8 +537,63 @@ function rankLift(
     return { totalLift, count };
 }
 
+function createScoreProvenanceAccumulator(variant: ReplayVariantName): ScoreProvenanceAccumulator {
+    return {
+        variant,
+        requests: 0,
+        candidates: 0,
+        requestsWithFallback: 0,
+        requestsMissingNativeScore: 0,
+        scoreSourceCounts: Object.fromEntries(
+            REPLAY_SCORE_PROVENANCE_NAMES.map((name) => [name, 0]),
+        ) as Record<ReplayScoreProvenance, number>,
+    };
+}
+
+function addScoreProvenance(
+    target: ScoreProvenanceAccumulator,
+    ranking: ReplayRankingCandidate[],
+    nativeScoreComplete: boolean,
+): void {
+    target.requests += 1;
+    target.candidates += ranking.length;
+    if (!nativeScoreComplete) target.requestsMissingNativeScore += 1;
+    let requestHasFallback = false;
+    for (const candidate of ranking) {
+        target.scoreSourceCounts[candidate.replayScoreProvenance] += 1;
+        if (candidate.replayScoreProvenance.startsWith('fallback_')) {
+            requestHasFallback = true;
+        }
+    }
+    if (requestHasFallback) target.requestsWithFallback += 1;
+}
+
+function finalizeScoreProvenance(
+    totals: ScoreProvenanceAccumulator,
+): ReplayScoreProvenanceSummary {
+    return {
+        contractVersion: 'replay_score_provenance_v1',
+        variant: totals.variant,
+        requests: totals.requests,
+        candidates: totals.candidates,
+        requestsWithFallback: totals.requestsWithFallback,
+        requestsMissingNativeScore: totals.requestsMissingNativeScore,
+        scoreSourceCounts: totals.scoreSourceCounts,
+    };
+}
+
 function createMetricAccumulator(): MetricAccumulator {
     return {
+        requests: 0,
+        candidates: 0,
+        feedbackRequests: 0,
+        feedbackCandidates: 0,
+        missingFeedbackRequests: 0,
+        missingFeedbackCandidates: 0,
+        scoreProvenanceUnavailableRequests: 0,
+        truncatedRequests: 0,
+        truncatedCandidates: 0,
+        candidateSetReasons: new Set(),
         clickHit: 0,
         engagementHit: 0,
         negativeHit: 0,
@@ -422,31 +607,81 @@ function createMetricAccumulator(): MetricAccumulator {
 }
 
 function addRankingSummary(target: MetricAccumulator, summary: RankingSummary): void {
-    target.clickHit += summary.clickHit;
-    target.engagementHit += summary.engagementHit;
-    target.negativeHit += summary.negativeHit;
+    target.requests += 1;
+    target.candidates += summary.candidateCount;
     target.authorDiversity += summary.authorDiversity;
     target.oonRatio += summary.oonRatio;
-    target.ndcgAtK += summary.ndcgAtK;
-    target.mrrAtK += summary.mrrAtK;
-    target.recallAtK += summary.recallAtK;
-    target.negativeRateAtK += summary.negativeRateAtK;
+    if (!summary.hasCompleteAttribution) {
+        target.missingFeedbackRequests += 1;
+        target.missingFeedbackCandidates += summary.candidateCount;
+    }
+    if (!summary.scoreProvenanceComplete) {
+        target.scoreProvenanceUnavailableRequests += 1;
+    }
+    if (!summary.candidateSetComplete) {
+        target.truncatedRequests += 1;
+        target.truncatedCandidates += summary.candidateCount;
+        if (summary.candidateSetReason) target.candidateSetReasons.add(summary.candidateSetReason);
+    }
+    if (summary.strictMetricsEligible) {
+        target.feedbackRequests += 1;
+        target.feedbackCandidates += summary.candidateCount;
+        target.clickHit += summary.clickHit;
+        target.engagementHit += summary.engagementHit;
+        target.negativeHit += summary.negativeHit;
+        target.ndcgAtK += summary.ndcgAtK;
+        target.mrrAtK += summary.mrrAtK;
+        target.recallAtK += summary.recallAtK;
+        target.negativeRateAtK += summary.negativeRateAtK;
+    }
 }
 
 function finalizeMetrics(
     totals: MetricAccumulator,
-    requests: number,
 ): ReplayRankingMetrics {
+    const feedbackRequests = Math.max(1, totals.feedbackRequests);
     return {
-        clickHitRateAtK: totals.clickHit / Math.max(1, requests),
-        engagementHitRateAtK: totals.engagementHit / Math.max(1, requests),
-        negativeHitRateAtK: totals.negativeHit / Math.max(1, requests),
-        averageAuthorDiversityAtK: totals.authorDiversity / Math.max(1, requests),
-        averageOonRatioAtK: totals.oonRatio / Math.max(1, requests),
-        averageNdcgAtK: totals.ndcgAtK / Math.max(1, requests),
-        averageMrrAtK: totals.mrrAtK / Math.max(1, requests),
-        averageRecallAtK: totals.recallAtK / Math.max(1, requests),
-        averageNegativeRateAtK: totals.negativeRateAtK / Math.max(1, requests),
+        clickHitRateAtK: totals.clickHit / feedbackRequests,
+        engagementHitRateAtK: totals.engagementHit / feedbackRequests,
+        negativeHitRateAtK: totals.negativeHit / feedbackRequests,
+        averageAuthorDiversityAtK: totals.authorDiversity / Math.max(1, totals.requests),
+        averageOonRatioAtK: totals.oonRatio / Math.max(1, totals.requests),
+        averageNdcgAtK: totals.ndcgAtK / feedbackRequests,
+        averageMrrAtK: totals.mrrAtK / feedbackRequests,
+        averageRecallAtK: totals.recallAtK / feedbackRequests,
+        averageNegativeRateAtK: totals.negativeRateAtK / feedbackRequests,
+        metricEligibility: buildMetricEligibility(totals),
+    };
+}
+
+function buildMetricEligibility(totals: MetricAccumulator): ReplayMetricEligibilitySummary {
+    const reasons: ReplayMetricEligibilitySummary['reasons'] = [];
+    if (totals.missingFeedbackRequests > 0) reasons.push('missing_feedback');
+    for (const reason of [
+        'candidate_set_truncated',
+        'candidate_set_completeness_unverified',
+    ] as const) {
+        if (totals.candidateSetReasons.has(reason)) reasons.push(reason);
+    }
+    if (totals.scoreProvenanceUnavailableRequests > 0) {
+        reasons.push('score_provenance_unavailable');
+    }
+    const eligibleRequestDenominator = totals.feedbackRequests;
+    return {
+        contractVersion: 'replay_metric_eligibility_v2',
+        status: totals.requests === 0 || eligibleRequestDenominator === 0
+            ? 'not_evaluable'
+            : eligibleRequestDenominator === totals.requests
+                ? 'complete'
+                : 'partial',
+        reasons,
+        eligibleRequestDenominator,
+        eligibleCandidateDenominator: totals.feedbackCandidates,
+        observedRequestDenominator: totals.requests,
+        observedCandidateDenominator: totals.candidates,
+        excludedRequestCount: totals.requests - eligibleRequestDenominator,
+        excludedObservedCandidateCount: totals.candidates - totals.feedbackCandidates,
+        observedCandidateSetOnly: totals.truncatedRequests > 0,
     };
 }
 
@@ -464,6 +699,56 @@ function diffMetrics(
         averageMrrAtK: left.averageMrrAtK - right.averageMrrAtK,
         averageRecallAtK: left.averageRecallAtK - right.averageRecallAtK,
         averageNegativeRateAtK: left.averageNegativeRateAtK - right.averageNegativeRateAtK,
+        metricEligibility: mergeMetricEligibility(left.metricEligibility, right.metricEligibility),
+    };
+}
+
+function mergeMetricEligibility(
+    left: ReplayMetricEligibilitySummary,
+    right: ReplayMetricEligibilitySummary,
+): ReplayMetricEligibilitySummary {
+    const reasons: ReplayMetricEligibilitySummary['reasons'] = [];
+    for (const reason of [
+        'missing_feedback',
+        'candidate_set_truncated',
+        'candidate_set_completeness_unverified',
+        'score_provenance_unavailable',
+    ] as const) {
+        if (left.reasons.includes(reason) || right.reasons.includes(reason)) reasons.push(reason);
+    }
+    const eligibleRequestDenominator = Math.min(
+        left.eligibleRequestDenominator,
+        right.eligibleRequestDenominator,
+    );
+    const observedRequestDenominator = Math.max(
+        left.observedRequestDenominator,
+        right.observedRequestDenominator,
+    );
+    const excludedRequestCount = Math.max(left.excludedRequestCount, right.excludedRequestCount);
+    return {
+        contractVersion: 'replay_metric_eligibility_v2',
+        status: eligibleRequestDenominator === 0
+            ? 'not_evaluable'
+            : eligibleRequestDenominator === observedRequestDenominator
+                ? 'complete'
+                : 'partial',
+        reasons,
+        eligibleRequestDenominator,
+        eligibleCandidateDenominator: Math.min(
+            left.eligibleCandidateDenominator,
+            right.eligibleCandidateDenominator,
+        ),
+        observedRequestDenominator,
+        observedCandidateDenominator: Math.max(
+            left.observedCandidateDenominator,
+            right.observedCandidateDenominator,
+        ),
+        excludedRequestCount,
+        excludedObservedCandidateCount: Math.max(
+            left.excludedObservedCandidateCount,
+            right.excludedObservedCandidateCount,
+        ),
+        observedCandidateSetOnly: left.observedCandidateSetOnly || right.observedCandidateSetOnly,
     };
 }
 
@@ -471,15 +756,18 @@ function addBucketSummary(
     target: Record<string, BucketAccumulator>,
     key: string,
     baseline: RankingSummary,
+    pairedBaseline: RankingSummary,
     variant: RankingSummary,
 ): void {
     const bucket = target[key] || {
         requests: 0,
         baseline: createMetricAccumulator(),
+        pairedBaseline: createMetricAccumulator(),
         variant: createMetricAccumulator(),
     };
     bucket.requests += 1;
     addRankingSummary(bucket.baseline, baseline);
+    addRankingSummary(bucket.pairedBaseline, pairedBaseline);
     addRankingSummary(bucket.variant, variant);
     target[key] = bucket;
 }
@@ -511,15 +799,16 @@ function finalizeBuckets(
         Object.entries(buckets)
             .sort((left, right) => left[0].localeCompare(right[0]))
             .map(([key, bucket]) => {
-                const baseline = finalizeMetrics(bucket.baseline, bucket.requests);
-                const variant = finalizeMetrics(bucket.variant, bucket.requests);
+                const baseline = finalizeMetrics(bucket.baseline);
+                const pairedBaseline = finalizeMetrics(bucket.pairedBaseline);
+                const variant = finalizeMetrics(bucket.variant);
                 return [
                     key,
                     {
                         requests: bucket.requests,
                         baseline,
                         variant,
-                        delta: diffMetrics(variant, baseline),
+                        delta: diffMetrics(variant, pairedBaseline),
                     },
                 ];
             }),

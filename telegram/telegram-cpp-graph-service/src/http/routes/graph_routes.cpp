@@ -86,15 +86,13 @@ std::optional<std::string> default_empty_reason_for(
 }
 
 template <typename Candidate>
-HttpResponse candidate_response(
+nlohmann::json candidate_payload(
     const std::string& kernel,
     nlohmann::json payload,
     const tg_core::GraphStore::QueryCandidates<Candidate>& query_result,
     const std::size_t requested_limit,
     tg_ops::GraphServiceMetrics& metrics,
-    const std::chrono::steady_clock::time_point started_at) {
-  const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - started_at);
+    const std::chrono::milliseconds duration) {
   const auto truncated_count =
       query_result.available_count > query_result.candidates.size()
           ? query_result.available_count - query_result.candidates.size()
@@ -107,11 +105,13 @@ HttpResponse candidate_response(
       .requested_limit = requested_limit,
       .available_count = query_result.available_count,
       .truncated_count = truncated_count,
+      .scanned_count = query_result.scanned_count,
+      .visited_count = query_result.visited_count,
       .snapshot_version = query_result.snapshot_version,
       .snapshot_loaded_at = query_result.snapshot_loaded_at,
       .pruned_count = query_result.pruned_count,
       .frontier_max_size = query_result.frontier_max_size,
-      .budget_exhausted = query_result.budget_exhausted || truncated_count > 0,
+      .budget_exhausted = query_result.budget_exhausted,
       .empty = query_result.candidates.empty(),
       .empty_reason = empty_reason,
       .relation_kinds = relation_kinds_for(query_result.candidates),
@@ -128,7 +128,28 @@ HttpResponse candidate_response(
       empty_reason);
   payload["candidates"] = query_result.candidates;
   payload["diagnostics"] = diagnostics;
-  return json_response(200, tg_contracts::success_response(payload));
+  return payload;
+}
+
+template <typename Candidate>
+HttpResponse candidate_response(
+    const std::string& kernel,
+    nlohmann::json payload,
+    const tg_core::GraphStore::QueryCandidates<Candidate>& query_result,
+    const std::size_t requested_limit,
+    tg_ops::GraphServiceMetrics& metrics,
+    const std::chrono::steady_clock::time_point started_at) {
+  const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started_at);
+  return json_response(
+      200,
+      tg_contracts::success_response(candidate_payload(
+          kernel,
+          std::move(payload),
+          query_result,
+          requested_limit,
+          metrics,
+          duration)));
 }
 
 tg_core::NeighborQuery parse_neighbor_query(
@@ -174,6 +195,75 @@ tg_core::OverlapQuery parse_overlap_query(
       .user_b_id = read_required_string(body, "userBId"),
       .limit = read_optional_size(body, "limit", config.default_overlap_limit, config.max_query_limit),
   };
+}
+
+std::size_t read_required_batch_size(
+    const nlohmann::json& body,
+    const char* key,
+    const std::size_t max_value) {
+  if (!body.contains(key) || body.at(key).is_null()) {
+    throw RequestValidationError(std::string("missing required integer field: ") + key);
+  }
+  return read_optional_size(body, key, 0, max_value);
+}
+
+tg_core::GraphBatchQuery parse_batch_query(
+    const nlohmann::json& body,
+    const tg_config::ServiceConfig& config) {
+  auto query = tg_core::GraphBatchQuery{
+      .user_id = read_required_string(body, "userId"),
+      .direct_limit =
+          read_required_batch_size(body, "directLimit", config.max_query_limit),
+      .bridge_limit =
+          read_required_batch_size(body, "bridgeLimit", config.max_query_limit),
+      .max_depth = read_required_batch_size(body, "maxDepth", config.max_query_depth),
+      .max_branching_factor = config.max_branching_factor,
+      .max_visited_nodes = config.max_multi_hop_visited,
+      .max_candidates = config.max_multi_hop_candidates,
+      .excluded_user_ids = read_optional_string_set(body, "excludeUserIds"),
+  };
+  if (query.max_depth == 0) {
+    throw RequestValidationError("maxDepth must be at least 1");
+  }
+  query.excluded_user_ids.insert(query.user_id);
+  return query;
+}
+
+HttpResponse handle_batch_query(
+    const nlohmann::json& body,
+    tg_core::GraphStore& store,
+    const tg_config::ServiceConfig& config,
+    tg_ops::GraphServiceMetrics& metrics) {
+  const auto query = parse_batch_query(body, config);
+  const auto batch = store.batch(query);
+  if (!batch.has_value()) {
+    return error_response(503, "SNAPSHOT_UNAVAILABLE", "graph snapshot not loaded");
+  }
+
+  const auto loaded_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      batch->snapshot_loaded_at.time_since_epoch()).count();
+  auto payload = nlohmann::json{
+      {"userId", query.user_id},
+      {"snapshotVersion", batch->snapshot_version},
+      {"snapshotLoadedAtMs", loaded_at_ms},
+  };
+  payload["socialNeighbors"] = candidate_payload(
+      "social_neighbors", nlohmann::json::object(), batch->social_neighbors,
+      query.direct_limit, metrics, batch->durations.social_neighbors);
+  payload["recentEngagers"] = candidate_payload(
+      "recent_engagers", nlohmann::json::object(), batch->recent_engagers,
+      query.direct_limit, metrics, batch->durations.recent_engagers);
+  payload["bridgeUsers"] = candidate_payload(
+      "bridge_users", nlohmann::json::object(), batch->bridge_users,
+      query.bridge_limit, metrics, batch->durations.bridge_users);
+  payload["coEngagers"] = candidate_payload(
+      "co_engagers", nlohmann::json::object(), batch->co_engagers,
+      query.direct_limit, metrics, batch->durations.co_engagers);
+  payload["contentAffinityNeighbors"] = candidate_payload(
+      "content_affinity_neighbors", nlohmann::json::object(),
+      batch->content_affinity_neighbors, query.direct_limit, metrics,
+      batch->durations.content_affinity_neighbors);
+  return json_response(200, tg_contracts::success_response(payload));
 }
 
 using NeighborStoreMethod = tg_core::GraphStore::QueryCandidates<tg_contracts::NeighborCandidate> (
@@ -228,9 +318,11 @@ HttpResponse handle_graph_post(
     const tg_config::ServiceConfig& config,
     tg_core::GraphStore& store,
     tg_ops::GraphServiceMetrics& metrics) {
-  const auto metadata = store.metadata();
-  if (!metadata.loaded) {
-    return error_response(503, "SNAPSHOT_UNAVAILABLE", "graph snapshot not loaded");
+  if (request.path != "/graph/batch") {
+    const auto metadata = store.metadata();
+    if (!metadata.loaded) {
+      return error_response(503, "SNAPSHOT_UNAVAILABLE", "graph snapshot not loaded");
+    }
   }
 
   nlohmann::json body;
@@ -241,6 +333,9 @@ HttpResponse handle_graph_post(
   }
 
   try {
+    if (request.path == "/graph/batch") {
+      return handle_batch_query(body, store, config, metrics);
+    }
     if (request.path == "/graph/neighbors") {
       return handle_neighbor_query(body, "neighbors", &tg_core::GraphStore::direct_neighbors,
           store, config.default_neighbor_limit, config.max_query_limit, metrics);

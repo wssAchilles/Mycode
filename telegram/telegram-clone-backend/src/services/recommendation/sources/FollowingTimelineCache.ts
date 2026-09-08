@@ -46,14 +46,15 @@ export class FollowingTimelineCache {
         }
 
         if (toRefresh.length > 0) {
+            const globalLimit = this.maxPerAuthor * toRefresh.length;
             const freshPosts = await Post.find({
                 authorId: { $in: toRefresh },
                 createdAt: { $gte: ageCutoff },
                 isNews: { $ne: true },
                 deletedAt: null,
             })
-                .sort({ createdAt: -1 })
-                .limit(this.maxPerAuthor * toRefresh.length)
+                .sort({ createdAt: -1, _id: -1 })
+                .limit(globalLimit)
                 .lean();
 
             const grouped = new Map<AuthorId, IPost[]>();
@@ -63,6 +64,31 @@ export class FollowingTimelineCache {
                     list.push(post as unknown as IPost);
                 }
                 grouped.set(post.authorId, list);
+            }
+
+            // A prolific author can consume the shared limit before another author appears.
+            // Only backfill when the limit was saturated, keeping the normal path to one query.
+            if (freshPosts.length === globalLimit) {
+                const underfilledAuthorIds = toRefresh.filter(
+                    (id) => (grouped.get(id)?.length ?? 0) < this.maxPerAuthor,
+                );
+                const backfilled = await Promise.all(
+                    underfilledAuthorIds.map(async (authorId) => {
+                        const posts = await Post.find({
+                            authorId,
+                            createdAt: { $gte: ageCutoff },
+                            isNews: { $ne: true },
+                            deletedAt: null,
+                        })
+                            .sort({ createdAt: -1, _id: -1 })
+                            .limit(this.maxPerAuthor)
+                            .lean();
+                        return [authorId, posts as unknown as IPost[]] as const;
+                    }),
+                );
+                for (const [authorId, posts] of backfilled) {
+                    grouped.set(authorId, posts);
+                }
             }
 
             for (const id of toRefresh) {
@@ -85,8 +111,15 @@ export class FollowingTimelineCache {
             result.push(...posts);
         }
 
-        // 按时间降序返回
-        return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        // 按时间降序返回，并用唯一帖子 ID 稳定同时间顺序
+        return result.sort((a, b) => {
+            const createdAtOrder = b.createdAt.getTime() - a.createdAt.getTime();
+            if (createdAtOrder !== 0) return createdAtOrder;
+            const leftId = String(a._id || '');
+            const rightId = String(b._id || '');
+            if (leftId === rightId) return 0;
+            return rightId > leftId ? 1 : -1;
+        });
     }
 
     private computeAgeCutoff(): Date {

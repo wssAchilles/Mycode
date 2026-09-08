@@ -65,6 +65,7 @@ const CONFIG = {
 class SignalBuffer {
     private buffer: UserSignalInput[] = [];
     private flushTimer: NodeJS.Timeout | null = null;
+    private flushPromise: Promise<void> = Promise.resolve();
 
     constructor(
         private maxSize: number,
@@ -83,17 +84,21 @@ class SignalBuffer {
     }
 
     async flush(): Promise<void> {
-        if (this.buffer.length === 0) return;
+        if (this.buffer.length > 0) {
+            const toFlush = this.buffer;
+            this.buffer = [];
 
-        const toFlush = this.buffer;
-        this.buffer = [];
-
-        try {
-            await this.onFlush(toFlush);
-        } catch (error) {
-            console.error('[USS] Buffer flush error:', error);
-            // 失败的信号会丢失 (可以添加重试逻辑)
+            this.flushPromise = this.flushPromise.then(async () => {
+                try {
+                    await this.onFlush(toFlush);
+                } catch (error) {
+                    console.error('[USS] Buffer flush error:', error);
+                    // 失败的信号会丢失 (可以添加重试逻辑)
+                }
+            });
         }
+
+        await this.flushPromise;
     }
 
     private startFlushTimer(): void {
@@ -102,12 +107,12 @@ class SignalBuffer {
         }, this.flushIntervalMs);
     }
 
-    stop(): void {
+    async stop(): Promise<void> {
         if (this.flushTimer) {
             clearInterval(this.flushTimer);
             this.flushTimer = null;
         }
-        this.flush(); // 最后刷新
+        await this.flush(); // 最后刷新
     }
 }
 
@@ -115,6 +120,7 @@ class SignalBuffer {
 export class UserSignalService {
     private static instance: UserSignalService;
     private signalBuffer: SignalBuffer;
+    private pendingBatchWrites = new Set<Promise<void>>();
 
     private constructor() {
         // 初始化信号缓冲区
@@ -181,6 +187,24 @@ export class UserSignalService {
      * 批量记录信号 (高吞吐场景)
      */
     async logSignalsBatch(signals: Array<{
+        userId: string;
+        signalType: SignalType;
+        targetId: string;
+        targetType: TargetType;
+        targetAuthorId?: string;
+        productSurface: ProductSurface;
+        metadata?: Record<string, any>;
+    }>): Promise<void> {
+        const writePromise = this.persistSignalsBatch(signals);
+        this.pendingBatchWrites.add(writePromise);
+        try {
+            await writePromise;
+        } finally {
+            this.pendingBatchWrites.delete(writePromise);
+        }
+    }
+
+    private async persistSignalsBatch(signals: Array<{
         userId: string;
         signalType: SignalType;
         targetId: string;
@@ -425,8 +449,11 @@ export class UserSignalService {
     /**
      * 停止服务 (优雅关闭)
      */
-    stop(): void {
-        this.signalBuffer.stop();
+    async stop(): Promise<void> {
+        await this.signalBuffer.stop();
+        if (this.pendingBatchWrites.size > 0) {
+            await Promise.allSettled([...this.pendingBatchWrites]);
+        }
     }
 
     /**

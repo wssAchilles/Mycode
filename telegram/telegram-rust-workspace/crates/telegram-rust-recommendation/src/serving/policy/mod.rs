@@ -2,6 +2,7 @@ mod cache;
 mod cursor;
 mod fingerprint;
 mod guard;
+mod randomized_slate;
 
 pub use cache::{CACHE_KEY_MODE, CACHE_POLICY_MODE, evaluate_store_policy};
 pub use fingerprint::build_query_fingerprint;

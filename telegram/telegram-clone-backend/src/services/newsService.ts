@@ -5,6 +5,10 @@ import NewsSource from '../models/NewsSource';
 import NewsUserEvent, { NewsEventType } from '../models/NewsUserEvent';
 import NewsUserVector from '../models/NewsUserVector';
 import { recordRecommendationEvent } from './recommendation/events';
+import {
+  normalizeServedPosition,
+  SERVED_POSITION_CONTRACT_VERSION,
+} from './recommendation/events/positionContract';
 import { getNewsTrendsRustMode, newsTrendService, type NewsTrendTopicResult } from './newsTrends';
 import { newsStorageService } from './newsStorageService';
 import {
@@ -334,12 +338,6 @@ const computeSimilarity = (vector: Record<string, number> | null | undefined, ke
   return score / norm;
 };
 
-const normalizeNewsRank = (rank: unknown): number | undefined => {
-  if (typeof rank !== 'number' || !Number.isFinite(rank)) return undefined;
-  const normalized = Math.floor(rank);
-  return normalized > 0 ? normalized : undefined;
-};
-
 export const newsService = {
   async ingestArticles(items: NewsIngestItem[]): Promise<number> {
     let createdOrUpdated = 0;
@@ -647,6 +645,7 @@ export const newsService = {
   },
 
   async recordRecommendationFeedback(input: NewsRecommendationFeedbackInput) {
+    const servedPosition = normalizeServedPosition(input.rank);
     const article = await NewsArticle.findByPk(input.newsId, {
       attributes: ['id', 'source', 'sourceUrl', 'canonicalUrl', 'keywords'],
     });
@@ -659,7 +658,10 @@ export const newsService = {
       targetId: input.newsId,
       productSurface: 'news_feed',
       requestId: input.requestId,
-      position: normalizeNewsRank(input.rank),
+      servedPosition,
+      positionContractVersion: servedPosition === undefined
+        ? undefined
+        : SERVED_POSITION_CONTRACT_VERSION,
       recommendationSource: input.source || article?.source || 'NewsFeed',
       dwellTimeMs: input.eventType === 'dwell' ? input.dwellMs : undefined,
       isNews: true,

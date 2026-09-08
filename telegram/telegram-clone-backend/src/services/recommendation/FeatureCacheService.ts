@@ -43,6 +43,16 @@ const CONFIG = {
     },
 };
 
+function parseCachedEdgeScore(value: string): number | undefined {
+    const normalized = value.trim();
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized)) {
+        return undefined;
+    }
+
+    const score = Number(normalized);
+    return Number.isFinite(score) ? score : undefined;
+}
+
 // ========== L1 本地缓存 (LRU) ==========
 class L1Cache<T> {
     private cache = new Map<string, { value: T; expiresAt: number }>();
@@ -200,16 +210,21 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value) {
-                    const parsed = JSON.parse(l2Value) as IUserFeatureVector;
-                    result.set(userId, parsed);
-                    this.userEmbeddingL1.set(`${CONFIG.l2.keyPrefix}emb:${userId}`, parsed);
+                    try {
+                        const parsed = JSON.parse(l2Value) as IUserFeatureVector;
+                        result.set(userId, parsed);
+                        this.userEmbeddingL1.set(`${CONFIG.l2.keyPrefix}emb:${userId}`, parsed);
+                    } catch {
+                        missingFromL2.push(userId);
+                    }
                 } else {
                     missingFromL2.push(userId);
                 }
             }
         } catch {
             // Redis 不可用时所有缺失的都从 DB 读取
-            missingFromL2.push(...missingFromL1);
+            missingFromL2.length = 0;
+            missingFromL2.push(...missingFromL1.filter(userId => !result.has(userId)));
         }
 
         if (missingFromL2.length === 0) return result;
@@ -238,14 +253,13 @@ export class FeatureCacheService {
     /**
      * 失效用户嵌入缓存
      */
-    async invalidateUserEmbedding(userId: string): Promise<void> {
+    async invalidateUserEmbedding(userId: string, signal?: AbortSignal): Promise<void> {
+        signal?.throwIfAborted();
         const cacheKey = `${CONFIG.l2.keyPrefix}emb:${userId}`;
         this.userEmbeddingL1.delete(cacheKey);
-        try {
-            await redis.del(cacheKey);
-        } catch {
-            // 忽略
-        }
+        signal?.throwIfAborted();
+        await redis.del(cacheKey);
+        signal?.throwIfAborted();
     }
 
     // ========== RealGraph 边分数缓存 ==========
@@ -269,9 +283,11 @@ export class FeatureCacheService {
         try {
             const l2Result = await redis.get(cacheKey);
             if (l2Result !== null) {
-                const score = parseFloat(l2Result);
-                this.realGraphL1.set(cacheKey, score);
-                return score;
+                const score = parseCachedEdgeScore(l2Result);
+                if (score !== undefined) {
+                    this.realGraphL1.set(cacheKey, score);
+                    return score;
+                }
             }
         } catch {
             // 继续从 DB 读取
@@ -328,7 +344,11 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value !== null) {
-                    const score = parseFloat(l2Value);
+                    const score = parseCachedEdgeScore(l2Value);
+                    if (score === undefined) {
+                        missingFromL2.push(pair);
+                        continue;
+                    }
                     result.set(pairKey, score);
                     this.realGraphL1.set(
                         `${CONFIG.l2.keyPrefix}rg:${pair.sourceUserId}:${pair.targetUserId}`,
@@ -368,7 +388,10 @@ export class FeatureCacheService {
             }
         } catch {
             // 回退到逐个查询
-            for (const pair of missingFromL1) {
+            for (const pair of missingFromL1.filter(
+                ({ sourceUserId, targetUserId }) =>
+                    !result.has(`${sourceUserId}:${targetUserId}`)
+            )) {
                 const pairKey = `${pair.sourceUserId}:${pair.targetUserId}`;
                 const score = await RealGraphEdge.getEdgeScore(pair.sourceUserId, pair.targetUserId);
                 result.set(pairKey, score);
@@ -385,10 +408,29 @@ export class FeatureCacheService {
         sourceUserId: string,
         targetUserId: string
     ): Promise<void> {
-        const cacheKey = `${CONFIG.l2.keyPrefix}rg:${sourceUserId}:${targetUserId}`;
-        this.realGraphL1.delete(cacheKey);
+        await this.invalidateEdgeScores([{ sourceUserId, targetUserId }]);
+    }
+
+    /**
+     * 批量失效边分数缓存
+     */
+    async invalidateEdgeScores(
+        pairs: Array<{ sourceUserId: string; targetUserId: string }>
+    ): Promise<void> {
+        const cacheKeys = Array.from(new Set(
+            pairs.map(({ sourceUserId, targetUserId }) =>
+                `${CONFIG.l2.keyPrefix}rg:${sourceUserId}:${targetUserId}`
+            )
+        ));
+
+        for (const cacheKey of cacheKeys) {
+            this.realGraphL1.delete(cacheKey);
+        }
+
         try {
-            await redis.del(cacheKey);
+            if (cacheKeys.length > 0) {
+                await redis.del(...cacheKeys);
+            }
         } catch {
             // 忽略
         }
@@ -472,9 +514,13 @@ export class FeatureCacheService {
                 const l2Value = l2Results[i];
 
                 if (l2Value) {
-                    const parsed = JSON.parse(l2Value) as IClusterDefinition;
-                    result.set(clusterId, parsed);
-                    this.clusterL1.set(`${CONFIG.l2.keyPrefix}cluster:${clusterId}`, parsed);
+                    try {
+                        const parsed = JSON.parse(l2Value) as IClusterDefinition;
+                        result.set(clusterId, parsed);
+                        this.clusterL1.set(`${CONFIG.l2.keyPrefix}cluster:${clusterId}`, parsed);
+                    } catch {
+                        missingFromL2.push(clusterId);
+                    }
                 } else {
                     missingFromL2.push(clusterId);
                 }
@@ -495,7 +541,9 @@ export class FeatureCacheService {
             }
         } catch {
             // 回退到 DB 查询
-            const dbResult = await ClusterDefinition.getClustersBatch(missingFromL1);
+            const unresolvedClusterIds = missingFromL1.filter(clusterId => !result.has(clusterId));
+            if (unresolvedClusterIds.length === 0) return result;
+            const dbResult = await ClusterDefinition.getClustersBatch(unresolvedClusterIds);
             for (const [clusterId, cluster] of dbResult) {
                 result.set(clusterId, cluster);
             }

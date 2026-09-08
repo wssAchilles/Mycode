@@ -1,4 +1,5 @@
 import mongoose, { Document, Model, Schema } from 'mongoose';
+import type { RecommendationDecisionLogV1 } from '../services/recommendation/decisionLog/contracts';
 
 export interface RecommendationTraceSourceCount {
     source: string;
@@ -59,6 +60,10 @@ export interface RecommendationTraceReplayPool {
 
 export interface IRecommendationTrace extends Document {
     requestId: string;
+    decisionId?: string;
+    clientRequestId?: string;
+    decisionLogV1?: RecommendationDecisionLogV1;
+    decisionLogV1Sha256?: string;
     userId: string;
     productSurface: string;
     pipeline?: string;
@@ -68,6 +73,9 @@ export interface IRecommendationTrace extends Document {
     replayPoolFingerprint?: string;
     traceVersion?: string;
     traceMode?: string;
+    runtimeMode?: 'off' | 'shadow' | 'primary';
+    servingOwner?: 'node' | 'rust';
+    fallbackReason?: 'rust_primary_empty_fallback_node' | 'rust_primary_error_fallback_node';
     owner?: string;
     fallbackMode?: string;
     degradedReasons: string[];
@@ -225,6 +233,13 @@ const RecommendationTraceSchema = new Schema<IRecommendationTrace>(
             unique: true,
             index: true,
         },
+        decisionId: String,
+        clientRequestId: String,
+        decisionLogV1: {
+            type: Schema.Types.Mixed,
+            default: undefined,
+        },
+        decisionLogV1Sha256: String,
         userId: {
             type: String,
             required: true,
@@ -254,6 +269,9 @@ const RecommendationTraceSchema = new Schema<IRecommendationTrace>(
             type: String,
             index: true,
         },
+        runtimeMode: String,
+        servingOwner: String,
+        fallbackReason: String,
         owner: {
             type: String,
             index: true,
@@ -336,6 +354,7 @@ RecommendationTraceSchema.index({ userId: 1, createdAt: -1 });
 RecommendationTraceSchema.index({ productSurface: 1, createdAt: -1 });
 RecommendationTraceSchema.index({ pipeline: 1, createdAt: -1 });
 RecommendationTraceSchema.index({ pipelineVersion: 1, createdAt: -1 });
+RecommendationTraceSchema.index({ runtimeMode: 1, createdAt: -1, servingOwner: 1 });
 RecommendationTraceSchema.index({ 'sourceCounts.source': 1, createdAt: -1 });
 
 const RecommendationTrace = mongoose.model<IRecommendationTrace, Model<IRecommendationTrace>>(

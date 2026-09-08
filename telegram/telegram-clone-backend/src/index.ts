@@ -18,6 +18,7 @@ import { registerRoutes } from './bootstrap/routes';
 import { registerCronJobs } from './bootstrap/scheduler';
 import { initializeSocketAndQueue } from './bootstrap/socket';
 import { createChildLogger } from './utils/logger';
+import { userSignalService } from './services/recommendation/UserSignalService';
 import {
   runtimeControlPlane,
   FailureClass,
@@ -131,9 +132,10 @@ app.get('/ready', async (_req, res) => {
 
   const services = [mongo, postgres, redisStatus, ai];
   const overallError = services.some((s) => s.status === 'error');
-  const degraded = services.some((s) => s.status === 'degraded');
   const controlPlane = runtimeControlPlane.snapshot();
   const capabilityOwners = buildNodeCapabilityOwnershipSummary();
+  const degraded = services.some((s) => s.status === 'degraded')
+    || !capabilityOwners.graphKernelConfig.valid;
 
   res.status(overallError ? 503 : degraded ? 206 : 200).json({
     status: overallError ? 'error' : degraded ? 'degraded' : 'ok',
@@ -145,6 +147,7 @@ app.get('/ready', async (_req, res) => {
       summary: controlPlane.summary,
       capabilitiesSummary: capabilityOwners.summary,
       nodeStrategicShape: capabilityOwners.nodeStrategicShape,
+      graphKernelConfig: capabilityOwners.graphKernelConfig,
     },
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
@@ -254,13 +257,21 @@ async function gracefulShutdown(signal: string) {
   }, 10_000);
 
   try {
-    // 停止接受新连接
-    httpServer.close(() => {
-      log.info('HTTP 服务器已停止接受新连接');
+    // 停止接受新连接，并等待在途请求排空
+    const httpServerClosed = new Promise<void>((resolve) => {
+      try {
+        httpServer.close(() => {
+          log.info('HTTP 服务器已停止接受新连接');
+          resolve();
+        });
+      } catch {
+        resolve();
+      }
     });
 
-    // 并行关闭所有子系统
+    // 先关闭传输层，避免在用户信号 flush 期间继续产生新事件
     await Promise.allSettled([
+      httpServerClosed,
       // 关闭 Socket.IO
       (async () => {
         try {
@@ -276,6 +287,13 @@ async function gracefulShutdown(signal: string) {
           await queueService.close();
         } catch { /* queue 可能未初始化 */ }
       })(),
+    ]);
+
+    // 等待用户信号缓冲区写入，避免数据库断开后丢失尾部信号
+    await userSignalService.stop();
+
+    // 传输层和信号缓冲区都已关闭，再断开持久化依赖
+    await Promise.allSettled([
       // 关闭数据库连接
       (async () => {
         try {

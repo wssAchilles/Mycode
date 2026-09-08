@@ -21,6 +21,7 @@ use telegram_source_primitives::{
     POPULAR_SOURCE,
 };
 
+use super::clock::ranking_now;
 use super::context::{env_bool, related_post_ids, space_feed_experiment_flag};
 
 mod author_socialgraph_filter;
@@ -345,7 +346,7 @@ fn age_filter(
         );
     }
 
-    let now = chrono::Utc::now();
+    let now = ranking_now();
     let sparse_sources = HashSet::<&str>::from_iter(SPARSE_RECALL_SOURCES.iter().copied());
     let (kept, removed) = partition(candidates, |candidate| {
         let max_age_days = candidate

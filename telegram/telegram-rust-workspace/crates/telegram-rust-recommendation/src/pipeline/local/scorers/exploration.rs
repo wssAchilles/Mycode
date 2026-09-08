@@ -14,19 +14,48 @@ use telegram_ranking_primitives::{
 
 /// Thompson Sampling using Beta distribution approximation
 fn thompson_sample(successes: f64, failures: f64, jitter: f64) -> f64 {
-    let alpha: f64 = 1.0 + successes;
-    let beta_val: f64 = 1.0 + failures;
-    let mean: f64 = alpha / (alpha + beta_val);
-    let variance: f64 =
-        (alpha * beta_val) / ((alpha + beta_val).powi(2) * (alpha + beta_val + 1.0));
+    let alpha = 1.0 + finite_nonnegative(successes);
+    let beta_val = 1.0 + finite_nonnegative(failures);
+    let scale = alpha.max(beta_val);
+    let alpha_scaled = alpha / scale;
+    let beta_scaled = beta_val / scale;
+    let scaled_total = alpha_scaled + beta_scaled;
+    let mean = alpha_scaled / scaled_total;
+    let inverse_scale = 1.0 / scale;
+    let variance = (alpha_scaled * beta_scaled / scaled_total.powi(2))
+        * (inverse_scale / (scaled_total + inverse_scale));
     let stddev: f64 = variance.sqrt();
     let z_score: f64 = (jitter * 6.0) - 3.0;
     (mean + z_score * stddev).clamp(0.0, 1.0)
 }
 
+fn finite_nonnegative(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn finite_nonnegative_product(value: f64, multiplier: f64) -> f64 {
+    let product = finite_nonnegative(value) * multiplier;
+    if product.is_finite() {
+        product
+    } else {
+        f64::MAX
+    }
+}
+
+fn finite_nonnegative_sum(values: impl IntoIterator<Item = f64>) -> f64 {
+    values.into_iter().fold(0.0, |total, value| {
+        let sum = total + finite_nonnegative(value);
+        if sum.is_finite() { sum } else { f64::MAX }
+    })
+}
+
 use super::helpers::{
     breakdown_value, build_stage, clamp01, default_exploration_rate, exploration_risk,
-    merge_breakdown, stable_unit_interval, user_state,
+    finite_score_product, merge_breakdown, stable_unit_interval, user_state,
 };
 
 pub(super) fn exploration_scorer(
@@ -147,7 +176,7 @@ pub(super) fn apply_exploration(
         0.0
     };
     let multiplier = (1.0 + strength).clamp(1.0, 1.16);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(
@@ -241,24 +270,39 @@ pub(super) fn apply_bandit_exploration(
     candidate: &mut RecommendationCandidatePayload,
     plan: &BanditExplorationPlan,
 ) {
-    let trials = (candidate.view_count.unwrap_or_default()
-        + breakdown_value(candidate.score_breakdown.as_ref(), "retrievalSourceRank").max(1.0))
+    let trials = finite_nonnegative_sum([
+        finite_nonnegative(candidate.view_count.unwrap_or_default()),
+        finite_nonnegative(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "retrievalSourceRank",
+        ))
+        .max(1.0),
+    ])
     .max(1.0);
-    let positive_rewards = candidate.like_count.unwrap_or_default()
-        + candidate.comment_count.unwrap_or_default() * 1.8
-        + candidate.repost_count.unwrap_or_default() * 2.4
-        + candidate
-            .action_scores
-            .as_ref()
-            .map(|scores| {
-                scores.like * 2.0 + scores.reply * 3.0 + scores.repost * 2.8 + scores.dwell
-            })
-            .unwrap_or_default();
-    let negative_rewards = breakdown_value(
-        candidate.score_breakdown.as_ref(),
-        NEGATIVE_FEEDBACK_STRENGTH_FIELD,
-    ) * trials
-        * 0.5;
+    let action_rewards = candidate.action_scores.as_ref().map(|scores| {
+        finite_nonnegative_sum([
+            finite_nonnegative_product(scores.like, 2.0),
+            finite_nonnegative_product(scores.reply, 3.0),
+            finite_nonnegative_product(scores.repost, 2.8),
+            finite_nonnegative(scores.dwell),
+        ])
+    });
+    let positive_rewards = finite_nonnegative_sum([
+        finite_nonnegative(candidate.like_count.unwrap_or_default()),
+        finite_nonnegative_product(candidate.comment_count.unwrap_or_default(), 1.8),
+        finite_nonnegative_product(candidate.repost_count.unwrap_or_default(), 2.4),
+        action_rewards.unwrap_or_default(),
+    ]);
+    let negative_rewards = finite_nonnegative_product(
+        finite_nonnegative_product(
+            breakdown_value(
+                candidate.score_breakdown.as_ref(),
+                NEGATIVE_FEEDBACK_STRENGTH_FIELD,
+            ),
+            trials,
+        ),
+        0.5,
+    );
 
     // Thompson Sampling: sample from Beta(alpha, beta) distribution
     let deterministic_jitter = stable_unit_interval(&ctx.query.request_id, &candidate.post_id);
@@ -296,7 +340,7 @@ pub(super) fn apply_bandit_exploration(
     let lift = if eligible {
         plan.epsilon
             * (thompson_value * 0.32
-                + exploration_bonus * 0.28
+                + exploration_bonus * plan.uncertainty_weight
                 + novelty * 0.22
                 + trend_strength * 0.12
                 + deterministic_jitter * 0.06)
@@ -304,7 +348,7 @@ pub(super) fn apply_bandit_exploration(
         0.0
     };
     let multiplier = (1.0 + lift).clamp(1.0, 1.14);
-    let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+    let adjusted = finite_score_product(candidate.weighted_score.unwrap_or_default(), multiplier);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "banditEligible", eligible as i32 as f64);
@@ -321,4 +365,26 @@ pub(super) fn apply_bandit_exploration(
     merge_breakdown(candidate, "banditRisk", risk);
     merge_breakdown(candidate, "banditJitter", deterministic_jitter);
     merge_breakdown(candidate, "banditMultiplier", multiplier);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{finite_nonnegative, finite_nonnegative_sum, thompson_sample};
+
+    #[test]
+    fn bandit_arithmetic_stays_finite_for_extreme_rewards() {
+        let alpha = 4.0_f64;
+        let beta = 3.0_f64;
+        let expected = alpha / (alpha + beta)
+            + 1.5 * ((alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0))).sqrt();
+        assert!((thompson_sample(3.0, 2.0, 0.75) - expected).abs() < f64::EPSILON);
+
+        let sample = thompson_sample(f64::MAX, f64::MAX, 0.5);
+        assert!(sample.is_finite());
+        assert!((0.0..=1.0).contains(&sample));
+        assert_eq!(finite_nonnegative_sum([f64::MAX, f64::MAX]), f64::MAX);
+        assert_eq!(finite_nonnegative(-1.0), 0.0);
+        assert_eq!(finite_nonnegative(f64::NAN), 0.0);
+        assert_eq!(finite_nonnegative(f64::INFINITY), 0.0);
+    }
 }

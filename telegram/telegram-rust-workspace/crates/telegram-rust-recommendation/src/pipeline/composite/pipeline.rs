@@ -8,6 +8,7 @@ use crate::contracts::{
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::selectors::top_k::select_candidates;
+use crate::serving::cursor::ranked_cursor_requires_abstention;
 
 use super::interleave_merger::InterleaveMerger;
 use super::traits::{CandidateGroup, CandidateMerger, ContentPipeline};
@@ -86,7 +87,9 @@ impl CompositeRecommendationPipeline {
         &self,
         query: RecommendationQueryPayload,
     ) -> Result<RecommendationResultPayload> {
-        if self.outer_sources.is_empty() {
+        if self.outer_sources.is_empty()
+            || ranked_cursor_requires_abstention(query.in_network_only, query.cursor.is_some())
+        {
             return self.inner.run(query).await;
         }
 

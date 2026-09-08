@@ -15,6 +15,12 @@
 import { realGraphService } from '../recommendation/RealGraphService';
 import RealGraphEdge, { DECAY_CONFIG } from '../../models/RealGraphEdge';
 import RecommendationJobRun from '../../models/RecommendationJobRun';
+import {
+    repairLeaseCoordinator,
+    repairRunId,
+    type RepairCompletionProvenance,
+    type RepairJobCoordinator,
+} from './coordination/repairLease';
 
 type Trigger = 'cron' | 'manual' | 'script';
 
@@ -33,15 +39,36 @@ const CONFIG = {
     progressInterval: 5,               // 每 N 批次报告一次
 };
 
+const JOB_NAME = 'realgraph-decay-repair';
+
+function assertEvidenceWrite(
+    result: { acknowledged: boolean; matchedCount?: number; upsertedCount?: number },
+    phase: string,
+): void {
+    if (!result.acknowledged || (result.matchedCount ?? 0) + (result.upsertedCount ?? 0) === 0) {
+        throw new Error(`[RealGraphDecayJob] ${phase} evidence write was not applied`);
+    }
+}
+
+function evidenceTrigger(value: string | undefined): Trigger {
+    if (value === 'cron' || value === 'manual' || value === 'script') {
+        return value;
+    }
+    throw new Error('[RealGraphDecayJob] Invalid completion trigger provenance');
+}
+
 // ========== 作业类 ==========
 export class RealGraphDecayJob {
     private isRunning = false;
-    private abortRequested = false;
+    private abortController: AbortController | undefined;
+
+    constructor(private readonly coordinator: RepairJobCoordinator = repairLeaseCoordinator) {}
 
     /**
      * 运行衰减作业
      */
-    async run(options?: {
+    async run(options: {
+        epoch: string;
         skipCleanup?: boolean;
         trigger?: Trigger;
         onProgress?: (batches: number, edges: number) => void;
@@ -51,96 +78,195 @@ export class RealGraphDecayJob {
         batches: number;
         durationMs: number;
     }> {
-        if (this.isRunning) {
-            throw new Error('[RealGraphDecayJob] Job is already running');
-        }
+        const epoch = String(options?.epoch ?? '').trim();
+        const evidenceId = repairRunId(JOB_NAME, epoch);
+        const evidenceFilter = { _id: evidenceId };
+        const trigger = options.trigger ?? 'manual';
+        const releaseTag = process.env.RELEASE_TAG || process.env.SENTRY_RELEASE;
 
-        this.isRunning = true;
-        this.abortRequested = false;
+        return this.coordinator.execute(
+                JOB_NAME,
+                epoch,
+                async (leaseSignal, attempt) => {
+                    leaseSignal.throwIfAborted();
+                    this.isRunning = true;
+                    const abortController = new AbortController();
+                    this.abortController = abortController;
+                    const signal = AbortSignal.any([leaseSignal, abortController.signal]);
+                    const startTime = Date.now();
+                    const startedAt = new Date(attempt.startedAt);
+                    let evidenceStarted = false;
+                    try {
+                        const write = await RecommendationJobRun.updateOne(
+                            {
+                                ...evidenceFilter,
+                                status: { $ne: 'success' },
+                                $or: [
+                                    { 'summary.fenceToken': { $lt: attempt.fenceToken } },
+                                    { 'summary.fenceToken': { $exists: false } },
+                                ],
+                            },
+                            {
+                                $set: {
+                                    status: 'running',
+                                    jobName: JOB_NAME,
+                                    mode: 'repair',
+                                    startedAt,
+                                    trigger,
+                                    releaseTag,
+                                    summary: {
+                                        mode: 'repair',
+                                        epoch,
+                                        attemptId: attempt.attemptId,
+                                        fenceToken: attempt.fenceToken,
+                                        attemptStartedAt: attempt.startedAt,
+                                    },
+                                },
+                                $unset: {
+                                    finishedAt: 1,
+                                    durationMs: 1,
+                                    counts: 1,
+                                    error: 1,
+                                },
+                            },
+                            { upsert: true, signal },
+                        );
+                        assertEvidenceWrite(write, 'running');
+                        evidenceStarted = true;
+                        signal.throwIfAborted();
+                        let decayedEdges = 0;
+                        let cleanedEdges = 0;
+                        let batches = 0;
 
-        const startTime = Date.now();
-        const startedAt = new Date();
-        const runDoc = await RecommendationJobRun.create({
-            jobName: 'realgraph-decay-repair',
-            mode: 'repair',
-            status: 'running',
-            startedAt,
-            trigger: options?.trigger ?? 'manual',
-            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
-            summary: { mode: 'repair' },
-        });
-        let decayedEdges = 0;
-        let cleanedEdges = 0;
-        let batches = 0;
+                        console.log('[RealGraphDecayJob] Starting decay job...');
 
-        try {
-            console.log('[RealGraphDecayJob] Starting decay job...');
+                        const decayResult = await realGraphService.applyDailyDecay(signal);
+                        signal.throwIfAborted();
+                        if (decayResult.errors > 0) {
+                            throw new Error('[RealGraphDecayJob] Decay completed with mutation errors');
+                        }
+                        decayedEdges = decayResult.totalProcessed;
+                        batches = decayResult.batches;
 
-            // Step 1: 应用衰减
-            const decayResult = await realGraphService.applyDailyDecay();
-            decayedEdges = decayResult.totalProcessed;
-            batches = decayResult.batches;
+                        console.log(
+                            `[RealGraphDecayJob] Decay complete: ${decayedEdges} edges in ${batches} batches`
+                        );
 
-            console.log(
-                `[RealGraphDecayJob] Decay complete: ${decayedEdges} edges in ${batches} batches`
-            );
+                        if (CONFIG.cleanupEnabled && !options.skipCleanup) {
+                            signal.throwIfAborted();
+                            cleanedEdges = await realGraphService.cleanupStaleEdges(
+                                CONFIG.cleanupMinScore,
+                                CONFIG.cleanupInactiveDays,
+                                signal,
+                            );
+                            signal.throwIfAborted();
 
-            // Step 2: 清理过期边 (可选)
-            if (CONFIG.cleanupEnabled && !options?.skipCleanup) {
-                cleanedEdges = await realGraphService.cleanupStaleEdges(
-                    CONFIG.cleanupMinScore,
-                    CONFIG.cleanupInactiveDays
-                );
+                            console.log(`[RealGraphDecayJob] Cleanup complete: ${cleanedEdges} edges removed`);
+                        }
 
-                console.log(`[RealGraphDecayJob] Cleanup complete: ${cleanedEdges} edges removed`);
-            }
+                        if (options.onProgress) {
+                            options.onProgress(batches, decayedEdges);
+                        }
 
-            if (options?.onProgress) {
-                options.onProgress(batches, decayedEdges);
-            }
-
-            const durationMs = Date.now() - startTime;
-            const finishedAt = new Date();
-            const counts = { decayedEdges, cleanedEdges, batches, durationMs };
-            await RecommendationJobRun.updateOne(
-                { _id: runDoc._id },
-                {
-                    $set: {
-                        status: 'success',
-                        finishedAt,
-                        durationMs,
-                        counts,
-                        summary: {
-                            mode: 'repair',
-                            counts,
+                        return {
+                            decayedEdges,
+                            cleanedEdges,
+                            batches,
+                            durationMs: Date.now() - startTime,
+                        };
+                    } catch (error) {
+                        if (evidenceStarted && !leaseSignal.aborted) {
+                            const finishedAt = new Date();
+                            const write = await RecommendationJobRun.updateOne(
+                                {
+                                    ...evidenceFilter,
+                                    status: 'running',
+                                    'summary.attemptId': attempt.attemptId,
+                                    'summary.fenceToken': attempt.fenceToken,
+                                },
+                                {
+                                    $set: {
+                                        jobName: JOB_NAME,
+                                        mode: 'repair',
+                                        status: 'failed',
+                                        startedAt,
+                                        finishedAt,
+                                        durationMs: finishedAt.getTime() - startedAt.getTime(),
+                                        trigger,
+                                        releaseTag,
+                                        summary: {
+                                            mode: 'repair',
+                                            epoch,
+                                            attemptId: attempt.attemptId,
+                                            fenceToken: attempt.fenceToken,
+                                            attemptStartedAt: attempt.startedAt,
+                                        },
+                                        error: error instanceof Error ? error.message : String(error),
+                                    },
+                                },
+                                { signal: leaseSignal },
+                            );
+                            assertEvidenceWrite(write, 'failure');
+                        }
+                        throw error;
+                    } finally {
+                        this.isRunning = false;
+                        if (this.abortController === abortController) {
+                            this.abortController = undefined;
+                        }
+                    }
+                },
+                async (counts, provenance) => {
+                    const finishedAt = new Date(provenance.completedAt);
+                    const write = await RecommendationJobRun.updateOne(
+                        {
+                            ...evidenceFilter,
+                            $or: [
+                                {
+                                    'summary.attemptId': provenance.attemptId,
+                                    'summary.fenceToken': provenance.fenceToken,
+                                },
+                                { 'summary.fenceToken': { $lt: provenance.fenceToken } },
+                                {
+                                    status: { $exists: false },
+                                    'summary.fenceToken': { $exists: false },
+                                },
+                            ],
                         },
-                    },
-                },
-            );
+                        {
+                            $set: {
+                                jobName: JOB_NAME,
+                                mode: 'repair',
+                                status: 'success',
+                                startedAt: new Date(provenance.startedAt),
+                                finishedAt,
+                                durationMs: counts.durationMs,
+                                trigger: evidenceTrigger(provenance.trigger),
+                                releaseTag: provenance.releaseTag,
+                                counts,
+                                summary: {
+                                    mode: 'repair',
+                                    epoch,
+                                    attemptId: provenance.attemptId,
+                                    fenceToken: provenance.fenceToken,
+                                    attemptStartedAt: provenance.startedAt,
+                                    completedAt: provenance.completedAt,
+                                    counts,
+                                },
+                            },
+                            $unset: { error: 1 },
+                        },
+                        { upsert: true },
+                    );
+                    assertEvidenceWrite(write, 'success');
 
-            console.log(
-                `[RealGraphDecayJob] Completed in ${durationMs}ms - ` +
-                `decayed: ${decayedEdges}, cleaned: ${cleanedEdges}`
-            );
-
-            return counts;
-        } catch (error) {
-            const finishedAt = new Date();
-            await RecommendationJobRun.updateOne(
-                { _id: runDoc._id },
-                {
-                    $set: {
-                        status: 'failed',
-                        finishedAt,
-                        durationMs: finishedAt.getTime() - startedAt.getTime(),
-                        error: error instanceof Error ? error.message : String(error),
-                    },
+                    console.log(
+                        `[RealGraphDecayJob] Completed in ${counts.durationMs}ms - ` +
+                        `decayed: ${counts.decayedEdges}, cleaned: ${counts.cleanedEdges}`
+                    );
                 },
+                { trigger, releaseTag },
             );
-            throw error;
-        } finally {
-            this.isRunning = false;
-        }
     }
 
     /**
@@ -185,7 +311,7 @@ export class RealGraphDecayJob {
      * 请求中止
      */
     abort(): void {
-        this.abortRequested = true;
+        this.abortController?.abort(new Error('[RealGraphDecayJob] Abort requested'));
     }
 
     /**

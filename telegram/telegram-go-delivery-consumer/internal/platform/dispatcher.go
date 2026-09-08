@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -41,11 +42,23 @@ func NewDispatcher(client Transport, cfg config.Config) *Dispatcher {
 	}
 }
 
-func NewReplayOperator(client replay.OperatorClient, cfg config.Config, dispatcher *Dispatcher) *replay.Operator {
+func NewReplayWorker(client replay.WorkerClient, cfg config.Config, dispatcher *Dispatcher, logger *log.Logger) *replay.Worker {
 	if dispatcher == nil {
 		return nil
 	}
-	return replay.NewOperatorWithScanCount(client, cfg.PlatformReplayStreamKey, dispatcher, cfg.PlatformReplayScanCount)
+	return replay.NewWorker(client, replay.WorkerConfig{
+		StreamKey:                cfg.PlatformReplayStreamKey,
+		ConsumerGroup:            cfg.ConsumerGroup,
+		ConsumerName:             cfg.ConsumerName,
+		ReadCount:                cfg.ReadCount,
+		BlockDuration:            cfg.BlockDuration,
+		PendingIdleDuration:      cfg.PendingIdleDuration,
+		PendingClaimCount:        cfg.PendingClaimCount,
+		PendingClaimInterval:     cfg.PendingClaimInterval,
+		PendingReclaimMaxBatches: cfg.PendingReclaimMaxBatches,
+		ReclaimCursorMode:        cfg.ReclaimCursorMode,
+		DeadLetterStreamKey:      cfg.PlatformDLQStreamKey,
+	}, dispatcher, logger)
 }
 
 func (d *Dispatcher) Dispatch(

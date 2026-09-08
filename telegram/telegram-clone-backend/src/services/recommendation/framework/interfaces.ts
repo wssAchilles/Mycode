@@ -45,6 +45,17 @@ export interface FilterResult<C> {
     removed: C[];
 }
 
+export interface SourceCandidateBatch<C> {
+    sourceName: string;
+    candidates: C[];
+}
+
+export type SourceCandidateMerger<Q, C> = (
+    query: Q,
+    sourceBatches: SourceCandidateBatch<C>[],
+    sourceOrder: string[],
+) => C[];
+
 // ============================================
 // 核心组件接口 (1:1 复刻 candidate-pipeline)
 // ============================================
@@ -85,6 +96,7 @@ export interface Source<Q, C> {
  */
 export interface QueryHydrator<Q> {
     readonly name: string;
+    readonly failClosedOnError?: boolean;
 
     enable(query: Q): boolean;
 
@@ -201,7 +213,15 @@ export interface SideEffect<Q, C> {
     /**
      * 执行副作用 (异步，不阻塞主流程)
      */
-    run(query: Q, selectedCandidates: C[]): Promise<void>;
+    run(
+        query: Q,
+        selectedCandidates: C[],
+        context?: PipelineSideEffectContext<C>,
+    ): Promise<void>;
+}
+
+export interface PipelineSideEffectContext<C> {
+    preSelectorCandidates: C[];
 }
 
 // ============================================

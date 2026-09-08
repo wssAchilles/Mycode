@@ -14,6 +14,7 @@ struct ServiceConfig {
   std::uint64_t backend_timeout_ms;
   std::uint64_t snapshot_refresh_secs;
   std::size_t snapshot_page_size;
+  bool snapshot_generation_v2_enabled{false};
   double min_edge_score;
   std::size_t max_neighbors_per_user;
   std::size_t max_branching_factor;

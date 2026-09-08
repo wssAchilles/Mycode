@@ -80,6 +80,16 @@ export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
   'ExperimentQueryHydrator',
 ] as const;
 
+export const RECOMMENDATION_DEPENDENT_QUERY_HYDRATORS: Record<string, string[]> = {
+  MutualFollowQueryHydrator: ['userFeatures'],
+  ExperimentQueryHydrator: ['userFeatures'],
+  UserStateQueryHydrator: ['userFeatures', 'embeddingContext', 'userActionSequence'],
+};
+
+export function recommendationQueryHydratorStage(hydratorName: string): number {
+  return hydratorName in RECOMMENDATION_DEPENDENT_QUERY_HYDRATORS ? 1 : 0;
+}
+
 export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
   'NewsAnnSource',
   'EmbeddingAuthorSource',

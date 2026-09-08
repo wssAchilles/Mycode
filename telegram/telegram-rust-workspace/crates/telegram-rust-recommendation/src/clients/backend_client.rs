@@ -7,6 +7,9 @@ pub use telegram_rust_http_types::ProviderResponse;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
+use crate::clients::response_body::{
+    ResponseBodyError, error_body_preview, read_response_body_bounded,
+};
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageResponse, GraphAuthorMaterializationRequest,
@@ -128,12 +131,24 @@ impl BackendRecommendationClient {
         limit_per_author: usize,
         lookback_days: usize,
     ) -> Result<ProviderResponse<GraphAuthorMaterializationResponse>> {
+        self.graph_author_candidates_with_cursor(author_ids, limit_per_author, lookback_days, None)
+            .await
+    }
+
+    pub async fn graph_author_candidates_with_cursor(
+        &self,
+        author_ids: &[String],
+        limit_per_author: usize,
+        lookback_days: usize,
+        created_before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<ProviderResponse<GraphAuthorMaterializationResponse>> {
         self.post_json(
             "/providers/graph/authors",
             &GraphAuthorMaterializationRequest {
                 author_ids: author_ids.to_vec(),
                 limit_per_author: Some(limit_per_author),
                 lookback_days: Some(lookback_days),
+                created_before,
             },
         )
         .await
@@ -144,6 +159,7 @@ impl BackendRecommendationClient {
         user_id: &str,
         limit: usize,
         lookback_days: usize,
+        exclude_post_ids: &[String],
     ) -> Result<ProviderResponse<SelfPostRescueResponse>> {
         self.post_json(
             SELF_POST_RESCUE_PROVIDER_PATH,
@@ -151,6 +167,7 @@ impl BackendRecommendationClient {
                 user_id: user_id.to_string(),
                 limit: Some(limit),
                 lookback_days: Some(lookback_days),
+                exclude_post_ids: exclude_post_ids.to_vec(),
             },
         )
         .await
@@ -310,17 +327,26 @@ impl BackendRecommendationClient {
             .await
             .with_context(|| format!("request backend recommendation adapter {url}"))?;
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .with_context(|| format!("read backend recommendation adapter body {url}"))?;
+        let body = match read_response_body_bounded(response).await {
+            Ok(body) => body,
+            Err(error @ ResponseBodyError::TooLarge { .. }) if !status.is_success() => {
+                return Err(anyhow!(
+                    "backend_recommendation_request_failed status={} path={} body={}",
+                    status,
+                    path,
+                    error_body_preview(&error.to_string())
+                ));
+            }
+            Err(error) => Err(error)
+                .with_context(|| format!("read backend recommendation adapter body {url}"))?,
+        };
 
         if !status.is_success() {
             return Err(anyhow!(
                 "backend_recommendation_request_failed status={} path={} body={}",
                 status,
                 path,
-                body
+                error_body_preview(&body)
             ));
         }
 

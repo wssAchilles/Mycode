@@ -1,4 +1,12 @@
-import type { Filter, Hydrator, QueryHydrator, ScoredCandidate, Scorer, Source } from '../framework';
+import {
+  runStagedQueryHydrators,
+  type Filter,
+  type Hydrator,
+  type QueryHydrator,
+  type ScoredCandidate,
+  type Scorer,
+  type Source,
+} from '../framework';
 import type { FeedCandidate } from '../types/FeedCandidate';
 import type { FeedQuery } from '../types/FeedQuery';
 import {
@@ -14,6 +22,8 @@ import {
   buildRecommendationSourceOrder,
   isMlRankingScorerName,
   isMlRetrievalSourceName,
+  recommendationQueryHydratorStage,
+  RECOMMENDATION_DEPENDENT_QUERY_HYDRATORS,
 } from './componentCatalog';
 import {
   assertNodeProviderScorerCandidateWrites,
@@ -21,7 +31,10 @@ import {
 } from '../contracts/rankingContract';
 import type { RecommendationQueryPatchPayload } from '../rust/contracts';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
+import { createChildLogger } from '../../../utils/logger';
 import { mergeSourceCandidates, type SourceCandidateBatch } from './merge/candidateMerge';
+
+const log = createChildLogger('recommendation:Adapter');
 
 export interface InternalStageExecution {
   name: string;
@@ -125,16 +138,10 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   UserActionSeqQueryHydrator: ['userActionSequence'],
   UserStateQueryHydrator: ['userStateContext'],
   NewsModelContextQueryHydrator: ['newsHistoryExternalIds', 'modelUserActionSequence'],
+  UserSignalQueryHydrator: ['userSignalFeatures'],
   ExperimentQueryHydrator: ['experimentContext'],
   PastRequestTimestampsQueryHydrator: ['pastRequestTimestamps'],
 };
-const USER_STATE_QUERY_HYDRATOR = 'UserStateQueryHydrator';
-const USER_STATE_DEPENDENCY_FIELDS: Array<keyof RecommendationQueryPatchPayload> = [
-  'userFeatures',
-  'embeddingContext',
-  'userActionSequence',
-];
-
 const SOURCE_BATCH_COMPONENT_TIMEOUT_MS = Math.max(
   1,
   parseInt(String(process.env.RECOMMENDATION_SOURCE_BATCH_COMPONENT_TIMEOUT_MS || '1200'), 10) || 1200,
@@ -152,45 +159,57 @@ export class RecommendationAdapterService {
   private readonly candidateHydratorConcurrency = CANDIDATE_HYDRATOR_CONCURRENCY;
 
   async hydrateQuery(query: FeedQuery): Promise<{ query: FeedQuery; stages: InternalStageExecution[] }> {
-    let current = query;
-    const stages: InternalStageExecution[] = [];
+    const execution = await runStagedQueryHydrators(
+      query,
+      buildRecommendationQueryHydrators(),
+      (hydrator) => recommendationQueryHydratorStage(hydrator.name),
+      async (hydrator, stageQuery) => {
+        const start = Date.now();
+        if (!hydrator.enable(stageQuery)) {
+          const stage: InternalStageExecution = {
+            name: hydrator.name,
+            enabled: false,
+            durationMs: Date.now() - start,
+            inputCount: 1,
+            outputCount: 1,
+          };
+          annotateDependencyStage(stage, hydrator.name);
+          return { hydrated: stageQuery, stage };
+        }
 
-    for (const hydrator of buildRecommendationQueryHydrators()) {
-      const start = Date.now();
-      if (!hydrator.enable(current)) {
-        stages.push({
-          name: hydrator.name,
-          enabled: false,
-          durationMs: Date.now() - start,
-          inputCount: 1,
-          outputCount: 1,
-        });
-        continue;
-      }
+        try {
+          const hydrated = await hydrator.hydrate(stageQuery);
+          const stage: InternalStageExecution = {
+            name: hydrator.name,
+            enabled: true,
+            durationMs: Date.now() - start,
+            inputCount: 1,
+            outputCount: 1,
+          };
+          annotateDependencyStage(stage, hydrator.name);
+          return { hydrated, stage };
+        } catch (error: any) {
+          const stage: InternalStageExecution = {
+            name: hydrator.name,
+            enabled: true,
+            durationMs: Date.now() - start,
+            inputCount: 1,
+            outputCount: 1,
+            detail: { error: error?.message || 'hydrate_query_failed' },
+          };
+          annotateDependencyStage(stage, hydrator.name);
+          return { hydrated: stageQuery, stage };
+        }
+      },
+      (current, hydrator, result) => result.stage.enabled
+        ? hydrator.update(current, result.hydrated)
+        : current,
+    );
 
-      try {
-        const hydrated = await hydrator.hydrate(current);
-        current = hydrator.update(current, hydrated);
-        stages.push({
-          name: hydrator.name,
-          enabled: true,
-          durationMs: Date.now() - start,
-          inputCount: 1,
-          outputCount: 1,
-        });
-      } catch (error: any) {
-        stages.push({
-          name: hydrator.name,
-          enabled: true,
-          durationMs: Date.now() - start,
-          inputCount: 1,
-          outputCount: 1,
-          detail: { error: error?.message || 'hydrate_query_failed' },
-        });
-      }
-    }
-
-    return { query: current, stages };
+    return {
+      query: execution.query,
+      stages: execution.results.map(({ stage }) => stage),
+    };
   }
 
   async hydrateQueryPatch(
@@ -274,50 +293,25 @@ export class RecommendationAdapterService {
     query: FeedQuery,
   ): Promise<InternalQueryHydratorBatchResult> {
     const orderedHydrators = hydratorNames.map((hydratorName) => String(hydratorName || '').trim());
-    const resultSlots = new Array<InternalQueryHydratorBatchResult['items'][number]>(
-      orderedHydrators.length,
-    );
-    const independentEntries = orderedHydrators
-      .map((hydratorName, index) => ({ hydratorName, index }))
-      .filter((entry) => entry.hydratorName !== USER_STATE_QUERY_HYDRATOR);
-    const userStateEntries = orderedHydrators
-      .map((hydratorName, index) => ({ hydratorName, index }))
-      .filter((entry) => entry.hydratorName === USER_STATE_QUERY_HYDRATOR);
-
-    const independentItems = await Promise.all(
-      independentEntries.map(async ({ hydratorName, index }) => ({
-        index,
-        item: {
+    const execution = await runStagedQueryHydrators(
+      query,
+      orderedHydrators,
+      recommendationQueryHydratorStage,
+      async (hydratorName, stageQuery) => {
+        const item = {
           hydratorName,
-          ...(await this.hydrateQueryPatch(hydratorName, query)),
+          ...(await this.hydrateQueryPatch(hydratorName, stageQuery)),
           providerCalls: {},
-        },
-      })),
+        };
+        annotateDependencyStage(item.stage, hydratorName);
+        return item;
+      },
+      (current, _hydratorName, item) =>
+        applyRecommendationQueryPatch(current, item.queryPatch),
     );
-
-    let dependentQuery = query;
-    for (const { index, item } of independentItems.sort((left, right) => left.index - right.index)) {
-      resultSlots[index] = item;
-      dependentQuery = applyRecommendationQueryPatch(dependentQuery, item.queryPatch);
-    }
-
-    for (const { hydratorName, index } of userStateEntries) {
-      const item = {
-        hydratorName,
-        ...(await this.hydrateQueryPatch(hydratorName, dependentQuery)),
-        providerCalls: {},
-      };
-      item.stage.detail = {
-        ...(item.stage.detail || {}),
-        dependencyMode: 'after_feature_action_embedding_patches',
-        dependencyFields: USER_STATE_DEPENDENCY_FIELDS,
-      };
-      resultSlots[index] = item;
-      dependentQuery = applyRecommendationQueryPatch(dependentQuery, item.queryPatch);
-    }
 
     return {
-      items: resultSlots.filter(Boolean),
+      items: execution.results,
       providerCalls: {},
     };
   }
@@ -338,6 +332,15 @@ export class RecommendationAdapterService {
     }
 
     const start = Date.now();
+    const drainStageDetail = (candidates: FeedCandidate[]): Record<string, unknown> | undefined => {
+      try {
+        return source.stageDetail?.(query, candidates);
+      } catch (error) {
+        log.warn(`[Source ${source.name}] Stage detail cleanup failed: ${error}`);
+        return undefined;
+      }
+    };
+
     if (!source.enable(query)) {
       return {
         candidates: [],
@@ -356,7 +359,7 @@ export class RecommendationAdapterService {
       const candidates = await source.getCandidates(query);
       const detail: Record<string, unknown> = {
         recallSource: source.name,
-        ...(source.stageDetail?.(query, candidates) || {}),
+        ...(drainStageDetail(candidates) || {}),
       };
 
       if (source.name === 'GraphSource') {
@@ -376,6 +379,7 @@ export class RecommendationAdapterService {
         },
       };
     } catch (error: any) {
+      drainStageDetail([]);
       const errorClass = classifySourceError(error?.message);
       return {
         candidates: [],
@@ -408,6 +412,7 @@ export class RecommendationAdapterService {
       this.sourceBatchComponentTimeoutMs,
     );
 
+    let timer: NodeJS.Timeout | undefined;
     const timeoutResult = new Promise<{
       candidates: FeedCandidate[];
       stage: InternalStageExecution;
@@ -415,7 +420,7 @@ export class RecommendationAdapterService {
       timeoutMs?: number;
       errorClass?: string;
     }>((resolve) => {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         resolve({
           candidates: [],
           timedOut: true,
@@ -437,22 +442,28 @@ export class RecommendationAdapterService {
         });
       }, timeoutMs);
 
-      if (typeof (timer as NodeJS.Timeout).unref === 'function') {
+      if (typeof timer.unref === 'function') {
         timer.unref();
       }
     });
 
-    return Promise.race([
-      this.getSourceCandidates(sourceName, query),
-      timeoutResult,
-    ]);
+    try {
+      return await Promise.race([
+        this.getSourceCandidates(sourceName, query),
+        timeoutResult,
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async getSourceCandidatesBatch(
     sourceNames: string[],
     query: FeedQuery,
   ): Promise<InternalSourceBatchResult> {
-    const orderedSourceNames = sourceNames.map((sourceName) => String(sourceName || '').trim());
+    const orderedSourceNames = Array.from(
+      new Set(sourceNames.map((sourceName) => String(sourceName || '').trim())),
+    );
     const items = await Promise.all(
       orderedSourceNames.map(async (sourceName) => ({
         sourceName,
@@ -625,15 +636,25 @@ export class RecommendationAdapterService {
           durationMs: Date.now() - start,
           inputCount: current.length,
           outputCount: current.length,
+          ...(scored.length !== current.length
+            ? {
+                detail: {
+                  error: `scorer_contract_violation:${scorer.name}:length_mismatch:${current.length}:${scored.length}`,
+                  errorClass: 'provider_contract_error',
+                  scoredCount: scored.length,
+                },
+              }
+            : {}),
         });
       } catch (error: any) {
+        const errorClass = classifyScorerError(error?.message);
         stages.push({
           name: scorer.name,
           enabled: true,
           durationMs: Date.now() - start,
           inputCount: current.length,
           outputCount: current.length,
-          detail: { error: error?.message || 'scorer_failed' },
+          detail: { error: error?.message || 'scorer_failed', errorClass },
         });
       }
     }
@@ -768,6 +789,14 @@ export class RecommendationAdapterService {
     const orderedNames = componentNames
       .map((name) => String(name || '').trim())
       .filter((name) => name.length > 0);
+    const duplicateNames = orderedNames.filter(
+      (name, index) => orderedNames.indexOf(name) !== index,
+    );
+    if (duplicateNames.length > 0) {
+      throw new Error(
+        `duplicate_provider_hydrator:${Array.from(new Set(duplicateNames)).join(',')}`,
+      );
+    }
     const unknownNames = orderedNames.filter((name) => !catalog[name]);
     if (unknownNames.length > 0) {
       throw new Error(`unknown_hydrator:${unknownNames.join(',')}`);
@@ -1036,6 +1065,26 @@ function applyRecommendationQueryPatch(
   if (patch.rankingPolicy !== undefined) {
     next.rankingPolicy = patch.rankingPolicy as FeedQuery['rankingPolicy'];
   }
+  if (patch.userSignalFeatures !== undefined) {
+    next.userSignalFeatures = patch.userSignalFeatures;
+  }
+  if (patch.mutualFollowIds !== undefined) {
+    next.mutualFollowIds = patch.mutualFollowIds;
+  }
+  if (patch.interestedTopics !== undefined) {
+    next.interestedTopics = patch.interestedTopics;
+  }
+  if (patch.demographics !== undefined) {
+    next.demographics = patch.demographics;
+  }
+  if (patch.pastRequestTimestamps !== undefined) {
+    next.pastRequestTimestamps = patch.pastRequestTimestamps
+      .map(parseOptionalPatchDate)
+      .filter((value): value is Date => Boolean(value));
+  }
+  if (patch.impressedPostIds !== undefined) {
+    next.impressedPostIds = patch.impressedPostIds;
+  }
   return next;
 }
 
@@ -1098,6 +1147,26 @@ function classifyCandidateHydratorError(message?: string): string {
   return 'candidate_hydrator_failed';
 }
 
+function classifyScorerError(message?: string): string {
+  const value = String(message || '').trim();
+  if (value.startsWith('provider_scorer_field_ownership_violation')) {
+    return 'provider_contract_error';
+  }
+  return 'scorer_failed';
+}
+
+function annotateDependencyStage(stage: InternalStageExecution, hydratorName: string): void {
+  const dependencyFields = RECOMMENDATION_DEPENDENT_QUERY_HYDRATORS[hydratorName];
+  if (!dependencyFields) {
+    return;
+  }
+  stage.detail = {
+    ...(stage.detail || {}),
+    dependencyMode: 'after_base_query_patches',
+    dependencyFields,
+  };
+}
+
 export const recommendationAdapterService = new RecommendationAdapterService();
 
 function sourceRetrievalLane(sourceName: string): string {
@@ -1128,7 +1197,7 @@ function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrieva
   const kernelCandidates = candidates.filter(isGraphKernelCandidate).length;
   const totalCandidates = candidates.length;
   const legacyCandidates = totalCandidates - kernelCandidates;
-  const kernelSourceCounts: Record<string, number> = {};
+  const kernelSourceCounts = Object.create(null) as Record<string, number>;
 
   for (const candidate of candidates) {
     if (!isGraphKernelCandidate(candidate)) {

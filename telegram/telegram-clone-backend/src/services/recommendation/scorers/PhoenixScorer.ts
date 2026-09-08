@@ -14,7 +14,6 @@ import {
 } from '../clients/PhoenixClient';
 import {
     buildSocialPhoenixFeatureMapFromCandidate,
-    loadSocialPhoenixModel,
     scoreTaskProbability,
     type SocialPhoenixLinearModel,
 } from '../socialPhoenix';
@@ -42,7 +41,7 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
                 this.remoteEnabled = true;
             }
         }
-        this.socialModel = loadSocialPhoenixModel(process.env.SOCIAL_PHOENIX_MODEL_PATH);
+        this.socialModel = null;
     }
 
     enable(query: FeedQuery): boolean {
@@ -169,9 +168,9 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
             dwellScore: prediction.dwell,
             dwellTime: (prediction as any).dwellTime,
             followAuthorScore: (prediction as any).followAuthor,
-            notInterestedScore: (prediction as any).notInterested ?? (prediction as any).dismiss,
+            notInterestedScore: (prediction as any).notInterested,
             dismissScore: (prediction as any).dismiss,
-            blockAuthorScore: (prediction as any).blockAuthor ?? (prediction as any).block,
+            blockAuthorScore: (prediction as any).blockAuthor,
             blockScore: (prediction as any).block,
             muteAuthorScore: (prediction as any).muteAuthor,
             reportScore: (prediction as any).report,

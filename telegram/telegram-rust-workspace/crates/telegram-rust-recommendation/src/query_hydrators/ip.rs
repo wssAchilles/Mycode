@@ -29,6 +29,7 @@ mod tests {
     fn preserves_existing_country_code() {
         let mut query = RecommendationQueryPayload {
             request_id: "req-ip-test".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "user-1".to_string(),
             limit: 20,
             country_code: Some("US".to_string()),
@@ -42,6 +43,7 @@ mod tests {
     fn no_op_when_country_code_absent() {
         let mut query = RecommendationQueryPayload {
             request_id: "req-ip-test".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "user-1".to_string(),
             limit: 20,
             country_code: None,

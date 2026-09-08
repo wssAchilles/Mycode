@@ -1,93 +1,204 @@
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
 
-import { connectMongoDB } from '../config/db';
-import UserFeatureVector from '../models/UserFeatureVector';
-import PostFeatureSnapshot from '../models/PostFeatureSnapshot';
-import { isVectorCompatibleWithContract } from '../services/recommendation/contracts/embeddingContract';
+import {
+    connectRecommendationAuditMongo,
+    type RecommendationAuditMongoEvidence,
+} from '../services/ops/recommendation/auditMongoAccess';
+import {
+    scanEmbeddingContractEvidence,
+    isFullEmbeddingEvidenceSummary,
+    type EmbeddingEvidenceScanResult,
+    type PersistedEmbeddingEvidenceSummary,
+} from '../services/ops/recommendation/embeddingEvidenceAudit';
+import { disconnectMongoDB } from '../config/db';
 
-dotenv.config();
+export const EMBEDDING_AUDIT_EXIT_PASS = 0 as const;
+export const EMBEDDING_AUDIT_EXIT_EVIDENCE_FAILURE = 2 as const;
+export const EMBEDDING_AUDIT_EXIT_PROGRAM_FAILURE = 3 as const;
 
-function parseArgs() {
-    const args = process.argv.slice(2);
-    const kv: Record<string, string> = {};
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (!arg.startsWith('--')) continue;
-        const key = arg.slice(2);
-        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : 'true';
-        kv[key] = value;
+export interface EmbeddingAuditArguments {
+    strict: boolean;
+    limit: number | undefined;
+    diagnosticOnly: boolean;
+    approvedQuarantineDigest: string | undefined;
+}
+
+type EmbeddingAuditCliDependencies = {
+    connectMongo: () => Promise<RecommendationAuditMongoEvidence>;
+    startSession: () => Promise<EmbeddingAuditSession>;
+    scan: (options: { limit?: number; session?: unknown }) => Promise<EmbeddingEvidenceScanResult>;
+    writeJson: (value: unknown) => void;
+    writeError: (message: string) => void;
+};
+
+type EmbeddingAuditSession = {
+    withTransaction?: (
+        callback: () => Promise<void>,
+        options?: Record<string, unknown>,
+    ) => Promise<unknown>;
+    endSession?: () => Promise<void> | void;
+};
+
+export function parseArgs(argv: readonly string[]): EmbeddingAuditArguments {
+    let strict = false;
+    let limit: number | undefined;
+    let approvedQuarantineDigest: string | undefined;
+
+    for (let index = 0; index < argv.length; index += 1) {
+        const argument = argv[index];
+        switch (argument) {
+            case '--strict':
+                strict = true;
+                break;
+            case '--limit': {
+                const value = argv[index + 1];
+                if (!value || value.startsWith('--') || !/^\d+$/.test(value) || Number(value) < 1) {
+                    throw new Error('embedding_audit_limit_invalid');
+                }
+                limit = Number(value);
+                index += 1;
+                break;
+            }
+            case '--approved-quarantine-digest': {
+                const value = argv[index + 1];
+                if (!value || !/^[a-f0-9]{64}$/.test(value)) {
+                    throw new Error('embedding_audit_approved_quarantine_digest_invalid');
+                }
+                approvedQuarantineDigest = value;
+                index += 1;
+                break;
+            }
+            default:
+                throw new Error(`embedding_audit_argument_unknown:${argument}`);
+        }
     }
+
+    if (strict && limit !== undefined) {
+        throw new Error('embedding_audit_limited_strict_forbidden');
+    }
+
     return {
-        limit: Math.max(1, parseInt(kv.limit || '5000', 10) || 5000),
+        strict,
+        limit,
+        diagnosticOnly: limit !== undefined,
+        approvedQuarantineDigest,
     };
 }
 
-async function main() {
-    const { limit } = parseArgs();
-    await connectMongoDB();
+export function resolveEmbeddingAuditExitCode({
+    strict,
+    diagnosticOnly,
+    embeddingEvidence,
+    approvedQuarantineDigest,
+}: {
+    strict: boolean;
+    diagnosticOnly: boolean;
+    embeddingEvidence: PersistedEmbeddingEvidenceSummary;
+    approvedQuarantineDigest?: string;
+}): typeof EMBEDDING_AUDIT_EXIT_PASS | typeof EMBEDDING_AUDIT_EXIT_EVIDENCE_FAILURE {
+    if (!strict || diagnosticOnly) return EMBEDDING_AUDIT_EXIT_PASS;
 
-    const [users, posts] = await Promise.all([
-        UserFeatureVector.find({}).limit(limit).lean(),
-        PostFeatureSnapshot.find({}).limit(limit).lean(),
-    ]);
-
-    const userDims = countDimensions(users.map((doc: any) => doc.phoenixEmbedding || doc.twoTowerEmbedding || []));
-    const postDims = countDimensions(posts.map((doc: any) => doc.denseEmbedding || []));
-    const userContracts = users.filter((doc: any) => doc.embeddingContract?.artifactVersion).length;
-    const postContracts = posts.filter((doc: any) => doc.embeddingContract?.artifactVersion).length;
-    const incompatibleUsers = users.filter((doc: any) => {
-        const vector = doc.phoenixEmbedding || doc.twoTowerEmbedding || [];
-        return doc.embeddingContract && !isVectorCompatibleWithContract(vector, doc.embeddingContract);
-    }).length;
-    const incompatiblePosts = posts.filter((doc: any) => (
-        doc.embeddingContract && !isVectorCompatibleWithContract(doc.denseEmbedding || [], doc.embeddingContract)
-    )).length;
-
-    console.log(JSON.stringify({
-        sampled: {
-            users: users.length,
-            postFeatureSnapshots: posts.length,
-        },
-        dimensionDistribution: {
-            userVectors: userDims,
-            postFeatureSnapshots: postDims,
-        },
-        artifactVersionCoverage: {
-            userVectors: ratio(userContracts, users.length),
-            postFeatureSnapshots: ratio(postContracts, posts.length),
-        },
-        incompatibleSamples: {
-            userVectors: incompatibleUsers,
-            postFeatureSnapshots: incompatiblePosts,
-        },
-    }, null, 2));
+    const evidenceFailed = !isFullEmbeddingEvidenceSummary(embeddingEvidence)
+        || embeddingEvidence.scan.userDocuments < 1
+        || embeddingEvidence.scan.postFeatureSnapshots < 1
+        || embeddingEvidence.invalid > 0
+        || embeddingEvidence.unclassified > 0
+        || approvedQuarantineDigest !== embeddingEvidence.quarantineDigest;
+    return evidenceFailed
+        ? EMBEDDING_AUDIT_EXIT_EVIDENCE_FAILURE
+        : EMBEDDING_AUDIT_EXIT_PASS;
 }
 
-function countDimensions(vectors: unknown[]): Record<string, number> {
-    const counts: Record<string, number> = {};
-    for (const vector of vectors) {
-        const dim = Array.isArray(vector) ? vector.length : 0;
-        counts[String(dim)] = (counts[String(dim)] || 0) + 1;
+export async function runEmbeddingContractAuditCli(
+    argv: readonly string[],
+    dependencyOverrides: Partial<EmbeddingAuditCliDependencies> = {},
+): Promise<
+    | typeof EMBEDDING_AUDIT_EXIT_PASS
+    | typeof EMBEDDING_AUDIT_EXIT_EVIDENCE_FAILURE
+    | typeof EMBEDDING_AUDIT_EXIT_PROGRAM_FAILURE
+> {
+    const dependencies: EmbeddingAuditCliDependencies = {
+        connectMongo: connectRecommendationAuditMongo,
+        startSession: () => mongoose.startSession() as unknown as Promise<EmbeddingAuditSession>,
+        scan: scanEmbeddingContractEvidence,
+        writeJson: (value) => console.log(JSON.stringify(value, null, 2)),
+        writeError: (message) => console.error(message),
+        ...dependencyOverrides,
+    };
+
+    try {
+        const arguments_ = parseArgs(argv);
+        const auditMongoEvidence = await dependencies.connectMongo();
+        const { embeddingEvidence } = arguments_.strict
+            ? await scanStrictSnapshot(arguments_.limit, dependencies)
+            : await dependencies.scan({ limit: arguments_.limit });
+        const exitCode = resolveEmbeddingAuditExitCode({
+            strict: arguments_.strict,
+            diagnosticOnly: arguments_.diagnosticOnly,
+            embeddingEvidence,
+            approvedQuarantineDigest: arguments_.approvedQuarantineDigest,
+        });
+
+        dependencies.writeJson({
+            auditedAt: new Date().toISOString(),
+            strict: arguments_.strict,
+            diagnosticOnly: arguments_.diagnosticOnly,
+            releasePass: arguments_.strict
+                && !arguments_.diagnosticOnly
+                && exitCode === EMBEDDING_AUDIT_EXIT_PASS,
+            quarantineApproval: quarantineApproval(
+                embeddingEvidence,
+                arguments_.approvedQuarantineDigest,
+            ),
+            auditMongoEvidence: {
+                ...auditMongoEvidence,
+                meaning: 'operator_review_only',
+            },
+            embeddingEvidence,
+        });
+        return exitCode;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        dependencies.writeError(`[AuditEmbeddingContracts] failed: ${message}`);
+        return EMBEDDING_AUDIT_EXIT_PROGRAM_FAILURE;
     }
-    return counts;
 }
 
-function ratio(count: number, total: number): number {
-    return total > 0 ? Number((count / total).toFixed(4)) : 0;
-}
-
-main()
-    .catch((error) => {
-        console.error('[AuditEmbeddingContracts] failed:', error);
-        process.exitCode = 1;
-    })
-    .finally(async () => {
-        try {
-            mongoose.connection.removeAllListeners('disconnected');
-            mongoose.connection.removeAllListeners('error');
-            await mongoose.disconnect();
-        } catch {
-            // ignore
+async function scanStrictSnapshot(
+    limit: number | undefined,
+    dependencies: EmbeddingAuditCliDependencies,
+): Promise<EmbeddingEvidenceScanResult> {
+    const session = await dependencies.startSession();
+    let result: EmbeddingEvidenceScanResult | undefined;
+    try {
+        if (typeof session.withTransaction !== 'function') {
+            throw new Error('embedding_audit_snapshot_transaction_unsupported');
         }
-    });
+        await session.withTransaction(
+            async () => {
+                result = await dependencies.scan({ limit, session });
+            },
+            { readConcern: { level: 'snapshot' } },
+        );
+    } finally {
+        await session.endSession?.();
+    }
+    if (!result) throw new Error('embedding_audit_snapshot_transaction_incomplete');
+    return result;
+}
+
+function quarantineApproval(
+    evidence: PersistedEmbeddingEvidenceSummary,
+    approvedDigest: string | undefined,
+): 'missing' | 'matched' | 'mismatch' {
+    if (!approvedDigest) return 'missing';
+    return approvedDigest === evidence.quarantineDigest ? 'matched' : 'mismatch';
+}
+
+if (require.main === module) {
+    runEmbeddingContractAuditCli(process.argv.slice(2))
+        .then((exitCode) => {
+            process.exitCode = exitCode;
+        })
+        .finally(disconnectMongoDB);
+}

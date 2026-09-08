@@ -23,6 +23,7 @@ import UserSignal, {
     SignalType,
     TargetType,
 } from '../../models/UserSignal';
+import { realGraphService } from '../../services/recommendation/RealGraphService';
 import { log, normalizeSpaceUploadUrl } from './shared';
 
 const router = Router();
@@ -356,7 +357,11 @@ async function undoGraphContribution(userId: string, signal: Pick<IUserSignal, '
     edge.lastPredictionAt = new Date();
     edge.markModified('dailyCounts');
     edge.markModified('rollupCounts');
-    await edge.save();
+    try {
+        await edge.save();
+    } finally {
+        await realGraphService.invalidateEdgeScoreCaches(userId, targetUserId);
+    }
     return true;
 }
 

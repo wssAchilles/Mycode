@@ -7,7 +7,7 @@ pub use constraint_reasons::*;
 pub use detail::*;
 pub use phase_plan::*;
 
-pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
+pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v3";
 pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
 pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
 pub const SELECTOR_SCORE_SOURCE_VERSION: &str = "selector_final_score_source_v1";
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn exports_stable_selector_contract_versions() {
-        assert_eq!(SELECTOR_POLICY_VERSION, "rust_top_k_selector_policy_v1");
+        assert_eq!(SELECTOR_POLICY_VERSION, "rust_top_k_selector_policy_v3");
         assert_eq!(SELECTOR_AUDIT_VERSION, "selector_lane_source_pool_audit_v1");
         assert_eq!(SELECTOR_CONSTRAINT_VERSION, "constraint_verdict_v1");
         assert_eq!(

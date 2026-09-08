@@ -92,7 +92,6 @@ func TestRedisIntegrationAutoClaimsAndAcksPendingMessage(t *testing.T) {
 		PendingClaimCount:        10,
 		PendingClaimInterval:     time.Hour,
 		PendingReclaimMaxBatches: 2,
-		PlatformReplayScanCount:  5000,
 		ReservationConcurrency:   8,
 		MongoInQueryChunkSize:    1000,
 		DryRun:                   true,

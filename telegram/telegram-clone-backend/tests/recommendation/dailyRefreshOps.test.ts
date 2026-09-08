@@ -3,47 +3,43 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
     userCount: vi.fn(),
     userVectorCountDocuments: vi.fn(),
+    userVectorFind: vi.fn(),
     userActionCountDocuments: vi.fn(),
     userSignalCountDocuments: vi.fn(),
     realGraphCountDocuments: vi.fn(),
     postSnapshotCountDocuments: vi.fn(),
+    postSnapshotFind: vi.fn(),
     jobRunFindOne: vi.fn(),
     jobRunFind: vi.fn(),
 }));
 
 vi.mock('../../src/models/User', () => ({
-    default: {
-        count: mocks.userCount,
-    },
+    default: { count: mocks.userCount },
 }));
 
 vi.mock('../../src/models/UserFeatureVector', () => ({
     default: {
         countDocuments: mocks.userVectorCountDocuments,
+        find: mocks.userVectorFind,
     },
 }));
 
 vi.mock('../../src/models/UserAction', () => ({
-    default: {
-        countDocuments: mocks.userActionCountDocuments,
-    },
+    default: { countDocuments: mocks.userActionCountDocuments },
 }));
 
 vi.mock('../../src/models/UserSignal', () => ({
-    default: {
-        countDocuments: mocks.userSignalCountDocuments,
-    },
+    default: { countDocuments: mocks.userSignalCountDocuments },
 }));
 
 vi.mock('../../src/models/RealGraphEdge', () => ({
-    default: {
-        countDocuments: mocks.realGraphCountDocuments,
-    },
+    default: { countDocuments: mocks.realGraphCountDocuments },
 }));
 
 vi.mock('../../src/models/PostFeatureSnapshot', () => ({
     default: {
         countDocuments: mocks.postSnapshotCountDocuments,
+        find: mocks.postSnapshotFind,
     },
 }));
 
@@ -54,18 +50,11 @@ vi.mock('../../src/models/RecommendationJobRun', () => ({
     },
 }));
 
-vi.mock('../../src/services/recommendation/contracts/embeddingContract', () => ({
-    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT: {
-        embeddingSpace: 'telegram_recommendation_v1',
-        retrievalEmbeddingDim: 256,
-        rankingEmbeddingDim: 48,
-        modelVersion: 'heuristic_two_tower_v1',
-        artifactVersion: 'heuristic_artifact_v1',
-        producer: 'node_daily_refresh',
-    },
-}));
-
-import { buildDailyRecommendationRefreshAudit, buildDailyRecommendationRefreshOps } from '../../src/services/ops/recommendation/dailyRefreshOps';
+import {
+    buildDailyRecommendationRefreshAudit,
+    buildDailyRecommendationRefreshOps,
+} from '../../src/services/ops/recommendation/dailyRefreshOps';
+import { quarantineDigestFromChecksums } from '../../src/services/recommendation/contracts/embeddingContractEvidence';
 
 describe('daily recommendation refresh ops', () => {
     afterEach(() => {
@@ -73,154 +62,163 @@ describe('daily recommendation refresh ops', () => {
         vi.useRealTimers();
     });
 
-    it('maps the latest persistent refresh evidence into the ops card contract', async () => {
+    it('uses only the user cohort for compatibility even when post evidence is invalid', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-06-11T08:00:00.000Z'));
         mockCoverageCounts();
-        mocks.jobRunFindOne.mockReturnValue(findOneResult({
-            status: 'success',
-            startedAt: new Date('2026-06-11T06:47:45.406Z'),
-            finishedAt: new Date('2026-06-11T07:04:46.553Z'),
-            durationMs: 1021147,
-            trigger: 'manual',
-            summary: {
-                users: {
-                    registered: 642,
-                    embeddingsUpdated: 642,
-                    embeddingFailures: 0,
-                    denseVectorsRepaired: 642,
-                },
-                realGraph: {
-                    predictionMatched: 954,
-                    predictionUpdated: 954,
-                },
-                posts: {
-                    scanned: 1161,
-                    refreshed: 1161,
-                },
-                featureExport: {
-                    usersExported: 642,
-                    postsExported: 1338,
-                    clustersExported: 0,
-                    durationMs: 34,
-                },
-            },
-            error: null,
-        }));
-        mocks.jobRunFind.mockReturnValue(findManyResult([
-            {
-                status: 'success',
-                startedAt: new Date('2026-06-11T06:47:45.406Z'),
-                finishedAt: new Date('2026-06-11T07:04:46.553Z'),
-                trigger: 'manual',
-            },
-        ]));
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({ embeddingEvidence })));
+        mocks.jobRunFind.mockReturnValue(findManyResult([latestRun({ embeddingEvidence })]));
 
         const result = await buildDailyRecommendationRefreshOps();
 
-        expect(result).toEqual({
-            status: 'success',
-            lastRefreshAt: '2026-06-11T07:04:46.553Z',
-            latestRun: {
-                startedAt: '2026-06-11T06:47:45.406Z',
-                finishedAt: '2026-06-11T07:04:46.553Z',
-                durationMs: 1021147,
-                trigger: 'manual',
-                error: null,
-            },
-            users: {
-                registered: 642,
-                vectors: 642,
-                refreshed: 642,
-                compatibleDenseVectorRatio: 1,
-            },
-            realGraph: {
-                edges: 954,
-                predicted: 954,
-            },
-            posts: {
-                snapshots: 1161,
-                refreshed: 1161,
-            },
-            artifacts: {
-                usersExported: 642,
-                postsExported: 1338,
-                clustersExported: 0,
-            },
-            schedule: {
-                label: '每天 02:00',
-                cron: '0 2 * * *',
-            },
-            freshnessWindow: {
-                hours: 24,
-                since: '2026-06-10T08:00:00.000Z',
-            },
+        expect(result.embeddingEvidence).toEqual({
+            status: 'available',
+            ...embeddingEvidence,
         });
-        expect(mocks.userVectorCountDocuments).toHaveBeenCalledWith(expect.objectContaining({
-            'embeddingContract.retrievalEmbeddingDim': 256,
-            twoTowerEmbedding: { $size: 256 },
-        }));
-    });
-
-    it('keeps current coverage evidence when no job run exists yet', async () => {
-        mockCoverageCounts();
-        mocks.jobRunFindOne.mockReturnValue(findOneResult(null));
-        mocks.jobRunFind.mockReturnValue(findManyResult([]));
-
-        const result = await buildDailyRecommendationRefreshOps({
-            hours: 12,
-            since: new Date('2026-06-11T00:00:00.000Z'),
-        });
-
-        expect(result.status).toBe('unknown');
-        expect(result.lastRefreshAt).toBeNull();
-        expect(result.users).toEqual({
+        expect(result.users.compatibleDenseVectorRatio).toBe(1);
+        expect(result.users).toMatchObject({
             registered: 642,
             vectors: 642,
             refreshed: 642,
-            compatibleDenseVectorRatio: 1,
         });
-        expect(result.realGraph).toEqual({
-            edges: 954,
-            predicted: 954,
-        });
-        expect(result.posts.refreshed).toBe(1161);
-        expect(result.artifacts).toEqual({
-            usersExported: 0,
-            postsExported: 0,
-            clustersExported: 0,
-        });
+        expect(result.realGraph).toEqual({ edges: 954, predicted: 954 });
+        expect(result.posts).toEqual({ snapshots: 1161, refreshed: 1161 });
+        expect(mocks.userVectorCountDocuments).toHaveBeenCalledTimes(2);
+        expect(mocks.userVectorCountDocuments).not.toHaveBeenCalledWith(expect.objectContaining({
+            embeddingContract: expect.anything(),
+        }));
     });
 
-    it('preserves the CLI audit fields while sharing the same read model', async () => {
+    it('fails closed when the latest persisted summary has no embedding evidence', async () => {
         mockCoverageCounts();
-        mocks.jobRunFindOne.mockReturnValue(findOneResult(null));
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({})));
         mocks.jobRunFind.mockReturnValue(findManyResult([]));
 
-        const audit = await buildDailyRecommendationRefreshAudit({
-            hours: 24,
-            since: new Date('2026-06-11T00:00:00.000Z'),
-        });
+        const result = await buildDailyRecommendationRefreshOps();
 
-        expect(audit.registeredUserFeatureCoverage).toMatchObject({
-            registeredUsers: 642,
-            userFeatureVectors: 642,
-            refreshedInWindow: 642,
-            compatibleDenseVectorRatio: 1,
-        });
-        expect(audit.realGraphRefreshCoverage).toMatchObject({
-            edges: 954,
-            predictedInWindow: 954,
-        });
-        expect(audit.dailyJobEvidence.latest).toBeNull();
+        expect(result.embeddingEvidence).toEqual({ status: 'unavailable' });
+        expect(result.users.compatibleDenseVectorRatio).toBe(0);
+        mockCoverageCounts();
+        const audit = await buildDailyRecommendationRefreshAudit();
+        expect(audit.embeddingEvidence).toBeNull();
+    });
+
+    it('never opens a cursor or full-scans embeddings on the HTTP/ops read path', async () => {
+        mockCoverageCounts();
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({ embeddingEvidence })));
+        mocks.jobRunFind.mockReturnValue(findManyResult([]));
+
+        await buildDailyRecommendationRefreshOps();
+
+        expect(mocks.userVectorFind).not.toHaveBeenCalled();
+        expect(mocks.postSnapshotFind).not.toHaveBeenCalled();
+    });
+
+    it('treats fabricated semantic-ready persisted evidence as unavailable', async () => {
+        mockCoverageCounts();
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({
+            embeddingEvidence: {
+                ...embeddingEvidence,
+                verified_local_fallback: 2,
+                semantic_ready: 1,
+                cohorts: {
+                    ...embeddingEvidence.cohorts,
+                    userVectors: {
+                        ...embeddingEvidence.cohorts.userVectors,
+                        verified_local_fallback: 1,
+                        semantic_ready: 1,
+                    },
+                },
+            },
+        })));
+        mocks.jobRunFind.mockReturnValue(findManyResult([]));
+
+        const result = await buildDailyRecommendationRefreshOps();
+
+        expect(result.embeddingEvidence).toEqual({ status: 'unavailable' });
+        expect(result.users.compatibleDenseVectorRatio).toBe(0);
+    });
+
+    it('fails closed when cohort counts do not add up to the aggregate', async () => {
+        mockCoverageCounts();
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({
+            embeddingEvidence: {
+                ...embeddingEvidence,
+                cohorts: {
+                    ...embeddingEvidence.cohorts,
+                    postFeatureSnapshots: {
+                        ...embeddingEvidence.cohorts.postFeatureSnapshots,
+                        verified_local_fallback: 2,
+                        invalid: 0,
+                    },
+                },
+            },
+        })));
+        mocks.jobRunFind.mockReturnValue(findManyResult([]));
+
+        const result = await buildDailyRecommendationRefreshOps();
+
+        expect(result.embeddingEvidence).toEqual({ status: 'unavailable' });
+        expect(result.users.compatibleDenseVectorRatio).toBe(0);
     });
 });
+
+const embeddingEvidence = {
+    total: 4,
+    verified_local_fallback: 3,
+    semantic_ready: 0,
+    quarantined: 0,
+    invalid: 1,
+    unclassified: 0,
+    cohorts: {
+        userVectors: {
+            total: 2,
+            verified_local_fallback: 2,
+            semantic_ready: 0,
+            quarantined: 0,
+            invalid: 0,
+            unclassified: 0,
+        },
+        postFeatureSnapshots: {
+            total: 2,
+            verified_local_fallback: 1,
+            semantic_ready: 0,
+            quarantined: 0,
+            invalid: 1,
+            unclassified: 0,
+        },
+    },
+    quarantineDigest: quarantineDigestFromChecksums([]),
+    scan: {
+        userDocuments: 1,
+        postFeatureSnapshots: 2,
+        mode: 'full' as const,
+        limit: null,
+        diagnosticOnly: false,
+        ordering: '_id_ascending' as const,
+    },
+};
+
+function latestRun(summary: Record<string, unknown>) {
+    return {
+        status: 'success',
+        startedAt: new Date('2026-06-11T06:47:45.406Z'),
+        finishedAt: new Date('2026-06-11T07:04:46.553Z'),
+        durationMs: 1021147,
+        trigger: 'manual',
+        summary: {
+            users: { embeddingsUpdated: 642 },
+            realGraph: { predictionMatched: 954, predictionUpdated: 954 },
+            posts: { refreshed: 1161 },
+            ...summary,
+        },
+        error: null,
+    };
+}
 
 function mockCoverageCounts() {
     mocks.userCount.mockResolvedValue(642);
     mocks.userVectorCountDocuments
-        .mockResolvedValueOnce(642)
-        .mockResolvedValueOnce(642)
         .mockResolvedValueOnce(642)
         .mockResolvedValueOnce(642);
     mocks.userActionCountDocuments

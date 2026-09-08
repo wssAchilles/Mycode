@@ -44,6 +44,72 @@ const base = (postId: mongoose.Types.ObjectId, extra?: Partial<any>) => ({
 });
 
 describe('Scoring semantics (Phoenix -> Weighted -> Calibration -> Diversity -> OON)', () => {
+    it('sanitizes non-finite weighted-score inputs at the scorer boundary', async () => {
+        const q = createFeedQuery('user', 20);
+        const scorer = new WeightedScorer();
+        const phoenixCandidate = base(oid('507f191e810c19729de87010'), {
+            phoenixScores: {
+                likeScore: Number.NaN,
+                replyScore: Number.POSITIVE_INFINITY,
+                clickScore: 0.2,
+                dismissScore: Number.NEGATIVE_INFINITY,
+            },
+            _scoreBreakdown: {
+                retrievalEvidenceConfidence: Number.NaN,
+            },
+        });
+        const actionCandidate = base(oid('507f191e810c19729de87016'), {
+            phoenixScores: undefined,
+            actionScores: {
+                like: Number.NaN,
+                reply: Number.POSITIVE_INFINITY,
+                repost: 0,
+                click: 0.2,
+                dwell: 0,
+                negative: Number.NEGATIVE_INFINITY,
+            },
+        });
+        const heuristicCandidate = base(oid('507f191e810c19729de87017'), {
+            phoenixScores: undefined,
+            actionScores: undefined,
+            likeCount: Number.MAX_VALUE,
+            commentCount: Number.MAX_VALUE,
+            repostCount: Number.POSITIVE_INFINITY,
+            viewCount: Number.NaN,
+            authorAffinityScore: Number.POSITIVE_INFINITY,
+            _scoreBreakdown: {
+                retrievalAuthorPrior: Number.POSITIVE_INFINITY,
+                retrievalDenseVectorScore: Number.NaN,
+                retrievalEvidenceConfidence: 1,
+            },
+        });
+        const overflowCandidate = base(oid('507f191e810c19729de87018'), {
+            phoenixScores: {
+                likeScore: Number.MAX_VALUE,
+                replyScore: Number.MAX_VALUE,
+            },
+            _scoreBreakdown: {
+                retrievalEvidenceConfidence: 1,
+            },
+        });
+
+        const weighted = await scorer.score(q, [
+            phoenixCandidate as any,
+            actionCandidate as any,
+            heuristicCandidate as any,
+            overflowCandidate as any,
+        ]);
+
+        expect(weighted[0].candidate.weightedScore).toBeCloseTo(0.1 / 30.55 + 0.1, 12);
+        for (const result of weighted) {
+            expect(result.score).toBe(result.candidate.weightedScore);
+            expect(Number.isFinite(result.score)).toBe(true);
+            expect(Object.values(result.scoreBreakdown ?? {}).every(Number.isFinite)).toBe(true);
+        }
+        expect(weighted[3].scoreBreakdown?.weightedBaseRawScore).toBe(0);
+        expect(weighted[3].scoreBreakdown?.weightedEvidenceLift).toBe(0);
+    });
+
     it('uses retrieval evidence as a bounded weighted-score lift', async () => {
         const q = createFeedQuery('user', 20);
         const single = base(oid('507f191e810c19729de87011'));

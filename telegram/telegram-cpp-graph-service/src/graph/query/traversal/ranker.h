@@ -46,6 +46,7 @@ template <typename QueryCandidates>
 QueryCandidates rank_multi_hop_candidates(
     std::vector<contracts::MultiHopCandidate> candidates,
     const std::size_t limit,
+    const std::size_t scanned_count,
     const std::size_t visited_count,
     const bool budget_exhausted) {
   const auto available_count = candidates.size();
@@ -54,7 +55,7 @@ QueryCandidates rank_multi_hop_candidates(
   return QueryCandidates{
       .candidates = std::move(candidates),
       .available_count = available_count,
-      .scanned_count = visited_count,
+      .scanned_count = scanned_count,
       .visited_count = visited_count,
       .budget_exhausted = budget_exhausted,
   };
@@ -64,6 +65,7 @@ template <typename QueryCandidates>
 QueryCandidates rank_bridge_candidates(
     std::vector<contracts::BridgeCandidate> candidates,
     const std::size_t limit,
+    const std::size_t scanned_count,
     const std::size_t visited_count,
     const bool budget_exhausted) {
   const auto available_count = candidates.size();
@@ -72,7 +74,7 @@ QueryCandidates rank_bridge_candidates(
   return QueryCandidates{
       .candidates = std::move(candidates),
       .available_count = available_count,
-      .scanned_count = visited_count,
+      .scanned_count = scanned_count,
       .visited_count = visited_count,
       .budget_exhausted = budget_exhausted,
   };

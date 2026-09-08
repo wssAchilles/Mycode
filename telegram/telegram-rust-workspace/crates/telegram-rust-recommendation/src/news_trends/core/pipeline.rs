@@ -148,6 +148,25 @@ mod tests {
     }
 
     #[test]
+    fn extreme_social_metrics_keep_trend_scores_finite() {
+        let mut document = news_doc("extreme", "AI launch gets shared widely", vec!["ai"], 20, 2);
+        document.metrics.likes = Some(f64::MAX);
+        document.metrics.comments = Some(f64::MAX);
+        document.metrics.reposts = Some(f64::MAX);
+
+        let response = run_news_trends_pipeline(request(vec![document]));
+
+        assert_eq!(response.trends.len(), 1);
+        assert!(response.trends[0].score.is_finite());
+        assert!(
+            response.trends[0]
+                .score_breakdown
+                .values()
+                .all(|value| value.is_finite())
+        );
+    }
+
+    #[test]
     fn source_cap_prevents_one_domain_from_dominating() {
         let mut docs = vec![
             news_doc("1", "AI model launch", vec!["ai"], 10, 1),

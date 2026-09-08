@@ -10,7 +10,8 @@ use telegram_ranking_primitives::{
 };
 
 use super::helpers::{
-    breakdown_value, build_stage, merge_breakdown, oon_factor, stable_unit_interval,
+    breakdown_value, build_stage, finite_score_product, merge_breakdown, oon_factor,
+    stable_unit_interval,
 };
 
 pub(super) fn oon_scorer(
@@ -38,7 +39,7 @@ pub(super) fn apply_oon(ctx: &ScoringContext, candidate: &mut RecommendationCand
     } else {
         1.0
     };
-    let adjusted = base * factor;
+    let adjusted = finite_score_product(base, factor);
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "baseScore", base);

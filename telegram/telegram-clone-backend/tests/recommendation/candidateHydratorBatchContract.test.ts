@@ -219,4 +219,35 @@ describe('RecommendationAdapterService candidate hydrator batch contract', () =>
     expect(result.candidates[0]?.isLikedByUser).toBe(true);
     expect(result.candidates[0]?.authorUsername).toBeUndefined();
   });
+
+  it('rejects duplicate requested hydrators before executing them', async () => {
+    const service = new RecommendationAdapterService();
+    const hydrate = vi.fn(async (_query: any, candidates: any[]) => candidates);
+    buildRecommendationHydratorsMock.mockReturnValue([
+      {
+        name: 'AuthorInfoHydrator',
+        enable: () => true,
+        hydrate,
+        update: (candidate: any) => candidate,
+      },
+    ]);
+
+    await expect(
+      service.hydrateCandidates(
+        createFeedQuery('viewer-contract', 20),
+        [
+          {
+            postId: 'post-6',
+            authorId: 'author-6',
+            content: 'six',
+            createdAt: new Date('2026-04-21T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+          },
+        ],
+        ['AuthorInfoHydrator', 'AuthorInfoHydrator'],
+      ),
+    ).rejects.toThrow('duplicate_provider_hydrator:AuthorInfoHydrator');
+    expect(hydrate).not.toHaveBeenCalled();
+  });
 });

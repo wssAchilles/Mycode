@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -15,6 +17,7 @@ import (
 	consumerhttp "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/http"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/observability/profiling"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
+	platformreplay "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
@@ -36,6 +39,12 @@ func main() {
 		DB:       config.RedisDB(cfg.RedisURL),
 	})
 	defer client.Close()
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
+	if err := client.Ping(startupCtx).Err(); err != nil {
+		startupCancel()
+		logger.Fatalf("ping redis during startup: %v", err)
+	}
+	startupCancel()
 
 	otelShutdown, err := telemetry.Init(context.Background(), "delivery-consumer", cfg.OTelEndpoint)
 	if err != nil {
@@ -73,7 +82,12 @@ func main() {
 	}()
 
 	dispatcher := platform.NewDispatcher(client, cfg)
-	replayOperator := platform.NewReplayOperator(client, cfg, dispatcher)
+	replayWorker := buildReplayWorker(cfg.PlatformReplayWorkerEnabled, func() *platformreplay.Worker {
+		return platform.NewReplayWorker(client, cfg, dispatcher, logger)
+	})
+	if cfg.PlatformReplayWorkerEnabled && replayWorker == nil {
+		logger.Fatal("initialize platform replay worker: invalid configuration")
+	}
 	profilingServer, err := profiling.NewServer(cfg.PprofBindAddr, logger)
 	if err != nil {
 		logger.Fatalf("initialize pprof server: %v", err)
@@ -82,7 +96,12 @@ func main() {
 		PrimaryExecutor: primaryExecutor,
 		Dispatcher:      dispatcher,
 	})
-	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, replayOperator, logger, consumer)
+	var httpServer *http.Server
+	if replayWorker == nil {
+		httpServer = consumerhttp.New(cfg.BindAddr, cfg, state, nil, logger, consumer)
+	} else {
+		httpServer = consumerhttp.New(cfg.BindAddr, cfg, state, replayWorker, logger, consumer)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -92,6 +111,16 @@ func main() {
 			logger.Printf("stream consumer stopped with error: %v", err)
 		}
 	}()
+
+	var replayWorkerDone <-chan error
+	if replayWorker != nil {
+		done := make(chan error, 1)
+		replayWorkerDone = done
+		go func() {
+			done <- replayWorker.Run(ctx)
+			close(done)
+		}()
+	}
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -108,6 +137,9 @@ func main() {
 	}
 
 	<-ctx.Done()
+	if err := waitForReplayWorker(replayWorkerDone, cfg.BlockDuration); err != nil && !errors.Is(err, context.Canceled) {
+		logger.Printf("platform replay worker stopped with error: %v", err)
+	}
 
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
 	consumer.Drain(drainCtx)
@@ -121,4 +153,25 @@ func main() {
 	if err := profilingServer.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("pprof shutdown error: %v", err)
 	}
+}
+
+func waitForReplayWorker(done <-chan error, timeout time.Duration) error {
+	if done == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("wait for platform replay worker: %w", ctx.Err())
+	}
+}
+
+func buildReplayWorker(enabled bool, build func() *platformreplay.Worker) *platformreplay.Worker {
+	if !enabled {
+		return nil
+	}
+	return build()
 }

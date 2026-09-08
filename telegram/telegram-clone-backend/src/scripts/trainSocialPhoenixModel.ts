@@ -5,15 +5,28 @@
  *   npx ts-node src/scripts/trainSocialPhoenixModel.ts --input ./tmp/recsys_samples.ndjson --output ./tmp/social_phoenix_model.json
  */
 
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 
-import type {
-    SocialPhoenixFeatureMap,
-    SocialPhoenixLinearModel,
-    SocialPhoenixTask,
+import {
+    type SocialPhoenixFeatureMap,
+    type SocialPhoenixLinearModel,
+    type SocialPhoenixTask,
 } from '../services/recommendation/socialPhoenix';
+import {
+    SOCIAL_PHOENIX_DEVELOPMENT_MODEL_LIMITS,
+    isValidSocialPhoenixDevelopmentModelV1,
+} from '../services/recommendation/socialPhoenix/modelArtifact/developmentContract';
+
+const DEVELOPMENT_TRAINING_LIMITS = Object.freeze({
+    maximumInputBytes: 128 * 1024 * 1024,
+    maximumLineBytes: 1 * 1024 * 1024,
+    maximumRows: 65_536,
+    maximumEpochs: 64,
+    maximumWorkUnits: 100_000_000,
+});
 
 type SampleRow = {
     trainingFeatures?: SocialPhoenixFeatureMap;
@@ -54,14 +67,27 @@ function parseArgs() {
         kv[key] = value;
     }
 
-    return {
+    const config = {
         input: kv.input || './tmp/recsys_samples.ndjson',
         output: kv.output || './tmp/social_phoenix_model.json',
-        epochs: Math.max(1, parseInt(kv.epochs || '8', 10) || 8),
-        learningRate: Math.max(0.0001, parseFloat(kv.learningRate || '0.05') || 0.05),
-        l2: Math.max(0, parseFloat(kv.l2 || '0.0005') || 0.0005),
-        minFeatureCount: Math.max(1, parseInt(kv.minFeatureCount || '4', 10) || 4),
+        epochs: Number(kv.epochs || '8'),
+        learningRate: Number(kv.learningRate || '0.05'),
+        l2: Number(kv.l2 || '0.0005'),
+        minFeatureCount: Number(kv.minFeatureCount || '4'),
     };
+    if (
+        !Number.isInteger(config.epochs)
+        || config.epochs < 1
+        || config.epochs > DEVELOPMENT_TRAINING_LIMITS.maximumEpochs
+        || !Number.isFinite(config.learningRate)
+        || config.learningRate <= 0
+        || !Number.isFinite(config.l2)
+        || config.l2 < 0
+        || !Number.isInteger(config.minFeatureCount)
+        || config.minFeatureCount < 1
+        || config.minFeatureCount > DEVELOPMENT_TRAINING_LIMITS.maximumRows
+    ) throw new Error('training_config_resource_limit_exceeded');
+    return config;
 }
 
 function sigmoid(value: number): number {
@@ -76,27 +102,86 @@ function sigmoid(value: number): number {
 async function main() {
     const args = parseArgs();
     const inputPath = path.resolve(process.cwd(), args.input);
+    const outputPath = path.resolve(process.cwd(), args.output);
     if (!fs.existsSync(inputPath)) {
         throw new Error(`input_not_found:${inputPath}`);
     }
+    if (fs.existsSync(outputPath)) throw new Error(`output_already_exists:${outputPath}`);
 
     const rows: SampleRow[] = [];
     const featureCounts = new Map<string, number>();
+    const inputDescriptor = fs.openSync(inputPath, 'r');
+    let inputStat: fs.Stats;
+    try {
+        inputStat = fs.fstatSync(inputDescriptor);
+    } catch (error) {
+        fs.closeSync(inputDescriptor);
+        throw error;
+    }
+    if (
+        !inputStat.isFile()
+        || !Number.isSafeInteger(inputStat.size)
+        || inputStat.size <= 0
+        || inputStat.size > DEVELOPMENT_TRAINING_LIMITS.maximumInputBytes
+    ) {
+        fs.closeSync(inputDescriptor);
+        throw new Error('training_input_resource_limit_exceeded');
+    }
+    const inputStream = fs.createReadStream(inputPath, {
+        autoClose: true,
+        encoding: 'utf8',
+        end: inputStat.size - 1,
+        fd: inputDescriptor,
+    });
     const input = readline.createInterface({
-        input: fs.createReadStream(inputPath, { encoding: 'utf8' }),
+        input: inputStream,
         crlfDelay: Infinity,
     });
 
-    for await (const line of input) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const row = JSON.parse(trimmed) as SampleRow;
-        if (!row.trainingFeatures || Object.keys(row.trainingFeatures).length === 0) continue;
-        rows.push(row);
-        for (const [feature, value] of Object.entries(row.trainingFeatures)) {
-            if (!Number.isFinite(value) || value === 0) continue;
-            featureCounts.set(feature, (featureCounts.get(feature) || 0) + 1);
+    try {
+        for await (const line of input) {
+            if (Buffer.byteLength(line, 'utf8') > DEVELOPMENT_TRAINING_LIMITS.maximumLineBytes) {
+                throw new Error('training_input_resource_limit_exceeded');
+            }
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const row = JSON.parse(trimmed) as SampleRow;
+            if (
+                !row.trainingFeatures
+                || typeof row.trainingFeatures !== 'object'
+                || Array.isArray(row.trainingFeatures)
+            ) continue;
+            const featureEntries = Object.entries(row.trainingFeatures);
+            if (featureEntries.length === 0) continue;
+            if (
+                rows.length >= DEVELOPMENT_TRAINING_LIMITS.maximumRows
+                || featureEntries.length > SOCIAL_PHOENIX_DEVELOPMENT_MODEL_LIMITS.maximumFeatures
+            ) throw new Error('training_input_resource_limit_exceeded');
+
+            for (const { label } of TASKS) {
+                if (row[label] !== 0 && row[label] !== 1) {
+                    throw new Error(`training_row_label_invalid:${label}`);
+                }
+            }
+            rows.push(row);
+            for (const [feature, value] of featureEntries) {
+                if (
+                    feature.length === 0
+                    || Buffer.byteLength(feature, 'utf8')
+                        > SOCIAL_PHOENIX_DEVELOPMENT_MODEL_LIMITS.maximumFeatureNameUtf8Bytes
+                    || typeof value !== 'number'
+                    || !Number.isFinite(value)
+                ) throw new Error('training_feature_contract_invalid');
+                if (value === 0) continue;
+                featureCounts.set(feature, (featureCounts.get(feature) || 0) + 1);
+                if (featureCounts.size > SOCIAL_PHOENIX_DEVELOPMENT_MODEL_LIMITS.maximumFeatures) {
+                    throw new Error('training_input_resource_limit_exceeded');
+                }
+            }
         }
+    } finally {
+        input.close();
+        inputStream.destroy();
     }
 
     if (rows.length === 0) {
@@ -107,6 +192,13 @@ async function main() {
         .filter(([feature, count]) => feature === 'bias' || count >= args.minFeatureCount)
         .map(([feature]) => feature)
         .sort();
+    const trainingWorkUnits = rows.length * TASKS.length
+        * (1 + args.epochs * (2 * features.length + 1))
+        + TASKS.length * features.length;
+    if (
+        !Number.isSafeInteger(trainingWorkUnits)
+        || trainingWorkUnits > DEVELOPMENT_TRAINING_LIMITS.maximumWorkUnits
+    ) throw new Error('training_work_resource_limit_exceeded');
 
     const model: SocialPhoenixLinearModel = {
         version: 1,
@@ -164,12 +256,21 @@ async function main() {
         }
     }
 
-    const outputPath = path.resolve(process.cwd(), args.output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, JSON.stringify(model, null, 2));
+    if (!isValidSocialPhoenixDevelopmentModelV1(model)) {
+        throw new Error('training_model_contract_invalid');
+    }
+    const modelBytes = Buffer.from(JSON.stringify(model, null, 2), 'utf8');
+    if (modelBytes.length > SOCIAL_PHOENIX_DEVELOPMENT_MODEL_LIMITS.maximumArtifactBytes) {
+        throw new Error('training_model_resource_limit_exceeded');
+    }
+    const modelSha256 = crypto.createHash('sha256').update(modelBytes).digest('hex');
+    fs.writeFileSync(outputPath, modelBytes, { flag: 'wx', mode: 0o600 });
 
     console.log(`[TrainSocialPhoenixModel] rows=${rows.length}`);
     console.log(`[TrainSocialPhoenixModel] features=${features.length}`);
+    console.log(`[TrainSocialPhoenixModel] workUnits=${trainingWorkUnits}`);
+    console.log(`[TrainSocialPhoenixModel] sha256=${modelSha256}`);
     console.log(`[TrainSocialPhoenixModel] wrote ${outputPath}`);
 }
 

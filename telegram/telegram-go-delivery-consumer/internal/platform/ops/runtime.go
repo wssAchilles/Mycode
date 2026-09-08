@@ -23,19 +23,19 @@ func TopicCatalog(cfg config.Config) map[string]TopicRuntime {
 			Owner:         "go",
 			Mode:          cfg.SyncWakeExecutionMode,
 			Channels:      nonEmpty(cfg.WakePubSubChannel),
-			ReplayEnabled: cfg.PlatformReplayStreamKey != "",
+			ReplayEnabled: cfg.PlatformReplayWorkerEnabled && cfg.PlatformReplayStreamKey != "",
 		},
 		"presence_fanout_requested": {
 			Owner:         "go",
 			Mode:          cfg.PresenceExecutionMode,
 			Channels:      nonEmpty(cfg.PresenceOnlineChannel, cfg.PresenceOfflineChannel),
-			ReplayEnabled: cfg.PlatformReplayStreamKey != "",
+			ReplayEnabled: cfg.PlatformReplayWorkerEnabled && cfg.PlatformReplayStreamKey != "",
 		},
 		"notification_dispatch_requested": {
 			Owner:         "go",
 			Mode:          cfg.NotificationExecutionMode,
 			Channels:      nonEmpty(cfg.NotificationChannel),
-			ReplayEnabled: cfg.PlatformReplayStreamKey != "",
+			ReplayEnabled: cfg.PlatformReplayWorkerEnabled && cfg.PlatformReplayStreamKey != "",
 		},
 	}
 }

@@ -16,6 +16,12 @@ import { simClustersService } from '../recommendation/SimClustersService';
 import UserFeatureVector from '../../models/UserFeatureVector';
 import RealGraphEdge from '../../models/RealGraphEdge';
 import RecommendationJobRun from '../../models/RecommendationJobRun';
+import {
+    repairLeaseCoordinator,
+    repairRunId,
+    type RepairCompletionProvenance,
+    type RepairJobCoordinator,
+} from './coordination/repairLease';
 
 type Trigger = 'cron' | 'manual' | 'script';
 
@@ -36,15 +42,36 @@ const CONFIG = {
     progressInterval: 100,             // 每 N 个用户报告一次进度
 };
 
+const JOB_NAME = 'simclusters-batch-repair';
+
+function assertEvidenceWrite(
+    result: { acknowledged: boolean; matchedCount?: number; upsertedCount?: number },
+    phase: string,
+): void {
+    if (!result.acknowledged || (result.matchedCount ?? 0) + (result.upsertedCount ?? 0) === 0) {
+        throw new Error(`[SimClustersBatchJob] ${phase} evidence write was not applied`);
+    }
+}
+
+function evidenceTrigger(value: string | undefined): Trigger {
+    if (value === 'cron' || value === 'manual' || value === 'script') {
+        return value;
+    }
+    throw new Error('[SimClustersBatchJob] Invalid completion trigger provenance');
+}
+
 // ========== 作业类 ==========
 export class SimClustersBatchJob {
     private isRunning = false;
-    private abortRequested = false;
+    private abortController: AbortController | undefined;
+
+    constructor(private readonly coordinator: RepairJobCoordinator = repairLeaseCoordinator) {}
 
     /**
      * 运行批量更新作业
      */
-    async run(options?: {
+    async run(options: {
+        epoch: string;
         maxUsers?: number;
         onlyStale?: boolean;
         trigger?: Trigger;
@@ -55,103 +82,168 @@ export class SimClustersBatchJob {
         skipped: number;
         durationMs: number;
     }> {
-        if (this.isRunning) {
-            throw new Error('[SimClustersBatchJob] Job is already running');
-        }
+        const epoch = String(options?.epoch ?? '').trim();
+        const evidenceId = repairRunId(JOB_NAME, epoch);
+        const evidenceFilter = { _id: evidenceId };
+        const trigger = options.trigger ?? 'manual';
+        const releaseTag = process.env.RELEASE_TAG || process.env.SENTRY_RELEASE;
 
-        this.isRunning = true;
-        this.abortRequested = false;
+        return this.coordinator.execute(
+                JOB_NAME,
+                epoch,
+                async (leaseSignal, attempt) => {
+                    leaseSignal.throwIfAborted();
+                    this.isRunning = true;
+                    const abortController = new AbortController();
+                    this.abortController = abortController;
+                    const signal = AbortSignal.any([leaseSignal, abortController.signal]);
+                    const startTime = Date.now();
+                    const startedAt = new Date(attempt.startedAt);
+                    let evidenceStarted = false;
+                    try {
+                        const write = await RecommendationJobRun.updateOne(
+                            {
+                                ...evidenceFilter,
+                                status: { $ne: 'success' },
+                                $or: [
+                                    { 'summary.fenceToken': { $lt: attempt.fenceToken } },
+                                    { 'summary.fenceToken': { $exists: false } },
+                                ],
+                            },
+                            {
+                                $set: {
+                                    status: 'running',
+                                    jobName: JOB_NAME,
+                                    mode: 'repair',
+                                    startedAt,
+                                    trigger,
+                                    releaseTag,
+                                    summary: {
+                                        mode: 'repair',
+                                        epoch,
+                                        attemptId: attempt.attemptId,
+                                        fenceToken: attempt.fenceToken,
+                                        attemptStartedAt: attempt.startedAt,
+                                    },
+                                },
+                                $unset: {
+                                    finishedAt: 1,
+                                    durationMs: 1,
+                                    counts: 1,
+                                    error: 1,
+                                },
+                            },
+                            { upsert: true, signal },
+                        );
+                        assertEvidenceWrite(write, 'running');
+                        evidenceStarted = true;
+                        signal.throwIfAborted();
+                        let success = 0;
+                        let failed = 0;
+                        const skipped = 0;
+                        const maxUsers = options.maxUsers || CONFIG.maxUsersPerRun;
 
-        const startTime = Date.now();
-        const startedAt = new Date();
-        const runDoc = await RecommendationJobRun.create({
-            jobName: 'simclusters-batch-repair',
-            mode: 'repair',
-            status: 'running',
-            startedAt,
-            trigger: options?.trigger ?? 'manual',
-            releaseTag: process.env.RELEASE_TAG || process.env.SENTRY_RELEASE,
-            summary: { mode: 'repair' },
-        });
-        let success = 0;
-        let failed = 0;
-        let skipped = 0;
+                        console.log('[SimClustersBatchJob] Starting batch job...');
 
-        const maxUsers = options?.maxUsers || CONFIG.maxUsersPerRun;
+                        const userIds = await this.getUsersToProcess(maxUsers, options.onlyStale);
+                        signal.throwIfAborted();
+                        console.log(`[SimClustersBatchJob] Found ${userIds.length} users to process`);
 
-        try {
-            console.log('[SimClustersBatchJob] Starting batch job...');
+                        if (userIds.length === 0) {
+                            console.log('[SimClustersBatchJob] No users to process');
+                            return { success, failed, skipped, durationMs: Date.now() - startTime };
+                        }
 
-            // Step 1: 获取需要更新的用户列表
-            const userIds = await this.getUsersToProcess(maxUsers, options?.onlyStale);
-            console.log(`[SimClustersBatchJob] Found ${userIds.length} users to process`);
+                        for (let i = 0; i < userIds.length; i += CONFIG.batchSize) {
+                            signal.throwIfAborted();
 
-            if (userIds.length === 0) {
-                console.log('[SimClustersBatchJob] No users to process');
-                const durationMs = Date.now() - startTime;
-                const counts = { success: 0, failed: 0, skipped: 0, durationMs };
-                await this.markRunSucceeded(runDoc._id, counts);
-                return counts;
-            }
+                            const batch = userIds.slice(i, i + CONFIG.batchSize);
+                            const results = await this.processBatch(batch, signal);
+                            signal.throwIfAborted();
 
-            // Step 2: 分批处理
-            for (let i = 0; i < userIds.length; i += CONFIG.batchSize) {
-                if (this.abortRequested) {
-                    console.log('[SimClustersBatchJob] Abort requested, stopping...');
-                    break;
-                }
+                            success += results.success;
+                            failed += results.failed;
+                            if (failed > 0) {
+                                throw new Error('[SimClustersBatchJob] Batch completed with user failures');
+                            }
 
-                const batch = userIds.slice(i, i + CONFIG.batchSize);
-                const results = await this.processBatch(batch);
+                            const processed = i + batch.length;
+                            if (processed % CONFIG.progressInterval === 0 || processed === userIds.length) {
+                                console.log(
+                                    `[SimClustersBatchJob] Progress: ${processed}/${userIds.length} ` +
+                                    `(success: ${success}, failed: ${failed})`
+                                );
 
-                success += results.success;
-                failed += results.failed;
+                                if (options.onProgress) {
+                                    options.onProgress(processed, userIds.length);
+                                }
+                            }
+                        }
 
-                // 进度报告
-                const processed = i + batch.length;
-                if (processed % CONFIG.progressInterval === 0 || processed === userIds.length) {
-                    console.log(
-                        `[SimClustersBatchJob] Progress: ${processed}/${userIds.length} ` +
-                        `(success: ${success}, failed: ${failed})`
-                    );
-
-                    if (options?.onProgress) {
-                        options.onProgress(processed, userIds.length);
+                        return { success, failed, skipped, durationMs: Date.now() - startTime };
+                    } catch (error) {
+                        if (evidenceStarted && !leaseSignal.aborted) {
+                            const finishedAt = new Date();
+                            const write = await RecommendationJobRun.updateOne(
+                                {
+                                    ...evidenceFilter,
+                                    status: 'running',
+                                    'summary.attemptId': attempt.attemptId,
+                                    'summary.fenceToken': attempt.fenceToken,
+                                },
+                                {
+                                    $set: {
+                                        jobName: JOB_NAME,
+                                        mode: 'repair',
+                                        status: 'failed',
+                                        startedAt,
+                                        finishedAt,
+                                        durationMs: finishedAt.getTime() - startedAt.getTime(),
+                                        trigger,
+                                        releaseTag,
+                                        summary: {
+                                            mode: 'repair',
+                                            epoch,
+                                            attemptId: attempt.attemptId,
+                                            fenceToken: attempt.fenceToken,
+                                            attemptStartedAt: attempt.startedAt,
+                                        },
+                                        error: error instanceof Error ? error.message : String(error),
+                                    },
+                                },
+                                { signal: leaseSignal },
+                            );
+                            assertEvidenceWrite(write, 'failure');
+                        }
+                        throw error;
+                    } finally {
+                        this.isRunning = false;
+                        if (this.abortController === abortController) {
+                            this.abortController = undefined;
+                        }
                     }
-                }
-            }
-            const durationMs = Date.now() - startTime;
-            const counts = { success, failed, skipped, durationMs };
-            await this.markRunSucceeded(runDoc._id, counts);
-            console.log(
-                `[SimClustersBatchJob] Completed in ${durationMs}ms - ` +
-                `success: ${success}, failed: ${failed}, skipped: ${skipped}`
-            );
-            return counts;
-        } catch (error) {
-            const finishedAt = new Date();
-            await RecommendationJobRun.updateOne(
-                { _id: runDoc._id },
-                {
-                    $set: {
-                        status: 'failed',
-                        finishedAt,
-                        durationMs: finishedAt.getTime() - startedAt.getTime(),
-                        error: error instanceof Error ? error.message : String(error),
-                    },
                 },
+                async (counts, provenance) => {
+                    await this.markRunSucceeded(
+                        evidenceId,
+                        counts,
+                        epoch,
+                        provenance,
+                    );
+                    console.log(
+                        `[SimClustersBatchJob] Completed in ${counts.durationMs}ms - ` +
+                        `success: ${counts.success}, failed: ${counts.failed}, skipped: ${counts.skipped}`
+                    );
+                },
+                { trigger, releaseTag },
             );
-            throw error;
-        } finally {
-            this.isRunning = false;
-        }
     }
 
     /**
      * 请求中止作业
      */
     abort(): void {
-        this.abortRequested = true;
+        this.abortController?.abort(new Error('[SimClustersBatchJob] Abort requested'));
     }
 
     /**
@@ -230,7 +322,8 @@ export class SimClustersBatchJob {
      * 处理一批用户
      */
     private async processBatch(
-        userIds: string[]
+        userIds: string[],
+        signal: AbortSignal,
     ): Promise<{ success: number; failed: number }> {
         let success = 0;
         let failed = 0;
@@ -242,9 +335,14 @@ export class SimClustersBatchJob {
         }
 
         for (const chunk of chunks) {
+            signal.throwIfAborted();
             const results = await Promise.allSettled(
-                chunk.map(userId => simClustersService.computeAndStoreEmbedding(userId))
+                chunk.map((userId) => {
+                    signal.throwIfAborted();
+                    return simClustersService.computeAndStoreEmbedding(userId, signal);
+                })
             );
+            signal.throwIfAborted();
 
             for (const result of results) {
                 if (result.status === 'fulfilled') {
@@ -260,24 +358,53 @@ export class SimClustersBatchJob {
     }
 
     private async markRunSucceeded(
-        runId: unknown,
+        evidenceId: string,
         counts: { success: number; failed: number; skipped: number; durationMs: number },
+        epoch: string,
+        provenance: RepairCompletionProvenance,
     ): Promise<void> {
-        await RecommendationJobRun.updateOne(
-            { _id: runId },
+        const finishedAt = new Date(provenance.completedAt);
+        const write = await RecommendationJobRun.updateOne(
+            {
+                _id: evidenceId,
+                $or: [
+                    {
+                        'summary.attemptId': provenance.attemptId,
+                        'summary.fenceToken': provenance.fenceToken,
+                    },
+                    { 'summary.fenceToken': { $lt: provenance.fenceToken } },
+                    {
+                        status: { $exists: false },
+                        'summary.fenceToken': { $exists: false },
+                    },
+                ],
+            },
             {
                 $set: {
+                    jobName: JOB_NAME,
+                    mode: 'repair',
                     status: 'success',
-                    finishedAt: new Date(),
+                    startedAt: new Date(provenance.startedAt),
+                    finishedAt,
                     durationMs: counts.durationMs,
+                    trigger: evidenceTrigger(provenance.trigger),
+                    releaseTag: provenance.releaseTag,
                     counts,
                     summary: {
                         mode: 'repair',
+                        epoch,
+                        attemptId: provenance.attemptId,
+                        fenceToken: provenance.fenceToken,
+                        attemptStartedAt: provenance.startedAt,
+                        completedAt: provenance.completedAt,
                         counts,
                     },
                 },
+                $unset: { error: 1 },
             },
+            { upsert: true },
         );
+        assertEvidenceWrite(write, 'success');
     }
 }
 

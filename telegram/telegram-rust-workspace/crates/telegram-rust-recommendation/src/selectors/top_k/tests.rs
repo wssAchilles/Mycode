@@ -24,6 +24,7 @@ use super::{build_selector_stage_detail, select_candidates, select_candidates_wi
 fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
     RecommendationQueryPayload {
         request_id: "selector-query".to_string(),
+        decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
         user_id: "viewer-1".to_string(),
         limit,
         cursor: None,
@@ -235,6 +236,53 @@ fn in_network_recency_selector_writes_serving_attribution() {
             Some((index + 1) as f64)
         );
     }
+}
+
+#[test]
+fn selector_uses_serving_tie_break_for_in_network_truncation() {
+    let mut query = query("warm", 1);
+    query.in_network_only = true;
+
+    let selected = select_candidates(
+        &query,
+        &[
+            candidate("post-a", "author-a", "in_network", true, 1.0),
+            candidate("post-b", "author-b", "in_network", true, 1.0),
+        ],
+        1,
+        1,
+        2,
+    );
+
+    assert_eq!(
+        selected
+            .iter()
+            .map(|candidate| candidate.post_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["post-b"]
+    );
+}
+
+#[test]
+fn selector_uses_serving_tie_break_for_general_window_selection() {
+    let selected = select_candidates(
+        &query("warm", 1),
+        &[
+            candidate("post-a", "author-a", "interest", false, 1.0),
+            candidate("post-b", "author-b", "interest", false, 1.0),
+        ],
+        1,
+        1,
+        2,
+    );
+
+    assert_eq!(
+        selected
+            .iter()
+            .map(|candidate| candidate.post_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["post-b"]
+    );
 }
 
 fn trend_candidate(
@@ -560,6 +608,39 @@ fn selector_report_counts_required_and_relaxed_fill_separately() {
             .and_then(serde_json::Value::as_u64),
         Some(1)
     );
+}
+
+#[test]
+fn selector_does_not_bypass_author_cap_for_candidates_outside_window() {
+    let mut candidates = (1..=18)
+        .map(|index| {
+            candidate(
+                &format!("window-{index}"),
+                "author-repeat",
+                "interest",
+                false,
+                100.0 - index as f64,
+            )
+        })
+        .collect::<Vec<_>>();
+    candidates.extend((19..=21).map(|index| {
+        candidate(
+            &format!("tail-{index}"),
+            "author-repeat",
+            "interest",
+            false,
+            100.0 - index as f64,
+        )
+    }));
+    let output = select_candidates_with_report(&query("warm", 6), &candidates, 1, 20, 2);
+
+    assert_eq!(output.candidates.len(), 3);
+    assert_eq!(output.report.required_selected_count, 2);
+    assert_eq!(output.report.relaxed_selected_count, 1);
+    assert_eq!(output.report.selected_count, 3);
+    assert!(output.candidates.iter().all(|candidate| {
+        candidate.author_id == "author-repeat" && candidate.post_id.starts_with("window-")
+    }));
 }
 
 #[test]

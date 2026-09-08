@@ -1,17 +1,19 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
+use moka::sync::Cache;
 use redis::AsyncCommands;
-use tokio::sync::Mutex;
 
-use crate::contracts::RecommendationCandidatePayload;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::serving::policy::build_query_fingerprint;
+
+const SOURCE_CACHE_LOCAL_CAPACITY: u64 = 4_096;
 
 /// Per-source cache for retrieval results.
 ///
-/// Caches source candidates by `(source_name, user_id)` with configurable TTL.
+/// Legacy callers cache by `(source_name, user_id)`. The source orchestrator uses
+/// query-aware keys so cursor and user-context changes cannot reuse stale candidates.
 /// Uses Redis as primary store with in-memory fallback, matching the ServeCache pattern.
 #[derive(Debug, Clone)]
 pub struct SourceCache {
@@ -19,7 +21,7 @@ pub struct SourceCache {
     ttl_secs: usize,
     prefix: String,
     redis_client: Option<redis::Client>,
-    memory: Arc<Mutex<HashMap<String, SourceCacheEntry>>>,
+    memory: Cache<String, SourceCacheEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +48,7 @@ impl SourceCache {
             ttl_secs,
             prefix: prefix.to_string(),
             redis_client,
-            memory: Arc::new(Mutex::new(HashMap::new())),
+            memory: Cache::new(SOURCE_CACHE_LOCAL_CAPACITY),
         }
     }
 
@@ -60,11 +62,27 @@ impl SourceCache {
         }
 
         let key = self.cache_key(source_name, user_id);
+        self.get_by_key(&key).await
+    }
 
+    pub async fn get_for_query(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> SourceCacheHit {
+        if !self.enabled {
+            return SourceCacheHit::default();
+        }
+
+        let key = self.query_cache_key(source_name, query);
+        self.get_by_key(&key).await
+    }
+
+    async fn get_by_key(&self, key: &str) -> SourceCacheHit {
         // Try Redis first.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
-            && let Ok(value) = connection.get::<_, Option<String>>(&key).await
+            && let Ok(value) = connection.get::<_, Option<String>>(key).await
             && let Some(value) = value
             && let Ok(candidates) =
                 serde_json::from_str::<Vec<RecommendationCandidatePayload>>(&value)
@@ -75,13 +93,13 @@ impl SourceCache {
         }
 
         // Fallback to in-memory cache.
-        let memory = self.memory.lock().await;
-        if let Some(entry) = memory.get(&key)
-            && entry.expires_at > Utc::now()
-        {
-            return SourceCacheHit {
-                candidates: Some(entry.candidates.clone()),
-            };
+        if let Some(entry) = self.memory.get(key) {
+            if entry.expires_at > Utc::now() {
+                return SourceCacheHit {
+                    candidates: Some(entry.candidates.clone()),
+                };
+            }
+            self.memory.invalidate(key);
         }
 
         SourceCacheHit::default()
@@ -98,32 +116,85 @@ impl SourceCache {
         }
 
         let key = self.cache_key(source_name, user_id);
+        self.store_by_key(&key, candidates).await
+    }
 
-        // Write to Redis.
+    pub async fn store_for_query(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let key = self.query_cache_key(source_name, query);
+        self.store_by_key(&key, candidates).await
+    }
+
+    async fn store_by_key(
+        &self,
+        key: &str,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
+        let serialized = serde_json::to_string(candidates)?;
+
+        // Write to Redis when available; the local cache remains the fallback.
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let serialized = serde_json::to_string(candidates)?;
-            let _: () = connection
-                .set_ex(&key, serialized, self.ttl_secs as u64)
-                .await?;
+            let _: redis::RedisResult<()> = connection
+                .set_ex(key, serialized, self.ttl_secs as u64)
+                .await;
         }
 
         // Write to in-memory cache.
-        let mut memory = self.memory.lock().await;
-        memory.insert(
-            key,
+        self.memory.insert(
+            key.to_owned(),
             SourceCacheEntry {
                 candidates: candidates.to_vec(),
                 expires_at: Utc::now() + Duration::seconds(self.ttl_secs as i64),
             },
         );
+        self.memory.run_pending_tasks();
 
         Ok(())
     }
 
     fn cache_key(&self, source_name: &str, user_id: &str) -> String {
         format!("{}:{source_name}:{user_id}", self.prefix)
+    }
+
+    pub(crate) fn query_cache_key(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> String {
+        format!(
+            "{}:{source_name}:{}:query:{}",
+            self.prefix,
+            query.user_id,
+            build_query_fingerprint(query)
+        )
+    }
+
+    pub(crate) async fn store_for_key(
+        &self,
+        key: &str,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        self.store_by_key(key, candidates).await
+    }
+
+    #[cfg(test)]
+    fn local_entry_count(&self) -> u64 {
+        self.memory.run_pending_tasks();
+        self.memory.entry_count()
     }
 }
 
@@ -259,6 +330,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn precomputed_query_key_roundtrip() {
+        let cache = SourceCache::new("redis://127.0.0.1:1", true, 300, "test:query-key");
+        let query = RecommendationQueryPayload {
+            user_id: "user-1".to_string(),
+            limit: 20,
+            ..Default::default()
+        };
+        let key = cache.query_cache_key("FollowingSource", &query);
+        cache
+            .store_for_key(&key, &[make_candidate("query-post")])
+            .await
+            .unwrap();
+
+        let hit = cache.get_by_key(&key).await;
+        assert_eq!(
+            hit.candidates
+                .as_ref()
+                .map(|candidates| candidates[0].post_id.as_str()),
+            Some("query-post")
+        );
+    }
+
+    #[tokio::test]
     async fn cache_miss_on_different_user() {
         let cache = SourceCache::new("redis://127.0.0.1:1", true, 300, "test:miss_user");
 
@@ -270,6 +364,23 @@ mod tests {
 
         let hit = cache.get("FollowingSource", "user-2").await;
         assert!(hit.candidates.is_none());
+    }
+
+    #[tokio::test]
+    async fn local_memory_cache_respects_capacity() {
+        let cache = SourceCache::new("not-a-redis-url", true, 300, "test:capacity");
+        for index in 0..=SOURCE_CACHE_LOCAL_CAPACITY {
+            cache
+                .store(
+                    "FollowingSource",
+                    &format!("user-{index}"),
+                    &[make_candidate(&format!("post-{index}"))],
+                )
+                .await
+                .unwrap();
+        }
+
+        assert!(cache.local_entry_count() <= SOURCE_CACHE_LOCAL_CAPACITY);
     }
 
     #[tokio::test]

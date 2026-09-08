@@ -17,6 +17,7 @@ telegram-component-primitives.workspace = true
 telegram-filter-primitives.workspace = true
 telegram-pipeline-primitives.workspace = true
 telegram-ranking-primitives.workspace = true
+telegram-randomized-policy-primitives.workspace = true
 telegram-recommendation-contracts.workspace = true
 telegram-recommendation-fixtures.workspace = true
 telegram-runtime-primitives.workspace = true

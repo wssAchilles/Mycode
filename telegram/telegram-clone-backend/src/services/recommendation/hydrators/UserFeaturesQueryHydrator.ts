@@ -20,6 +20,7 @@ const CONFIG = {
 
 export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
     readonly name = 'UserFeaturesQueryHydrator';
+    readonly failClosedOnError = true;
 
     enable(_query: FeedQuery): boolean {
         return true;
@@ -110,7 +111,7 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             return contacts.map((c: { contactId: string }) => c.contactId);
         } catch (error) {
             console.error('[UserFeaturesQueryHydrator] Failed to load blocked users:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -123,7 +124,7 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             return await UserSettings.getMutedUserIds(userId);
         } catch (error) {
             console.error('[UserFeaturesQueryHydrator] Failed to load muted users:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -157,7 +158,7 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             return await UserSettings.getMutedKeywords(userId);
         } catch (error) {
             console.error('[UserFeaturesQueryHydrator] Failed to load muted keywords:', error);
-            return [];
+            throw error;
         }
     }
 

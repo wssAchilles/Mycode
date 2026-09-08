@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeEmbeddingRecallSignals,
+    computeEmbeddingRecallSignalsFromSnapshot,
     getEmbeddingAuthorRecallWeights,
     getEmbeddingInterestPoolPlan,
     type PreparedEmbeddingRetrievalContext,
@@ -81,5 +82,22 @@ describe('embedding retrieval policy', () => {
         expect(signals.authorTopicProxyScore).toBeGreaterThan(0);
         expect(signals.topicCoverageScore).toBeGreaterThan(0);
         expect(signals.candidateTopicCompleteness).toBeGreaterThan(0);
+    });
+
+    it('fails closed for snapshot dense vectors with a different dimension', () => {
+        const context: PreparedEmbeddingRetrievalContext = {
+            qualityScore: 0.8,
+            userClusters: [],
+            userClusterMap: new Map(),
+            keywordWeights: new Map(),
+            denseUserEmbedding: [1, 0],
+        };
+
+        const signals = computeEmbeddingRecallSignalsFromSnapshot(
+            { denseEmbedding: [1] },
+            context,
+        );
+
+        expect(signals.denseVectorScore).toBe(0);
     });
 });

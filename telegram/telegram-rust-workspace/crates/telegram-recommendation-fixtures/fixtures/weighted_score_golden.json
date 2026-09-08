@@ -1,0 +1,141 @@
+{
+  "fixtureVersion": "recommendation_weighted_score_golden_v1",
+  "identity": {
+    "servingPostId": "507f191e810c19729de87001",
+    "modelPostId": "model-post-1",
+    "idNamespace": "recommendation_fixture"
+  },
+  "cases": [
+    {
+      "name": "phoenix_full_precedes_fallbacks",
+      "input": {
+        "phoenixScores": {
+          "like": 0.1,
+          "reply": 0.1,
+          "repost": 0.1,
+          "quote": 0.1,
+          "photoExpand": 0.1,
+          "click": 0.1,
+          "quotedClick": 0.1,
+          "profileClick": 0.1,
+          "videoQualityView": 0.1,
+          "share": 0.1,
+          "shareViaDm": 0.1,
+          "shareViaCopyLink": 0.1,
+          "dwell": 0.1,
+          "dwellTime": 0.1,
+          "followAuthor": 0.1,
+          "notInterested": 0,
+          "dismiss": 0,
+          "blockAuthor": 0,
+          "block": 0,
+          "muteAuthor": 0,
+          "report": 0
+        },
+        "actionScores": { "like": 0, "reply": 0, "repost": 0, "click": 0, "dwell": 0, "negative": 1 },
+        "heuristicScores": { "engagementRate": 1, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 0,
+        "signalPrior": 0,
+        "videoDurationSec": 6
+      },
+      "expected": {
+        "inputMode": "phoenix",
+        "baseRawScore": 3.055,
+        "positiveScore": 3.055,
+        "negativeScore": 0,
+        "evidenceScore": 0,
+        "rawScore": 3.055,
+        "normalizedWeightedScore": 0.2
+      }
+    },
+    {
+      "name": "phoenix_negative_aliases_accumulate",
+      "input": {
+        "phoenixScores": { "like": 0.5, "notInterested": 0.02, "dismiss": 0.03, "blockAuthor": 0.01, "block": 0.02, "muteAuthor": 0.01, "report": 0.01 },
+        "heuristicScores": { "engagementRate": 0, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 0,
+        "signalPrior": 0
+      },
+      "expected": {
+        "inputMode": "phoenix",
+        "baseRawScore": 0.32999999999999996,
+        "positiveScore": 1,
+        "negativeScore": 0.67,
+        "evidenceScore": 0,
+        "rawScore": 0.32999999999999996,
+        "normalizedWeightedScore": 0.11080196399345336
+      }
+    },
+    {
+      "name": "action_fallback_precedes_heuristic",
+      "input": {
+        "actionScores": { "like": 0.1, "reply": 0.02, "repost": 0.03, "click": 0.04, "dwell": 0.5, "negative": 0.02 },
+        "heuristicScores": { "engagementRate": 1, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 0,
+        "signalPrior": 0
+      },
+      "expected": {
+        "inputMode": "action",
+        "baseRawScore": 0.35,
+        "positiveScore": 0.59,
+        "negativeScore": 0.24,
+        "evidenceScore": 0,
+        "rawScore": 0.35,
+        "normalizedWeightedScore": 0.11145662847790508
+      }
+    },
+    {
+      "name": "heuristic_fallback",
+      "input": {
+        "heuristicScores": { "engagementRate": 0, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 0,
+        "signalPrior": 0
+      },
+      "expected": {
+        "inputMode": "heuristic",
+        "baseRawScore": 0.186,
+        "positiveScore": 0.186,
+        "negativeScore": 0,
+        "evidenceScore": 0,
+        "rawScore": 0.186,
+        "normalizedWeightedScore": 0.10608837970540098
+      }
+    },
+    {
+      "name": "non_positive_base_ignores_evidence",
+      "input": {
+        "actionScores": { "like": 0, "reply": 0, "repost": 0, "click": 0, "dwell": 0, "negative": 0.1 },
+        "heuristicScores": { "engagementRate": 1, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 1,
+        "signalPrior": 1
+      },
+      "expected": {
+        "inputMode": "action",
+        "baseRawScore": -1.2,
+        "positiveScore": 0,
+        "negativeScore": 1.2,
+        "evidenceScore": 0,
+        "rawScore": -1.2,
+        "normalizedWeightedScore": 0.08445171849427169
+      }
+    },
+    {
+      "name": "evidence_and_signal_prior",
+      "input": {
+        "actionScores": { "like": 0.1, "reply": 0, "repost": 0, "click": 0, "dwell": 0, "negative": 0 },
+        "heuristicScores": { "engagementRate": 1, "replyProxy": 0, "repostProxy": 0, "clickProxy": 0.08, "contentProxy": 0.1, "followProxy": 0, "retrievalSupport": 0 },
+        "evidencePrior": 0.28,
+        "signalPrior": 0.16
+      },
+      "expected": {
+        "inputMode": "action",
+        "baseRawScore": 0.2,
+        "positiveScore": 0.2,
+        "negativeScore": 0,
+        "evidenceScore": 0.049600000000000005,
+        "rawScore": 0.24960000000000002,
+        "normalizedWeightedScore": 0.10817021276595745
+      }
+    }
+  ]
+}

@@ -74,7 +74,7 @@ describe('replay logging readiness', () => {
           },
         ],
       },
-    ] as any);
+    ] as any, 10, 'trace_final_score_v1');
 
     expect(result.loggingReadiness).toEqual({
       totalRequests: 2,

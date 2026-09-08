@@ -1,6 +1,9 @@
 import express from 'express';
 import type { Server } from 'http';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     rustRecommendationMode: vi.fn(),
@@ -9,7 +12,14 @@ const mocks = vi.hoisted(() => ({
     rustRecommendationSummary: vi.fn(),
     graphKernelSummary: vi.fn(),
     traceSummary: vi.fn(),
+    traceAggregate: vi.fn(),
     dailyRefreshOps: vi.fn(),
+}));
+
+vi.mock('../../src/models/RecommendationTrace', () => ({
+    default: {
+        aggregate: mocks.traceAggregate,
+    },
 }));
 
 vi.mock('../../src/services/chatRuntimeMetrics', () => ({
@@ -148,11 +158,39 @@ vi.mock('../../src/services/ops/recommendation/dailyRefreshOps', () => ({
 
 describe('recommendation ops route', () => {
     const originalOpsToken = process.env.OPS_METRICS_TOKEN;
+    const originalFallbackThreshold = process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD;
+    const originalPolicyConfig = process.env.RECOMMENDATION_ROLLOUT_POLICY_CONFIG;
+    const originalPolicyFile = process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE;
     let server: Server;
     let baseUrl = '';
+    let policyDirectory = '';
+    let validPolicyFile = '';
+    let invalidPolicyFile = '';
 
     beforeAll(async () => {
+        policyDirectory = await mkdtemp(join(tmpdir(), 'recommendation-rollout-policy-'));
+        validPolicyFile = join(policyDirectory, 'valid.json');
+        invalidPolicyFile = join(policyDirectory, 'invalid.json');
+        await Promise.all([
+            writeFile(validPolicyFile, JSON.stringify({
+                activeVersion: 'phase6a-v1',
+                approvedVersions: ['phase6a-v1'],
+                policies: {
+                    'phase6a-v1': {
+                        servingVersion: 'rust_serving_v1',
+                        windowHours: 2,
+                        minimumPrimarySamples: 4,
+                        maximumFallbackRatio: 0.5,
+                    },
+                },
+            })),
+            writeFile(invalidPolicyFile, '{invalid-json'),
+        ]);
         process.env.OPS_METRICS_TOKEN = 'phase5-test-token';
+        process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD = '1';
+        process.env.RECOMMENDATION_ROLLOUT_POLICY_CONFIG = JSON.stringify({
+            activeVersion: 'query-must-not-load-this',
+        });
         mocks.rustRecommendationMode.mockReturnValue('primary');
         mocks.rustRecommendationTimeoutMs.mockReturnValue(1600);
         mocks.recommendationRuntimeSnapshot.mockReturnValue({
@@ -253,8 +291,35 @@ describe('recommendation ops route', () => {
         baseUrl = `http://127.0.0.1:${address.port}`;
     });
 
+    beforeEach(() => {
+        delete process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE;
+        mocks.traceAggregate.mockReset().mockResolvedValue([{
+            primarySamples: 4,
+            validPrimarySamples: 4,
+            fallbackSamples: 2,
+            servingVersionMismatchCount: 0,
+            invalidTraceCount: 0,
+        }]);
+    });
+
     afterAll(async () => {
         process.env.OPS_METRICS_TOKEN = originalOpsToken;
+        if (originalFallbackThreshold === undefined) {
+            delete process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD;
+        } else {
+            process.env.RECOMMENDATION_RUST_PRIMARY_FALLBACK_RATE_THRESHOLD = originalFallbackThreshold;
+        }
+        if (originalPolicyConfig === undefined) {
+            delete process.env.RECOMMENDATION_ROLLOUT_POLICY_CONFIG;
+        } else {
+            process.env.RECOMMENDATION_ROLLOUT_POLICY_CONFIG = originalPolicyConfig;
+        }
+        if (originalPolicyFile === undefined) {
+            delete process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE;
+        } else {
+            process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE = originalPolicyFile;
+        }
+        await rm(policyDirectory, { recursive: true, force: true });
         await new Promise<void>((resolve, reject) => {
             server.close((error) => {
                 if (error) {
@@ -284,11 +349,81 @@ describe('recommendation ops route', () => {
         expect(payload.data.traceSummary.requests).toBe(2);
         expect(payload.data.traceSummary.shadow.averageOverlapRatio).toBe(0.42);
         expect(payload.data.traceSummary.candidateSet.averageTotalCandidates).toBe(90);
+        expect(payload.data.rankingPromotion).toEqual({
+            contractVersion: 'ranking_promotion_policy_v1',
+            verdict: 'blocked',
+            blockers: ['missing_ci', 'task9_unauthorized'],
+            evidenceStatus: 'not_loaded',
+        });
+        expect(payload.data.readiness.status).toBe('degraded');
+        expect(payload.data.readiness.blockers).toContain('recommendation_rollout_policy_missing');
+        expect(payload.data.readiness.blockers).not.toContain('missing_ci');
+        expect(payload.data.readiness.blockers).not.toContain('task9_unauthorized');
         expect(mocks.traceSummary).toHaveBeenCalledWith({
             windowHours: 12,
             limit: 50,
             surface: 'space_feed',
             shadowLowOverlapThreshold: 0.5,
+        });
+        expect(payload.data.rolloutEvidence.blockers).toContain(
+            'recommendation_rollout_policy_missing',
+        );
+    });
+
+    it('loads the approved rollout policy from the configured versioned file', async () => {
+        process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE = validPolicyFile;
+
+        const response = await fetch(`${baseUrl}/api/ops/recommendation`, {
+            headers: {
+                'x-ops-token': 'phase5-test-token',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        expect(payload.data.rolloutEvidence).toMatchObject({
+            policyVersion: 'phase6a-v1',
+            servingVersion: 'rust_serving_v1',
+            primarySamples: 4,
+            fallbackSamples: 2,
+            fallbackRatio: 0.5,
+            status: 'ready',
+            blockers: [],
+        });
+    });
+
+    it('fails closed when the configured rollout policy file is invalid', async () => {
+        process.env.RECOMMENDATION_ROLLOUT_POLICY_FILE = invalidPolicyFile;
+
+        const response = await fetch(`${baseUrl}/api/ops/recommendation`, {
+            headers: {
+                'x-ops-token': 'phase5-test-token',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        expect(payload.data.rolloutEvidence).toMatchObject({
+            status: 'blocked',
+            blockers: ['recommendation_rollout_policy_invalid'],
+        });
+        expect(mocks.traceAggregate).not.toHaveBeenCalled();
+    });
+
+    it('does not let ops query or env values synthesize a rollout policy', async () => {
+        const response = await fetch(
+            `${baseUrl}/api/ops/recommendation?windowHours=1&limit=1&minimumPrimarySamples=0&maximumFallbackRatio=1&rolloutPolicyVersion=query-policy`,
+            {
+                headers: {
+                    'x-ops-token': 'phase5-test-token',
+                },
+            },
+        );
+
+        const payload = await response.json();
+        expect(payload.data.rolloutEvidence).toMatchObject({
+            status: 'blocked',
+            blockers: ['recommendation_rollout_policy_missing'],
         });
     });
 

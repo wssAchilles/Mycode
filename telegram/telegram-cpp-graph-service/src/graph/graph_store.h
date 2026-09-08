@@ -2,7 +2,10 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_set>
@@ -39,8 +42,24 @@ struct OverlapQuery {
   std::size_t limit{0};
 };
 
+struct GraphBatchQuery {
+  std::string user_id;
+  std::size_t direct_limit{0};
+  std::size_t bridge_limit{0};
+  std::size_t max_depth{0};
+  std::size_t max_branching_factor{0};
+  std::size_t max_visited_nodes{0};
+  std::size_t max_candidates{0};
+  std::unordered_set<std::string> excluded_user_ids;
+};
+
 class GraphStore {
  public:
+  using QueryClock = std::function<std::chrono::steady_clock::time_point()>;
+
+  GraphStore();
+  explicit GraphStore(QueryClock query_clock);
+
   template <typename T>
   struct QueryCandidates {
     std::vector<T> candidates;
@@ -56,6 +75,25 @@ class GraphStore {
 
   using WeightedNeighbor = domain::WeightedNeighbor;
 
+  struct BatchQueryDurations {
+    std::chrono::milliseconds social_neighbors{};
+    std::chrono::milliseconds recent_engagers{};
+    std::chrono::milliseconds bridge_users{};
+    std::chrono::milliseconds co_engagers{};
+    std::chrono::milliseconds content_affinity_neighbors{};
+  };
+
+  struct BatchQueryCandidates {
+    std::string snapshot_version;
+    std::chrono::system_clock::time_point snapshot_loaded_at{};
+    QueryCandidates<contracts::NeighborCandidate> social_neighbors;
+    QueryCandidates<contracts::NeighborCandidate> recent_engagers;
+    QueryCandidates<contracts::BridgeCandidate> bridge_users;
+    QueryCandidates<contracts::NeighborCandidate> co_engagers;
+    QueryCandidates<contracts::NeighborCandidate> content_affinity_neighbors;
+    BatchQueryDurations durations;
+  };
+
   void replace_snapshot(
       const std::vector<contracts::SnapshotEdgeRecord>& edges,
       std::size_t max_neighbors_per_user,
@@ -63,6 +101,8 @@ class GraphStore {
       std::chrono::system_clock::time_point loaded_at);
 
   void publish_snapshot(std::shared_ptr<const store::SnapshotData> snapshot);
+  void publish_externally_pinned_snapshot(
+      std::shared_ptr<const store::SnapshotData> snapshot);
   bool rollback_snapshot();
 
   void set_traversal_best_first_enabled(bool enabled);
@@ -142,6 +182,8 @@ class GraphStore {
       const std::string& user_b_id,
       std::size_t limit) const;
 
+  std::optional<BatchQueryCandidates> batch(const GraphBatchQuery& query) const;
+
   SnapshotMetadata metadata() const;
 
  private:
@@ -157,6 +199,27 @@ class GraphStore {
   static std::unordered_set<std::uint32_t> intern_excluded_ids(
       const SnapshotData& snapshot,
       const std::unordered_set<std::string>& excluded_user_ids);
+  QueryCandidates<contracts::NeighborCandidate> social_neighbors_from_snapshot(
+      const NeighborQuery& query,
+      const SnapshotData& snapshot,
+      std::int64_t now_ms) const;
+  QueryCandidates<contracts::NeighborCandidate> recent_engagers_from_snapshot(
+      const NeighborQuery& query,
+      const SnapshotData& snapshot,
+      std::int64_t now_ms) const;
+  QueryCandidates<contracts::NeighborCandidate> co_engagers_from_snapshot(
+      const NeighborQuery& query,
+      const SnapshotData& snapshot,
+      std::int64_t now_ms) const;
+  QueryCandidates<contracts::NeighborCandidate> content_affinity_neighbors_from_snapshot(
+      const NeighborQuery& query,
+      const SnapshotData& snapshot,
+      std::int64_t now_ms) const;
+  QueryCandidates<contracts::BridgeCandidate> bridge_users_from_snapshot(
+      const TraversalQuery& query,
+      const SnapshotData& snapshot,
+      std::int64_t now_ms) const;
+  QueryClock query_clock_;
   store::SnapshotHandle<SnapshotData> snapshot_;
   bool traversal_best_first_enabled_{false};
   bool overlap_streaming_topk_enabled_{true};

@@ -106,11 +106,7 @@ fn build_reinsert_plans(workset: &DedupWorkset) -> Vec<ReinsertPlan> {
 }
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate
-        .score
-        .or(candidate.weighted_score)
-        .or(candidate.pipeline_score)
-        .unwrap_or_default()
+    candidate.final_score()
 }
 
 pub(super) fn apply_deferred_suppression_counts(

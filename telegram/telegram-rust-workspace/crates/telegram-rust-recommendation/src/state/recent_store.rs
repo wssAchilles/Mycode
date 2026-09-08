@@ -93,7 +93,13 @@ impl RecentHotStore {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        candidates.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.post_id.cmp(&left.post_id))
+                .then_with(|| right.author_id.cmp(&left.author_id))
+        });
         candidates.truncate(query.limit.saturating_mul(2));
         candidates
     }
@@ -298,6 +304,7 @@ mod tests {
         store.record("u1", &[candidate("p1"), candidate("p2")]);
         let query = RecommendationQueryPayload {
             request_id: "req-1".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "u2".to_string(),
             limit: 10,
             cursor: None,
@@ -338,6 +345,7 @@ mod tests {
         store.record("u1", &[candidate("p1"), candidate("p2"), candidate("p3")]);
         let query = RecommendationQueryPayload {
             request_id: "req-1".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "u9".to_string(),
             limit: 10,
             cursor: None,
@@ -374,5 +382,42 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["p3", "p2"]
         );
+    }
+
+    #[test]
+    fn recent_hot_tie_order_is_stable_before_candidate_window_truncation() {
+        let created_at = Utc::now();
+        let mut forward = vec![
+            candidate("post-a"),
+            candidate("post-b"),
+            candidate("post-c"),
+        ];
+        for item in &mut forward {
+            item.created_at = created_at;
+        }
+        let mut reverse = forward.clone();
+        reverse.reverse();
+
+        let forward_store = RecentHotStore::new_sharded(8, 8, 1);
+        forward_store.record("u1", &forward);
+        let reverse_store = RecentHotStore::new_sharded(8, 8, 1);
+        reverse_store.record("u1", &reverse);
+
+        let query = RecommendationQueryPayload {
+            user_id: "viewer".to_string(),
+            limit: 1,
+            ..RecommendationQueryPayload::default()
+        };
+        let expected = vec!["post-c", "post-b"];
+        let ids = |store: &RecentHotStore| {
+            store
+                .recent_hot_candidates(&query, &HashSet::new())
+                .into_iter()
+                .map(|item| item.post_id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ids(&forward_store), expected);
+        assert_eq!(ids(&reverse_store), expected);
     }
 }

@@ -30,6 +30,7 @@ mod tests {
     fn make_query(impressed: Vec<String>, seen: Vec<String>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-impressed-test".to_string(),
+            decision_id: "00000000-0000-4000-8000-0000000000ff".to_string(),
             user_id: "user-1".to_string(),
             limit: 20,
             seen_ids: seen,

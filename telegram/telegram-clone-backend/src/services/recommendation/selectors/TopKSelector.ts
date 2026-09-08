@@ -337,9 +337,27 @@ function applySelection(candidate: FeedCandidate, index: number, state: Selectio
 }
 
 function selectorConstraints(query: FeedQuery, size: number): SelectorConstraints {
-    const maxOonCount = (defaultRatio: number) => Math.min(size, Math.ceil(size * policyNumber(query, 'maxOonRatio', defaultRatio)));
-    const fallbackCeiling = (defaultRatio: number) => Math.min(size, Math.ceil(size * policyNumber(query, 'fallbackCeilingRatio', defaultRatio)));
-    const explorationFloor = (defaultRatio: number) => Math.ceil(size * policyNumber(query, 'explorationFloorRatio', defaultRatio));
+    const maxOonCount = (defaultRatio: number) => {
+        const ratio = policyNumber(query, 'maxOonRatio', defaultRatio);
+        return Math.min(size, Math.ceil(size * (ratio > 0 ? Math.min(1, ratio) : defaultRatio)));
+    };
+    const fallbackCeiling = (defaultRatio: number) => {
+        const configured = query.rankingPolicy?.fallbackCeilingRatio;
+        const ratio = typeof configured === 'number' && Number.isFinite(configured)
+            ? Math.max(0, Math.min(1, configured))
+            : defaultRatio;
+        return Math.min(size, Math.ceil(size * ratio));
+    };
+    const explorationFloor = (defaultRatio: number, defaultMax?: number) => {
+        if (size < 4) return 0;
+        const configured = query.rankingPolicy?.explorationFloorRatio;
+        const hasConfiguredRatio = typeof configured === 'number'
+            && Number.isFinite(configured)
+            && configured >= 0;
+        const ratio = hasConfiguredRatio ? Math.min(0.5, configured) : defaultRatio;
+        const floor = Math.ceil(size * ratio);
+        return hasConfiguredRatio || defaultMax === undefined ? floor : Math.min(defaultMax, floor);
+    };
     switch (query.userStateContext?.state) {
         case 'cold_start':
             return {
@@ -370,7 +388,7 @@ function selectorConstraints(query: FeedQuery, size: number): SelectorConstraint
                 },
                 laneCeilings: { fallback: fallbackCeiling(0.12) },
                 maxOonCount: maxOonCount(0.42),
-                explorationFloor: explorationFloor(0.06),
+                explorationFloor: explorationFloor(0.06, 2),
                 laneOrder: ['in_network', 'social_expansion', 'interest', 'fallback'],
             };
         default:

@@ -20,6 +20,17 @@ export const DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT: EmbeddingContract = {
     semantic: true,
 };
 
+export const REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT: EmbeddingContract = {
+    embeddingSpace: 'registered_user_cold_start_v1',
+    dimensions: 256,
+    retrievalEmbeddingDim: 256,
+    rankingEmbeddingDim: 256,
+    modelVersion: 'registered_user_cold_start_v1',
+    artifactVersion: 'registered_user_profile_features_v1',
+    producer: 'RegisteredUserFeatureBootstrapService',
+    semantic: false,
+};
+
 export const HEURISTIC_POST_HASH_EMBEDDING_CONTRACT: EmbeddingContract = {
     embeddingSpace: 'heuristic_post_hash_v1',
     dimensions: 48,
@@ -81,7 +92,8 @@ export function isVectorCompatibleWithContract(
     return Array.isArray(vector)
         && typeof dimensions === 'number'
         && dimensions > 0
-        && vector.length === dimensions;
+        && vector.length === dimensions
+        && vector.every((value) => typeof value === 'number' && Number.isFinite(value));
 }
 
 export function buildEmbeddingContract(

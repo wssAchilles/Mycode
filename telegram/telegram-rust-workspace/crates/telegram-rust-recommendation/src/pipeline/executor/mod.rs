@@ -11,6 +11,7 @@ use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::serving::cache::ServeCache;
 use crate::serving::cache::ServeCacheSnapshot;
+use crate::serving::cursor::ranked_cursor_requires_abstention;
 use crate::serving::policy::build_query_fingerprint;
 use crate::serving::singleflight::{CacheSingleflight, CacheSingleflightSnapshot};
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
@@ -34,7 +35,10 @@ mod summary;
 mod telemetry;
 mod trace;
 
-use response::{LiveRecommendationResultInput, build_live_recommendation_result};
+use response::{
+    LiveRecommendationResultInput, build_live_recommendation_result,
+    build_ranked_cursor_abstention_result, build_safety_context_abstention_result,
+};
 use telemetry::RunTelemetry;
 
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
@@ -88,28 +92,52 @@ impl RecommendationPipeline {
         query: RecommendationQueryPayload,
     ) -> Result<RecommendationResultPayload> {
         let request_start = Instant::now();
-        let query_fingerprint = build_query_fingerprint(&query);
+        if ranked_cursor_requires_abstention(query.in_network_only, query.cursor.is_some()) {
+            let query_fingerprint = build_query_fingerprint(&query);
+            let mut result = build_ranked_cursor_abstention_result(
+                &self.config,
+                &self.definition,
+                &query,
+                request_start.elapsed().as_millis() as u64,
+            );
+            self.dispatch_live_post_response_side_effects(&query, query_fingerprint, &mut result);
+            return Ok(result);
+        }
+
+        let mut telemetry = RunTelemetry::default();
+        let query_stage = self.execute_query_stage(&query, &mut telemetry).await;
+        if query_stage.safety_context_unavailable {
+            return Ok(build_safety_context_abstention_result(
+                &self.config,
+                &self.definition,
+                &query_stage.hydrated_query,
+                telemetry,
+                request_start.elapsed().as_millis() as u64,
+            ));
+        }
+        let query_fingerprint = build_query_fingerprint(&query_stage.hydrated_query);
         let serve_cache_start = Instant::now();
         let serve_cache_lookup = self.serve_cache.get(&query_fingerprint).await;
         let serve_cache_duration_ms = serve_cache_start.elapsed().as_millis() as u64;
         if let Some(cached_result) = serve_cache_lookup.result {
             return Ok(self.rebuild_cached_result(
                 cached_result,
-                &query,
+                &query_stage.hydrated_query,
                 &query_fingerprint,
+                telemetry,
                 serve_cache_duration_ms,
                 request_start.elapsed().as_millis() as u64,
             ));
         }
 
         if self.cache_singleflight.enabled() {
-            let singleflight_query = query.clone();
             let singleflight_fingerprint = query_fingerprint.clone();
             let mut result = self
                 .cache_singleflight
                 .run(query_fingerprint.clone(), || async move {
                     self.run_live(
-                        singleflight_query,
+                        query_stage,
+                        telemetry,
                         singleflight_fingerprint,
                         request_start,
                         serve_cache_duration_ms,
@@ -122,7 +150,8 @@ impl RecommendationPipeline {
         }
 
         self.run_live(
-            query,
+            query_stage,
+            telemetry,
             query_fingerprint,
             request_start,
             serve_cache_duration_ms,
@@ -132,19 +161,18 @@ impl RecommendationPipeline {
 
     async fn run_live(
         &self,
-        query: RecommendationQueryPayload,
+        query_stage: query_stage::QueryStageOutput,
+        mut telemetry: RunTelemetry,
         query_fingerprint: String,
         request_start: Instant,
         serve_cache_duration_ms: u64,
     ) -> Result<RecommendationResultPayload> {
-        let mut telemetry = RunTelemetry::default();
         self.record_serve_cache_miss_stage(
             &mut telemetry,
             &query_fingerprint,
             serve_cache_duration_ms,
         );
 
-        let query_stage = self.execute_query_stage(&query, &mut telemetry).await;
         let hydrated_query = query_stage.hydrated_query;
         let retrieval_stage = self
             .execute_retrieval_stage(

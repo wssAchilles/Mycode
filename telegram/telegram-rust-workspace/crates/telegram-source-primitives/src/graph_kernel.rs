@@ -59,31 +59,29 @@ pub fn graph_kernel_neighbor_signal_score(
     engagement_score: Option<f64>,
     recentness_score: Option<f64>,
 ) -> f64 {
-    match source_kind {
+    let score = finite_or_zero(score);
+    let engagement_score = engagement_score.map(finite_or_zero).unwrap_or(0.0);
+    let recentness_score = recentness_score.map(finite_or_zero).unwrap_or(0.0);
+
+    finite_or_bound(match source_kind {
         GraphKernelSourceKind::SocialNeighbor => {
-            score + engagement_score.unwrap_or(0.0) * 0.25 + recentness_score.unwrap_or(0.0) * 0.05
+            score + engagement_score * 0.25 + recentness_score * 0.05
         }
         GraphKernelSourceKind::RecentEngager => {
-            score * 0.2
-                + engagement_score.unwrap_or(0.0) * 0.45
-                + recentness_score.unwrap_or(0.0) * 0.45
+            score * 0.2 + engagement_score * 0.45 + recentness_score * 0.45
         }
         GraphKernelSourceKind::CoEngager => {
-            score * 0.65
-                + engagement_score.unwrap_or(0.0) * 0.25
-                + recentness_score.unwrap_or(0.0) * 0.1
+            score * 0.65 + engagement_score * 0.25 + recentness_score * 0.1
         }
         GraphKernelSourceKind::ContentAffinity => {
-            score * 0.55
-                + engagement_score.unwrap_or(0.0) * 0.15
-                + recentness_score.unwrap_or(0.0) * 0.3
+            score * 0.55 + engagement_score * 0.15 + recentness_score * 0.3
         }
         GraphKernelSourceKind::BridgeUser => score,
-    }
+    })
 }
 
 pub fn graph_kernel_bridge_signal_score(score: f64, bridge_strength: Option<f64>) -> f64 {
-    bridge_strength.unwrap_or(score)
+    finite_or_zero(bridge_strength.unwrap_or(score))
 }
 
 pub fn aggregate_graph_kernel_author_signals(
@@ -155,10 +153,11 @@ fn upsert_graph_kernel_author(
                 via_user_ids: HashSet::new(),
             });
 
-    aggregate.total_score += signal.score;
+    let signal_score = finite_or_zero(signal.score);
+    aggregate.total_score = finite_or_bound(aggregate.total_score + signal_score);
     aggregate.source_kinds.insert(signal.source_kind.clone());
-    if signal.score > aggregate.dominant_score {
-        aggregate.dominant_score = signal.score;
+    if signal_score > aggregate.dominant_score {
+        aggregate.dominant_score = signal_score;
         aggregate.dominant_kind = signal.source_kind;
     }
 
@@ -175,6 +174,14 @@ fn upsert_graph_kernel_author(
             aggregate.via_user_ids.insert(trimmed.to_string());
         }
     }
+}
+
+fn finite_or_zero(value: f64) -> f64 {
+    if value.is_finite() { value } else { 0.0 }
+}
+
+fn finite_or_bound(value: f64) -> f64 {
+    finite_or_zero(value.clamp(f64::MIN, f64::MAX))
 }
 
 #[cfg(test)]
@@ -203,6 +210,58 @@ mod tests {
         assert_eq!(social, 9.52);
         assert_eq!(recent, 4.155);
         assert_eq!(graph_kernel_bridge_signal_score(4.0, Some(6.5)), 6.5);
+    }
+
+    #[test]
+    fn graph_kernel_signal_scores_bound_overflow_and_reject_non_finite_inputs() {
+        let positive_neighbor = graph_kernel_neighbor_signal_score(
+            &GraphKernelSourceKind::SocialNeighbor,
+            f64::MAX,
+            Some(f64::MAX),
+            Some(f64::MAX),
+        );
+        let negative_neighbor = graph_kernel_neighbor_signal_score(
+            &GraphKernelSourceKind::SocialNeighbor,
+            f64::MIN,
+            Some(f64::MIN),
+            Some(f64::MIN),
+        );
+        let bridge = graph_kernel_bridge_signal_score(f64::MAX, Some(f64::INFINITY));
+        let ranked = aggregate_graph_kernel_author_signals(
+            [
+                GraphKernelAuthorSignal::new(
+                    "author-high",
+                    f64::MAX,
+                    GraphKernelSourceKind::SocialNeighbor,
+                ),
+                GraphKernelAuthorSignal::new(
+                    "author-high",
+                    f64::MAX,
+                    GraphKernelSourceKind::RecentEngager,
+                ),
+                GraphKernelAuthorSignal::new("author-mid", 1.0, GraphKernelSourceKind::BridgeUser),
+                GraphKernelAuthorSignal::new(
+                    "author-low",
+                    f64::MIN,
+                    GraphKernelSourceKind::SocialNeighbor,
+                ),
+                GraphKernelAuthorSignal::new(
+                    "author-low",
+                    f64::MIN,
+                    GraphKernelSourceKind::RecentEngager,
+                ),
+            ],
+            1,
+        );
+
+        assert_eq!(positive_neighbor, f64::MAX);
+        assert_eq!(negative_neighbor, f64::MIN);
+        assert_eq!(bridge, 0.0);
+        assert_eq!(ranked[0].user_id, "author-high");
+        assert_eq!(ranked[0].total_score, f64::MAX);
+        assert_eq!(ranked[1].user_id, "author-mid");
+        assert_eq!(ranked[2].user_id, "author-low");
+        assert_eq!(ranked[2].total_score, f64::MIN);
     }
 
     #[test]

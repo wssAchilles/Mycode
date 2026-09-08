@@ -214,14 +214,20 @@ export function buildDenseUserEmbedding(input: BuildDenseUserEmbeddingInput): nu
 }
 
 export function cosineDenseEmbedding(left?: number[], right?: number[]): number {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length === 0 || right.length === 0) {
+    if (
+        !Array.isArray(left)
+        || !Array.isArray(right)
+        || left.length === 0
+        || left.length !== right.length
+        || !left.every(Number.isFinite)
+        || !right.every(Number.isFinite)
+    ) {
         return 0;
     }
 
-    const dimensions = Math.min(left.length, right.length);
     let dot = 0;
-    for (let index = 0; index < dimensions; index += 1) {
-        dot += (left[index] || 0) * (right[index] || 0);
+    for (let index = 0; index < left.length; index += 1) {
+        dot += left[index] * right[index];
     }
     return clamp01(dot);
 }

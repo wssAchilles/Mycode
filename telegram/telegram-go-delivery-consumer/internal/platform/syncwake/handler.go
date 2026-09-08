@@ -66,6 +66,7 @@ func (h *Handler) Dispatch(
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
+		"eventId":  envelope.EventID,
 		"userId":   payload.UserID,
 		"updateId": payload.UpdateID,
 	})

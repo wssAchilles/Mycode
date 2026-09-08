@@ -31,26 +31,31 @@ function parseArgs() {
     };
 }
 
-async function main() {
-    const args = parseArgs();
-    const createdAfter = new Date(Date.now() - args.days * 24 * 60 * 60 * 1000);
-    await connectMongoDB();
-
+export async function backfillPostFeatureSnapshots(options: {
+    createdAfter: Date;
+    batch: number;
+}): Promise<number> {
     let processed = 0;
-    let cursor: Date | undefined;
+    let cursor: { createdAt: Date; id: mongoose.Types.ObjectId } | undefined;
 
     while (true) {
-        const query: Record<string, unknown> = {
-            createdAt: cursor
-                ? { $gte: createdAfter, $lt: cursor }
-                : { $gte: createdAfter },
-            deletedAt: null,
-        };
+        const query: Record<string, unknown> = cursor
+            ? {
+                $or: [
+                    { createdAt: { $gte: options.createdAfter, $lt: cursor.createdAt } },
+                    { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+                ],
+                deletedAt: null,
+            }
+            : {
+                createdAt: { $gte: options.createdAfter },
+                deletedAt: null,
+            };
 
         const posts = await Post.find(query)
             .select('_id authorId content keywords language createdAt updatedAt media stats engagementScore isNews newsMetadata.clusterId')
             .sort({ createdAt: -1, _id: -1 })
-            .limit(args.batch)
+            .limit(options.batch)
             .lean();
 
         if (posts.length === 0) {
@@ -59,22 +64,40 @@ async function main() {
 
         await postFeatureSnapshotService.ensureSnapshotsForPosts(posts as any);
         processed += posts.length;
-        cursor = new Date(posts[posts.length - 1].createdAt);
+        const lastPost = posts[posts.length - 1];
+        cursor = {
+            createdAt: new Date(lastPost.createdAt),
+            id: lastPost._id as mongoose.Types.ObjectId,
+        };
         console.log(`[BackfillPostFeatureSnapshots] processed=${processed}`);
     }
 
+    return processed;
+}
+
+async function main() {
+    const args = parseArgs();
+    const createdAfter = new Date(Date.now() - args.days * 24 * 60 * 60 * 1000);
+    await connectMongoDB();
+
+    const processed = await backfillPostFeatureSnapshots({
+        createdAfter,
+        batch: args.batch,
+    });
     console.log(`[BackfillPostFeatureSnapshots] completed processed=${processed}`);
 }
 
-main()
-    .catch((error) => {
-        console.error('[BackfillPostFeatureSnapshots] failed:', error);
-        process.exitCode = 1;
-    })
-    .finally(async () => {
-        try {
-            await mongoose.disconnect();
-        } catch {
-            // ignore
-        }
-    });
+if (require.main === module) {
+    main()
+        .catch((error) => {
+            console.error('[BackfillPostFeatureSnapshots] failed:', error);
+            process.exitCode = 1;
+        })
+        .finally(async () => {
+            try {
+                await mongoose.disconnect();
+            } catch {
+                // ignore
+            }
+        });
+}
