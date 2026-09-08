@@ -8,6 +8,8 @@ import {
     type EmbeddingContract,
 } from '../contracts/embeddingContract';
 import { isCompleteEmbeddingContract } from '../contracts/embeddingContractEvidence';
+import { FeatureCacheService } from '../FeatureCacheService';
+import { simClustersService } from '../SimClustersService';
 import { buildRegisteredUserColdStartEmbedding } from './coldStartEmbedding';
 
 const COLD_START_DIM = REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT.retrievalEmbeddingDim;
@@ -104,6 +106,7 @@ export class RegisteredUserFeatureBootstrapService {
             .lean();
         const docsByUserId = new Map(docs.map((doc) => [doc.userId, doc]));
         const operations = [];
+        const repairUserIds = new Set<string>();
 
         for (const user of users) {
             const doc = docsByUserId.get(user.id);
@@ -141,11 +144,34 @@ export class RegisteredUserFeatureBootstrapService {
                     update: { $set },
                 },
             });
+            repairUserIds.add(user.id);
         }
 
-        const result = operations.length > 0
-            ? await UserFeatureVector.bulkWrite(operations, { ordered: false })
-            : undefined;
+        let result: Awaited<ReturnType<typeof UserFeatureVector.bulkWrite>> | undefined;
+        let writeFailed = false;
+        let writeError: unknown;
+        if (operations.length > 0) {
+            try {
+                result = await UserFeatureVector.bulkWrite(operations, { ordered: false });
+            } catch (error) {
+                writeFailed = true;
+                writeError = error;
+            }
+
+            // unordered bulkWrite 可能部分成功后才抛错，因此清理所有已计划的缓存键。
+            const cache = FeatureCacheService.getInstance();
+            const invalidationResults = await Promise.allSettled(
+                [...repairUserIds].flatMap((userId) => [
+                    simClustersService.invalidateUserEmbeddingCache(userId),
+                    cache.invalidateUserEmbedding(userId),
+                ]),
+            );
+            const rejected = invalidationResults.find(
+                (entry): entry is PromiseRejectedResult => entry.status === 'rejected',
+            );
+            if (writeFailed) throw writeError;
+            if (rejected) throw rejected.reason;
+        }
 
         return { scanned: users.length, repaired: result?.modifiedCount ?? 0 };
     }

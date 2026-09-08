@@ -295,6 +295,11 @@ export class SimClustersService {
         return embedding;
     }
 
+    /** 清除完整用户嵌入缓存 */
+    async invalidateUserEmbeddingCache(userId: string): Promise<void> {
+        await redis.del(`${CONFIG.cache.keyPrefix}${userId}`);
+    }
+
     /**
      * 计算并存储用户嵌入
      */
@@ -358,9 +363,8 @@ export class SimClustersService {
             : await UserFeatureVector.upsertEmbedding(userId, embeddings, version);
 
         // 清除当前 SimClusters 缓存和 FeatureCache 当前进程 L1/L2
-        const cacheKey = `${CONFIG.cache.keyPrefix}${userId}`;
         const invalidationResults = await Promise.allSettled([
-            redis.del(cacheKey),
+            this.invalidateUserEmbeddingCache(userId),
             // 写入已完成后必须清理缓存；取消信号只在清理完成后传播。
             FeatureCacheService.getInstance().invalidateUserEmbedding(userId),
         ]);

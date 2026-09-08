@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
     featureCreate: vi.fn(),
     featureInsertMany: vi.fn(),
     featureBulkWrite: vi.fn(),
+    invalidateSimClustersEmbedding: vi.fn(),
+    invalidateUserEmbedding: vi.fn(),
+    getFeatureCacheInstance: vi.fn(),
     postFeatureFind: vi.fn(),
     connectMongoDB: vi.fn(),
     disconnectMongoDB: vi.fn(),
@@ -34,6 +37,18 @@ vi.mock('../../src/models/UserFeatureVector', () => ({
 
 vi.mock('../../src/models/PostFeatureSnapshot', () => ({
     default: { find: mocks.postFeatureFind },
+}));
+
+vi.mock('../../src/services/recommendation/FeatureCacheService', () => ({
+    FeatureCacheService: {
+        getInstance: mocks.getFeatureCacheInstance,
+    },
+}));
+
+vi.mock('../../src/services/recommendation/SimClustersService', () => ({
+    simClustersService: {
+        invalidateUserEmbeddingCache: mocks.invalidateSimClustersEmbedding,
+    },
 }));
 
 vi.mock('../../src/config/db', () => ({
@@ -84,6 +99,11 @@ describe('RegisteredUserFeatureBootstrapService', () => {
         vi.clearAllMocks();
         mocks.featureCreate.mockResolvedValue({});
         mocks.featureBulkWrite.mockResolvedValue({ modifiedCount: 1 });
+        mocks.invalidateSimClustersEmbedding.mockResolvedValue(undefined);
+        mocks.invalidateUserEmbedding.mockResolvedValue(undefined);
+        mocks.getFeatureCacheInstance.mockReturnValue({
+            invalidateUserEmbedding: mocks.invalidateUserEmbedding,
+        });
     });
 
     it('creates deterministic cold-start vectors with independent non-semantic sidecars', async () => {
@@ -123,6 +143,71 @@ describe('RegisteredUserFeatureBootstrapService', () => {
         expect($set).not.toHaveProperty('embeddingContract');
     });
 
+    it('invalidates the user embedding cache after a dense repair write', async () => {
+        mocks.featureFind.mockReturnValue(findManyResult([{
+            userId: user.id,
+            phoenixEmbedding: vectorFor(),
+            phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+        }]));
+
+        await new RegisteredUserFeatureBootstrapService().repairDenseVectors([user]);
+
+        expect(mocks.invalidateSimClustersEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.featureBulkWrite.mock.invocationCallOrder[0])
+            .toBeLessThan(mocks.invalidateSimClustersEmbedding.mock.invocationCallOrder[0]);
+        expect(mocks.featureBulkWrite.mock.invocationCallOrder[0])
+            .toBeLessThan(mocks.invalidateUserEmbedding.mock.invocationCallOrder[0]);
+    });
+
+    it('attempts every cache invalidation and propagates the first failure', async () => {
+        const secondUser = {
+            ...user,
+            id: 'registered-user-2',
+            username: 'registered-user-2',
+        };
+        mocks.featureFind.mockReturnValue(findManyResult([
+            {
+                userId: user.id,
+                phoenixEmbedding: vectorFor(),
+                phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+            },
+            {
+                userId: secondUser.id,
+                phoenixEmbedding: vectorFor(),
+                phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+            },
+        ]));
+        const cacheError = new Error('cache unavailable');
+        mocks.invalidateUserEmbedding.mockImplementation(async (userId: string) => {
+            if (userId === user.id) throw cacheError;
+        });
+
+        await expect(
+            new RegisteredUserFeatureBootstrapService().repairDenseVectors([user, secondUser]),
+        ).rejects.toBe(cacheError);
+        expect(mocks.invalidateSimClustersEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.invalidateSimClustersEmbedding).toHaveBeenCalledWith(secondUser.id);
+        expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith(secondUser.id);
+    });
+
+    it('invalidates both caches and preserves a Mongo repair write error', async () => {
+        mocks.featureFind.mockReturnValue(findManyResult([{
+            userId: user.id,
+            phoenixEmbedding: vectorFor(),
+            phoenixEmbeddingContract: { ...REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT },
+        }]));
+        const writeError = new Error('bulk write failed');
+        mocks.featureBulkWrite.mockRejectedValue(writeError);
+
+        await expect(
+            new RegisteredUserFeatureBootstrapService().repairDenseVectors([user]),
+        ).rejects.toBe(writeError);
+        expect(mocks.invalidateSimClustersEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith(user.id);
+    });
+
     it('repairs a damaged trusted slot without changing a quarantined sibling', async () => {
         mocks.featureFind.mockReturnValue(findManyResult([{
             userId: user.id,
@@ -155,6 +240,8 @@ describe('RegisteredUserFeatureBootstrapService', () => {
 
         expect(result).toEqual({ scanned: 1, repaired: 0 });
         expect(mocks.featureBulkWrite).not.toHaveBeenCalled();
+        expect(mocks.invalidateSimClustersEmbedding).not.toHaveBeenCalled();
+        expect(mocks.invalidateUserEmbedding).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -210,6 +297,8 @@ describe('RegisteredUserFeatureBootstrapService', () => {
 
         expect(result).toEqual({ scanned: 1, repaired: 0 });
         expect(mocks.featureBulkWrite).toHaveBeenCalledOnce();
+        expect(mocks.invalidateSimClustersEmbedding).toHaveBeenCalledWith(user.id);
+        expect(mocks.invalidateUserEmbedding).toHaveBeenCalledWith(user.id);
     });
 
     it('guards repair writes with the observed document identity and timestamp', async () => {
