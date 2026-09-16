@@ -10,3 +10,5 @@ export * from './posts/postMutations';
 export * from './internal/postFeatureSnapshots';
 export * from './interactions/interactions';
 export * from './internal/userMap';
+export * from './profiles/profileQueries';
+export * from './profiles/recommendedUsers';

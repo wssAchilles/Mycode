@@ -42,7 +42,6 @@ import {
     buildSpaceFeedPageResult,
     type SpaceFeedPageResult,
 } from './recommendation/feed/pageResult';
-import { AuthorSuggestionService } from './recommendation/authorSuggestions';
 import {
   getNewsTrendsRustMode,
   newsTrendService,
@@ -117,6 +116,15 @@ import {
     unlikePost,
     unrepostPost,
 } from './space/interactions/interactions';
+import {
+    getFollowedSet,
+    getUserLikedPosts,
+    getUserPosts,
+    getUserProfile,
+    setUserCover,
+    updateSpaceProfileFields,
+} from './space/profiles/profileQueries';
+import { getRecommendedUsers } from './space/profiles/recommendedUsers';
 
 const log = createChildLogger('services:spaceService');
 
@@ -139,7 +147,6 @@ export type {
  * Space 服务类
  */
 class SpaceService {
-    private readonly authorSuggestionService = new AuthorSuggestionService();
     private feedTrendKeywordCache?: { expiresAt: number; keywords: string[] };
 
     async getFeed(
@@ -174,16 +181,7 @@ class SpaceService {
      * 获取当前用户已关注列表 (Space 使用 Contact.accepted 作为关注)
      */
     private async getFollowedSet(userId: string): Promise<Set<string>> {
-        try {
-            const contacts = await Contact.findAll({
-                where: { userId, status: ContactStatus.ACCEPTED },
-                attributes: ['contactId'],
-            });
-            return new Set(contacts.map((c: { contactId: string }) => c.contactId));
-        } catch (error) {
-            log.error({ err: error }, '[SpaceService] Failed to load followed users');
-            return new Set();
-        }
+        return getFollowedSet(userId);
     }
 
     private refreshPostFeatureSnapshots(postIds: Array<string | mongoose.Types.ObjectId | undefined | null>): void {
@@ -750,16 +748,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<IPost[]> {
-        const query: Record<string, unknown> = {
-            authorId,
-            deletedAt: null,
-        };
-
-        if (cursor) {
-            query.createdAt = { $lt: cursor };
-        }
-
-        return Post.find(query).sort({ createdAt: -1 }).limit(limit);
+        return getUserPosts(authorId, limit, cursor);
     }
 
     /**
@@ -838,55 +827,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<{ posts: any[]; hasMore: boolean; nextCursor?: string }> {
-        const likeQuery: Record<string, unknown> = { userId: targetUserId };
-        if (cursor) {
-            likeQuery.createdAt = { $lt: cursor };
-        }
-
-        const likes = await Like.find(likeQuery)
-            .sort({ createdAt: -1 })
-            .select('postId createdAt')
-            .limit(limit)
-            .lean();
-
-        const nextCursor = likes.length > 0
-            ? new Date(likes[likes.length - 1].createdAt).toISOString()
-            : undefined;
-
-        const postIds = likes
-            .map((like: { postId?: mongoose.Types.ObjectId }) => like.postId)
-            .filter((id: mongoose.Types.ObjectId | undefined): id is mongoose.Types.ObjectId => !!id);
-
-        if (postIds.length === 0) {
-            return { posts: [], hasMore: likes.length >= limit, nextCursor };
-        }
-
-        const idStrings = postIds.map((id) => id.toString());
-        const posts = await this.getPostsByIds(idStrings);
-
-        const objectIds = postIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
-        const [likedSet, repostedSet] = viewerId
-            ? await Promise.all([
-                Like.getLikedPostIds(viewerId, objectIds),
-                Repost.getRepostedPostIds(viewerId, objectIds),
-            ])
-            : [new Set<string>(), new Set<string>()];
-
-        const enriched = posts.map((post) => {
-            const raw = post.toObject ? post.toObject() : post;
-            const id = raw._id?.toString() || raw.id;
-            return {
-                ...raw,
-                isLikedByUser: viewerId ? likedSet.has(id) : false,
-                isRepostedByUser: viewerId ? repostedSet.has(id) : false,
-            };
-        });
-
-        return {
-            posts: enriched,
-            hasMore: likes.length >= limit,
-            nextCursor,
-        };
+        return getUserLikedPosts(targetUserId, viewerId, limit, cursor);
     }
 
     /**
@@ -915,62 +856,14 @@ class SpaceService {
         isFollowed: boolean;
         pinnedPost?: IPost | null;
     } | null> {
-        const user = await User.findByPk(targetUserId, {
-            attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'lastSeen', 'createdAt'],
-        });
-
-        if (!user) return null;
-
-        const [postsCount, followersCount, followingCount, followRecord, profileDoc, pinnedPost] = await Promise.all([
-            Post.countDocuments({ authorId: targetUserId, deletedAt: null }),
-            Contact.count({ where: { contactId: targetUserId, status: ContactStatus.ACCEPTED } }),
-            Contact.count({ where: { userId: targetUserId, status: ContactStatus.ACCEPTED } }),
-            viewerId
-                ? Contact.findOne({
-                    where: {
-                        userId: viewerId,
-                        contactId: targetUserId,
-                        status: ContactStatus.ACCEPTED,
-                    },
-                })
-                : Promise.resolve(null),
-            SpaceProfile.findOne({ userId: targetUserId }).lean(),
-            Post.findOne({ authorId: targetUserId, isPinned: true, deletedAt: null }),
-        ]);
-
-        return {
-            id: user.id,
-            username: user.username,
-            avatarUrl: user.avatarUrl ?? null,
-            isOnline: user.isOnline ?? null,
-            lastSeen: user.lastSeen ?? null,
-            createdAt: user.createdAt ?? null,
-            displayName: profileDoc?.displayName ?? null,
-            bio: profileDoc?.bio ?? null,
-            location: profileDoc?.location ?? null,
-            website: profileDoc?.website ?? null,
-            coverUrl: profileDoc?.coverUrl ?? null,
-            stats: {
-                posts: postsCount,
-                followers: followersCount,
-                following: followingCount,
-            },
-            isFollowed: !!followRecord,
-            pinnedPost,
-        };
+        return getUserProfile(targetUserId, viewerId);
     }
 
     /**
      * 更新用户空间封面
      */
     async setUserCover(userId: string, coverUrl: string | null): Promise<string | null> {
-        const updated = await SpaceProfile.findOneAndUpdate(
-            { userId },
-            { coverUrl },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-
-        return updated?.coverUrl ?? null;
+        return setUserCover(userId, coverUrl);
     }
 
     /**
@@ -991,24 +884,7 @@ class SpaceService {
         location: string | null;
         website: string | null;
     }> {
-        const $set: Record<string, unknown> = {};
-        if (updates.displayName !== undefined) $set.displayName = updates.displayName;
-        if (updates.bio !== undefined) $set.bio = updates.bio;
-        if (updates.location !== undefined) $set.location = updates.location;
-        if (updates.website !== undefined) $set.website = updates.website;
-
-        const updated = await SpaceProfile.findOneAndUpdate(
-            { userId },
-            { $set },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        ).lean();
-
-        return {
-            displayName: (updated as any)?.displayName ?? null,
-            bio: (updated as any)?.bio ?? null,
-            location: (updated as any)?.location ?? null,
-            website: (updated as any)?.website ?? null,
-        };
+        return updateSpaceProfileFields(userId, updates);
     }
 
     /**
@@ -1298,120 +1174,11 @@ class SpaceService {
      * 推荐关注
      */
     async getRecommendedUsers(userId: string, limit: number = 4): Promise<RecommendedSpaceUser[]> {
-        return this.withRecommendedUsersFallback(
-            this.authorSuggestionService.getRecommendedUsers(userId, limit),
-            () => this.getFastRecommendedUsers(userId, limit),
-        );
+        return getRecommendedUsers(userId, limit);
     }
 
-    private async withRecommendedUsersFallback(
-        work: Promise<RecommendedSpaceUser[]>,
-        fallback: () => Promise<RecommendedSpaceUser[]>,
-    ): Promise<RecommendedSpaceUser[]> {
-        let timedOut = false;
-        let timer: NodeJS.Timeout | undefined;
-        const guardedWork = work.catch(async (error) => {
-            log.warn({ err: (error as any)?.message || error }, '[SpaceService] author suggestions failed');
-            return timedOut ? [] : fallback();
-        });
-        const timeout = new Promise<RecommendedSpaceUser[]>((resolve) => {
-            timer = setTimeout(async () => {
-                timedOut = true;
-                log.warn('[SpaceService] author suggestions timed out, using fast fallback');
-                resolve(await fallback());
-            }, 1800);
-        });
 
-        try {
-            return await Promise.race([guardedWork, timeout]);
-        } finally {
-            if (timer) clearTimeout(timer);
-        }
-    }
 
-    private async getFastRecommendedUsers(userId: string, limit: number): Promise<RecommendedSpaceUser[]> {
-        const safeLimit = Math.max(1, Math.min(12, limit));
-        const followed = await this.getFollowedSet(userId);
-        const excluded = new Set<string>([userId, ...followed]);
-        const excludedIds = Array.from(excluded);
-
-        const recentPosts = await Post.find({
-            deletedAt: null,
-            isNews: { $ne: true },
-            ...(excludedIds.length > 0 ? { authorId: { $nin: excludedIds } } : {}),
-        })
-            .sort({ createdAt: -1, _id: -1 })
-            .limit(120)
-            .select('authorId stats')
-            .lean<Array<{ authorId?: string; stats?: Partial<IPost['stats']> }>>();
-
-        const authorStats = new Map<string, { recentPosts: number; engagementScore: number }>();
-        for (const post of recentPosts) {
-            if (!post.authorId || excluded.has(post.authorId)) continue;
-            const stats = post.stats || {};
-            const current = authorStats.get(post.authorId) || { recentPosts: 0, engagementScore: 0 };
-            current.recentPosts += 1;
-            current.engagementScore +=
-                Number(stats.likeCount || 0) +
-                Number(stats.commentCount || 0) * 2 +
-                Number(stats.repostCount || 0) * 3;
-            authorStats.set(post.authorId, current);
-        }
-
-        const rankedAuthorIds = Array.from(authorStats.entries())
-            .sort((left, right) =>
-                right[1].engagementScore - left[1].engagementScore ||
-                right[1].recentPosts - left[1].recentPosts ||
-                left[0].localeCompare(right[0])
-            )
-            .slice(0, safeLimit)
-            .map(([authorId]) => authorId);
-
-        if (rankedAuthorIds.length === 0) {
-            return this.getFastFallbackUsers(excludedIds, safeLimit);
-        }
-
-        const userMap = await this.getUserMap(rankedAuthorIds);
-        return rankedAuthorIds
-            .map((authorId): RecommendedSpaceUser | null => {
-                const user = userMap.get(authorId);
-                const stats = authorStats.get(authorId);
-                if (!user || !stats) return null;
-                return {
-                    id: authorId,
-                    username: user.username,
-                    avatarUrl: user.avatarUrl,
-                    isOnline: user.isOnline,
-                    reason: '近期高质量讨论',
-                    isFollowed: false,
-                    recentPosts: stats.recentPosts,
-                    engagementScore: stats.engagementScore,
-                };
-            })
-            .filter((user): user is RecommendedSpaceUser => user !== null);
-    }
-
-    private async getFastFallbackUsers(excludedIds: string[], limit: number): Promise<RecommendedSpaceUser[]> {
-        const users = await User.findAll({
-            where: excludedIds.length > 0
-                ? { id: { [Op.notIn]: excludedIds } }
-                : {},
-            attributes: ['id', 'username', 'avatarUrl', 'isOnline'],
-            order: [['createdAt', 'DESC']],
-            limit,
-        });
-
-        return users.map((user) => ({
-            id: user.id,
-            username: user.username,
-            avatarUrl: user.avatarUrl,
-            isOnline: user.isOnline,
-            reason: '近期活跃用户',
-            isFollowed: false,
-            recentPosts: 0,
-            engagementScore: 0,
-        }));
-    }
 
     /**
      * 获取通知 (基于用户互动行为)

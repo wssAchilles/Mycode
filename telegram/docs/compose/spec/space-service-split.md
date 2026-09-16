@@ -70,6 +70,6 @@ cd telegram-clone-backend
 - [x] T1: Batch 1 — pure helpers + news + search + types — acceptance: tsc + 48 space-related tests green on master e1cb7819 (covers: S2)
 - [x] T2: S2 posts extraction — acceptance: createPost/getPost/getPostsByIds/deletePost/pin/unpin delegate to space/posts; tsc + phase tests green; facade API unchanged (covers: S2)
 - [x] T3: S3 interactions extraction — acceptance: like/unlike/repost/unrepost/comment paths delegate; feature-snapshot side effects preserved; phase tests green (covers: S2; depends: T2)
-- [ ] T4: S4 profiles + recommended users extraction — acceptance: profile/cover/user posts/liked/recommended users delegate; phase tests green (covers: S2; depends: T3)
+- [x] T4: S4 profiles + recommended users extraction — acceptance: profile/cover/user posts/liked/recommended users delegate; phase tests green (covers: S2; depends: T3)
 - [ ] T5: S5 feed extraction — acceptance: getFeedPage/getFeed/trace/trend keyword paths delegate; recommendation identity/pageResult/trace tests green; full backend vitest or documented smoke (covers: S2; depends: T4)
 - [ ] T6: Final review + finalize spec — acceptance: reviewer pass on integrated diff; Report filled; status delivered (covers: S2; depends: T5)
