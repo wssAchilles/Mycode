@@ -53,6 +53,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   delivery_consumer:
     build:
@@ -85,6 +91,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4200:4200"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   redis_data:

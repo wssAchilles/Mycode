@@ -49,6 +49,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   delivery_consumer:
     image: ${DELIVERY_CONSUMER_IMAGE:?DELIVERY_CONSUMER_IMAGE is required}:${RELEASE_TAG:?RELEASE_TAG is required}
@@ -77,6 +83,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4200:4200"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   graph_kernel:
     image: ${GRAPH_KERNEL_IMAGE:?GRAPH_KERNEL_IMAGE is required}:${RELEASE_TAG:?RELEASE_TAG is required}
@@ -88,6 +100,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4300:4300"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4300/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   redis_data:
