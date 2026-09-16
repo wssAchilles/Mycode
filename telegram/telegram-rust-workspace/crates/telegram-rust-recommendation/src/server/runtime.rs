@@ -176,6 +176,7 @@ mod tests {
             backend_url: "http://backend:5000/internal/recommendation".to_string(),
             redis_url: "redis://redis:6379".to_string(),
             internal_token: Some("secret".to_string()),
+            internal_token_required: false,
             timeout_ms: 9000,
             graph_kernel_enabled: true,
             graph_kernel_url: "http://graph_kernel:4300".to_string(),

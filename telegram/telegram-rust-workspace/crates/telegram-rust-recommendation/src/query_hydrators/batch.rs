@@ -591,6 +591,7 @@ mod tests {
             backend_url: base_url,
             redis_url: "redis://redis:6379".to_string(),
             internal_token: None,
+            internal_token_required: false,
             timeout_ms: 1200,
             graph_kernel_enabled: false,
             graph_kernel_url: "http://graph-kernel.invalid".to_string(),

@@ -10,6 +10,9 @@ pub struct RecommendationConfig {
     pub backend_url: String,
     pub redis_url: String,
     pub internal_token: Option<String>,
+    /// When true, requests are rejected if `internal_token` is unset/empty.
+    /// Defaults to true when NODE_ENV=production.
+    pub internal_token_required: bool,
     pub timeout_ms: u64,
     pub graph_kernel_enabled: bool,
     pub graph_kernel_url: String,
@@ -52,6 +55,12 @@ impl RecommendationConfig {
                 .or_else(|| read_env("REDIS_URL"))
                 .unwrap_or_else(|| "redis://redis:6379".to_string()),
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
+            internal_token_required: parse_bool_env(
+                "RECOMMENDATION_INTERNAL_TOKEN_REQUIRED",
+                read_env("NODE_ENV")
+                    .map(|value| value.eq_ignore_ascii_case("production"))
+                    .unwrap_or(false),
+            )?,
             timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 9000)?,
             graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true)?,
             graph_kernel_url: read_env("CPP_GRAPH_KERNEL_URL")

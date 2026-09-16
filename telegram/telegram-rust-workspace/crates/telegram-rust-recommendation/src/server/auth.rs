@@ -13,6 +13,12 @@ pub fn require_internal_token(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
+        if config.internal_token_required {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "recommendation_internal_token_not_configured".to_string(),
+            ));
+        }
         return Ok(());
     };
 
@@ -43,7 +49,7 @@ pub fn require_internal_token(
 
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderMap;
+    use axum::http::{HeaderMap, StatusCode};
     use telegram_pipeline_primitives::{
         RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
@@ -57,6 +63,15 @@ mod tests {
     fn allows_requests_when_internal_token_is_not_configured() {
         let config = test_config(None);
         assert!(require_internal_token(&config, &HeaderMap::new()).is_ok());
+    }
+
+    #[test]
+    fn rejects_all_requests_when_token_required_but_not_configured() {
+        let mut config = test_config(None);
+        config.internal_token_required = true;
+        let err = require_internal_token(&config, &HeaderMap::new()).unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(err.1, "recommendation_internal_token_not_configured");
     }
 
     #[test]
@@ -80,6 +95,7 @@ mod tests {
             backend_url: "http://backend:5000/internal/recommendation".to_string(),
             redis_url: "redis://redis:6379".to_string(),
             internal_token: token.map(ToOwned::to_owned),
+            internal_token_required: false,
             timeout_ms: 9000,
             graph_kernel_enabled: true,
             graph_kernel_url: "http://graph_kernel:4300".to_string(),
