@@ -1,5 +1,5 @@
 import chatCoreClient from '../../../../core/bridge/chatCoreClient';
-import { enqueueMessage } from '../../../../core/chat/offlineQueue';
+import { enqueueMessage, flushOfflineQueue } from '../../../../core/chat/offlineQueue';
 import { authUtils, messageAPI } from '../../../../services/apiClient';
 import { resolveChatRuntimePolicy } from '../../../../core/chat/rolloutPolicy';
 import type { SocketMessageSendPayload } from '../../../../core/chat/types';
@@ -106,6 +106,10 @@ export function createRealtimeActions(
           // ignore (e.g. not authenticated yet)
         }
       })();
+
+      if (connected) {
+        void flushQueuedOfflineMessages(deps);
+      }
     },
 
     sendRealtimeMessage: async (payload: SocketMessageSendPayload) => {
@@ -182,9 +186,21 @@ export function createRealtimeActions(
         void enqueueMessage({
           chatId: payloadWithClientTempId.receiverId || payloadWithClientTempId.groupId || '',
           content: payloadWithClientTempId.content || '',
-          senderId: '',
+          senderId: authUtils.getCurrentUser()?.id || '',
           clientTempId: normalizedClientTempId,
-          vectorClock: { userId: '', timestamp: Date.now() },
+          chatType: payloadWithClientTempId.chatType,
+          receiverId: payloadWithClientTempId.receiverId,
+          groupId: payloadWithClientTempId.groupId,
+          type: payloadWithClientTempId.type,
+          fileUrl: payloadWithClientTempId.fileUrl,
+          fileName: payloadWithClientTempId.fileName,
+          fileSize: payloadWithClientTempId.fileSize,
+          mimeType: payloadWithClientTempId.mimeType,
+          thumbnailUrl: payloadWithClientTempId.thumbnailUrl,
+          vectorClock: {
+            userId: authUtils.getCurrentUser()?.id || '',
+            timestamp: Date.now(),
+          },
         });
         deps.removeOptimisticPendingMessage(normalizedClientTempId);
         return {
@@ -231,4 +247,44 @@ export function createRealtimeActions(
       })();
     },
   };
+}
+
+let offlineFlushInFlight = false;
+
+async function flushQueuedOfflineMessages(deps: MessageStoreDeps): Promise<void> {
+  if (offlineFlushInFlight) return;
+  offlineFlushInFlight = true;
+  try {
+    await flushOfflineQueue(async (msg) => {
+      const response = await messageAPI.sendMessage({
+        clientTempId: msg.clientTempId,
+        chatType: msg.chatType || (msg.groupId ? 'group' : 'private'),
+        receiverId: msg.receiverId,
+        groupId: msg.groupId,
+        content: msg.content,
+        type: msg.type || 'text',
+        fileUrl: msg.fileUrl,
+        fileName: msg.fileName,
+        fileSize: msg.fileSize,
+        mimeType: msg.mimeType,
+        thumbnailUrl: msg.thumbnailUrl,
+      });
+      const sentRaw = extractSentMessageRaw(response);
+      if (sentRaw) {
+        sentRaw.clientTempId = sentRaw.clientTempId || msg.clientTempId;
+        try {
+          await chatCoreClient.ingestSocketMessages([sentRaw]);
+        } catch {
+          // ignore optimistic-ingest failures; sync loop will reconcile
+        }
+        deps.removeOptimisticPendingMessage(msg.clientTempId);
+        return { success: true };
+      }
+      return { success: false, error: 'EMPTY_SEND_RESPONSE' };
+    });
+  } catch {
+    // flush is best-effort; next reconnect will retry
+  } finally {
+    offlineFlushInFlight = false;
+  }
 }
