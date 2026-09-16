@@ -8,3 +8,5 @@ export * from './news/newsQueries';
 export * from './search/searchQueries';
 export * from './posts/postMutations';
 export * from './internal/postFeatureSnapshots';
+export * from './interactions/interactions';
+export * from './internal/userMap';

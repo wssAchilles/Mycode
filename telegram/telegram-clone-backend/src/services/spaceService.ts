@@ -107,6 +107,16 @@ import {
     unpinPost,
 } from './space/posts/postMutations';
 import { refreshPostFeatureSnapshots } from './space/internal/postFeatureSnapshots';
+import { getUserMap } from './space/internal/userMap';
+import {
+    createComment,
+    getCommentsWithAuthors,
+    getPostComments,
+    likePost,
+    repostPost,
+    unlikePost,
+    unrepostPost,
+} from './space/interactions/interactions';
 
 const log = createChildLogger('services:spaceService');
 
@@ -157,26 +167,7 @@ class SpaceService {
      * 批量获取用户信息 (用于作者/通知/评论)
      */
     private async getUserMap(userIds: string[]): Promise<Map<string, { id: string; username: string; avatarUrl?: string | null; isOnline?: boolean | null }>> {
-        const isUuid = (value: string) =>
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-        const uniqueIds = Array.from(new Set(userIds.filter((id) => id && isUuid(id))));
-        if (uniqueIds.length === 0) return new Map();
-
-        const users = await User.findAll({
-            where: { id: uniqueIds },
-            attributes: ['id', 'username', 'avatarUrl', 'isOnline'],
-        });
-
-        const map = new Map<string, { id: string; username: string; avatarUrl?: string | null; isOnline?: boolean | null }>();
-        users.forEach((u) => {
-            map.set(u.id, {
-                id: u.id,
-                username: u.username,
-                avatarUrl: u.avatarUrl,
-                isOnline: u.isOnline,
-            });
-        });
-        return map;
+        return getUserMap(userIds);
     }
 
     /**
@@ -305,115 +296,28 @@ class SpaceService {
      * 点赞帖子
      */
     async likePost(postId: string, userId: string): Promise<boolean> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const post = await Post.findById(postObjId);
-
-        if (!post) return false;
-
-        try {
-            await Like.create({
-                userId,
-                postId: postObjId,
-                authorId: post.authorId,
-            });
-
-            // 增加点赞数
-            await Post.incrementStat(postObjId, 'likeCount', 1);
-
-            await recordRecommendationEvent({
-                userId,
-                eventType: 'like',
-                targetId: postObjId,
-                targetAuthorId: post.authorId,
-                productSurface: 'space_feed',
-            });
-
-            this.refreshPostFeatureSnapshots([postObjId]);
-
-            return true;
-        } catch (error: unknown) {
-            // 重复点赞
-            if ((error as { code?: number }).code === 11000) {
-                return false;
-            }
-            throw error;
-        }
+        return likePost(postId, userId);
     }
 
     /**
      * 取消点赞
      */
     async unlikePost(postId: string, userId: string): Promise<boolean> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const result = await Like.deleteOne({ userId, postId: postObjId });
-
-        if (result.deletedCount > 0) {
-            await Post.incrementStat(postObjId, 'likeCount', -1);
-            this.refreshPostFeatureSnapshots([postObjId]);
-            return true;
-        }
-
-        return false;
+        return unlikePost(postId, userId);
     }
 
     /**
      * 转发帖子
      */
     async repostPost(postId: string, userId: string): Promise<IPost | null> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const post = await Post.findById(postObjId);
-
-        if (!post) return null;
-
-        try {
-            await Repost.create({
-                userId,
-                postId: postObjId,
-                type: RepostType.REPOST,
-            });
-
-            // 增加转发数
-            await Post.incrementStat(postObjId, 'repostCount', 1);
-
-            await recordRecommendationEvent({
-                userId,
-                eventType: 'repost',
-                targetId: postObjId,
-                targetAuthorId: post.authorId,
-                productSurface: 'space_feed',
-            });
-
-            this.refreshPostFeatureSnapshots([postObjId]);
-
-            // 返回更新后的帖子
-            const updated = await Post.findById(postObjId);
-            return updated;
-        } catch (error: unknown) {
-            if ((error as { code?: number }).code === 11000) {
-                return null;
-            }
-            throw error;
-        }
+        return repostPost(postId, userId);
     }
 
     /**
      * 取消转发
      */
     async unrepostPost(postId: string, userId: string): Promise<boolean> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const result = await Repost.deleteOne({
-            userId,
-            postId: postObjId,
-            type: RepostType.REPOST,
-        });
-
-        if (result.deletedCount > 0) {
-            await Post.incrementStat(postObjId, 'repostCount', -1);
-            this.refreshPostFeatureSnapshots([postObjId]);
-            return true;
-        }
-
-        return false;
+        return unrepostPost(postId, userId);
     }
 
     /**
@@ -425,38 +329,7 @@ class SpaceService {
         content: string,
         parentId?: string
     ): Promise<IComment> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const post = await Post.findById(postObjId);
-
-        if (!post) {
-            throw new Error('帖子不存在');
-        }
-
-        const comment = new Comment({
-            userId,
-            postId: postObjId,
-            content,
-            parentId: parentId ? new mongoose.Types.ObjectId(parentId) : undefined,
-        });
-
-        await comment.save();
-
-        // 增加评论数
-        await Post.incrementStat(postObjId, 'commentCount', 1);
-
-        await recordRecommendationEvent({
-            userId,
-            eventType: 'reply',
-            targetId: postObjId,
-            targetCommentId: comment._id as mongoose.Types.ObjectId,
-            targetAuthorId: post.authorId,
-            actionText: String(content || '').slice(0, 280),
-            productSurface: 'space_feed',
-        });
-
-        this.refreshPostFeatureSnapshots([postObjId]);
-
-        return comment;
+        return createComment(postId, userId, content, parentId);
     }
 
     /**
@@ -467,8 +340,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<IComment[]> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        return Comment.getPostComments(postObjId, limit, cursor);
+        return getPostComments(postId, limit, cursor);
     }
 
     /**
@@ -1662,40 +1534,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<{ comments: Array<any>; hasMore: boolean; nextCursor?: string }> {
-        const postObjId = new mongoose.Types.ObjectId(postId);
-        const comments = await Comment.getPostComments(postObjId, limit, cursor);
-
-        const userIds = comments.map((c) => c.userId);
-        const userMap = await this.getUserMap(userIds);
-
-        const transformed = comments.map((c) => {
-            const author = userMap.get(c.userId);
-            return {
-                id: c._id?.toString(),
-                postId: c.postId?.toString(),
-                content: c.content,
-                author: author
-                    ? {
-                        id: author.id,
-                        username: author.username,
-                        avatarUrl: author.avatarUrl,
-                        isOnline: author.isOnline,
-                    }
-                    : { id: c.userId, username: 'Unknown' },
-                likeCount: c.likeCount || 0,
-                parentId: c.parentId?.toString(),
-                replyToUserId: c.replyToUserId,
-                createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
-            };
-        });
-
-        return {
-            comments: transformed,
-            hasMore: comments.length >= limit,
-            nextCursor: comments.length > 0
-                ? comments[comments.length - 1].createdAt.toISOString()
-                : undefined,
-        };
+        return getCommentsWithAuthors(postId, limit, cursor);
     }
 
     /**
