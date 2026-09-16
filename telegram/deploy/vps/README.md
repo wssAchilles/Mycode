@@ -108,10 +108,13 @@ Use these instead of phase-specific checks:
 Examples:
 
 ```bash
-bash deploy/vps/check_realtime_readiness.sh
-bash deploy/vps/check_recommendation_readiness.sh
-bash deploy/vps/check_graph_readiness.sh
-bash deploy/vps/check_platform_replay_readiness.sh
+OPS_URL=https://api.xuziqi.tech
+OPS_TOKEN=...   # OPS_METRICS_TOKEN
+
+bash deploy/vps/check_realtime_readiness.sh "${OPS_URL}/api/ops/realtime" "${OPS_TOKEN}"
+bash deploy/vps/check_recommendation_readiness.sh "${OPS_URL}/api/ops/recommendation" "${OPS_TOKEN}"
+bash deploy/vps/check_graph_readiness.sh "${OPS_URL}/api/ops/recommendation" "${OPS_TOKEN}"
+bash deploy/vps/check_platform_replay_readiness.sh "${OPS_URL}/api/ops/platform-bus" "${OPS_TOKEN}"
 ```
 
 Each script returns machine-readable JSON with:
@@ -122,6 +125,11 @@ Each script returns machine-readable JSON with:
 - `recommendedAction`
 - `runtimeMode`
 - `capabilityMetrics`
+- `readinessState` (`ready` | `blocked` | `waiting_for_traffic` | `skipped`)
+
+Shared helpers live in `deploy/vps/lib/ops_readiness.sh`.  
+`gates/ops_readiness_gate.sh` invokes all four scripts (plus platform probe) for release gates.  
+A check that cannot reach the ops endpoint exits `1` and emits `currentBlocker=ops_endpoint_unreachable`; a reachable endpoint always emits full JSON (even when blocked) so `release_gate_report.py` can classify blockers.
 
 ## Main ops endpoints
 
