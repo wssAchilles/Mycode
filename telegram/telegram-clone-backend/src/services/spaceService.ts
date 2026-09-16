@@ -4,98 +4,48 @@
  */
 
 import mongoose from 'mongoose';
-import { v4 as uuidv4 } from 'uuid';
 import Post, { IPost, MediaType } from '../models/Post';
-import Like from '../models/Like';
 import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
-import { createFeedCandidate, createFeedQuery, FeedCandidate, FeedQuery, getSpaceFeedMixer } from './recommendation';
-import { recordRecommendationEvent, recordRecommendationEvents } from './recommendation/events';
-import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
-import SpaceProfile from '../models/SpaceProfile';
-import { Op } from 'sequelize';
 import { newsService } from './newsService';
-import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
-import { postFeatureSnapshotService } from './recommendation/contentFeatures';
-import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
-import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
-import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
-import { UserInteractionHydrator } from './recommendation/hydrators/UserInteractionHydrator';
-import { AuthorDiversityScorer } from './recommendation/scorers';
-import type { RecommendationTracePayload } from './recommendation/rust/contracts';
-import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
-import {
-    buildRecommendationDecisionLogV1,
-    isRecommendationDecisionLogV1Enabled,
-    persistRecommendationDecisionLogV1,
-} from './recommendation/decisionLog/write';
-import { attachRecommendationExplain } from './recommendation/explain/candidateExplain';
-import {
-    buildSpaceFeedDebugInfo,
-} from './recommendation/feed/debugInfo';
-import {
-    resolveFeedRuntime,
-} from './recommendation/feed/rustFeedRuntime';
-import {
-    buildSpaceFeedPageResult,
-    type SpaceFeedPageResult,
-} from './recommendation/feed/pageResult';
 import {
   getNewsTrendsRustMode,
   newsTrendService,
   type SpaceTrendPostInput,
   type SpaceTrendResult,
 } from './newsTrends';
-import {
-  AgeFilter,
-  BlockedUserFilter,
-  ConversationDedupFilter,
-  DuplicateFilter,
-  MutedKeywordFilter,
-  PreviouslyServedFilter,
-  RetweetDedupFilter,
-  SeenPostFilter,
-  SelfPostFilter,
-} from './recommendation/filters';
 import { createChildLogger } from '../utils/logger';
+import type { FeedQuery } from './recommendation';
+import type { FeedCandidate } from './recommendation';
+import type { SpaceFeedPageResult } from './recommendation/feed/pageResult';
 import {
-    buildExactTextSearchQuery,
     buildNewsSummary,
-    buildTextSearchQuery,
     buildTopicTextSearchQueries,
     computeRecencyScore,
     computeSimilarity,
-    dedupePostsById,
     dedupeTrendsByTag,
-    escapeRegexLiteral,
-    extractKeywords,
     extractNewsKeywords,
-    extractTextTrendKeywords,
     extractTrendKeywords,
     isValidTrendToken,
     mergeFeedTrendKeywords,
-    normalizeSearchLimit,
     normalizeTopicTag,
     sourceWeight,
-    trendPostWeight,
+    trendPostWeight
 } from './space/internal/pureHelpers';
 import {
     cleanupOldNews,
     createNewsPosts,
     getNewsClusterPosts,
     getNewsClusters,
-    getNewsPosts,
+    getNewsPosts
 } from './space/news/newsQueries';
 import {
     countExactTextSearchMatches,
     countTextSearchMatches,
     getTopicPosts,
-    newsArticleToSpacePost,
-    searchNewsTopicPosts,
-    searchPostsByExactTextPage,
-    searchPostsPage,
+    searchPostsPage
 } from './space/search/searchQueries';
 import {
     createPost,
@@ -103,10 +53,12 @@ import {
     getPost,
     getPostsByIds,
     pinPost,
-    unpinPost,
+    unpinPost
 } from './space/posts/postMutations';
-import { refreshPostFeatureSnapshots } from './space/internal/postFeatureSnapshots';
-import { getUserMap } from './space/internal/userMap';
+
+import {
+    getUserMap
+} from './space/internal/userMap';
 import {
     createComment,
     getCommentsWithAuthors,
@@ -114,21 +66,22 @@ import {
     likePost,
     repostPost,
     unlikePost,
-    unrepostPost,
+    unrepostPost
 } from './space/interactions/interactions';
 import {
-    getFollowedSet,
     getUserLikedPosts,
     getUserPosts,
     getUserProfile,
     setUserCover,
-    updateSpaceProfileFields,
+    updateSpaceProfileFields
 } from './space/profiles/profileQueries';
-import { getRecommendedUsers } from './space/profiles/recommendedUsers';
+import {
+    getRecommendedUsers
+} from './space/profiles/recommendedUsers';
 import {
     getFeedPage as getFeedPageImpl,
     getInNetworkDirectFallback,
-    recordServedFeedTrace,
+    recordServedFeedTrace
 } from './space/feed/feedPage';
 
 const log = createChildLogger('services:spaceService');
@@ -185,13 +138,7 @@ class SpaceService {
     /**
      * 获取当前用户已关注列表 (Space 使用 Contact.accepted 作为关注)
      */
-    private async getFollowedSet(userId: string): Promise<Set<string>> {
-        return getFollowedSet(userId);
-    }
 
-    private refreshPostFeatureSnapshots(postIds: Array<string | mongoose.Types.ObjectId | undefined | null>): void {
-        refreshPostFeatureSnapshots(postIds);
-    }
 
     /**
      * In-network hard fallback:
@@ -578,37 +525,11 @@ class SpaceService {
         return getTopicPosts(tag, limit, cursor);
     }
 
-    private async searchNewsTopicPosts(
-        tag: string,
-        limit: number = 20,
-        cursor?: Date
-    ): Promise<SpaceSearchPageResult> {
-        return searchNewsTopicPosts(tag, limit, cursor);
-    }
 
-    private newsArticleToSpacePost(article: Awaited<ReturnType<typeof newsService.searchTopicArticles>>['articles'][number]) {
-        return newsArticleToSpacePost(article);
-    }
 
-    private normalizeSearchLimit(limit: number): number {
-        return normalizeSearchLimit(limit);
-    }
 
-    private buildTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
-        return buildTextSearchQuery(query, cursor);
-    }
 
-    private async searchPostsByExactTextPage(
-        query: string,
-        limit: number = 20,
-        cursor?: Date
-    ): Promise<SpaceSearchPageResult> {
-        return searchPostsByExactTextPage(query, limit, cursor);
-    }
 
-    private buildExactTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
-        return buildExactTextSearchQuery(query, cursor);
-    }
 
     /**
      * 获取话题下的新闻帖子
@@ -730,13 +651,7 @@ class SpaceService {
         return buildTopicTextSearchQueries(normalizedTag);
     }
 
-    private escapeRegexLiteral(value: string): string {
-        return escapeRegexLiteral(value);
-    }
 
-    private dedupePostsById(posts: IPost[]): IPost[] {
-        return dedupePostsById(posts);
-    }
 
     private dedupeTrendsByTag(trends: SpaceTrendResult[]): SpaceTrendResult[] {
         return dedupeTrendsByTag(trends);
@@ -805,9 +720,6 @@ class SpaceService {
         return extractTrendKeywords(post);
     }
 
-    private extractTextTrendKeywords(text: string): string[] {
-        return extractTextTrendKeywords(text);
-    }
 
     private isValidTrendToken(token: string): boolean {
         return isValidTrendToken(token);
@@ -956,9 +868,6 @@ class SpaceService {
     /**
      * 提取关键词 (简单实现)
      */
-    private extractKeywords(content: string): string[] {
-        return extractKeywords(content);
-    }
 
     private buildNewsSummary(text: string): string {
         return buildNewsSummary(text);
