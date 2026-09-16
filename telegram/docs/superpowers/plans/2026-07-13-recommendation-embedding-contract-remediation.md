@@ -54,7 +54,7 @@
 - [x] Task 3：Non-Destructive Cold-Start Creation And Repair 已完成并冻结现有验收状态。
 - [x] Task 4：Serving, Export And Similarity Boundaries 已完成并通过 task review。
 - [x] Task 5-7：本地 audit、repair、release-gate 实现已完成并通过 task review。
-- [ ] Task 8：等待 operator-issued 只读 Mongo URI 与证据文件后刷新确定性检查并生成授权包。
+- [x] Task 8：authorization packet 已于 2026-07-14 生成（`reports/recommendation/embedding-contract-remediation/`，状态 `CODE_AND_DRY_RUN_READY` / `NOT GRANTED`）。当前 worktree 存在 README 等漂移，operator 处理后方可刷新确定性检查。
 - [ ] Task 9：仅在独立生产授权后执行，当前不属于已授权工作。
 
 ## Task 1: Known Contracts And Evidence Classification
@@ -504,7 +504,7 @@
 
 **Interfaces:**
 
-- Produce `summarizeEmbeddingEvidence(inputs: EmbeddingContractEvidenceInput[]): EmbeddingEvidenceSummary` in `embeddingEvidenceAudit.ts`. Both `buildEmbeddingContractAudit(...)` and `buildDailyRecommendationRefreshAudit(...)` consume it and report the same five statuses from `classifyEmbeddingContractEvidence(...)`: `verified_local_fallback`, `semantic_ready`, `quarantined`, `invalid`, and `unclassified`.
+- Produce the shared evidence helpers in `embeddingEvidenceAudit.ts` (as implemented): `createEmbeddingEvidenceSummary()`, `accumulateEmbeddingEvidence(...)`, `accumulatePostEmbeddingEvidence(...)`, `isFullEmbeddingEvidenceSummary(...)`, and `scanEmbeddingContractEvidence(options)`. Both `buildEmbeddingContractAudit(...)` and `buildDailyRecommendationRefreshAudit(...)` consume the same classifier vocabulary and report the five statuses from `classifyEmbeddingContractEvidence(...)`: `verified_local_fallback`, `semantic_ready`, `quarantined`, `invalid`, and `unclassified`. (Plan text previously named a single `summarizeEmbeddingEvidence(inputs)` helper; that name is superseded by the create/accumulate/scan API.)
 - Strict user/post scans use stable `_id` cursor traversal over the full collection. They report that this is stable ordering, not snapshot isolation; an authoritative apply packet still requires writer pause or an approved snapshot read concern.
 - Strict mode has no default or explicit silent cap and rejects any limited invocation. Limited mode is diagnostic-only and cannot emit a passing strict/release result.
 - Strict accepts only a quarantine digest supplied from previously reviewed evidence. It must not compute the current digest and treat that same value as approval.
