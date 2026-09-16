@@ -98,6 +98,15 @@ import {
     searchPostsByExactTextPage,
     searchPostsPage,
 } from './space/search/searchQueries';
+import {
+    createPost,
+    deletePost,
+    getPost,
+    getPostsByIds,
+    pinPost,
+    unpinPost,
+} from './space/posts/postMutations';
+import { refreshPostFeatureSnapshots } from './space/internal/postFeatureSnapshots';
 
 const log = createChildLogger('services:spaceService');
 
@@ -187,34 +196,7 @@ class SpaceService {
     }
 
     private refreshPostFeatureSnapshots(postIds: Array<string | mongoose.Types.ObjectId | undefined | null>): void {
-        const uniquePostIds = Array.from(
-            new Map(
-                postIds
-                    .map((postId) => {
-                        const normalized = typeof postId === 'string'
-                            ? postId
-                            : postId?.toString();
-                        if (!normalized || !mongoose.Types.ObjectId.isValid(normalized)) {
-                            return null;
-                        }
-                        return [
-                            normalized,
-                            new mongoose.Types.ObjectId(normalized),
-                        ] as const;
-                    })
-                    .filter(Boolean) as Array<readonly [string, mongoose.Types.ObjectId]>,
-            ).values(),
-        );
-
-        if (uniquePostIds.length === 0) {
-            return;
-        }
-
-        postFeatureSnapshotService
-            .refreshSnapshotsByPostIds(uniquePostIds)
-            .catch((error) => {
-                log.warn({ err: error }, '[SpaceService] post feature snapshot refresh failed');
-            });
+        refreshPostFeatureSnapshots(postIds);
     }
 
     /**
@@ -279,59 +261,7 @@ class SpaceService {
      * 创建帖子
      */
     async createPost(params: CreatePostParams): Promise<IPost> {
-        const { authorId, content, media, replyToPostId, quotePostId, quoteContent } = params;
-
-        // 提取关键词 (用于 MutedKeywordFilter)
-        const keywords = this.extractKeywords(content);
-
-        const postData: Partial<IPost> = {
-            authorId,
-            content,
-            keywords,
-            media: media?.map(m => ({ ...m, type: m.type as MediaType })) || [],
-        };
-
-        // 处理回复
-        if (replyToPostId) {
-            postData.isReply = true;
-            postData.replyToPostId = new mongoose.Types.ObjectId(replyToPostId);
-
-            // 获取对话根帖子
-            const parentPost = await Post.findById(replyToPostId);
-            if (parentPost) {
-                postData.conversationId = (parentPost.conversationId || parentPost._id) as mongoose.Types.ObjectId;
-                // 增加父帖子评论数
-                await Post.incrementStat(parentPost._id as mongoose.Types.ObjectId, 'commentCount', 1);
-            }
-        }
-
-        // 处理引用转发
-        if (quotePostId) {
-            postData.isRepost = true;
-            postData.originalPostId = new mongoose.Types.ObjectId(quotePostId);
-            postData.quoteContent = quoteContent;
-
-            // 增加原帖引用数和转发数
-            await Post.incrementStat(new mongoose.Types.ObjectId(quotePostId), 'quoteCount', 1);
-            await Post.incrementStat(new mongoose.Types.ObjectId(quotePostId), 'repostCount', 1);
-        }
-
-        const post = new Post(postData);
-        await post.save();
-
-        // Write-light in-network timeline: one Redis ZSET write per post.
-        // Best-effort: feed can fall back to DB-based paths if Redis is unavailable.
-        InNetworkTimelineService.addPost(authorId, String(post._id), post.createdAt).catch((err) => {
-            log.warn('[SpaceService] timeline addPost failed', err);
-        });
-
-        this.refreshPostFeatureSnapshots([
-            post._id as mongoose.Types.ObjectId,
-            replyToPostId,
-            quotePostId,
-        ]);
-
-        return post;
+        return createPost(params);
     }
 
     /**
@@ -345,29 +275,7 @@ class SpaceService {
      * 获取帖子详情
      */
     async getPost(postId: string, userId?: string): Promise<IPost | null> {
-        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
-
-        const post = await Post.findOne({
-            _id: postId,
-            deletedAt: null,
-        });
-
-        if (!post) return null;
-
-        // 记录浏览行为
-        if (userId) {
-            await recordRecommendationEvent({
-                userId,
-                eventType: 'click',
-                targetId: post._id as mongoose.Types.ObjectId,
-                targetAuthorId: post.authorId,
-                productSurface: 'space_feed',
-            });
-
-            // 增加浏览数
-            await Post.incrementStat(post._id as mongoose.Types.ObjectId, 'viewCount', 1);
-        }
-        return post;
+        return getPost(postId, userId);
     }
 
     /**
@@ -383,68 +291,14 @@ class SpaceService {
      * 批量获取帖子 (保持输入 ID 顺序)
      */
     async getPostsByIds(postIds: string[]): Promise<IPost[]> {
-        if (!postIds || postIds.length === 0) return [];
-
-        const normalizedIds = postIds.map((id) => String(id || '').trim()).filter(Boolean);
-        const objectIdStrings = normalizedIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
-        const externalIds = normalizedIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-
-        const orQuery: Record<string, unknown>[] = [];
-        if (objectIdStrings.length > 0) {
-            orQuery.push({
-                _id: { $in: objectIdStrings.map((id) => new mongoose.Types.ObjectId(id)) },
-            });
-        }
-        if (externalIds.length > 0) {
-            orQuery.push({
-                'newsMetadata.externalId': { $in: externalIds },
-            });
-        }
-        if (orQuery.length === 0) return [];
-
-        const posts = await Post.find({
-            deletedAt: null,
-            $or: orQuery,
-        });
-
-        // 内存中重新排序 (MongoDB $in 不保证顺序)，同时支持 objectId 和 externalId 两种语料 ID
-        const objectIdMap = new Map<string, IPost>();
-        const externalIdMap = new Map<string, IPost>();
-        for (const p of posts) {
-            const idStr = p._id?.toString?.();
-            if (idStr) objectIdMap.set(idStr, p);
-            const ext = p.newsMetadata?.externalId ? String(p.newsMetadata.externalId) : '';
-            if (ext) externalIdMap.set(ext, p);
-        }
-
-        return normalizedIds
-            .map((id) => {
-                if (mongoose.Types.ObjectId.isValid(id)) {
-                    return objectIdMap.get(id) || externalIdMap.get(id);
-                }
-                return externalIdMap.get(id);
-            })
-            .filter((p): p is IPost => !!p);
+        return getPostsByIds(postIds);
     }
 
     /**
      * 删除帖子
      */
     async deletePost(postId: string, userId: string): Promise<boolean> {
-        const post = await Post.findOne({
-            _id: postId,
-            authorId: userId,
-            deletedAt: null,
-        });
-
-        if (!post) return false;
-
-        post.deletedAt = new Date();
-        await post.save();
-
-        // Best-effort removal from Redis in-network timeline.
-        InNetworkTimelineService.removePost(post.authorId, String(post._id)).catch(() => undefined);
-        return true;
+        return deletePost(postId, userId);
     }
 
     /**
@@ -1289,33 +1143,14 @@ class SpaceService {
      * 置顶动态
      */
     async pinPost(postId: string, userId: string): Promise<IPost | null> {
-        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
-        const postObjectId = new mongoose.Types.ObjectId(postId);
-
-        const post = await Post.findOne({ _id: postObjectId, authorId: userId, deletedAt: null });
-        if (!post) return null;
-
-        await Post.updateMany({ authorId: userId, isPinned: true }, { $set: { isPinned: false } });
-        post.isPinned = true;
-        await post.save();
-
-        return post;
+        return pinPost(postId, userId);
     }
 
     /**
      * 取消置顶动态
      */
     async unpinPost(postId: string, userId: string): Promise<IPost | null> {
-        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
-        const postObjectId = new mongoose.Types.ObjectId(postId);
-
-        const post = await Post.findOne({ _id: postObjectId, authorId: userId, deletedAt: null });
-        if (!post) return null;
-
-        post.isPinned = false;
-        await post.save();
-
-        return post;
+        return unpinPost(postId, userId);
     }
 
     /**

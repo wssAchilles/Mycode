@@ -6,3 +6,5 @@ export * from './types';
 export * from './internal/pureHelpers';
 export * from './news/newsQueries';
 export * from './search/searchQueries';
+export * from './posts/postMutations';
+export * from './internal/postFeatureSnapshots';
