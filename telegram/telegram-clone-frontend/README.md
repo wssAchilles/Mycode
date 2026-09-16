@@ -1,6 +1,45 @@
 # Telegram Clone Frontend
 
-React + Vite 前端。该项目包含聊天、Space 动态、AI 助手、认证引导和后台运营面板。
+React 19 + Vite 前端。覆盖聊天、Space 动态、AI 助手、认证引导和后台运营面板，并作为 PWA 提供离线壳与本地消息投影。
+
+## 架构速览
+
+```text
+UI (routes / pages / features)
+        │
+        ▼
+Zustand stores (chatStore / messageStore / useSpaceStore / auth)
+        │
+        ▼
+chatCoreClient (Comlink + executeWithRecovery)
+        │
+        ▼
+chat-core Web Worker（canonical owner）
+  ├─ Socket.IO（realtimeBatch）
+  ├─ syncEngine（pts / difference / ack）
+  ├─ realtimeIngest（切片 / 背压 / ChatPatch p0-p2）
+  ├─ persistence（默认 SQLite-OPFS，可回退 Dexie IDB + shadow）
+  ├─ searchBridge
+  └─ chat_wasm（Rust/WASM：seq 合并、搜索、patch 压缩、ChaCha20）
+```
+
+要点：
+
+- **实时**：Worker 内 Socket；主线程只消费 ChatPatch 做投影与虚拟列表刷新。
+- **本地存储**：`runtimeFlags.storageBackend` 默认 `sqlite-opfs`；分桶发布见 `src/core/chat/rolloutPolicy.ts`。
+- **WASM**：`src/core/wasm/chat_wasm`；需 COOP/COEP（`vite.config.ts`）以启用 SharedArrayBuffer。
+- **推荐 Feed**：`POST /api/space/feed`，响应带 `_recommendationContext`（requestId/decisionId/servedPosition…），行为埋点经 `useAnalytics` 批量上报。
+- **生产 Worker 现状**：入口仍为单体 `src/core/workers/chatCore.worker.ts`；`chatCore/` 模块化拆分与 `chatCore.worker.new.ts` 为待接线参考实现。
+- **离线**：PWA 可离线打开；`offlineQueue` 目前只写不重放，离线发送可能丢失。
+
+常用命令：
+
+```bash
+npm ci
+npm run dev
+npm run quality:ci
+npm run build
+```
 
 ## 动画治理
 

@@ -183,7 +183,7 @@ telegram/
 ├── ml-services/                   # ANN, Phoenix, safety and training workflows
 ├── telegram-light-jobs/           # Lightweight crawl and archive jobs
 ├── deploy/vps/                    # Compose, release, rollback and VPS operations
-└── docs/                          # Architecture, contracts, plans and research records
+└── docs/                          # architecture/ as-built 总览、contracts、plans、research
 ```
 
 ## 运行时数据路径
@@ -241,11 +241,34 @@ npm run demo:live
 
 ## 文档索引
 
+### 架构（As-built）
+
+- [架构文档目录](docs/architecture/README.md)
+- [系统总览](docs/architecture/system-overview.md)
+- [服务目录](docs/architecture/service-catalog.md)
+- [跨服务契约](docs/architecture/cross-service-contracts.md)
+- [阶段状态总览](docs/architecture/phase-status.md)
+- [运行时开关与回退](docs/architecture/runtime-switches.md)
+
+### 部署与服务
+
 - [VPS 部署与发布](deploy/vps/README.md)
+- [部署手册 DEPLOYMENT.md](deploy/DEPLOYMENT.md)
+- [Node Backend](telegram-clone-backend/README.md)
+- [Rust Gateway](telegram-rust-gateway/README.md)
 - [Rust recommendation workspace](telegram-rust-workspace/README.md)
+- [Go Delivery Consumer](telegram-go-delivery-consumer/README.md)
+- [C++ Graph Kernel](telegram-cpp-graph-service/README.md)
 - [Phoenix / Two-Tower ML 服务](ml-services/README.md)
+- [Light Jobs](telegram-light-jobs/README.md)
+- [Frontend](telegram-clone-frontend/README.md)
+
+### 研究与设计
+
 - [推荐算法研究设计](docs/superpowers/specs/2026-07-07-recommendation-algorithm-research-design.md)
 - [Embedding 契约修复设计](docs/superpowers/specs/2026-07-13-recommendation-embedding-contract-remediation-design.md)
+- `docs/research/phase*.md`：算法证据矩阵与阶段研究记录
+- `docs/recommendation/`：行为事件契约与阶段检查
 
 ## 贡献
 
