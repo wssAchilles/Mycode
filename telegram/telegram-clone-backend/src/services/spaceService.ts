@@ -61,68 +61,60 @@ import {
   SelfPostFilter,
 } from './recommendation/filters';
 import { createChildLogger } from '../utils/logger';
+import {
+    buildExactTextSearchQuery,
+    buildNewsSummary,
+    buildTextSearchQuery,
+    buildTopicTextSearchQueries,
+    computeRecencyScore,
+    computeSimilarity,
+    dedupePostsById,
+    dedupeTrendsByTag,
+    escapeRegexLiteral,
+    extractKeywords,
+    extractNewsKeywords,
+    extractTextTrendKeywords,
+    extractTrendKeywords,
+    isValidTrendToken,
+    mergeFeedTrendKeywords,
+    normalizeSearchLimit,
+    normalizeTopicTag,
+    sourceWeight,
+    trendPostWeight,
+} from './space/internal/pureHelpers';
+import {
+    cleanupOldNews,
+    createNewsPosts,
+    getNewsClusterPosts,
+    getNewsClusters,
+    getNewsPosts,
+} from './space/news/newsQueries';
+import {
+    countExactTextSearchMatches,
+    countTextSearchMatches,
+    getTopicPosts,
+    newsArticleToSpacePost,
+    searchNewsTopicPosts,
+    searchPostsByExactTextPage,
+    searchPostsPage,
+} from './space/search/searchQueries';
 
 const log = createChildLogger('services:spaceService');
 
 const DEFAULT_TREND_WINDOW_HOURS = Number.parseInt(process.env.SPACE_TREND_WINDOW_HOURS || '72', 10);
 const MAX_TREND_SCAN_POSTS = 500;
 
-/**
- * 创建帖子参数
- */
-export interface CreatePostParams {
-    authorId: string;
-    content: string;
-    media?: { type: 'image' | 'video' | 'gif'; url: string }[];
-    replyToPostId?: string;
-    quotePostId?: string;
-    quoteContent?: string;
-}
+import type {
+    CreatePostParams,
+    RecommendedSpaceUser,
+    SpaceSearchPageResult,
+} from './space/types';
 
-export interface SpaceSearchPageResult {
-    posts: IPost[];
-    totalCount: number;
-    hasMore: boolean;
-    nextCursor?: string;
-    query: string;
-    tag?: string;
-}
-
-export interface RecommendedSpaceUser {
-    id: string;
-    username: string;
-    avatarUrl?: string | null;
-    isOnline?: boolean | null;
-    reason?: string;
-    isFollowed: boolean;
-    recentPosts: number;
-    engagementScore: number;
-}
-
-function mergeFeedTrendKeywords(
-    current: string[] | undefined,
-    next: Array<string | null | undefined>,
-): string[] {
-    const normalized: string[] = [];
-    for (const value of [...(current || []), ...next]) {
-        const text = String(value || '')
-            .replace(/^#+/, '')
-            .replace(/[_-]+/g, ' ')
-            .trim()
-            .toLowerCase();
-        if (!text) continue;
-
-        const parts = text.split(/\s+/).filter((part) => part.length >= 2);
-        normalized.push(text);
-        normalized.push(...parts);
-    }
-
-    return Array.from(new Set(
-        normalized
-            .map((value) => value.trim())
-            .filter((value) => value.length >= 2 && value.length <= 48),
-    )).slice(0, 32);
-}
+export type {
+    CreatePostParams,
+    RecommendedSpaceUser,
+    SpaceSearchPageResult,
+};
 
 /**
  * Space 服务类
@@ -346,45 +338,7 @@ class SpaceService {
      * 批量创建新闻帖子 (Crawler Hook)
      */
     async createNewsPosts(articles: any[]): Promise<number> {
-        let count = 0;
-        const NEWS_BOT_ID = 'news_bot_official';
-
-        for (const article of articles) {
-            if (!article?.url) continue;
-
-            const title = article.title || '新闻速递';
-            const rawContent = article.content || `${title}\n\n${article.summary || ''}`;
-            const summary = this.buildNewsSummary(article.summary || rawContent);
-            const keywords = this.extractNewsKeywords(`${title}\n${summary}`);
-            const createdAt = article.published ? new Date(article.published) : new Date();
-
-            const postData: Partial<IPost> = {
-                authorId: NEWS_BOT_ID,
-                content: rawContent,
-                keywords,
-                isNews: true,
-                newsMetadata: {
-                    title,
-                    source: article.source || 'news',
-                    url: article.url,
-                    clusterId: article.cluster_id,
-                    summary,
-                },
-                media: article.top_image ? [{ type: MediaType.IMAGE, url: article.top_image }] : [],
-                createdAt,
-            };
-
-            const result = await Post.updateOne(
-                { 'newsMetadata.url': article.url },
-                { $setOnInsert: postData },
-                { upsert: true }
-            );
-
-            if ((result as any).upsertedCount > 0) {
-                count++;
-            }
-        }
-        return count;
+        return createNewsPosts(articles);
     }
 
     /**
@@ -420,45 +374,7 @@ class SpaceService {
      * 获取热门新闻话题聚合
      */
     async getNewsClusters(limit: number = 5): Promise<any[]> {
-        // 聚合最近 24 小时的新闻
-        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-        return Post.aggregate([
-            {
-                $match: {
-                    isNews: true,
-                    createdAt: { $gte: since },
-                    deletedAt: null
-                }
-            },
-            {
-                $group: {
-                    _id: "$newsMetadata.clusterId",
-                    count: { $sum: 1 },
-                    representativePost: { $first: "$$ROOT" }, // 取最新的一条作为代表
-                    avgScore: { $avg: "$engagementScore" } // 假设有分数
-                }
-            },
-            { $sort: { count: -1 } }, // 按热度排序
-            { $limit: limit },
-            {
-                $project: {
-                    clusterId: "$_id",
-                    postId: "$representativePost._id",
-                    count: 1,
-                    title: { $ifNull: ["$representativePost.newsMetadata.title", "$representativePost.content"] },
-                    summary: "$representativePost.newsMetadata.summary",
-                    source: "$representativePost.newsMetadata.source",
-                    coverUrl: {
-                        $ifNull: [
-                            { $arrayElemAt: ["$representativePost.media.url", 0] },
-                            null,
-                        ],
-                    },
-                    latestAt: "$representativePost.createdAt"
-                }
-            }
-        ]);
+        return getNewsClusters(limit);
     }
 
 
@@ -1128,33 +1044,7 @@ class SpaceService {
         cursor?: Date,
         days: number = 1
     ): Promise<{ posts: IPost[]; hasMore: boolean; nextCursor?: string }> {
-        const since = new Date();
-        since.setDate(since.getDate() - Math.max(days, 1));
-
-        const query: Record<string, unknown> = {
-            isNews: true,
-            deletedAt: null,
-            createdAt: { $gte: since },
-        };
-
-        if (cursor) {
-            query.createdAt = { $gte: since, $lt: cursor };
-        }
-
-        const posts = await Post.find(query)
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .lean();
-
-        const nextCursor = posts.length > 0
-            ? new Date(posts[posts.length - 1].createdAt).toISOString()
-            : undefined;
-
-        return {
-            posts: posts as unknown as IPost[],
-            hasMore: posts.length >= limit,
-            nextCursor,
-        };
+        return getNewsPosts(limit, cursor, days);
     }
 
     /**
@@ -1445,37 +1335,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<SpaceSearchPageResult> {
-        const normalizedQuery = String(query || '').trim();
-        const safeLimit = this.normalizeSearchLimit(limit);
-
-        if (!normalizedQuery) {
-            return {
-                posts: [],
-                totalCount: 0,
-                hasMore: false,
-                query: normalizedQuery,
-            };
-        }
-
-        const [totalCount, fetchedPosts] = await Promise.all([
-            this.countTextSearchMatches(normalizedQuery),
-            this.fetchTextSearchPosts(normalizedQuery, safeLimit + 1, cursor),
-        ]);
-
-        const hasMore = fetchedPosts.length > safeLimit;
-        const posts = hasMore ? fetchedPosts.slice(0, safeLimit) : fetchedPosts;
-        const lastPost = posts[posts.length - 1];
-        const nextCursor = hasMore && lastPost?.createdAt
-            ? new Date(lastPost.createdAt).toISOString()
-            : undefined;
-
-        return {
-            posts,
-            totalCount,
-            hasMore,
-            nextCursor,
-            query: normalizedQuery,
-        };
+        return searchPostsPage(query, limit, cursor);
     }
 
     async getTopicPosts(
@@ -1483,60 +1343,7 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<SpaceSearchPageResult> {
-        const normalizedTag = this.normalizeTopicTag(tag);
-        if (!normalizedTag) {
-            return {
-                posts: [],
-                totalCount: 0,
-                hasMore: false,
-                query: '',
-                tag: normalizedTag,
-            };
-        }
-
-        const query = `#${normalizedTag}`;
-        const textQueries = this.buildTopicTextSearchQueries(normalizedTag);
-        const [textResults, exactTextResults, newsResult] = await Promise.all([
-            Promise.all(textQueries.map((textQuery) => this.searchPostsPage(textQuery, limit, cursor))),
-            Promise.all(textQueries.map((textQuery) => this.searchPostsByExactTextPage(textQuery, limit, cursor))),
-            this.searchNewsTopicPosts(normalizedTag, limit, cursor),
-        ]);
-
-        const mergedPosts = this.dedupePostsById([
-            ...textResults.flatMap((result) => result.posts),
-            ...exactTextResults.flatMap((result) => result.posts),
-            ...newsResult.posts,
-        ]);
-        mergedPosts.sort((a, b) => {
-            const dateA = new Date(a.createdAt || 0).getTime();
-            const dateB = new Date(b.createdAt || 0).getTime();
-            return dateB - dateA;
-        });
-
-        const posts = mergedPosts.slice(0, limit);
-        const hasMore = textResults.some((result) => result.hasMore)
-            || exactTextResults.some((result) => result.hasMore)
-            || newsResult.hasMore
-            || mergedPosts.length > limit;
-        const lastPost = posts[posts.length - 1];
-        const nextCursor = hasMore && lastPost?.createdAt
-            ? new Date(lastPost.createdAt).toISOString()
-            : undefined;
-        const totalCount = Math.max(
-            posts.length,
-            newsResult.totalCount,
-            ...textResults.map((result) => result.totalCount),
-            ...exactTextResults.map((result) => result.totalCount),
-        );
-
-        return {
-            posts,
-            totalCount,
-            hasMore,
-            nextCursor,
-            query,
-            tag: normalizedTag,
-        };
+        return getTopicPosts(tag, limit, cursor);
     }
 
     private async searchNewsTopicPosts(
@@ -1544,91 +1351,19 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<SpaceSearchPageResult> {
-        const result = await newsService.searchTopicArticles(tag, limit, cursor);
-        const posts = result.articles.map((article) => this.newsArticleToSpacePost(article)) as unknown as IPost[];
-        const query = `#${tag}`;
-        return {
-            posts,
-            totalCount: result.totalCount,
-            hasMore: result.hasMore,
-            nextCursor: result.nextCursor,
-            query,
-            tag,
-        };
+        return searchNewsTopicPosts(tag, limit, cursor);
     }
 
     private newsArticleToSpacePost(article: Awaited<ReturnType<typeof newsService.searchTopicArticles>>['articles'][number]) {
-        const createdAt = article.fetchedAt || article.publishedAt || article.createdAt || new Date();
-        const summary = String(article.summary || article.lead || '').trim();
-        const content = [article.title, summary].filter(Boolean).join('\n\n');
-        return {
-            _id: article.id,
-            id: article.id,
-            authorId: 'news_bot_official',
-            content,
-            media: article.coverImageUrl
-                ? [{ type: MediaType.IMAGE, url: article.coverImageUrl }]
-                : [],
-            stats: {
-                likeCount: 0,
-                repostCount: article.shareCount || 0,
-                quoteCount: 0,
-                commentCount: 0,
-                viewCount: article.viewCount || 0,
-            },
-            keywords: article.keywords || [],
-            isNsfw: false,
-            isPinned: false,
-            isRepost: false,
-            isReply: false,
-            isNews: true,
-            newsMetadata: {
-                title: article.title,
-                source: article.source || 'news',
-                url: article.canonicalUrl || article.sourceUrl || `news://${article.id}`,
-                sourceUrl: article.sourceUrl || article.canonicalUrl || undefined,
-                externalId: article.id,
-                clusterId: article.clusterId ?? undefined,
-                summary,
-            },
-            createdAt,
-            updatedAt: article.updatedAt || createdAt,
-        };
+        return newsArticleToSpacePost(article);
     }
 
     private normalizeSearchLimit(limit: number): number {
-        if (!Number.isFinite(limit)) return 20;
-        return Math.max(1, Math.min(Math.trunc(limit), 50));
+        return normalizeSearchLimit(limit);
     }
 
     private buildTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
-        const searchQuery: Record<string, unknown> = {
-            deletedAt: null,
-            $text: { $search: query },
-        };
-
-        if (cursor) {
-            searchQuery.createdAt = { $lt: cursor };
-        }
-
-        return searchQuery;
-    }
-
-    private async fetchTextSearchPosts(
-        query: string,
-        limit: number,
-        cursor?: Date
-    ): Promise<IPost[]> {
-        return Post.find(this.buildTextSearchQuery(query, cursor))
-            .sort({ createdAt: -1, _id: -1 })
-            .limit(limit)
-            .exec();
-    }
-
-    private async countTextSearchMatches(query: string): Promise<number> {
-        const normalizedQuery = String(query || '').trim();
-        if (!normalizedQuery) return 0;
-        return Post.countDocuments(this.buildTextSearchQuery(normalizedQuery)).exec();
+        return buildTextSearchQuery(query, cursor);
     }
 
     private async searchPostsByExactTextPage(
@@ -1636,97 +1371,25 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<SpaceSearchPageResult> {
-        const normalizedQuery = String(query || '').trim();
-        const safeLimit = this.normalizeSearchLimit(limit);
-        if (!normalizedQuery) {
-            return {
-                posts: [],
-                totalCount: 0,
-                hasMore: false,
-                query: normalizedQuery,
-            };
-        }
-
-        const [totalCount, fetchedPosts] = await Promise.all([
-            this.countExactTextSearchMatches(normalizedQuery),
-            this.fetchExactTextSearchPosts(normalizedQuery, safeLimit + 1, cursor),
-        ]);
-        const hasMore = fetchedPosts.length > safeLimit;
-        const posts = hasMore ? fetchedPosts.slice(0, safeLimit) : fetchedPosts;
-        const lastPost = posts[posts.length - 1];
-        const nextCursor = hasMore && lastPost?.createdAt
-            ? new Date(lastPost.createdAt).toISOString()
-            : undefined;
-
-        return {
-            posts,
-            totalCount,
-            hasMore,
-            nextCursor,
-            query: normalizedQuery,
-        };
+        return searchPostsByExactTextPage(query, limit, cursor);
     }
 
     private buildExactTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
-        const escaped = this.escapeRegexLiteral(query);
-        const searchQuery: Record<string, unknown> = {
-            deletedAt: null,
-            $or: [
-                { content: { $regex: escaped, $options: 'i' } },
-                { 'newsMetadata.title': { $regex: escaped, $options: 'i' } },
-            ],
-        };
-
-        if (cursor) {
-            searchQuery.createdAt = { $lt: cursor };
-        }
-
-        return searchQuery;
-    }
-
-    private async fetchExactTextSearchPosts(
-        query: string,
-        limit: number,
-        cursor?: Date
-    ): Promise<IPost[]> {
-        return Post.find(this.buildExactTextSearchQuery(query, cursor))
-            .sort({ createdAt: -1, _id: -1 })
-            .limit(limit)
-            .exec();
-    }
-
-    private async countExactTextSearchMatches(query: string): Promise<number> {
-        const normalizedQuery = String(query || '').trim();
-        if (!normalizedQuery) return 0;
-        return Post.countDocuments(this.buildExactTextSearchQuery(normalizedQuery)).exec();
+        return buildExactTextSearchQuery(query, cursor);
     }
 
     /**
      * 获取话题下的新闻帖子
      */
     async getNewsClusterPosts(clusterId: number, limit: number = 20): Promise<IPost[]> {
-        return Post.find({
-            'newsMetadata.clusterId': clusterId,
-            isNews: true,
-            deletedAt: null
-        })
-            .sort({ createdAt: -1 })
-            .limit(limit);
+        return getNewsClusterPosts(clusterId, limit);
     }
 
     /**
      * 清理过期新闻 (7天前)
      */
     async cleanupOldNews(): Promise<number> {
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-        const result = await Post.deleteMany({
-            isNews: true,
-            createdAt: { $lt: sevenDaysAgo }
-        });
-
-        log.info(`[Cleanup] Deleted ${result.deletedCount} old news posts.`);
-        return result.deletedCount;
+        return cleanupOldNews();
     }
 
     /**
@@ -1820,8 +1483,8 @@ class SpaceService {
             const counts = await Promise.all(
                 this.buildTopicTextSearchQueries(normalizedTag)
                     .flatMap((query) => [
-                        this.countTextSearchMatches(query),
-                        this.countExactTextSearchMatches(query),
+                        countTextSearchMatches(query),
+                        countExactTextSearchMatches(query),
                     ])
             );
             return Math.max(0, ...counts);
@@ -1832,73 +1495,23 @@ class SpaceService {
     }
 
     private buildTopicTextSearchQueries(normalizedTag: string): string[] {
-        return Array.from(new Set([
-            `#${normalizedTag}`,
-            normalizedTag,
-            normalizedTag.replace(/[-_]+/g, ' '),
-        ].map((query) => query.trim()).filter(Boolean)));
+        return buildTopicTextSearchQueries(normalizedTag);
     }
 
     private escapeRegexLiteral(value: string): string {
-        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return escapeRegexLiteral(value);
     }
 
     private dedupePostsById(posts: IPost[]): IPost[] {
-        const seen = new Set<string>();
-        const deduped: IPost[] = [];
-        for (const post of posts) {
-            const rawId = (post as unknown as { _id?: unknown; id?: unknown })._id
-                ?? (post as unknown as { id?: unknown }).id;
-            const key = rawId ? String(rawId) : `${post.authorId}:${post.createdAt}:${post.content}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            deduped.push(post);
-        }
-        return deduped;
+        return dedupePostsById(posts);
     }
 
     private dedupeTrendsByTag(trends: SpaceTrendResult[]): SpaceTrendResult[] {
-        const byTag = new Map<string, SpaceTrendResult>();
-
-        for (const trend of trends) {
-            const key = this.normalizeTopicTag(trend.tag);
-            if (!key) continue;
-
-            const normalizedTrend: SpaceTrendResult = {
-                ...trend,
-                tag: key,
-            };
-            const existing = byTag.get(key);
-
-            if (!existing) {
-                byTag.set(key, normalizedTrend);
-                continue;
-            }
-
-            const existingScore = existing.score ?? existing.heat ?? existing.count ?? 0;
-            const nextScore = normalizedTrend.score ?? normalizedTrend.heat ?? normalizedTrend.count ?? 0;
-            const winner = nextScore > existingScore ? normalizedTrend : existing;
-            byTag.set(key, {
-                ...winner,
-                count: Math.max(existing.count, normalizedTrend.count),
-                heat: Math.max(existing.heat, normalizedTrend.heat),
-                canonicalKeywords: Array.from(new Set([
-                    ...(existing.canonicalKeywords || []),
-                    ...(normalizedTrend.canonicalKeywords || []),
-                ])).slice(0, 8),
-            });
-        }
-
-        return Array.from(byTag.values()).sort((left, right) =>
-            (right.score ?? 0) - (left.score ?? 0)
-            || right.heat - left.heat
-            || right.count - left.count
-            || left.tag.localeCompare(right.tag)
-        );
+        return dedupeTrendsByTag(trends);
     }
 
     private normalizeTopicTag(tag: string): string {
-        return String(tag || '').trim().replace(/^#+/, '').toLowerCase();
+        return normalizeTopicTag(tag);
     }
 
     private async collectTrendingTags(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
@@ -1957,46 +1570,21 @@ class SpaceService {
     private extractTrendKeywords(
         post: Pick<SpaceTrendPostInput, 'content' | 'keywords' | 'isNews' | 'newsMetadata'>
     ): string[] {
-        const explicit = Array.isArray(post.keywords)
-            ? post.keywords.map((keyword) => String(keyword || '').trim().toLowerCase()).filter(Boolean)
-            : [];
-        if (explicit.length > 0) return explicit;
-
-        const sourceText = post.isNews
-            ? `${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || ''}\n${post.content || ''}`
-            : post.content || '';
-        return this.extractTextTrendKeywords(sourceText);
+        return extractTrendKeywords(post);
     }
 
     private extractTextTrendKeywords(text: string): string[] {
-        const cleaned = (text || '')
-            .replace(/https?:\/\/\S+/g, ' ')
-            .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
-            .toLowerCase();
-        const tokens = cleaned.match(/[a-zA-Z]{2,}|[\u4e00-\u9fff]{2,}/g) || [];
-        return Array.from(new Set(tokens.filter((token) => this.isValidTrendToken(token)))).slice(0, 12);
+        return extractTextTrendKeywords(text);
     }
 
     private isValidTrendToken(token: string): boolean {
-        const t = token.trim().toLowerCase();
-        if (!t) return false;
-        if (t.length < 2 || t.length > 24) return false;
-        if (/^\d+$/.test(t)) return false;
-        if (t.includes('http') || t.includes('/') || t.includes(':')) return false;
-        return !/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow|company|says|said|will|can|could|would|should|while|during|under|again|more|less|very|demo|cohort|note)$/.test(t);
+        return isValidTrendToken(token);
     }
 
     private trendPostWeight(
         post: Pick<SpaceTrendPostInput, 'stats' | 'engagementScore' | 'isNews'>
     ): number {
-        const stats = post.stats || {};
-        const engagement =
-            Number(post.engagementScore || 0) ||
-            Number(stats.likeCount || 0) +
-                Number(stats.commentCount || 0) * 2 +
-                Number(stats.repostCount || 0) * 3;
-        const engagementBoost = Math.min(4, Math.floor(Math.max(0, engagement) / 20));
-        return Math.max(1, 1 + engagementBoost + (post.isNews ? 1 : 0));
+        return trendPostWeight(post);
     }
 
     /**
@@ -2279,54 +1867,30 @@ class SpaceService {
      * 提取关键词 (简单实现)
      */
     private extractKeywords(content: string): string[] {
-        // 简单实现: 提取 hashtags 和分词
-        const hashtags = content.match(/#[\u4e00-\u9fa5\w]+/g) || [];
-        return hashtags.map((tag) => tag.slice(1));
+        return extractKeywords(content);
     }
 
     private buildNewsSummary(text: string): string {
-        const cleaned = (text || '').replace(/\s+/g, ' ').trim();
-        if (cleaned.length <= 160) return cleaned;
-        return `${cleaned.slice(0, 160)}...`;
+        return buildNewsSummary(text);
     }
 
     private extractNewsKeywords(text: string): string[] {
-        const cleaned = (text || '').replace(/https?:\/\/\S+/g, ' ');
-        const english = cleaned.match(/[a-zA-Z]{3,}/g) || [];
-        const numbers = cleaned.match(/\b\d{2,}\b/g) || [];
-        const chinese = cleaned.match(/[\u4e00-\u9fff]{2,}/g) || [];
-        const tokens = [...english, ...numbers, ...chinese]
-            .map((t) => t.toLowerCase())
-            .slice(0, 30);
-        return Array.from(new Set(tokens));
+        return extractNewsKeywords(text);
     }
 
     private computeSimilarity(
         interest: Map<string, number>,
         candidateKeywords: string[]
     ): number {
-        if (interest.size === 0 || candidateKeywords.length === 0) return 0;
-        let score = 0;
-        let norm = 0;
-        for (const val of interest.values()) norm += val;
-        for (const kw of candidateKeywords) {
-            if (interest.has(kw)) score += interest.get(kw) || 0;
-        }
-        return score / Math.max(norm, 1);
+        return computeSimilarity(interest, candidateKeywords);
     }
 
     private computeRecencyScore(createdAt: Date | string): number {
-        const ts = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
-        const hours = Math.max(0, (Date.now() - ts) / (1000 * 60 * 60));
-        return Math.exp(-hours / 12);
+        return computeRecencyScore(createdAt);
     }
 
     private sourceWeight(source?: string): number {
-        const key = (source || '').toLowerCase();
-        if (key.includes('reuters')) return 1.0;
-        if (key.includes('bbc')) return 0.9;
-        if (key.includes('cnn')) return 0.85;
-        return 0.7;
+        return sourceWeight(source);
     }
 
     private async buildUserInterestKeywords(userId: string, limit: number = 200): Promise<Map<string, number>> {
