@@ -1,4 +1,7 @@
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
+use dashmap::DashMap;
 use reqwest::StatusCode;
 use serde_json::{Map, Value, json};
 
@@ -8,6 +11,13 @@ use super::contracts::{
     ApiSuccessEnvelope, SendMessagePayload, UpstreamAuthMeData, UpstreamGroupSummary,
     UpstreamReadChatResponse,
 };
+
+static AUTH_ME_CACHE: LazyLock<DashMap<String, (Instant, UpstreamAuthMeData)>> =
+    LazyLock::new(DashMap::new);
+static USER_GROUPS_CACHE: LazyLock<DashMap<String, (Instant, Vec<UpstreamGroupSummary>)>> =
+    LazyLock::new(DashMap::new);
+
+const AUTH_METADATA_CACHE_TTL: Duration = Duration::from_secs(30);
 
 async fn request_json<T: serde::de::DeserializeOwned>(
     state: &AppState,
@@ -61,28 +71,46 @@ pub async fn fetch_current_user(
     state: &AppState,
     access_token: &str,
 ) -> Result<UpstreamAuthMeData> {
-    request_success_data(
+    if let Some(entry) = AUTH_ME_CACHE.get(access_token) {
+        if entry.0.elapsed() < AUTH_METADATA_CACHE_TTL {
+            return Ok(entry.1.clone());
+        }
+    }
+
+    let data: UpstreamAuthMeData = request_success_data(
         state,
         reqwest::Method::GET,
         "/api/auth/me",
         access_token,
         None,
     )
-    .await
+    .await?;
+
+    AUTH_ME_CACHE.insert(access_token.to_string(), (Instant::now(), data.clone()));
+    Ok(data)
 }
 
 pub async fn fetch_user_groups(
     state: &AppState,
     access_token: &str,
 ) -> Result<Vec<UpstreamGroupSummary>> {
-    request_success_data(
+    if let Some(entry) = USER_GROUPS_CACHE.get(access_token) {
+        if entry.0.elapsed() < AUTH_METADATA_CACHE_TTL {
+            return Ok(entry.1.clone());
+        }
+    }
+
+    let data: Vec<UpstreamGroupSummary> = request_success_data(
         state,
         reqwest::Method::GET,
         "/api/groups/my",
         access_token,
         None,
     )
-    .await
+    .await?;
+
+    USER_GROUPS_CACHE.insert(access_token.to_string(), (Instant::now(), data.clone()));
+    Ok(data)
 }
 
 pub async fn ensure_group_access(

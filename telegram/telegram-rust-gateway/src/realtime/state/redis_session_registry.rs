@@ -35,14 +35,16 @@ struct RedisSessionRecord {
 pub struct RedisSessionRegistry {
     redis: redis::Client,
     gateway_id: String,
+    lease_ttl_secs: u64,
     local_cache: Arc<RwLock<HashMap<String, RedisSessionRecord>>>,
 }
 
 impl RedisSessionRegistry {
-    pub fn new(redis: redis::Client, gateway_id: String) -> Self {
+    pub fn new(redis: redis::Client, gateway_id: String, lease_ttl_secs: u64) -> Self {
         Self {
             redis,
             gateway_id,
+            lease_ttl_secs,
             local_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -83,13 +85,13 @@ impl RedisSessionRegistry {
 
         let mut conn = self.get_conn().await?;
         let mut pipe = Pipeline::new();
-        pipe.set_ex(&session_key, &record_json, 3600u64)
+        pipe.set_ex(&session_key, &record_json, self.lease_ttl_secs)
             .sadd(REGISTRY_SET_KEY, &envelope.session_id);
 
         if let Some(user_id) = &envelope.user_id {
             let user_key = Self::user_sessions_key(user_id);
             pipe.sadd(&user_key, &envelope.session_id)
-                .expire(&user_key, 3600i64);
+                .expire(&user_key, self.lease_ttl_secs as i64);
         }
 
         pipe.query_async::<()>(&mut conn).await?;
@@ -143,9 +145,37 @@ impl RedisSessionRegistry {
             if let Ok(mut record) = serde_json::from_str::<RedisSessionRecord>(&json) {
                 record.last_heartbeat_at = envelope.emitted_at.clone();
                 record.last_event_at = envelope.emitted_at.clone();
+
+                let mut pipe = Pipeline::new();
+
+                // 同步用户信息
+                if let Some(incoming_user) = &envelope.user_id {
+                    record.user_id = Some(incoming_user.clone());
+                    record.authenticated = true;
+                    let user_key = Self::user_sessions_key(incoming_user);
+                    pipe.sadd(&user_key, &envelope.session_id)
+                        .expire(&user_key, self.lease_ttl_secs as i64);
+                }
+
+                // 同步房间信息
+                if let Some(room_id) = envelope.payload.get("roomId").and_then(|v| v.as_str()) {
+                    let room_key = Self::room_key(room_id);
+                    let activity = envelope.payload.get("activity").and_then(|v| v.as_str());
+                    if activity == Some("room_left") {
+                        record.rooms.retain(|r| r != room_id);
+                        pipe.srem(&room_key, &envelope.session_id);
+                    } else {
+                        if !record.rooms.contains(&room_id.to_string()) {
+                            record.rooms.push(room_id.to_string());
+                        }
+                        pipe.sadd(&room_key, &envelope.session_id)
+                            .expire(&room_key, self.lease_ttl_secs as i64);
+                    }
+                }
+
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
-                    .await?;
+                pipe.set_ex(&session_key, &updated_json, self.lease_ttl_secs);
+                pipe.query_async::<()>(&mut conn).await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(envelope.session_id.clone(), record);
@@ -169,8 +199,9 @@ impl RedisSessionRegistry {
                 let updated_json = serde_json::to_string(&record)?;
 
                 let mut pipe = Pipeline::new();
-                pipe.set_ex(&session_key, &updated_json, 3600u64);
-                pipe.sadd(&room_key, session_id);
+                pipe.set_ex(&session_key, &updated_json, self.lease_ttl_secs);
+                pipe.sadd(&room_key, session_id)
+                    .expire(&room_key, self.lease_ttl_secs as i64);
                 pipe.query_async::<()>(&mut conn).await?;
 
                 let mut cache = self.local_cache.write().await;
@@ -193,7 +224,7 @@ impl RedisSessionRegistry {
                 let updated_json = serde_json::to_string(&record)?;
 
                 let mut pipe = Pipeline::new();
-                pipe.set_ex(&session_key, &updated_json, 3600u64);
+                pipe.set_ex(&session_key, &updated_json, self.lease_ttl_secs);
                 pipe.srem(&room_key, session_id);
                 pipe.query_async::<()>(&mut conn).await?;
 

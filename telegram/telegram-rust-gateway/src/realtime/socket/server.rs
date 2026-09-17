@@ -175,21 +175,22 @@ fn register_connection(state: &AppState, socket: &SocketRef) {
             .expect("rust socket session mutex poisoned");
         sessions.register_connection(&session_id);
     }
-    apply_ingress_envelope(
-        state,
-        &build_socket_event(
-            &session_id,
-            None,
-            None,
-            RealtimeTopic::SessionOpened,
-            None,
-            json!({
-                "transport": "socket_io_compat",
-                "connectedAt": chrono::Utc::now().to_rfc3339(),
-                "status": "unknown"
-            }),
-        ),
+    let state_clone = state.clone();
+    let event = build_socket_event(
+        &session_id,
+        None,
+        None,
+        RealtimeTopic::SessionOpened,
+        None,
+        json!({
+            "transport": "socket_io_compat",
+            "connectedAt": chrono::Utc::now().to_rfc3339(),
+            "status": "unknown"
+        }),
     );
+    tokio::spawn(async move {
+        apply_ingress_envelope(&state_clone, &event).await;
+    });
 }
 
 async fn handle_authenticate(
@@ -236,7 +237,8 @@ async fn handle_authenticate(
                     "status": "online"
                 }),
             ),
-        );
+        )
+        .await;
     }
 
     apply_ingress_envelope(
@@ -253,7 +255,8 @@ async fn handle_authenticate(
                 "status": "online"
             }),
         ),
-    );
+    )
+    .await;
     apply_ingress_envelope(
         state,
         &build_socket_event(
@@ -268,7 +271,8 @@ async fn handle_authenticate(
                 "reason": "authenticated"
             }),
         ),
-    );
+    )
+    .await;
 
     let _ = socket.emit(
         "authenticated",
@@ -315,7 +319,8 @@ async fn handle_join_room(
                 "status": "online"
             }),
         ),
-    );
+    )
+    .await;
     Ok(())
 }
 
@@ -351,7 +356,8 @@ async fn handle_leave_room(
                 "status": "online"
             }),
         ),
-    );
+    )
+    .await;
     Ok(())
 }
 
@@ -389,7 +395,8 @@ async fn handle_send_message(
                         .unwrap_or(false),
             }),
         ),
-    );
+    )
+    .await;
 
     let response = send_message(state, &access_token, &payload).await?;
     Ok(SocketMessageAck::ok(
@@ -421,7 +428,8 @@ async fn handle_read_chat(
                 "seq": payload.seq
             }),
         ),
-    );
+    )
+    .await;
 
     let response = mark_chat_read(state, &access_token, &payload.chat_id, payload.seq).await?;
     emit_read_receipt(
@@ -507,7 +515,8 @@ async fn handle_typing_event(
                 "groupId": payload.group_id,
             }),
         ),
-    );
+    )
+    .await;
 
     if let Some(group_id) = payload.group_id {
         let target_room = normalize_group_room(&group_id);
@@ -539,22 +548,23 @@ fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: DisconnectRea
         sessions.remove(&session_id)
     };
     let user_id = removed.as_ref().and_then(|record| record.user_id.clone());
-    apply_ingress_envelope(
-        state,
-        &build_socket_event(
-            &session_id,
-            user_id.as_deref(),
-            None,
-            RealtimeTopic::SessionClosed,
-            None,
-            json!({
-                "transport": "socket_io_compat",
-                "closeReason": format!("{reason:?}"),
-                "closedAt": chrono::Utc::now().to_rfc3339(),
-                "status": if user_id.is_some() { "offline" } else { "unknown" }
-            }),
-        ),
+    let state_clone = state.clone();
+    let event = build_socket_event(
+        &session_id,
+        user_id.as_deref(),
+        None,
+        RealtimeTopic::SessionClosed,
+        None,
+        json!({
+            "transport": "socket_io_compat",
+            "closeReason": format!("{reason:?}"),
+            "closedAt": chrono::Utc::now().to_rfc3339(),
+            "status": if user_id.is_some() { "offline" } else { "unknown" }
+        }),
     );
+    tokio::spawn(async move {
+        apply_ingress_envelope(&state_clone, &event).await;
+    });
 }
 
 async fn emit_read_receipt(

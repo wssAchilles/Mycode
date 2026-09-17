@@ -114,6 +114,7 @@ mod tests {
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
             realtime_socket_terminator: GatewayRealtimeSocketTerminator::Node,
             realtime_heartbeat_stale_secs: 120,
+            realtime_session_lease_ttl_secs: 100,
         }
     }
 

@@ -1,51 +1,32 @@
-mod auth;
-mod config;
-mod core;
-mod http;
-mod ingress;
-mod ops;
-mod perf_fixture;
-mod realtime;
-
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-pub use auth::jwt;
-pub use core::{bootstrap, state};
-pub use http::{cors, error, handlers, probes};
-pub use ingress::{ingress_audit, ingress_commands, rate_limit, request_context, traffic_policy};
-pub use ops::{control_plane, realtime_ops};
-pub use realtime::{
-    fanout_bridge, presence_router, realtime_auth, realtime_consumer, realtime_contracts,
-    session_registry,
-};
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use axum::{
-    Router,
-    middleware::from_fn_with_state,
-    routing::{any, get},
+use telegram_rust_gateway::{
+    bootstrap::{mark_gateway_online, seed_control_plane},
+    build_router,
+    config::GatewayConfig,
+    control_plane,
+    fanout_bridge::FanoutBridge,
+    ingress_audit::IngressAuditTrail,
+    jwt, perf_fixture,
+    presence_router::PresenceRouter,
+    probes::{prime_dependency_probes, spawn_dependency_probe_loop},
+    rate_limit::RateLimiter,
+    realtime::{
+        fanout::delivery_consumer::spawn_delivery_consumer_loop,
+        socket::server::{create_socket_layer, register_socket_namespace},
+        state::{redis_session_registry::RedisSessionRegistry, SessionRegistryBackend},
+    },
+    realtime_consumer::spawn_realtime_consumer_loop,
+    realtime_ops::RealtimeOpsState,
+    session_registry::RealtimeSessionRegistry,
+    state::AppState,
 };
-use bootstrap::{mark_gateway_online, seed_control_plane};
-use config::GatewayConfig;
-use fanout_bridge::FanoutBridge;
-use ingress_audit::IngressAuditTrail;
-use presence_router::PresenceRouter;
-use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
-use rate_limit::RateLimiter;
-use realtime::fanout::delivery_consumer::spawn_delivery_consumer_loop;
-use realtime::socket::server::{create_socket_layer, register_socket_namespace};
-use realtime::state::SessionRegistryBackend;
-use realtime::state::redis_session_registry::RedisSessionRegistry;
-use realtime_consumer::spawn_realtime_consumer_loop;
-use realtime_ops::RealtimeOpsState;
-use session_registry::RealtimeSessionRegistry;
-use socketioxide::layer::SocketIoLayer;
-use state::AppState;
 use tokio::{net::TcpListener, signal};
 use tracing::info;
 
@@ -81,7 +62,11 @@ async fn main() -> Result<()> {
             Ok(c) => {
                 let gid = std::env::var("GATEWAY_ID").unwrap_or_else(|_| "gateway-1".into());
                 info!("using Redis session registry (gateway_id={})", gid);
-                SessionRegistryBackend::Redis(RedisSessionRegistry::new(c, gid))
+                SessionRegistryBackend::Redis(RedisSessionRegistry::new(
+                    c,
+                    gid,
+                    config.realtime_session_lease_ttl_secs,
+                ))
             }
             Err(e) => {
                 tracing::warn!("Redis connect failed: {}, falling back to in-memory", e);
@@ -109,7 +94,7 @@ async fn main() -> Result<()> {
         realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
         realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
         realtime_socket_state: Arc::new(Mutex::new(
-            realtime::socket::state::RustSocketSessionStore::default(),
+            telegram_rust_gateway::realtime::socket::state::RustSocketSessionStore::default(),
         )),
         realtime_socket_io: socket_io.clone(),
         config,
@@ -139,42 +124,6 @@ async fn main() -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await
     .context("gateway server error")
-}
-
-fn build_router(state: AppState, socket_layer: Option<SocketIoLayer>) -> Router {
-    let router = Router::new()
-        .route("/health", get(handlers::health_handler))
-        .route(
-            "/gateway/ops/control-plane",
-            get(handlers::control_plane_handler),
-        )
-        .route(
-            "/gateway/ops/control-plane/summary",
-            get(handlers::control_plane_summary_handler),
-        )
-        .route(
-            "/gateway/ops/ingress-policy",
-            get(handlers::ingress_policy_handler),
-        )
-        .route(
-            "/gateway/ops/traffic",
-            get(handlers::ingress_traffic_handler),
-        )
-        .route("/gateway/ops/realtime", get(handlers::realtime_ops_handler))
-        .route(
-            "/gateway/ops/realtime/summary",
-            get(handlers::realtime_summary_handler),
-        )
-        .route("/", any(handlers::proxy_handler))
-        .route("/{*path}", any(handlers::proxy_handler))
-        .with_state(state.clone());
-
-    let router = if let Some(layer) = socket_layer {
-        router.layer(layer)
-    } else {
-        router
-    };
-    router.layer(from_fn_with_state(state, cors::cors_middleware))
 }
 
 fn init_tracing() {

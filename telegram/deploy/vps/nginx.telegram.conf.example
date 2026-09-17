@@ -4,11 +4,16 @@ server {
 
     client_max_body_size 50m;
 
-    # Phase 2A keeps Node as the socket terminator.
-    # For Phase 2B, keep this location block and switch proxy_pass to
-    # http://127.0.0.1:4000 together with GATEWAY_REALTIME_SOCKET_TERMINATOR=rust.
+    # Phase 26: 实时网关 2B 阶段 (Rust Socket 终结器)
+    # 选项 A (Canary 灰度切流):
+    # split_clients "${remote_addr}AAA" $socket_upstream {
+    #     20%     127.0.0.1:4000;  # 灰度导向 Rust
+    #     *       127.0.0.1:5000;  # 存量维持 Node
+    # }
+    # 选项 B (全量切流 2B 完成):
+    # 直接将 proxy_pass 指向 http://127.0.0.1:4000
     location /socket.io/ {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:4000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

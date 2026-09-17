@@ -49,6 +49,7 @@ pub struct GatewayConfig {
     pub realtime_rollout_stage: GatewayRealtimeRolloutStage,
     pub realtime_socket_terminator: GatewayRealtimeSocketTerminator,
     pub realtime_heartbeat_stale_secs: u64,
+    pub realtime_session_lease_ttl_secs: u64,
 }
 
 impl GatewayConfig {
@@ -108,6 +109,8 @@ impl GatewayConfig {
             realtime_rollout_stage,
         );
         let realtime_heartbeat_stale_secs = read_u64("GATEWAY_REALTIME_HEARTBEAT_STALE_SECS", 120)?;
+        let realtime_session_lease_ttl_secs =
+            read_u64("GATEWAY_REALTIME_SESSION_LEASE_TTL_SECS", 100)?;
 
         Ok(Self {
             bind_addr,
@@ -133,6 +136,7 @@ impl GatewayConfig {
             realtime_rollout_stage,
             realtime_socket_terminator,
             realtime_heartbeat_stale_secs,
+            realtime_session_lease_ttl_secs,
         })
     }
 
@@ -357,6 +361,7 @@ mod tests {
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
             realtime_socket_terminator: GatewayRealtimeSocketTerminator::Node,
             realtime_heartbeat_stale_secs: 120,
+            realtime_session_lease_ttl_secs: 100,
         }
     }
 

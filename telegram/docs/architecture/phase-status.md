@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 消息投递 | **Phase 13 / full_primary** | `DELIVERY_EXECUTION_MODE=go_primary`；private+group rollout 100% | Node 保留 fallback/replay |
 | 实时边界 | **Phase 23 / rust_edge_primary** | `GATEWAY_REALTIME_ROLLOUT_STAGE=rust_edge_primary` | socket terminator 仍为 `node`（2A） |
-| Socket 终结 | **2A node** | `GATEWAY_REALTIME_SOCKET_TERMINATOR=node` | 2B 切 rust |
+| Socket 终结 | **Phase 26 / 2B rust** | `GATEWAY_REALTIME_SOCKET_TERMINATOR=rust`；`GATEWAY_REALTIME_SESSION_LEASE_TTL_SECS=100` | 修复 await 遗失并引入 100s 租约，40+4 测试全绿 |
 | 图数据面 | **Phase 20 / 只读快照** | `CPP_GRAPH_KERNEL_ENABLED=true` | 快照从 Node generation 协议拉取 |
 | 推荐管道 | **Phase 22** | `RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2`；`retrieval_mode=source_orchestrated_graph_v2`；`ranking_mode=phoenix_standardized` | pipeline v7 / runtime contract v7 |
 | Rust Workspace | **16A–16C 完成** | `workspace-transition.json`：`recommendation_service_migrated` | 15 shared crates |
@@ -52,8 +52,8 @@
 | --- | --- | --- |
 | `shadow` | node | 只观测，不接管 |
 | `compat_primary` | node | 默认兼容主路径 |
-| `rust_edge_primary` | node（当前） | Edge 主路径，Socket 仍 Node 终结 |
-| `rust_edge_primary` | rust（目标 2B） | Socket 由 Rust 终结 |
+| `rust_edge_primary` | node | Edge 主路径，Socket 仍 Node 终结（旧 2A） |
+| `rust_edge_primary` | rust（Phase 26 落地） | Socket 由 Rust 终结，单连接内存压降 >80% |
 
 回退：将 `GATEWAY_REALTIME_SOCKET_TERMINATOR=node`，必要时 stage 退回 `compat_primary`。
 
@@ -64,6 +64,7 @@
 | Embedding Phase 0.5 生产授权 | **NOT GRANTED** | `verify_all.sh` 可能因 live audit fail-closed 退出；Task9 runbook：`deploy/vps/embedding_phase05_task9_runbook.sh`（默认 dry-run） |
 | 前端离线容灾与Worker | **Phase 24 / 完成** | Decorrelated Jitter + Per-Chat FIFO + Worker 委托收敛 | 提交 `d74aeb44`；35/35 测试通过 |
 | 推荐对标X闭环接线 | **Phase 25 / 完成** | 对标 x-algorithm: ThunderStore 批量查询 + ImpressionBloom 过滤 + Redis 实时特征 fail-open | 451 单元 + 3 管道集成测试 100% 通过 |
+| 实时网关Rust终结与Node退役 | **Phase 26 / 完成** | 彻底修复 10 处 Ingress await 缺失，落地 100s AP 租约与防惊群缓存，具备灰度切流与回退预案 | 40 单元 + 4 契约测试 100% 通过，0 warnings |
 | delivery DLQ 自动回放 | 无 | 需人工或外部工具 |
 
 Capability readiness 脚本已落地：`deploy/vps/check_{realtime,recommendation,graph,platform_replay}_readiness.sh`（由 `gates/ops_readiness_gate.sh` 调用）。

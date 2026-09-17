@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::sync::Arc;
 
 use super::redis_session_registry::RedisSessionRegistry;
