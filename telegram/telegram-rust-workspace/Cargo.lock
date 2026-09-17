@@ -1631,6 +1631,7 @@ dependencies = [
  "telegram-selector-primitives",
  "telegram-serving-primitives",
  "telegram-source-primitives",
+ "telegram-thunder-store",
  "tokio",
  "tracing",
  "tracing-subscriber",

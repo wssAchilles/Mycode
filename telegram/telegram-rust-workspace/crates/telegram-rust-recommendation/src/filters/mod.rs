@@ -1,4 +1,5 @@
 pub mod blocked_by;
+pub mod impression_filter;
 pub mod post_selection;
 pub mod subscription_filter;
 pub mod video_filter;

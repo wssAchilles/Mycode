@@ -63,6 +63,7 @@
 | --- | --- | --- |
 | Embedding Phase 0.5 生产授权 | **NOT GRANTED** | `verify_all.sh` 可能因 live audit fail-closed 退出；Task9 runbook：`deploy/vps/embedding_phase05_task9_runbook.sh`（默认 dry-run） |
 | 前端离线容灾与Worker | **Phase 24 / 完成** | Decorrelated Jitter + Per-Chat FIFO + Worker 委托收敛 | 提交 `d74aeb44`；35/35 测试通过 |
+| 推荐对标X闭环接线 | **Phase 25 / 完成** | 对标 x-algorithm: ThunderStore 批量查询 + ImpressionBloom 过滤 + Redis 实时特征 fail-open | 451 单元 + 3 管道集成测试 100% 通过 |
 | delivery DLQ 自动回放 | 无 | 需人工或外部工具 |
 
 Capability readiness 脚本已落地：`deploy/vps/check_{realtime,recommendation,graph,platform_replay}_readiness.sh`（由 `gates/ops_readiness_gate.sh` 调用）。

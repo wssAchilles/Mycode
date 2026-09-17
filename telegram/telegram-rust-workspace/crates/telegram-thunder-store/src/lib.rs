@@ -186,6 +186,17 @@ impl ThunderStore {
         post_ids.iter().map(|id| self.get(id)).collect()
     }
 
+    /// 批量查询并返回 Map (对标 X 的 Thunder In-Network Batch Hydration)
+    pub fn get_batch_map(&self, post_ids: &[String]) -> std::collections::HashMap<String, LightPost> {
+        let mut map = std::collections::HashMap::with_capacity(post_ids.len());
+        for id in post_ids {
+            if let Some(post) = self.get(id) {
+                map.insert(id.clone(), post);
+            }
+        }
+        map
+    }
+
     /// 按作者查询帖子
     pub fn get_by_author(&self, author_id: &str) -> Vec<LightPost> {
         self.stats

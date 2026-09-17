@@ -63,7 +63,28 @@ impl RealtimeFeatureProvider {
             interaction_count_1h: count_1h,
             interaction_count_24h: members.len() as u32,
             type_distribution: type_dist,
-            recency_score: (total_weight / 10.0).min(1.0),
+            recency_score: ((1.0 + total_weight).ln() / 4.0).min(1.0),
         })
+    }
+
+    /// 安全获取用户实时行为特征（对标 X 的 Realtime Feature Store 软降级机制）
+    /// 带有超时控制（默认 10ms~50ms），遇到任何网络抖动或超时平滑回退至 Default，绝不阻塞主推荐链路
+    pub async fn get_user_features_safe(&self, user_id: &str, timeout_ms: u64) -> RealtimeUserFeatures {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            self.get_user_features(user_id),
+        )
+        .await
+        {
+            Ok(Ok(features)) => features,
+            Ok(Err(err)) => {
+                tracing::debug!(user_id = %user_id, error = %err, "realtime user features fetch failed, falling back to empty");
+                RealtimeUserFeatures::default()
+            }
+            Err(_) => {
+                tracing::debug!(user_id = %user_id, timeout_ms = timeout_ms, "realtime user features timed out, falling back to empty");
+                RealtimeUserFeatures::default()
+            }
+        }
     }
 }
