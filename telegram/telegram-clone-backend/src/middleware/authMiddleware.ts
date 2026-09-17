@@ -66,17 +66,9 @@ export const authenticateToken = async (
       return;
     }
 
-    // 特殊逻辑：允许 CRON_SECRET 绕过用户认证 (用于 ML 服务回调)
-    if (process.env.CRON_SECRET && token === process.env.CRON_SECRET) {
-      req.userId = 'system-crawler';
-      req.user = {
-        id: 'system-crawler',
-        username: 'SystemCrawler',
-        email: 'crawler@system.local'
-      };
-      next();
-      return;
-    }
+    // 注意：CRON_SECRET 不再作为 Bearer 绕过用户认证。
+    // 定时任务 / ML 回调请改用 requireCronSecret（header x-cron-secret），
+    // 仅挂载在 POST /api/news/ingest 等明确的 cron 入口。
 
     const decoded: JWTPayload = await verifyAccessToken(token);
     const user = await getUserWithCache(decoded.userId);

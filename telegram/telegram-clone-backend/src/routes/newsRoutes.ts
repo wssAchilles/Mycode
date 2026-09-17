@@ -1,12 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { newsService } from '../services/newsService';
+import { requireCronSecret } from '../middleware/cronAuth';
 import { createChildLogger } from '../utils/logger';
 
 const log = createChildLogger('newsRoutes');
 
-const router = Router();
+/**
+ * Cron / ML 入库入口。仅接受 x-cron-secret，不走用户 JWT。
+ * 由 bootstrap 单独挂载在 /api/news，且不得再套 authenticateToken。
+ */
+export const newsIngestRouter = Router();
 
-router.post('/ingest', async (req: Request, res: Response) => {
+newsIngestRouter.post('/ingest', requireCronSecret, async (req: Request, res: Response) => {
   try {
     const { articles } = req.body;
     if (!Array.isArray(articles)) {
@@ -19,6 +24,9 @@ router.post('/ingest', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '新闻入库失败' });
   }
 });
+
+// 其余新闻路由继续走 authenticateToken（由 bootstrap 统一挂载）
+const router = Router();
 
 router.get('/feed', async (req: Request, res: Response) => {
   try {

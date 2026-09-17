@@ -14,7 +14,7 @@ import keyRoutes from '../routes/keys';
 import syncRoutes from '../routes/sync';
 import realtimeRoutes from '../routes/realtime';
 import spaceRoutes from '../routes/space';
-import newsRoutes from '../routes/newsRoutes';
+import newsRoutes, { newsIngestRouter } from '../routes/newsRoutes';
 import analyticsRoutes from '../routes/analyticsRoutes';
 import featureRoutes from '../routes/featureRoutes';
 import mlProxyRoutes from '../routes/mlProxy';
@@ -60,6 +60,8 @@ export function registerRoutes(app: Express): void {
   app.use('/api/sync', syncRoutes);
   app.use('/api/realtime', realtimeRoutes);
   app.use('/api/space', authenticateToken, spaceRoutes);
+  // cron 入库：仅 x-cron-secret，禁止 JWT/CRON_SECRET Bearer 旁路
+  app.use('/api/news', newsIngestRouter);
   app.use('/api/news', authenticateToken, newsRoutes);
   app.use('/api/ml', authenticateToken, mlProxyRoutes);
   app.use('/api/analytics', authenticateToken, analyticsRoutes);
