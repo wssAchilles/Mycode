@@ -62,8 +62,7 @@
 | 项 | 状态 | 影响 |
 | --- | --- | --- |
 | Embedding Phase 0.5 生产授权 | **NOT GRANTED** | `verify_all.sh` 可能因 live audit fail-closed 退出；Task9 runbook：`deploy/vps/embedding_phase05_task9_runbook.sh`（默认 dry-run） |
-| ThunderStore / ImpressionBloom / RealtimeFeatureProvider 接线 | 骨架已建，主路径未闭环 | 曝光去重与实时特征仍依赖 query 传入 |
-| 前端离线发送重放 | 未实现 | 离线消息可能丢失 |
+| 前端离线容灾与Worker | **Phase 24 / 完成** | Decorrelated Jitter + Per-Chat FIFO + Worker 委托收敛 | 提交 `d74aeb44`；35/35 测试通过 |
 | delivery DLQ 自动回放 | 无 | 需人工或外部工具 |
 
 Capability readiness 脚本已落地：`deploy/vps/check_{realtime,recommendation,graph,platform_replay}_readiness.sh`（由 `gates/ops_readiness_gate.sh` 调用）。
