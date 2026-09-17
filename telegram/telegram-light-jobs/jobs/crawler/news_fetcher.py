@@ -3,7 +3,6 @@ import re
 import time
 from datetime import datetime
 from typing import Dict, List
-from urllib.parse import quote
 
 import feedparser
 import newspaper
@@ -219,14 +218,15 @@ class NewsCrawler:
 
         cron_secret = os.getenv("CRON_SECRET", "").strip()
         endpoint = f"{backend_url.rstrip('/')}/api/news/ingest"
-        authenticated_endpoint = (
-            f"{endpoint}?token={quote(cron_secret, safe='')}" if cron_secret else endpoint
-        )
         print(f"  > Pushing to: {endpoint}")
+        headers = {}
+        if cron_secret:
+            headers["x-cron-secret"] = cron_secret
         try:
             response = self.session.post(
-                authenticated_endpoint,
+                endpoint,
                 json={"articles": articles},
+                headers=headers,
                 timeout=PUSH_TIMEOUT,
             )
             if response.status_code == 200:

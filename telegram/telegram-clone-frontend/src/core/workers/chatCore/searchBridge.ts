@@ -278,6 +278,7 @@ export class SearchBridge {
 
   async searchMessagesRemote(
     chatId: string,
+    isGroup: boolean,
     query: string,
     limit: number,
     signal?: AbortSignal,
@@ -298,7 +299,7 @@ export class SearchBridge {
       if (elapsed < control.backoffMs) return [];
     }
 
-    const promise = this.doRemoteSearch(chatId, query, limit, apiBaseUrl, signal);
+    const promise = this.doRemoteSearch(chatId, isGroup, query, limit, apiBaseUrl, signal);
     this.remoteSearchInFlight.set(cacheKey, promise);
 
     try {
@@ -319,16 +320,35 @@ export class SearchBridge {
     }
   }
 
+  private deriveSearchTargetId(chatId: string, isGroup: boolean): string | null {
+    if (isGroup) {
+      return chatId.startsWith('g:') ? chatId.slice(2) : chatId;
+    }
+    const me = this.ctx.getCurrentUserId();
+    if (!me) return null;
+    if (!chatId.startsWith('p:')) return null;
+    const parts = chatId.substring(2).split(':').filter(Boolean);
+    if (parts.length !== 2) return null;
+    const [a, b] = parts;
+    if (a === me) return b;
+    if (b === me) return a;
+    return null;
+  }
+
   private async doRemoteSearch(
     chatId: string,
+    isGroup: boolean,
     query: string,
     limit: number,
     apiBaseUrl: string,
     signal?: AbortSignal,
   ): Promise<Message[]> {
+    const targetId = this.deriveSearchTargetId(chatId, isGroup);
+    if (!targetId) return [];
+
     const params = new URLSearchParams({
-      chatId,
       q: query,
+      targetId,
       limit: String(limit),
     });
     const url = `${apiBaseUrl}/api/messages/search?${params.toString()}`;

@@ -4217,7 +4217,7 @@ const apiImpl: ChatCoreApi = {
 
     let remote: Message[] = [];
     try {
-      remote = await searchBridge.searchMessagesRemote(chatId, normalizedQuery, normalizedLimit, controller.signal);
+      remote = await searchBridge.searchMessagesRemote(chatId, isGroup, normalizedQuery, normalizedLimit, controller.signal);
     } catch {
       remote = [];
     } finally {

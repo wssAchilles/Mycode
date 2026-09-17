@@ -228,7 +228,7 @@ class NewsCrawler:
         cron_secret = os.getenv("CRON_SECRET")
         headers = {}
         if cron_secret:
-            headers["Authorization"] = f"Bearer {cron_secret}"
+            headers["x-cron-secret"] = cron_secret
         else:
             print("  ! Warning: CRON_SECRET not found, request might fail")
 
