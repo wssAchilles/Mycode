@@ -11,9 +11,13 @@
 
 Apply this gate before planning or implementing changes to scorer, ranker, retrieval, policy, OPE, statistical inference, or other algorithm semantics. Research informs design but never replaces reading the repository.
 
+### 核心对标铁律（X-Algorithm Mandate）
+- **推荐算法相关的思想必须严格借鉴与对标 `https://github.com/xai-org/x-algorithm` 代码仓库的内容**（包括但不限于 Candidate Pipeline、Thunder 内存帖子存储、Impression Bloom Filter 曝光去重、Heavy Ranker、实时特征工程与加权混合打分器等工业设计）。
+- 在涉及推荐架构、召回源、特征打分、重排与过滤逻辑演进时，必须以 `x-algorithm` 的架构设计、解耦范式和数学模型作为第一准绳展开对标与研读。
+
 1. Use codebase-memory first to confirm the current implementation, call graph, data contracts, canonical owner, default switches, fallback behavior, observability, and production boundaries.
 2. Derive 3-5 explicit research questions from concrete code problems before searching for evidence. Do not choose an algorithm first and then search only for supporting material.
-3. Prefer foundational and recent top-tier papers, public large-scale industrial practice, official technical reports, mature open-source implementations, and reproducible experiments.
+3. Prefer foundational and recent top-tier papers, public large-scale industrial practice (specifically `x-algorithm`), official technical reports, mature open-source implementations, and reproducible experiments.
 4. For every source, record the exact title, authors, year, venue or institution, DOI or official link, and reading status (`full_text`, `abstract_or_public_description`, or `unverified`). Never invent papers, experimental results, online gains, or adoption claims.
 5. Produce a concise evidence matrix covering the problem and core idea, required data/PIT/propensity/support assumptions, known limitations or failure cases, corresponding repository files and contracts, and the reason to adopt, adapt, or reject it.
 6. Analyze at least one competing approach and state at least one reason not to adopt a method. Avoid confirmation bias.
