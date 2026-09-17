@@ -20,6 +20,9 @@ func DecodeEnvelope(message redis.XMessage) (DeliveryEventEnvelope, error) {
 	if err := json.Unmarshal([]byte(rawEnvelope), &envelope); err != nil {
 		return DeliveryEventEnvelope{}, fmt.Errorf("decode event envelope: %w", err)
 	}
+	if envelope.SpecVersion != DeliveryEventSpecVersion {
+		return DeliveryEventEnvelope{}, fmt.Errorf("unsupported delivery event specVersion: %s", envelope.SpecVersion)
+	}
 	if envelope.Topic == "" || envelope.EventID == "" {
 		return DeliveryEventEnvelope{}, fmt.Errorf("invalid event envelope: topic/eventId required")
 	}
@@ -35,6 +38,9 @@ func DecodePlatformEnvelope(message redis.XMessage) (PlatformEventEnvelope, erro
 	var envelope PlatformEventEnvelope
 	if err := json.Unmarshal([]byte(rawEnvelope), &envelope); err != nil {
 		return PlatformEventEnvelope{}, fmt.Errorf("decode platform event envelope: %w", err)
+	}
+	if envelope.SpecVersion != PlatformEventSpecVersion {
+		return PlatformEventEnvelope{}, fmt.Errorf("unsupported platform event specVersion: %s", envelope.SpecVersion)
 	}
 	if envelope.Topic == "" || envelope.EventID == "" {
 		return PlatformEventEnvelope{}, fmt.Errorf("invalid platform event envelope: topic/eventId required")

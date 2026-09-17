@@ -1,18 +1,20 @@
 package contracts
 
 type FanoutRequestedPayload struct {
-	MessageID           string   `json:"messageId"`
-	ChatID              string   `json:"chatId"`
-	ChatType            string   `json:"chatType"`
-	Seq                 int64    `json:"seq"`
-	SenderID            string   `json:"senderId"`
-	RecipientIDs        []string `json:"recipientIds"`
-	RecipientCount      int      `json:"recipientCount"`
-	Topology            string   `json:"topology"`
-	OutboxID            string   `json:"outboxId"`
-	DispatchMode        string   `json:"dispatchMode"`
-	JobIDs              []string `json:"jobIds"`
-	PrimaryAttemptCount int      `json:"primaryAttemptCount,omitempty"`
+	MessageID           string             `json:"messageId"`
+	ChatID              string             `json:"chatId"`
+	ChatType            string             `json:"chatType"`
+	Seq                 int64              `json:"seq"`
+	SenderID            string             `json:"senderId"`
+	RecipientIDs        []string           `json:"recipientIds"`
+	RecipientCount      int                `json:"recipientCount"`
+	Topology            string             `json:"topology"`
+	OutboxID            string             `json:"outboxId,omitempty"`
+	DispatchMode        string             `json:"dispatchMode"`
+	JobIDs              []string           `json:"jobIds"`
+	PrimaryAttemptCount int                `json:"primaryAttemptCount,omitempty"`
+	SkippedReason       string             `json:"skippedReason,omitempty"`
+	Projection          *ProjectionMetrics `json:"projection,omitempty"`
 }
 
 type ProjectionMetrics struct {
@@ -29,13 +31,13 @@ type ProjectionPayload struct {
 	RecipientIDs        []string           `json:"recipientIds"`
 	RecipientCount      int                `json:"recipientCount"`
 	Topology            string             `json:"topology"`
-	OutboxID            string             `json:"outboxId"`
+	OutboxID            string             `json:"outboxId,omitempty"`
 	ChunkIndex          int                `json:"chunkIndex"`
 	ChunkCount          int                `json:"chunkCount"`
 	TotalRecipientCount int                `json:"totalRecipientCount"`
-	JobID               string             `json:"jobId"`
-	AttemptCount        int                `json:"attemptCount"`
-	ReplayCount         int                `json:"replayCount"`
+	JobID               string             `json:"jobId,omitempty"`
+	AttemptCount        int                `json:"attemptCount,omitempty"`
+	ReplayCount         int                `json:"replayCount,omitempty"`
 	Projection          *ProjectionMetrics `json:"projection,omitempty"`
 	ErrorMessage        string             `json:"errorMessage,omitempty"`
 	Terminal            bool               `json:"terminal,omitempty"`

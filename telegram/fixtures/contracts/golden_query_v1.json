@@ -1,0 +1,19 @@
+{
+  "requestId": "req_golden_9001",
+  "decisionId": "dec_golden_9001",
+  "userId": "user_viewer_10",
+  "limit": 20,
+  "inNetworkOnly": false,
+  "seenIds": ["post_seen_1", "post_seen_2"],
+  "servedIds": ["post_served_1"],
+  "isBottomRequest": false,
+  "countryCode": "US",
+  "languageCode": "en",
+  "demographics": {
+    "country": "US",
+    "city": "San Francisco",
+    "gender": "O",
+    "ageRange": "18-24",
+    "language": "en"
+  }
+}

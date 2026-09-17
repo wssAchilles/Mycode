@@ -1,0 +1,26 @@
+{
+  "specVersion": "chat.delivery.v1",
+  "producer": "node-backend",
+  "eventId": "evt_golden_delivery_3001",
+  "topic": "fanout_requested",
+  "emittedAt": "2026-09-17T12:00:00.000Z",
+  "partitionKey": "chat_group_777",
+  "payload": {
+    "messageId": "msg_golden_4001",
+    "chatId": "chat_group_777",
+    "chatType": "group",
+    "seq": 108,
+    "senderId": "user_sender_1",
+    "recipientIds": ["user_recipient_2", "user_recipient_3"],
+    "recipientCount": 2,
+    "topology": "direct",
+    "outboxId": "outbox_5001",
+    "dispatchMode": "broadcast",
+    "jobIds": ["job_6001", "job_6002"],
+    "skippedReason": "none",
+    "projection": {
+      "recipientCount": 2,
+      "chunkCount": 1
+    }
+  }
+}

@@ -65,6 +65,7 @@
 | 前端离线容灾与Worker | **Phase 24 / 完成** | Decorrelated Jitter + Per-Chat FIFO + Worker 委托收敛 | 提交 `d74aeb44`；35/35 测试通过 |
 | 推荐对标X闭环接线 | **Phase 25 / 完成** | 对标 x-algorithm: ThunderStore 批量查询 + ImpressionBloom 过滤 + Redis 实时特征 fail-open | 451 单元 + 3 管道集成测试 100% 通过 |
 | 实时网关Rust终结与Node退役 | **Phase 26 / 完成** | 彻底修复 10 处 Ingress await 缺失，落地 100s AP 租约与防惊群缓存，具备灰度切流与回退预案 | 40 单元 + 4 契约测试 100% 通过，0 warnings |
+| 统一契约Codegen与防漂移门禁 | **Phase 27 / 完成** | 修复 12 项重大跨语言契约漂移，消除 Zod strip 与 ageRange 崩溃，落地 Golden Roundtrip 与全自动 CI 阻断门禁 | 跨语言静态门禁 + 3 端 Golden Roundtrip 100% 通过 |
 | delivery DLQ 自动回放 | 无 | 需人工或外部工具 |
 
 Capability readiness 脚本已落地：`deploy/vps/check_{realtime,recommendation,graph,platform_replay}_readiness.sh`（由 `gates/ops_readiness_gate.sh` 调用）。

@@ -126,11 +126,63 @@ pub struct UserSignalFeaturesPayload {
     pub implicit_score: f64,
 }
 
+pub fn deserialize_flexible_age_range<'de, D>(deserializer: D) -> Result<Option<(u32, u32)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = serde::Deserialize::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Array(arr)) => {
+            if arr.len() == 2 {
+                let low = arr[0]
+                    .as_u64()
+                    .ok_or_else(|| Error::custom("invalid age range lower bound"))? as u32;
+                let high = arr[1]
+                    .as_u64()
+                    .ok_or_else(|| Error::custom("invalid age range upper bound"))? as u32;
+                Ok(Some((low, high)))
+            } else {
+                Err(Error::custom("age range array must contain exactly 2 integers"))
+            }
+        }
+        Some(serde_json::Value::String(s)) => {
+            let cleaned = s.trim().trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')');
+            let parts: Vec<&str> = cleaned
+                .split(|c| c == '-' || c == ',' || c == ':')
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .collect();
+            if parts.len() == 2 {
+                let low = parts[0].parse::<u32>().map_err(Error::custom)?;
+                let high = parts[1].parse::<u32>().map_err(Error::custom)?;
+                Ok(Some((low, high)))
+            } else {
+                Err(Error::custom(format!("invalid age range string format: {s}")))
+            }
+        }
+        _ => Err(Error::custom(
+            "age range must be either an array of two integers or a range string like '18-24'",
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Demographics {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_flexible_age_range",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub age_range: Option<(u32, u32)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gender: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

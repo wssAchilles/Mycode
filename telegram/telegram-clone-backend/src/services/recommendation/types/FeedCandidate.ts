@@ -59,6 +59,9 @@ export interface RankingSignals {
     network: number;
     negativeFeedback: number;
     deliveryFatigue: number;
+    contentKind?: number;
+    trend?: number;
+    sourceQuality?: number;
 }
 
 export interface RecallEvidence {
@@ -291,6 +294,27 @@ export interface FeedCandidate {
 
     /** 是否置顶（Space profile pinned post） */
     isPinned?: boolean;
+
+    /** 话题 ID 列表 */
+    topicIds?: string[];
+    /** 是否包含媒体 */
+    hasMedia?: boolean;
+    /** 媒体类型 */
+    mediaType?: 'none' | 'photo' | 'video' | 'gif' | 'mixed' | string;
+    /** 视频时长（毫秒） */
+    videoDurationMs?: number;
+    /** 作者是否拉黑访问者 */
+    authorBlocksViewer?: boolean;
+    /** 语言代码 */
+    languageCode?: string;
+    /** 是否仅限订阅者 */
+    isSubscriptionOnly?: boolean;
+    /** 帖子类型 */
+    postType?: string;
+    /** 共同关注 Jaccard 相似度 */
+    mutualFollowJaccard?: number;
+    /** 关注的人是否已回复 */
+    followingReplied?: boolean;
 }
 
 /**

@@ -1,0 +1,110 @@
+{
+  "postId": "post_golden_1001",
+  "modelPostId": "model_post_1001",
+  "authorId": "user_author_42",
+  "content": "Telegram multi-language contract drift defense golden candidate.",
+  "createdAt": "2026-09-17T12:00:00.000Z",
+  "conversationId": "conv_99",
+  "isReply": false,
+  "isRepost": false,
+  "inNetwork": true,
+  "recallSource": "graph_kernel",
+  "retrievalLane": "heavy_ranker",
+  "interestPoolKind": "cluster_pool",
+  "topicIds": ["tech", "ai", "systems"],
+  "secondaryRecallSources": ["popular_embedding"],
+  "hasVideo": true,
+  "hasImage": false,
+  "videoDurationSec": 42.5,
+  "hasMedia": true,
+  "mediaType": "video",
+  "videoDurationMs": 42500,
+  "media": [
+    {
+      "type": "video",
+      "url": "https://cdn.example.com/videos/1001.mp4",
+      "thumbnailUrl": "https://cdn.example.com/thumbs/1001.jpg"
+    }
+  ],
+  "likeCount": 128,
+  "commentCount": 32,
+  "repostCount": 16,
+  "viewCount": 2048,
+  "authorUsername": "alice_engineer",
+  "authorAvatarUrl": "https://cdn.example.com/avatars/alice.png",
+  "authorAffinityScore": 0.88,
+  "authorBlocksViewer": false,
+  "languageCode": "zh-CN",
+  "phoenixScores": {
+    "likeScore": 0.95,
+    "replyScore": 0.31,
+    "repostScore": 0.12,
+    "dwellScore": 0.78
+  },
+  "actionScores": {
+    "click": 0.85,
+    "like": 0.92,
+    "reply": 0.44,
+    "repost": 0.21,
+    "dwell": 0.65,
+    "negative": 0.01
+  },
+  "rankingSignals": {
+    "relevance": 0.91,
+    "freshness": 0.85,
+    "popularity": 0.75,
+    "quality": 0.95,
+    "authorAffinity": 0.88,
+    "topicAffinity": 0.72,
+    "sourceAffinity": 0.68,
+    "conversationAffinity": 0.5,
+    "sourceEvidence": 0.77,
+    "network": 0.82,
+    "negativeFeedback": 0.02,
+    "deliveryFatigue": 0.1,
+    "contentKind": 0.65,
+    "trend": 0.89,
+    "sourceQuality": 0.94
+  },
+  "recallEvidence": {
+    "primarySource": "graph_kernel",
+    "primaryLane": "heavy_ranker",
+    "sourceScore": 0.88,
+    "sourceCount": 2.0
+  },
+  "selectionPool": "heavy_ranker_v2",
+  "selectionReason": "top_score_cluster",
+  "scoreContractVersion": "score.v2",
+  "scoreBreakdownVersion": "breakdown.v1",
+  "weightedScore": 0.895,
+  "score": 0.912,
+  "isLikedByUser": false,
+  "isRepostedByUser": false,
+  "isNsfw": false,
+  "vfResult": {
+    "safe": true,
+    "level": "green",
+    "score": 0.99
+  },
+  "isNews": true,
+  "newsMetadata": {
+    "title": "Industrial Contract Governance",
+    "source": "TechDaily",
+    "url": "https://news.example.com/1001",
+    "externalId": "ext_news_1001",
+    "clusterId": 8848
+  },
+  "isPinned": false,
+  "isSubscriptionOnly": false,
+  "_scoreBreakdown": {
+    "phoenix": 0.912,
+    "affinity": 0.88
+  },
+  "_pipelineScore": 0.912,
+  "graphScore": 0.88,
+  "graphPath": "user->cluster->post",
+  "graphRecallType": "bridge",
+  "postType": "article",
+  "mutualFollowJaccard": 0.625,
+  "followingReplied": true
+}

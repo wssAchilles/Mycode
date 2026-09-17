@@ -131,9 +131,9 @@ inline EdgeSignalCounts parse_signal_counts(const nlohmann::json& json) {
 }
 
 inline void from_json(const nlohmann::json& json, SnapshotEdgeRecord& record) {
-  record.source_user_id = json.at("sourceUserId").get<std::string>();
-  record.target_user_id = json.at("targetUserId").get<std::string>();
-  record.decayed_sum = json.at("decayedSum").get<double>();
+  record.source_user_id = json.value("sourceUserId", "");
+  record.target_user_id = json.value("targetUserId", "");
+  record.decayed_sum = json.value("decayedSum", 0.0);
   record.interaction_probability = json.value("interactionProbability", 0.0);
   if (json.contains("dailySignalCounts") && json.at("dailySignalCounts").is_object()) {
     record.daily_signal_counts = parse_signal_counts(json.at("dailySignalCounts"));

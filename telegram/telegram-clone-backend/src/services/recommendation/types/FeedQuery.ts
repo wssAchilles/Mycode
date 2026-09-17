@@ -35,7 +35,10 @@ export interface UserFeatures {
 }
 
 export interface Demographics {
-    ageRange?: string;
+    ageRange?: string | [number, number];
+    country?: string;
+    city?: string;
+    gender?: string;
     region?: string;
     language?: string;
 }

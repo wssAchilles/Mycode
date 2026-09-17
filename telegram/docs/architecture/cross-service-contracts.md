@@ -144,3 +144,19 @@ Node `mlProxy` / client 转发：
 2. Node↔Rust 推荐契约以 zod schema + Rust serde 类型双侧校验；违约抛 `rust_recommendation_contract_violation`。
 3. 实时 rollout 以 stage 字段切换 owner，禁止在无 stage 的情况下直接改 terminator。
 4. 决策日志与 OPE 输入必须可指纹复现；未验证投影 fail-closed（`evaluateOpeV2`）。
+
+## 6. 全自动跨语言契约防漂移 CI 门禁 (Phase 27)
+
+为防御跨语言（Rust / TypeScript / Go / C++）Wire 协议静默漂移，全仓部署了严格的自动化 CI 阻断门禁：
+
+1. **统一门禁执行脚本**：
+   ```bash
+   bash telegram-rust-workspace/scripts/cross-language-contract-drift-gate.sh
+   ```
+2. **门禁四重检查**：
+   - **步骤 1**：静态 AST 与字段比对（`check-cross-language-contracts.mjs`），覆盖 `RecommendationCandidatePayload`（58 字段）、`RankingSignals`（15 信号）、`RecommendationGraphRetrievalPayload`（28 字段）、`FanoutRequestedPayload`（14 字段）与 `ProjectionPayload`（18 字段）；
+   - **步骤 2**：Node.js Golden Roundtrip 测试（`crossLanguageRoundtrip.test.ts`），杜绝 Zod `.strip()` 丢失字段，并校验决策指纹；
+   - **步骤 3**：Rust 核心契约 Golden 测试（`cross_language_golden_test.rs`），验证弹性反序列化（如 `ageRange` 字符串/数组双模解析）与确定性 SHA-256；
+   - **步骤 4**：Go 投递消费端信封版本门禁（`golden_roundtrip_test.go`），断言非合法 `specVersion` 拒绝策略与 `omitempty` 标签。
+3. **黄金测试向量基准**：
+   - 位于 `fixtures/contracts/golden_candidate_v1.json`、`golden_query_v1.json` 与 `golden_delivery_envelope_v1.json`，作为多语言对齐的标准黄金向量。

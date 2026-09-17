@@ -169,6 +169,16 @@ export interface RecommendationCandidatePayload {
   graphScore?: number;
   graphPath?: string;
   graphRecallType?: string;
+  topicIds?: string[];
+  hasMedia?: boolean;
+  mediaType?: string;
+  videoDurationMs?: number;
+  authorBlocksViewer?: boolean;
+  languageCode?: string;
+  isSubscriptionOnly?: boolean;
+  postType?: string;
+  mutualFollowJaccard?: number;
+  followingReplied?: boolean;
 }
 
 export interface RecommendationStagePayload {
@@ -208,6 +218,7 @@ export interface RecommendationGraphRetrievalPayload {
   perKernelErrors?: Record<string, string>;
   budgetExhaustedKernels?: string[];
   dominantKernelSource?: string;
+  dominanceShare?: number;
   emptyReason?: string;
 }
 
@@ -661,6 +672,16 @@ export const recommendationCandidatePayloadSchema = z.object({
   graphScore: z.number().optional(),
   graphPath: z.string().optional(),
   graphRecallType: z.string().optional(),
+  topicIds: z.array(z.string()).optional(),
+  hasMedia: z.boolean().optional(),
+  mediaType: z.string().optional(),
+  videoDurationMs: z.number().optional(),
+  authorBlocksViewer: z.boolean().optional(),
+  languageCode: z.string().optional(),
+  isSubscriptionOnly: z.boolean().optional(),
+  postType: z.string().optional(),
+  mutualFollowJaccard: z.number().optional(),
+  followingReplied: z.boolean().optional(),
 });
 
 const recommendationStagePayloadSchema = z.object({
@@ -715,6 +736,7 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
     perKernelErrors: z.record(z.string(), z.string()).optional(),
     budgetExhaustedKernels: z.array(z.string()).optional(),
     dominantKernelSource: z.string().optional(),
+    dominanceShare: z.number().optional(),
     emptyReason: z.string().optional(),
   }),
 });
@@ -1428,6 +1450,16 @@ export function serializeRecommendationCandidate(
     graphScore: anyCandidate.graphScore,
     graphPath: anyCandidate.graphPath,
     graphRecallType: anyCandidate.graphRecallType,
+    topicIds: anyCandidate.topicIds,
+    hasMedia: anyCandidate.hasMedia,
+    mediaType: anyCandidate.mediaType,
+    videoDurationMs: anyCandidate.videoDurationMs,
+    authorBlocksViewer: anyCandidate.authorBlocksViewer,
+    languageCode: anyCandidate.languageCode,
+    isSubscriptionOnly: anyCandidate.isSubscriptionOnly,
+    postType: anyCandidate.postType,
+    mutualFollowJaccard: anyCandidate.mutualFollowJaccard,
+    followingReplied: anyCandidate.followingReplied,
   };
 }
 
@@ -1483,6 +1515,16 @@ export function deserializeRecommendationCandidate(
     ...(payload.graphScore !== undefined ? { graphScore: payload.graphScore } : {}),
     ...(payload.graphPath ? { graphPath: payload.graphPath } : {}),
     ...(payload.graphRecallType ? { graphRecallType: payload.graphRecallType } : {}),
+    ...(payload.topicIds ? { topicIds: payload.topicIds } : {}),
+    ...(payload.hasMedia !== undefined ? { hasMedia: payload.hasMedia } : {}),
+    ...(payload.mediaType ? { mediaType: payload.mediaType } : {}),
+    ...(payload.videoDurationMs !== undefined ? { videoDurationMs: payload.videoDurationMs } : {}),
+    ...(payload.authorBlocksViewer !== undefined ? { authorBlocksViewer: payload.authorBlocksViewer } : {}),
+    ...(payload.languageCode ? { languageCode: payload.languageCode } : {}),
+    ...(payload.isSubscriptionOnly !== undefined ? { isSubscriptionOnly: payload.isSubscriptionOnly } : {}),
+    ...(payload.postType ? { postType: payload.postType } : {}),
+    ...(payload.mutualFollowJaccard !== undefined ? { mutualFollowJaccard: payload.mutualFollowJaccard } : {}),
+    ...(payload.followingReplied !== undefined ? { followingReplied: payload.followingReplied } : {}),
   } as FeedCandidate;
 }
 

@@ -2,6 +2,13 @@ package contracts
 
 import "encoding/json"
 
+const (
+	// DeliveryEventSpecVersion 是投递总线标准契约版本
+	DeliveryEventSpecVersion = "chat.delivery.v1"
+	// PlatformEventSpecVersion 是平台事件总线标准契约版本
+	PlatformEventSpecVersion = "platform.event.v1"
+)
+
 type DeliveryEventEnvelope struct {
 	SpecVersion  string          `json:"specVersion"`
 	Producer     string          `json:"producer"`
