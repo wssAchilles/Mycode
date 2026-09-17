@@ -33,8 +33,9 @@ export const editMessageSchema = z.object({
 });
 
 export const searchMessagesSchema = z.object({
-  query: z.string().min(1).max(200),
+  // FE worker sends `q`; controller reads `req.query.q`
+  q: z.string().min(1).max(200),
   targetId: z.string().optional(),
   chatType: z.enum(['private', 'group']).optional(),
-  limit: z.number().min(1).max(100).optional(),
+  limit: z.coerce.number().min(1).max(100).optional(),
 });

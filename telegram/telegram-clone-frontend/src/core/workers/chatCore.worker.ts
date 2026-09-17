@@ -396,6 +396,7 @@ function markTelemetryUpdate() {
 const searchBridgeCtx: SearchBridgeContext = {
   getApiBaseUrl: () => apiBaseUrl,
   getCurrentUserId: () => currentUserId,
+  getAccessToken: () => accessToken,
   getWasmApiRef: () => wasmApiRef,
   telemetry,
   markTelemetryUpdate,
@@ -3782,6 +3783,7 @@ const apiImpl: ChatCoreApi = {
       }
     }
     remoteSearchAbortByChat.clear();
+    searchBridge.clearAll();
 
     // Best-effort: initialize Rust/WASM hot-path helpers.
     // If it fails, the worker continues with the TS fallback path.
@@ -4611,6 +4613,7 @@ const apiImpl: ChatCoreApi = {
     stopChatFetches();
     store.clearAll();
     searchService.clearAll();
+    searchBridge.clearAll();
     prefetchInFlight.clear();
     prefetchLastAt.clear();
     prefetchQueue.length = 0;

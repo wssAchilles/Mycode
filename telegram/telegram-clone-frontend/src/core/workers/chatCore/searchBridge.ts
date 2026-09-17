@@ -16,6 +16,7 @@ import { runtimeFlags } from '../../chat/runtimeFlags';
 export interface SearchBridgeContext {
   getApiBaseUrl: () => string;
   getCurrentUserId: () => string | null;
+  getAccessToken: () => string | null;
   getWasmApiRef: () => any | null;
   telemetry: Record<string, number>;
   markTelemetryUpdate: () => void;
@@ -307,12 +308,6 @@ export class SearchBridge {
       if (result.length) {
         this.setCachedRemoteSearch(chatId, query, limit, result);
         this.remoteSearchControl.delete(chatId);
-      } else {
-        const prev = this.remoteSearchControl.get(chatId);
-        this.remoteSearchControl.set(chatId, {
-          lastAt: Date.now(),
-          backoffMs: prev ? Math.min(prev.backoffMs * 2, 60_000) : 5_000,
-        });
       }
       return result;
     } finally {
@@ -360,8 +355,16 @@ export class SearchBridge {
       ? this.combineAbortSignals(signal, controller.signal)
       : controller.signal;
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    const accessToken = this.ctx.getAccessToken();
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+
     try {
-      const res = await fetch(url, { signal: combinedSignal });
+      const res = await fetch(url, { signal: combinedSignal, headers });
       if (!res.ok) return [];
 
       const json = await res.json().catch(() => null);
@@ -459,5 +462,14 @@ export class SearchBridge {
 
   setTieredWasmEnabled(enabled: boolean): void {
     this.searchTieredWasmEnabled = enabled;
+  }
+
+  /** Clear all search caches/indexes (init re-entry, emergency reset, shutdown). */
+  clearAll(): void {
+    this.searchService.clearAll();
+    this.searchHaystackCache.clear();
+    this.remoteSearchCache.clear();
+    this.remoteSearchInFlight.clear();
+    this.remoteSearchControl.clear();
   }
 }
