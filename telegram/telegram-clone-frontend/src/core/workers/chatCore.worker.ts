@@ -38,6 +38,7 @@ import { createSqliteOpfsDriver } from '../chat/persist/sqliteOpfsDriver';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
+import { SearchBridge, type SearchBridgeContext } from './chatCore/searchBridge';
 import {
   compactMessagePatchesWithRuntime,
   type MessagePatch,
@@ -119,9 +120,6 @@ const INITIAL_PAGE_LIMIT = 30;
 const MAX_CHAT_MESSAGES = runtimeFlags.chatMemoryWindow;
 const SEARCH_CACHE_WARM_LIMIT = 800;
 const SEARCH_INDEX_MAX_MESSAGES = 6_000;
-const SEARCH_FALLBACK_SCAN_LIMIT = 1_600;
-const SEARCH_REMOTE_CACHE_TTL_MS = 20_000;
-const SEARCH_REMOTE_CACHE_MAX_KEYS = 240;
 const SEARCH_REMOTE_MIN_QUERY_LEN = 2;
 const SEARCH_REMOTE_REQUEST_TIMEOUT_MS = 12_000;
 const SEARCH_REMOTE_LOCAL_HIT_SKIP_RATIO = 0.8;
@@ -389,14 +387,20 @@ const pendingMeta = {
   chatRemovals: new Set<string>(),
 };
 
-const remoteSearchCache = new Map<string, { cachedAt: number; messages: Message[] }>();
-const remoteSearchInFlight = new Map<string, Promise<Message[]>>();
 const remoteSearchAbortByChat = new Map<string, { key: string; controller: AbortController }>();
-const searchHaystackCache = new Map<string, Map<string, string>>();
 
 function markTelemetryUpdate() {
   telemetry.updatedAt = Date.now();
 }
+
+const searchBridgeCtx: SearchBridgeContext = {
+  getApiBaseUrl: () => apiBaseUrl,
+  getCurrentUserId: () => currentUserId,
+  getWasmApiRef: () => wasmApiRef,
+  telemetry,
+  markTelemetryUpdate,
+};
+const searchBridge = new SearchBridge(searchBridgeCtx);
 
 function resetTelemetryCounters() {
   telemetry.patchQueuePeak = 0;
@@ -474,8 +478,7 @@ function nextTraceId(scope: string): string {
 store.setOnChatEvicted((chat) => {
   if (!chat?.chatId) return;
   searchService.clearChat(chat.chatId);
-  clearRemoteSearchStateForChat(chat.chatId);
-  clearSearchHaystackCacheForChat(chat.chatId);
+  searchBridge.removeChat(chat.chatId);
   dropPrefetchTarget(chat.chatId);
 });
 
@@ -2915,7 +2918,7 @@ async function hydratePrefetchFromCache(chatId: string, isGroup: boolean): Promi
     if (!cached.length) return;
     store.replaceMessages(chatId, isGroup, cached);
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
-    pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
+    searchBridge.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
     const listId = chatListIdFromChatId(chatId, isGroup);
     const last = cached[cached.length - 1];
     if (listId && last) {
@@ -2963,14 +2966,14 @@ async function warmPrefetchFromNetwork(
     const incoming = Array.isArray(result.messages) ? result.messages : [];
     const listId = chatListIdFromChatId(chatId, isGroup);
     if (incoming.length) {
-      invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
+      searchBridge.invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
       const { added } = store.mergeMessages(chatId, isGroup, incoming);
       searchService.upsert(chatId, incoming);
-      clearRemoteSearchCacheForChat(chatId);
+      searchBridge.clearRemoteSearchCacheForChat(chatId);
       const { removedIds } = trimChatByRetention(chatId, isGroup);
       if (removedIds.length) {
         searchService.remove(chatId, removedIds);
-        invalidateSearchHaystacks(chatId, removedIds);
+        searchBridge.invalidateSearchHaystacks(chatId, removedIds);
       }
       if (listId && isIncrementalWarm && currentUserId && store.activeChatId !== chatId) {
         let delta = 0;
@@ -3088,70 +3091,6 @@ async function bootstrapHotChatPrefetch(): Promise<void> {
   }
 }
 
-function buildSearchHaystack(message: Message): string {
-  const chunks: string[] = [];
-  if (message.content) chunks.push(message.content);
-  if (message.fileName) chunks.push(message.fileName);
-  if (message.senderUsername) chunks.push(message.senderUsername);
-  if (Array.isArray(message.attachments) && message.attachments.length) {
-    for (const file of message.attachments) {
-      if (file?.fileName) chunks.push(file.fileName);
-    }
-  }
-  return chunks.join(' ').toLowerCase();
-}
-
-function clearSearchHaystackCacheForChat(chatId: string) {
-  if (!chatId) return;
-  searchHaystackCache.delete(chatId);
-}
-
-function pruneSearchHaystackCache(chatId: string, messages: Message[]) {
-  if (!chatId) return;
-  const cache = searchHaystackCache.get(chatId);
-  if (!cache || !cache.size) return;
-
-  const validIds = new Set(messages.map((m) => m.id).filter(Boolean));
-  for (const id of cache.keys()) {
-    if (validIds.has(id)) continue;
-    cache.delete(id);
-  }
-  if (!cache.size) {
-    searchHaystackCache.delete(chatId);
-  }
-}
-
-function invalidateSearchHaystacks(chatId: string, ids: string[]) {
-  if (!chatId || !ids.length) return;
-  const cache = searchHaystackCache.get(chatId);
-  if (!cache || !cache.size) return;
-  for (const id of ids) {
-    if (!id) continue;
-    cache.delete(id);
-  }
-  if (!cache.size) {
-    searchHaystackCache.delete(chatId);
-  }
-}
-
-function getSearchHaystack(chatId: string, message: Message): string {
-  if (!message?.id) {
-    return buildSearchHaystack(message);
-  }
-  let cache = searchHaystackCache.get(chatId);
-  if (!cache) {
-    cache = new Map<string, string>();
-    searchHaystackCache.set(chatId, cache);
-  }
-  const cached = cache.get(message.id);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const next = buildSearchHaystack(message);
-  cache.set(message.id, next);
-  return next;
-}
-
 function shouldFetchRemoteSearch(localCount: number, limit: number, query: string): boolean {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length < SEARCH_REMOTE_MIN_QUERY_LEN) return false;
@@ -3163,128 +3102,9 @@ function shouldFetchRemoteSearch(localCount: number, limit: number, query: strin
   return true;
 }
 
-async function searchMessagesInChat(chatId: string, isGroup: boolean, query: string, limit: number): Promise<Message[]> {
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) return [];
-
-  const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
-  const chat = store.getOrCreate(chatId, isGroup);
-  if (!chat.messages.length) {
-    try {
-      const cached = await loadRecentMessages(chatId, SEARCH_CACHE_WARM_LIMIT);
-      if (cached.length) {
-        store.replaceMessages(chatId, isGroup, cached);
-        searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
-        pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
-      }
-    } catch {
-      // ignore cache read failures
-    }
-  }
-
-  const source = store.getOrCreate(chatId, isGroup).messages;
-  if (!source.length) return [];
-  searchService.ensureChat(chatId, source);
-
-  // Keep search scope bounded for stable latency.
-  const start = source.length > SEARCH_FALLBACK_SCAN_LIMIT ? source.length - SEARCH_FALLBACK_SCAN_LIMIT : 0;
-  const candidates = source.slice(start).reverse();
-  if (!candidates.length) return [];
-
-  // Tier 1: inverted index query (recent + full merged) for repeated searches.
-  let local = searchTieredIndexEnabled
-    ? searchService.queryLayered(chatId, normalizedQuery, normalizedLimit)
-    : searchService.query(chatId, normalizedQuery, normalizedLimit);
-  if (local.length >= normalizedLimit) {
-    return local.slice(0, normalizedLimit);
-  }
-
-  // Tier 2: WASM scan over bounded recent window to fill recall gaps with stable latency.
-  const wasm = searchTieredWasmEnabled && runtimeFlags.wasmSearchFallback ? wasmApiRef : null;
-  if (wasm && local.length < normalizedLimit) {
-    try {
-      const haystacks = candidates.map((msg) => getSearchHaystack(chatId, msg));
-      const wasmLimit = Math.min(normalizedLimit * 2, 240);
-      const idxs = Array.from(wasm.search_contains_indices(haystacks, normalizedQuery, wasmLimit));
-      if (idxs.length) {
-        const wasmHits: Message[] = [];
-        const seen = new Set<string>();
-        for (const idx of idxs) {
-          const msg = candidates[idx];
-          if (!msg || seen.has(msg.id)) continue;
-          seen.add(msg.id);
-          wasmHits.push(msg);
-          if (wasmHits.length >= wasmLimit) break;
-        }
-        if (wasmHits.length) {
-          local = mergeSearchResults(local, wasmHits, normalizedLimit);
-          if (local.length >= normalizedLimit) {
-            return local.slice(0, normalizedLimit);
-          }
-        }
-      }
-    } catch {
-      // fallback to non-wasm path
-    }
-  }
-
-  // Tier 3: JS substring fallback over bounded candidates (for tokenization edge cases).
-  const jsHits: Message[] = [];
-  const seen = new Set<string>();
-  const terms = normalizedQuery
-    .toLowerCase()
-    .split(/\s+/)
-    .map((term) => term.trim())
-    .filter(Boolean);
-
-  for (const msg of candidates) {
-    if (!msg?.id || seen.has(msg.id)) continue;
-    const haystack = getSearchHaystack(chatId, msg);
-    let ok = true;
-    for (const term of terms) {
-      if (!haystack.includes(term)) {
-        ok = false;
-        break;
-      }
-    }
-    if (!ok) continue;
-    seen.add(msg.id);
-    jsHits.push(msg);
-    if (jsHits.length >= normalizedLimit) break;
-  }
-
-  return mergeSearchResults(local, jsHits, normalizedLimit);
-}
-
-function deriveSearchTargetId(chatId: string, isGroup: boolean): string | null {
-  if (isGroup) {
-    return chatId.startsWith('g:') ? chatId.slice(2) : chatId;
-  }
-  if (!currentUserId) return null;
-  return parsePrivateChatOtherUserId(chatId, currentUserId);
-}
-
 function makeRemoteSearchCacheKey(chatId: string, query: string, limit: number): string {
   const normalizedQuery = query.trim().toLowerCase();
   return `${chatId}::${normalizedQuery}::${limit}`;
-}
-
-function trimRemoteSearchCache() {
-  if (remoteSearchCache.size <= SEARCH_REMOTE_CACHE_MAX_KEYS) return;
-  const entries = Array.from(remoteSearchCache.entries()).sort((a, b) => a[1].cachedAt - b[1].cachedAt);
-  const overflow = entries.length - SEARCH_REMOTE_CACHE_MAX_KEYS;
-  for (let i = 0; i < overflow; i += 1) {
-    remoteSearchCache.delete(entries[i][0]);
-  }
-}
-
-function clearRemoteSearchCacheForChat(chatId: string) {
-  if (!chatId || !remoteSearchCache.size) return;
-  const prefix = `${chatId}::`;
-  for (const key of remoteSearchCache.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    remoteSearchCache.delete(key);
-  }
 }
 
 function clearRemoteSearchControlForChat(chatId: string) {
@@ -3296,101 +3116,6 @@ function clearRemoteSearchControlForChat(chatId: string) {
     // ignore
   }
   remoteSearchAbortByChat.delete(chatId);
-}
-
-function clearRemoteSearchStateForChat(chatId: string) {
-  clearRemoteSearchControlForChat(chatId);
-  clearRemoteSearchCacheForChat(chatId);
-}
-
-function getCachedRemoteSearch(chatId: string, query: string, limit: number): Message[] | null {
-  const key = makeRemoteSearchCacheKey(chatId, query, limit);
-  const cached = remoteSearchCache.get(key);
-  if (!cached) return null;
-  if (Date.now() - cached.cachedAt > SEARCH_REMOTE_CACHE_TTL_MS) {
-    remoteSearchCache.delete(key);
-    return null;
-  }
-  return cached.messages.slice();
-}
-
-function setCachedRemoteSearch(chatId: string, query: string, limit: number, messages: Message[]) {
-  const key = makeRemoteSearchCacheKey(chatId, query, limit);
-  remoteSearchCache.set(key, { cachedAt: Date.now(), messages: messages.slice() });
-  trimRemoteSearchCache();
-}
-
-function isAbortError(err: unknown): boolean {
-  return isAbortErrorMessage(err);
-}
-
-async function searchMessagesRemote(
-  chatId: string,
-  isGroup: boolean,
-  query: string,
-  limit: number,
-  signal?: AbortSignal,
-): Promise<Message[]> {
-  const cached = getCachedRemoteSearch(chatId, query, limit);
-  if (cached) return cached;
-
-  const targetId = deriveSearchTargetId(chatId, isGroup);
-  if (!targetId) return [];
-  if (!apiBaseUrl) return [];
-
-  const params = new URLSearchParams({
-    q: query,
-    targetId,
-    limit: String(limit),
-  });
-  const url = `${apiBaseUrl}/api/messages/search?${params.toString()}`;
-  const key = makeRemoteSearchCacheKey(chatId, query, limit);
-
-  const inFlight = remoteSearchInFlight.get(key);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const task = (async () => {
-    try {
-      const { res, json } = await fetchJson(url, { signal });
-      if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
-      if (!res.ok) return [];
-      const data = unwrapSuccessData(json);
-      const messagesRaw = Array.isArray(data?.messages) ? data.messages : Array.isArray(json?.messages) ? json.messages : [];
-      const normalized = normalizeSyncMessages(messagesRaw);
-      setCachedRemoteSearch(chatId, query, limit, normalized);
-      return normalized;
-    } catch (err) {
-      if (isAuthErrorMessage(err)) {
-        throw err;
-      }
-      if (isAbortError(err)) return [];
-      return [];
-    } finally {
-      remoteSearchInFlight.delete(key);
-    }
-  })();
-
-  remoteSearchInFlight.set(key, task);
-  return task;
-}
-
-function mergeSearchResults(local: Message[], remote: Message[], limit: number): Message[] {
-  if (!remote.length) return local.slice(0, limit);
-  const out: Message[] = [];
-  const seen = new Set<string>();
-
-  for (const source of [local, remote]) {
-    for (const item of source) {
-      const id = item?.id;
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      out.push(item);
-      if (out.length >= limit) return out;
-    }
-  }
-  return out;
 }
 
 function emitReset(chatId: string, loadSeq: LoadSeq, messages: Message[], paging: FetchPaging) {
@@ -3471,11 +3196,11 @@ async function ingestMessagesInternal(messages: Message[]) {
 
   for (const [chatId, bucket] of grouped.entries()) {
     const chat = store.getOrCreate(chatId, bucket.isGroup);
-    invalidateSearchHaystacks(chatId, bucket.messages.map((m) => m.id).filter(Boolean));
+    searchBridge.invalidateSearchHaystacks(chatId, bucket.messages.map((m) => m.id).filter(Boolean));
     const { added } = store.mergeMessages(chatId, bucket.isGroup, bucket.messages);
     if (added.length) {
       enqueueSenderSafetyChecks(added);
-      clearRemoteSearchCacheForChat(chatId);
+      searchBridge.clearRemoteSearchCacheForChat(chatId);
     }
     if (added.length) {
       searchService.upsert(chatId, added);
@@ -3483,7 +3208,7 @@ async function ingestMessagesInternal(messages: Message[]) {
     const { removedIds } = trimChatByRetention(chatId, bucket.isGroup);
     if (removedIds.length) {
       searchService.remove(chatId, removedIds);
-      invalidateSearchHaystacks(chatId, removedIds);
+      searchBridge.invalidateSearchHaystacks(chatId, removedIds);
     }
     const removedSet = removedIds.length ? new Set(removedIds) : null;
     const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
@@ -3979,6 +3704,8 @@ const apiImpl: ChatCoreApi = {
     workerSafetyChecksEnabled = params.runtimeOverrides?.workerSafetyChecks ?? runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = params.runtimeOverrides?.searchTieredIndex ?? runtimeFlags.searchTieredIndex;
     searchTieredWasmEnabled = params.runtimeOverrides?.searchTieredWasm ?? runtimeFlags.searchTieredWasm;
+    searchBridge.setTieredIndexEnabled(searchTieredIndexEnabled);
+    searchBridge.setTieredWasmEnabled(searchTieredWasmEnabled);
     storageBackendPreference = params.runtimeOverrides?.storageBackend ?? runtimeFlags.storageBackend;
     storageShadowIdbEnabled = params.runtimeOverrides?.storageShadowIdb ?? runtimeFlags.storageShadowIdb;
     storageShadowReadCompareEnabled =
@@ -4004,6 +3731,7 @@ const apiImpl: ChatCoreApi = {
       workerSyncFallbackEnabled = true;
       workerSafetyChecksEnabled = false;
       searchTieredWasmEnabled = false;
+      searchBridge.setTieredWasmEnabled(false);
       storageBackendPreference = 'idb';
       storageShadowIdbEnabled = false;
       storageShadowReadCompareEnabled = false;
@@ -4054,9 +3782,6 @@ const apiImpl: ChatCoreApi = {
       }
     }
     remoteSearchAbortByChat.clear();
-    remoteSearchInFlight.clear();
-    remoteSearchCache.clear();
-    searchHaystackCache.clear();
 
     // Best-effort: initialize Rust/WASM hot-path helpers.
     // If it fails, the worker continues with the TS fallback path.
@@ -4368,16 +4093,16 @@ const apiImpl: ChatCoreApi = {
 
     if (context.messages.length) {
       const isGroup = context.chatId.startsWith('g:');
-      invalidateSearchHaystacks(context.chatId, context.messages.map((m) => m.id).filter(Boolean));
+      searchBridge.invalidateSearchHaystacks(context.chatId, context.messages.map((m) => m.id).filter(Boolean));
       const { added } = store.mergeMessages(context.chatId, isGroup, context.messages);
       if (added.length) {
         searchService.upsert(context.chatId, added);
-        clearRemoteSearchCacheForChat(context.chatId);
+        searchBridge.clearRemoteSearchCacheForChat(context.chatId);
       }
       const { removedIds } = trimChatByRetention(context.chatId, isGroup);
       if (removedIds.length) {
         searchService.remove(context.chatId, removedIds);
-        invalidateSearchHaystacks(context.chatId, removedIds);
+        searchBridge.invalidateSearchHaystacks(context.chatId, removedIds);
       }
       saveMessages(context.messages).catch(() => undefined);
     }
@@ -4408,14 +4133,14 @@ const apiImpl: ChatCoreApi = {
       try {
         const cached = await loadMessagesByIds(chatId, missing);
         if (cached.length) {
-          invalidateSearchHaystacks(chatId, cached.map((m) => m.id).filter(Boolean));
+          searchBridge.invalidateSearchHaystacks(chatId, cached.map((m) => m.id).filter(Boolean));
           store.mergeMessages(chatId, isGroup, cached);
           searchService.upsert(chatId, cached);
-          clearRemoteSearchCacheForChat(chatId);
+          searchBridge.clearRemoteSearchCacheForChat(chatId);
           const { removedIds } = trimChatByRetention(chatId, isGroup);
           if (removedIds.length) {
             searchService.remove(chatId, removedIds);
-            invalidateSearchHaystacks(chatId, removedIds);
+            searchBridge.invalidateSearchHaystacks(chatId, removedIds);
           }
           for (const msg of cached) {
             if (msg?.id) found.set(msg.id, msg);
@@ -4439,7 +4164,24 @@ const apiImpl: ChatCoreApi = {
     if (!normalizedQuery) return [];
 
     const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
-    const local = await searchMessagesInChat(chatId, isGroup, normalizedQuery, normalizedLimit);
+    const chat = store.getOrCreate(chatId, isGroup);
+    if (!chat.messages.length) {
+      try {
+        const cached = await loadRecentMessages(chatId, SEARCH_CACHE_WARM_LIMIT);
+        if (cached.length) {
+          store.replaceMessages(chatId, isGroup, cached);
+          searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+          searchBridge.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+        }
+      } catch {
+        // ignore cache read failures
+      }
+    }
+
+    const source = store.getOrCreate(chatId, isGroup).messages;
+    if (!source.length) return [];
+
+    const local = searchBridge.searchMessagesLocal(chatId, normalizedQuery, normalizedLimit, source);
 
     if (!shouldFetchRemoteSearch(local.length, normalizedLimit, normalizedQuery)) {
       return local.slice(0, normalizedLimit);
@@ -4475,7 +4217,9 @@ const apiImpl: ChatCoreApi = {
 
     let remote: Message[] = [];
     try {
-      remote = await searchMessagesRemote(chatId, isGroup, normalizedQuery, normalizedLimit, controller.signal);
+      remote = await searchBridge.searchMessagesRemote(chatId, normalizedQuery, normalizedLimit, controller.signal);
+    } catch {
+      remote = [];
     } finally {
       clearTimeout(timeout);
       const cur = remoteSearchAbortByChat.get(chatId);
@@ -4485,7 +4229,7 @@ const apiImpl: ChatCoreApi = {
     }
 
     if (remote.length) {
-      invalidateSearchHaystacks(chatId, remote.map((msg) => msg.id).filter(Boolean));
+      searchBridge.invalidateSearchHaystacks(chatId, remote.map((msg) => msg.id).filter(Boolean));
       const { added } = store.mergeMessages(chatId, isGroup, remote);
       if (added.length) {
         searchService.upsert(chatId, added);
@@ -4493,11 +4237,11 @@ const apiImpl: ChatCoreApi = {
       const { removedIds } = trimChatByRetention(chatId, isGroup);
       if (removedIds.length) {
         searchService.remove(chatId, removedIds);
-        invalidateSearchHaystacks(chatId, removedIds);
+        searchBridge.invalidateSearchHaystacks(chatId, removedIds);
       }
     }
 
-    return mergeSearchResults(local, remote, normalizedLimit);
+    return searchBridge.mergeSearchResults(local, remote, normalizedLimit);
   },
 
   async setActiveChat(chatId: string, isGroup: boolean, loadSeq: LoadSeq) {
@@ -4522,7 +4266,7 @@ const apiImpl: ChatCoreApi = {
       const merged = cached.length ? [...cached, ...extras] : [...extras];
       store.replaceMessages(chatId, isGroup, merged);
       searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
-      pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
+      searchBridge.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
       emitReset(chatId, loadSeq, store.getOrCreate(chatId, isGroup).messages, {
         hasMore: chat.hasMore,
         nextBeforeSeq: chat.nextBeforeSeq,
@@ -4550,16 +4294,16 @@ const apiImpl: ChatCoreApi = {
 
         const incoming = delta.messages || [];
         if (incoming.length) {
-          invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
+          searchBridge.invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
           const { added } = store.mergeMessages(chatId, isGroup, incoming);
           if (added.length) {
             searchService.upsert(chatId, added);
-            clearRemoteSearchCacheForChat(chatId);
+            searchBridge.clearRemoteSearchCacheForChat(chatId);
           }
           const { removedIds } = trimChatByRetention(chatId, isGroup);
           if (removedIds.length) {
             searchService.remove(chatId, removedIds);
-            invalidateSearchHaystacks(chatId, removedIds);
+            searchBridge.invalidateSearchHaystacks(chatId, removedIds);
           }
           const removedSet = removedIds.length ? new Set(removedIds) : null;
           const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
@@ -4616,9 +4360,9 @@ const apiImpl: ChatCoreApi = {
     const extras = chat.messages.filter((m) => !incomingIds.has(m.id));
     store.replaceMessages(chatId, isGroup, [...incoming, ...extras]);
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
-    pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
+    searchBridge.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
     if (incoming.length) {
-      clearRemoteSearchCacheForChat(chatId);
+      searchBridge.clearRemoteSearchCacheForChat(chatId);
     }
 
     chat.hasMore = result.paging.hasMore;
@@ -4692,11 +4436,11 @@ const apiImpl: ChatCoreApi = {
       };
     }
 
-    invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
+    searchBridge.invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
     const { added } = store.mergeMessages(chatId, active.isGroup, incoming);
     if (added.length) {
       searchService.upsert(chatId, added);
-      clearRemoteSearchCacheForChat(chatId);
+      searchBridge.clearRemoteSearchCacheForChat(chatId);
     }
 
     // Paging older history should preserve old pages in memory.
@@ -4705,7 +4449,7 @@ const apiImpl: ChatCoreApi = {
     const { removedIds } = trimChatByRetention(chatId, active.isGroup, { preferHistory: true });
     if (removedIds.length) {
       searchService.remove(chatId, removedIds);
-      invalidateSearchHaystacks(chatId, removedIds);
+      searchBridge.invalidateSearchHaystacks(chatId, removedIds);
     }
     const removedSet = removedIds.length ? new Set(removedIds) : null;
     const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
@@ -4902,6 +4646,8 @@ const apiImpl: ChatCoreApi = {
     workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
     searchTieredWasmEnabled = runtimeFlags.searchTieredWasm;
+    searchBridge.setTieredIndexEnabled(searchTieredIndexEnabled);
+    searchBridge.setTieredWasmEnabled(searchTieredWasmEnabled);
     wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
     wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     emergencySafeModeEnabled = false;
@@ -4955,9 +4701,6 @@ const apiImpl: ChatCoreApi = {
       }
     }
     remoteSearchAbortByChat.clear();
-    remoteSearchInFlight.clear();
-    remoteSearchCache.clear();
-    searchHaystackCache.clear();
     resetTelemetryCounters();
   },
 };
