@@ -39,6 +39,15 @@ import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
 import { SearchBridge, type SearchBridgeContext } from './chatCore/searchBridge';
+import { SocketBridge, type SocketBridgeContext } from './chatCore/socketBridge';
+import {
+  type RawSyncMessage,
+  type RawGroupEvent,
+  type RawSyncUpdate,
+  normalizeSyncMessage,
+  normalizeSyncMessages,
+  normalizeSyncUpdates,
+} from './chatCore/messageAssembler';
 import {
   compactMessagePatchesWithRuntime,
   type MessagePatch,
@@ -59,58 +68,6 @@ function isAbortErrorMessage(err: unknown): boolean {
   const name = err instanceof Error ? err.name : '';
   const message = getErrorMessage(err).toLowerCase();
   return name === 'AbortError' || message.includes('abort');
-}
-
-interface RawSyncMessage {
-  _id?: string;
-  id?: string;
-  chatId?: string;
-  sender?: string;
-  senderId?: string;
-  senderUsername?: string;
-  username?: string;
-  receiverId?: string;
-  receiver?: string;
-  userId?: string;
-  content?: string;
-  timestamp?: string;
-  seq?: number;
-  type?: number | string;
-  chatType?: string;
-  isGroupChat?: boolean;
-  clientTempId?: string;
-  groupId?: string;
-  status?: string;
-  readCount?: number;
-  attachments?: unknown[];
-  fileUrl?: string;
-  fileName?: string;
-  fileSize?: number;
-  mimeType?: string;
-  thumbnailUrl?: string;
-  [key: string]: unknown;
-}
-
-interface RawGroupEvent {
-  action?: string;
-  groupId?: string;
-  userId?: string;
-  targetId?: string;
-  name?: string;
-  groupName?: string;
-  avatarUrl?: string;
-  memberIds?: string[];
-  members?: Array<{ user?: { id?: string; userId?: string }; userId?: string }>;
-  [key: string]: unknown;
-}
-
-interface RawSyncUpdate {
-  updateId?: number;
-  type?: string;
-  chatId?: string;
-  seq?: number;
-  payload?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 const CHAT_CACHE_LIMIT = 30;
@@ -402,6 +359,26 @@ const searchBridgeCtx: SearchBridgeContext = {
   markTelemetryUpdate,
 };
 const searchBridge = new SearchBridge(searchBridgeCtx);
+
+const socketBridgeCtx: SocketBridgeContext = {
+  getAccessToken: () => accessToken,
+  getApiBaseUrl: () => apiBaseUrl,
+  getIsInited: () => isInited,
+  getCurrentUserId: () => currentUserId,
+  getWorkerSocketEnabled: () => workerSocketEnabled,
+  telemetry,
+  markTelemetryUpdate,
+  setSyncPhase: (phase: string, reason?: string) => setSyncPhase(phase as ChatSyncPhase, reason),
+  stopSyncLoop: () => stopSyncLoop(),
+  requestReadSyncFlush: (delayMs: number) => requestReadSyncFlush(delayMs),
+  setConnectivityFromSocket: (connected: boolean, reason: string) => void setConnectivityFromSocket(connected, reason),
+  enqueueRealtimeEventsForIngest: (events: SocketRealtimeEvent[], source: 'socket' | 'api') => enqueueRealtimeEventsForIngest(events, source),
+  desiredJoinedRooms,
+  setSyncAuthError: (error: boolean) => { syncAuthError = error; },
+  setSocketConnected: (connected: boolean) => { socketConnected = connected; },
+  setWorkerSocketAuthBlocked: (blocked: boolean) => { workerSocketAuthBlocked = blocked; },
+};
+const socketBridge = new SocketBridge(socketBridgeCtx);
 
 function resetTelemetryCounters() {
   telemetry.patchQueuePeak = 0;
@@ -1792,148 +1769,28 @@ async function setConnectivityFromSocket(next: boolean, reason: string) {
 }
 
 function detachWorkerSocket() {
-  if (!workerSocket) return;
-  try {
-    workerSocket.removeAllListeners();
-    workerSocket.disconnect();
-  } catch {
-    // ignore
-  }
-  workerSocket = null;
-  workerSocketHandlersBound = false;
-  workerSocketConnectRequested = false;
-  workerSocketAuthenticated = false;
-  workerSocketLastConnectAttemptAt = 0;
+  socketBridge.detachWorkerSocket();
+  workerSocket = socketBridge.getSocket();
 }
 
 function requestWorkerSocketConnect(force = false) {
-  if (!workerSocket) return;
-  if (workerSocketAuthBlocked) return;
-  const now = Date.now();
-  if (!force && now - workerSocketLastConnectAttemptAt < WORKER_SOCKET_CONNECT_THROTTLE_MS) {
-    return;
-  }
-  workerSocketLastConnectAttemptAt = now;
-  workerSocketConnectRequested = true;
-  workerSocket.connect();
+  socketBridge.requestWorkerSocketConnect(force);
+  workerSocket = socketBridge.getSocket();
 }
 
 function emitWorkerPresenceSubscribe() {
-  if (!workerSocket?.connected || !workerSocketAuthenticated || !desiredPresenceUserIds.size) return;
-  workerSocket.emit('presenceSubscribe', Array.from(desiredPresenceUserIds));
-}
-
-function bindWorkerSocketHandlers(socket: Socket) {
-  if (workerSocketHandlersBound) return;
-  workerSocketHandlersBound = true;
-
-  socket.on('connect', () => {
-    telemetry.socketConnects += 1;
-    markTelemetryUpdate();
-    workerSocketAuthBlocked = false;
-    workerSocketAuthenticated = false;
-    workerSocketConnectRequested = true;
-    workerSocketLastConnectAttemptAt = Date.now();
-    if (accessToken) {
-      socket.emit('authenticate', { token: accessToken });
-    }
-    void setConnectivityFromSocket(true, 'worker_socket_connected');
-  });
-
-  socket.on('disconnect', () => {
-    workerSocketConnectRequested = false;
-    workerSocketAuthenticated = false;
-    void setConnectivityFromSocket(false, 'worker_socket_disconnected');
-  });
-
-  socket.on('connect_error', () => {
-    telemetry.socketConnectErrors += 1;
-    markTelemetryUpdate();
-    workerSocketConnectRequested = false;
-    void setConnectivityFromSocket(false, 'worker_socket_connect_error');
-  });
-
-  socket.on('authenticated', () => {
-    syncAuthError = false;
-    workerSocketAuthBlocked = false;
-    workerSocketAuthenticated = true;
-    if (desiredJoinedRooms.size) {
-      for (const roomId of desiredJoinedRooms.values()) {
-        socket.emit('joinRoom', { roomId });
-      }
-    }
-    emitWorkerPresenceSubscribe();
-    if (socketConnected) {
-      setSyncPhase('live', 'worker_socket_authenticated');
-      stopSyncLoop();
-      requestReadSyncFlush(0);
-    }
-  });
-
-  socket.on('authError', () => {
-    syncAuthError = true;
-    workerSocketAuthBlocked = true;
-    workerSocketAuthenticated = false;
-    workerSocketConnectRequested = false;
-    void setConnectivityFromSocket(false, 'worker_socket_auth_error');
-    detachWorkerSocket();
-    setSyncPhase('auth_error', 'socket_auth');
-  });
-
-  socket.on('realtimeBatch', (events: SocketRealtimeEvent[]) => {
-    enqueueRealtimeEventsForIngest(events, 'socket');
-  });
+  const s = socketBridge.getSocket();
+  if (!s?.connected || !desiredPresenceUserIds.size) return;
+  s.emit('presenceSubscribe', Array.from(desiredPresenceUserIds));
 }
 
 async function connectWorkerSocketInternal(force = false): Promise<void> {
-  if (!workerSocketEnabled) return;
-  if (workerSocketAuthBlocked) throw new Error('AUTH_ERROR');
-  if (!isInited) return;
-  if (!accessToken) return;
-  if (!currentUserId) return;
-  if (!socketUrl) {
-    socketUrl = deriveSocketUrl(apiBaseUrl);
-  }
-
-  if (workerSocket) {
-    if (!workerSocket.connected && (force || !workerSocketConnectRequested)) {
-      requestWorkerSocketConnect(force);
-    }
-    return;
-  }
-
-  workerSocketConnectRequested = true;
-  workerSocketLastConnectAttemptAt = Date.now();
-  try {
-    const socket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-      timeout: 5000,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      forceNew: true,
-    });
-    workerSocket = socket;
-    bindWorkerSocketHandlers(socket);
-  } catch (err) {
-    telemetry.socketConnectErrors += 1;
-    markTelemetryUpdate();
-    throw err;
-  }
+  await socketBridge.connectWorkerSocketInternal(force);
+  workerSocket = socketBridge.getSocket();
 }
 
 async function emitWorkerSocket(event: string, payload: Record<string, unknown>): Promise<void> {
-  if (!workerSocketEnabled) return;
-  await connectWorkerSocketInternal();
-  if (!workerSocket) throw new Error('SOCKET_NOT_AVAILABLE');
-  if (!workerSocket.connected) {
-    requestWorkerSocketConnect();
-    throw new Error('SOCKET_NOT_CONNECTED');
-  }
-  if (!workerSocketAuthenticated) {
-    throw new Error('SOCKET_NOT_AUTHENTICATED');
-  }
-  workerSocket.emit(event as any, payload as any);
+  return socketBridge.emitWorkerSocket(event, payload);
 }
 
 async function emitWorkerSocketWithAck(
@@ -1941,168 +1798,7 @@ async function emitWorkerSocketWithAck(
   payload: Record<string, unknown>,
   timeoutMs = 10_000,
 ): Promise<SocketMessageSendAck> {
-  if (!workerSocketEnabled) {
-    return { success: false, error: 'SOCKET_DISABLED' };
-  }
-
-  await connectWorkerSocketInternal();
-  if (!workerSocket) {
-    return { success: false, error: 'SOCKET_NOT_AVAILABLE' };
-  }
-  if (!workerSocket.connected) {
-    requestWorkerSocketConnect();
-    return { success: false, error: 'SOCKET_NOT_CONNECTED' };
-  }
-  if (!workerSocketAuthenticated) {
-    return { success: false, error: 'SOCKET_NOT_AUTHENTICATED' };
-  }
-
-  return new Promise<SocketMessageSendAck>((resolve) => {
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      resolve({ success: false, error: 'ACK_TIMEOUT' });
-    }, timeoutMs);
-
-    workerSocket!.emit(event as any, payload as any, (ack: SocketMessageSendAck) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (!ack || typeof ack.success !== 'boolean') {
-        resolve({ success: false, error: 'ACK_INVALID' });
-        return;
-      }
-      resolve(ack);
-    });
-  });
-}
-
-function normalizeSyncMessage(raw: RawSyncMessage): Message | null {
-  if (!raw) return null;
-
-  const id = String(raw.id || raw._id || '');
-  const chatId = raw.chatId ? String(raw.chatId) : '';
-  if (!id || !chatId) return null;
-
-  const chatType: Message['chatType'] =
-    raw.chatType === 'group' || raw.isGroupChat || chatId.startsWith('g:') ? 'group' : 'private';
-
-  const senderId = String(raw.senderId || raw.sender || raw.userId || 'unknown');
-  const senderUsername = String(raw.senderUsername || raw.username || '未知用户');
-  const receiverId = raw.receiverId || raw.receiver;
-
-  const seq = typeof raw.seq === 'number' ? raw.seq : Number.isFinite(Number(raw.seq)) ? Number(raw.seq) : undefined;
-
-  const timestamp =
-    typeof raw.timestamp === 'string'
-      ? raw.timestamp
-      : raw.timestamp?.toString?.() || new Date().toISOString();
-
-  return {
-    id,
-    clientTempId:
-      typeof raw.clientTempId === 'string' && raw.clientTempId.trim()
-        ? raw.clientTempId.trim()
-        : undefined,
-    chatId,
-    chatType,
-    seq,
-    content: String(raw.content ?? ''),
-    senderId,
-    senderUsername,
-    userId: senderId,
-    username: senderUsername,
-    receiverId: receiverId ? String(receiverId) : undefined,
-    groupId: raw.groupId ? String(raw.groupId) : undefined,
-    timestamp,
-    type: (raw.type || 'text') as Message['type'],
-    isGroupChat: chatType === 'group',
-    status: (raw.status || 'delivered') as Message['status'],
-    readCount: typeof raw.readCount === 'number' ? raw.readCount : undefined,
-    attachments: Array.isArray(raw.attachments) ? raw.attachments : undefined,
-    fileUrl: raw.fileUrl || undefined,
-    fileName: raw.fileName || undefined,
-    fileSize: typeof raw.fileSize === 'number' ? raw.fileSize : undefined,
-    mimeType: raw.mimeType || undefined,
-    thumbnailUrl: raw.thumbnailUrl || undefined,
-  };
-}
-
-function normalizeSyncMessages(raw: RawSyncMessage[]): Message[] {
-  if (!Array.isArray(raw) || !raw.length) return [];
-  const out: Message[] = [];
-  for (const r of raw) {
-    const m = normalizeSyncMessage(r);
-    if (m) out.push(m);
-  }
-  return out;
-}
-
-function normalizeSyncUpdates(
-  raw: RawSyncUpdate[],
-  minUpdateIdExclusive: number,
-): {
-  updates: RawSyncUpdate[];
-  maxUpdateId: number;
-  stats: {
-    droppedInvalid: number;
-    droppedStale: number;
-    droppedDuplicate: number;
-    gapEvents: number;
-    gapMax: number;
-  };
-} {
-  const stats = {
-    droppedInvalid: 0,
-    droppedStale: 0,
-    droppedDuplicate: 0,
-    gapEvents: 0,
-    gapMax: 0,
-  };
-
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return { updates: [], maxUpdateId: minUpdateIdExclusive, stats };
-  }
-
-  const byUpdateId = new Map<number, RawSyncUpdate>();
-  let maxUpdateId = minUpdateIdExclusive;
-
-  for (const item of raw) {
-    const updateId = Number(item?.updateId);
-    if (!Number.isFinite(updateId)) {
-      stats.droppedInvalid += 1;
-      continue;
-    }
-    if (updateId <= minUpdateIdExclusive) {
-      stats.droppedStale += 1;
-      continue;
-    }
-    if (byUpdateId.has(updateId)) {
-      stats.droppedDuplicate += 1;
-    }
-    byUpdateId.set(updateId, item);
-    if (updateId > maxUpdateId) maxUpdateId = updateId;
-  }
-
-  if (!byUpdateId.size) {
-    return { updates: [], maxUpdateId, stats };
-  }
-
-  const sortedEntries = Array.from(byUpdateId.entries()).sort((a, b) => a[0] - b[0]);
-  let prevUpdateId = minUpdateIdExclusive;
-  for (const [updateId] of sortedEntries) {
-    const gap = updateId - prevUpdateId - 1;
-    if (gap > 0) {
-      stats.gapEvents += 1;
-      if (gap > stats.gapMax) stats.gapMax = gap;
-    }
-    prevUpdateId = updateId;
-  }
-
-  const updates = sortedEntries.map((entry) => entry[1]);
-
-  return { updates, maxUpdateId, stats };
+  return socketBridge.emitWorkerSocketWithAck(event, payload, timeoutMs);
 }
 
 async function commitSyncPts(nextPts: number): Promise<void> {

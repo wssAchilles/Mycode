@@ -147,42 +147,7 @@ export function createRealtimeActions(
         };
       };
 
-      try {
-        await deps.ensureCoreReady();
-        const ack = await chatCoreClient.sendSocketMessage(payloadWithClientTempId);
-        if (ack.success) {
-          return {
-            ...ack,
-            clientTempId: ack.clientTempId || normalizedClientTempId,
-          };
-        }
-        if (shouldFallbackToHttpSend(ack.error)) {
-          try {
-            return await sendViaHttpFallback();
-          } catch (fallbackErr: unknown) {
-            deps.removeOptimisticPendingMessage(normalizedClientTempId);
-            return {
-              success: false,
-              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || ack.error || 'SEND_FAILED',
-            };
-          }
-        }
-        deps.removeOptimisticPendingMessage(normalizedClientTempId);
-        return ack;
-      } catch (err: unknown) {
-        const reason = err instanceof Error ? err.message : String(err || 'SEND_FAILED');
-        if (shouldFallbackToHttpSend(reason)) {
-          try {
-            return await sendViaHttpFallback();
-          } catch (fallbackErr: unknown) {
-            deps.removeOptimisticPendingMessage(normalizedClientTempId);
-            return {
-              success: false,
-              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || reason,
-            };
-          }
-        }
-        // Enqueue for offline retry
+      const persistOfflineMessage = () => {
         void enqueueMessage({
           chatId: payloadWithClientTempId.receiverId || payloadWithClientTempId.groupId || '',
           content: payloadWithClientTempId.content || '',
@@ -202,13 +167,55 @@ export function createRealtimeActions(
             timestamp: Date.now(),
           },
         });
+      };
+
+      try {
+        await deps.ensureCoreReady();
+        const ack = await chatCoreClient.sendSocketMessage(payloadWithClientTempId);
+        if (ack.success) {
+          return {
+            ...ack,
+            clientTempId: ack.clientTempId || normalizedClientTempId,
+          };
+        }
+        if (shouldFallbackToHttpSend(ack.error)) {
+          try {
+            return await sendViaHttpFallback();
+          } catch (fallbackErr: unknown) {
+            // 弱网断网容灾：HTTP 也失败时持久化至离线队列，保留乐观卡片供在线自愈重放
+            persistOfflineMessage();
+            return {
+              success: false,
+              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || ack.error || 'SEND_FAILED',
+            };
+          }
+        }
+        // 非网络断连类硬性业务错误，移除乐观卡片
         deps.removeOptimisticPendingMessage(normalizedClientTempId);
+        return ack;
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : String(err || 'SEND_FAILED');
+        if (shouldFallbackToHttpSend(reason)) {
+          try {
+            return await sendViaHttpFallback();
+          } catch (fallbackErr: unknown) {
+            // 弱网断网容灾：持久化至离线队列，保留乐观卡片
+            persistOfflineMessage();
+            return {
+              success: false,
+              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || reason,
+            };
+          }
+        }
+        // 其它异常落入离线保护队列
+        persistOfflineMessage();
         return {
           success: false,
           error: reason,
         };
       }
     },
+
 
     joinRealtimeRoom: (roomId: string) => {
       if (!roomId) return;
@@ -250,41 +257,64 @@ export function createRealtimeActions(
 }
 
 let offlineFlushInFlight = false;
+let onlineListenerRegistered = false;
 
 async function flushQueuedOfflineMessages(deps: MessageStoreDeps): Promise<void> {
   if (offlineFlushInFlight) return;
   offlineFlushInFlight = true;
   try {
-    await flushOfflineQueue(async (msg) => {
-      const response = await messageAPI.sendMessage({
-        clientTempId: msg.clientTempId,
-        chatType: msg.chatType || (msg.groupId ? 'group' : 'private'),
-        receiverId: msg.receiverId,
-        groupId: msg.groupId,
-        content: msg.content,
-        type: msg.type || 'text',
-        fileUrl: msg.fileUrl,
-        fileName: msg.fileName,
-        fileSize: msg.fileSize,
-        mimeType: msg.mimeType,
-        thumbnailUrl: msg.thumbnailUrl,
-      });
-      const sentRaw = extractSentMessageRaw(response);
-      if (sentRaw) {
-        sentRaw.clientTempId = sentRaw.clientTempId || msg.clientTempId;
-        try {
-          await chatCoreClient.ingestSocketMessages([sentRaw]);
-        } catch {
-          // ignore optimistic-ingest failures; sync loop will reconcile
+    await flushOfflineQueue(
+      async (msg) => {
+        const response = await messageAPI.sendMessage({
+          clientTempId: msg.clientTempId,
+          chatType: msg.chatType || (msg.groupId ? 'group' : 'private'),
+          receiverId: msg.receiverId,
+          groupId: msg.groupId,
+          content: msg.content,
+          type: msg.type || 'text',
+          fileUrl: msg.fileUrl,
+          fileName: msg.fileName,
+          fileSize: msg.fileSize,
+          mimeType: msg.mimeType,
+          thumbnailUrl: msg.thumbnailUrl,
+        });
+        const sentRaw = extractSentMessageRaw(response);
+        if (sentRaw) {
+          sentRaw.clientTempId = sentRaw.clientTempId || msg.clientTempId;
+          try {
+            await chatCoreClient.ingestSocketMessages([sentRaw]);
+          } catch {
+            // ignore optimistic-ingest failures; sync loop will reconcile
+          }
+          deps.removeOptimisticPendingMessage(msg.clientTempId);
+          return { success: true };
         }
-        deps.removeOptimisticPendingMessage(msg.clientTempId);
-        return { success: true };
-      }
-      return { success: false, error: 'EMPTY_SEND_RESPONSE' };
-    });
+        return { success: false, error: 'EMPTY_SEND_RESPONSE' };
+      },
+      { usePerChatScheduling: true },
+    );
   } catch {
     // flush is best-effort; next reconnect will retry
   } finally {
     offlineFlushInFlight = false;
   }
 }
+
+export function registerOfflineAutoFlush(deps: MessageStoreDeps): () => void {
+  if (typeof window === 'undefined' || !window.addEventListener) {
+    return () => undefined;
+  }
+  if (!onlineListenerRegistered) {
+    onlineListenerRegistered = true;
+    const handleOnline = () => {
+      void flushQueuedOfflineMessages(deps);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      onlineListenerRegistered = false;
+    };
+  }
+  return () => undefined;
+}
+
