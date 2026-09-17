@@ -79,7 +79,7 @@ DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE=publish
 | `RECOMMENDATION_INTERNAL_TOKEN` | 建议配置；未配置且 `RECOMMENDATION_INTERNAL_TOKEN_REQUIRED=false` 时 Rust 侧放行 |
 | `RECOMMENDATION_INTERNAL_TOKEN_REQUIRED` | `true` 时未配置 token 则拒绝全部请求；`NODE_ENV=production` 默认 `true` |
 | `GRAPH_KERNEL_INTERNAL_TOKEN` | 快照与查询面 |
-| `CRON_SECRET` | jobs 鉴权；Node 中可绕过用户认证，必须网络隔离 + 强密钥 |
+| `CRON_SECRET` | 仅 `POST /api/news/ingest` 的 `x-cron-secret`；不再绕过通用 JWT |
 
 ## 4. 配置漂移防护
 
