@@ -4,7 +4,7 @@
   "expectedReceipt": {
     "contractVersion": "target_distribution_stream_verification_receipt_v2",
     "verifierVersion": "telegram_recommendation_policy_offline_stream_verifier_v2",
-    "verifierBuildFingerprintSha256": "9db367a35811e2dfca10f95f393d166e51ee12d53210ac04a42ae9cf36664a13",
+    "verifierBuildFingerprintSha256": "739601370491b753bf1124db388bee750aa18fccfe341001309c4f0b5f68f84d",
     "ioMode": "bounded_stream_v1",
     "status": "verified",
     "sourceDecisionNdjsonSha256": "2f023d4708f5fd80ada5c1a9bafcc065333c9813219adf8fb70c16cbebdbfd05",
@@ -24,7 +24,7 @@
       "maxStepActionCount": 3,
       "maxPrefixActionCount": 1
     },
-    "verificationReceiptSha256": "5b2cfe8ff0123c08b253536d4b8fcaa0e80d22729afaef0ae64ddddfc883b933",
+    "verificationReceiptSha256": "67a99b25e9e93e65936b446a716176488f4e4ed5035d75eea8ee87f146cf7d90",
     "servable": false
   }
 }

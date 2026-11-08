@@ -126,7 +126,9 @@ pub struct UserSignalFeaturesPayload {
     pub implicit_score: f64,
 }
 
-pub fn deserialize_flexible_age_range<'de, D>(deserializer: D) -> Result<Option<(u32, u32)>, D::Error>
+pub fn deserialize_flexible_age_range<'de, D>(
+    deserializer: D,
+) -> Result<Option<(u32, u32)>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -138,19 +140,23 @@ where
             if arr.len() == 2 {
                 let low = arr[0]
                     .as_u64()
-                    .ok_or_else(|| Error::custom("invalid age range lower bound"))? as u32;
+                    .ok_or_else(|| Error::custom("invalid age range lower bound"))?
+                    as u32;
                 let high = arr[1]
                     .as_u64()
-                    .ok_or_else(|| Error::custom("invalid age range upper bound"))? as u32;
+                    .ok_or_else(|| Error::custom("invalid age range upper bound"))?
+                    as u32;
                 Ok(Some((low, high)))
             } else {
-                Err(Error::custom("age range array must contain exactly 2 integers"))
+                Err(Error::custom(
+                    "age range array must contain exactly 2 integers",
+                ))
             }
         }
         Some(serde_json::Value::String(s)) => {
-            let cleaned = s.trim().trim_matches(|c| c == '[' || c == ']' || c == '(' || c == ')');
+            let cleaned = s.trim().trim_matches(['[', ']', '(', ')']);
             let parts: Vec<&str> = cleaned
-                .split(|c| c == '-' || c == ',' || c == ':')
+                .split(['-', ',', ':'])
                 .map(|p| p.trim())
                 .filter(|p| !p.is_empty())
                 .collect();
@@ -159,7 +165,9 @@ where
                 let high = parts[1].parse::<u32>().map_err(Error::custom)?;
                 Ok(Some((low, high)))
             } else {
-                Err(Error::custom(format!("invalid age range string format: {s}")))
+                Err(Error::custom(format!(
+                    "invalid age range string format: {s}"
+                )))
             }
         }
         _ => Err(Error::custom(

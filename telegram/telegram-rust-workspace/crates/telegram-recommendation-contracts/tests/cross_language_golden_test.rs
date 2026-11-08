@@ -28,7 +28,7 @@ fn test_golden_candidate_roundtrip_and_fingerprint() {
     assert_eq!(candidate.post_id, "post_golden_1001");
     assert_eq!(candidate.author_id, "user_author_42");
     assert_eq!(candidate.topic_ids, vec!["tech", "ai", "systems"]);
-    assert_eq!(candidate.has_media, true);
+    assert!(candidate.has_media);
     assert_eq!(candidate.media_type, MediaType::Video);
     assert_eq!(candidate.video_duration_ms, Some(42500));
     assert_eq!(candidate.author_blocks_viewer, Some(false));

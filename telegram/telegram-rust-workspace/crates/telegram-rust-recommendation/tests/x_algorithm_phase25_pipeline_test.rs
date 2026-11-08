@@ -1,9 +1,11 @@
 use chrono::Utc;
 
+use telegram_rust_recommendation::clients::redis_features::{
+    RealtimeFeatureProvider, RealtimeUserFeatures,
+};
 use telegram_rust_recommendation::contracts::RecommendationCandidatePayload;
 use telegram_rust_recommendation::filters::impression_filter::ImpressionFilter;
 use telegram_rust_recommendation::serving::impression_bloom::ImpressionBloomFilter;
-use telegram_rust_recommendation::clients::redis_features::{RealtimeFeatureProvider, RealtimeUserFeatures};
 use telegram_thunder_store::{LightPost, ThunderConfig, ThunderStore};
 
 fn make_test_candidate(id: &str, author_id: &str) -> RecommendationCandidatePayload {
@@ -48,7 +50,8 @@ async fn test_impression_bloom_filtering_lifecycle() {
     let c3 = make_test_candidate("post_1003", "author_3");
 
     // 1. 初始状态：未看过任何帖子，所有候选保留
-    let (kept, dropped) = ImpressionFilter::apply(vec![c1.clone(), c2.clone(), c3.clone()], user_id, &bloom);
+    let (kept, dropped) =
+        ImpressionFilter::apply(vec![c1.clone(), c2.clone(), c3.clone()], user_id, &bloom);
     assert_eq!(kept.len(), 3);
     assert_eq!(dropped, 0);
 
@@ -93,7 +96,9 @@ async fn test_realtime_features_fail_open_on_invalid_connection() {
     let provider = RealtimeFeatureProvider::new("redis://127.0.0.1:59999").unwrap();
 
     // 必须在超时限制内平滑返回默认特征，不发生 panic，不报错中断
-    let features: RealtimeUserFeatures = provider.get_user_features_safe("user_timeout_test", 50).await;
+    let features: RealtimeUserFeatures = provider
+        .get_user_features_safe("user_timeout_test", 50)
+        .await;
     assert!(features.is_empty());
     assert_eq!(features.interaction_count_1h, 0);
     assert_eq!(features.interaction_count_24h, 0);

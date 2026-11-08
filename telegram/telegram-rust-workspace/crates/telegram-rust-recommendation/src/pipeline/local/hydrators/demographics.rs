@@ -34,6 +34,7 @@ pub fn demographics_hydrator(
         age_range: None,
         region,
         language,
+        ..Default::default()
     };
 
     hydrated.demographics = Some(demographics);
@@ -99,6 +100,7 @@ mod tests {
             age_range: Some((18, 35)),
             region: Some("JP".to_string()),
             language: Some("ja".to_string()),
+            ..Default::default()
         });
 
         let (hydrated, stage) = demographics_hydrator(&query);

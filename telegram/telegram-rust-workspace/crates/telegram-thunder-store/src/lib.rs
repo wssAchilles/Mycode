@@ -187,7 +187,10 @@ impl ThunderStore {
     }
 
     /// 批量查询并返回 Map (对标 X 的 Thunder In-Network Batch Hydration)
-    pub fn get_batch_map(&self, post_ids: &[String]) -> std::collections::HashMap<String, LightPost> {
+    pub fn get_batch_map(
+        &self,
+        post_ids: &[String],
+    ) -> std::collections::HashMap<String, LightPost> {
         let mut map = std::collections::HashMap::with_capacity(post_ids.len());
         for id in post_ids {
             if let Some(post) = self.get(id) {

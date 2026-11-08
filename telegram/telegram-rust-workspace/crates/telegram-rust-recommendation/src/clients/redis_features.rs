@@ -69,7 +69,11 @@ impl RealtimeFeatureProvider {
 
     /// 安全获取用户实时行为特征（对标 X 的 Realtime Feature Store 软降级机制）
     /// 带有超时控制（默认 10ms~50ms），遇到任何网络抖动或超时平滑回退至 Default，绝不阻塞主推荐链路
-    pub async fn get_user_features_safe(&self, user_id: &str, timeout_ms: u64) -> RealtimeUserFeatures {
+    pub async fn get_user_features_safe(
+        &self,
+        user_id: &str,
+        timeout_ms: u64,
+    ) -> RealtimeUserFeatures {
         match tokio::time::timeout(
             std::time::Duration::from_millis(timeout_ms),
             self.get_user_features(user_id),
