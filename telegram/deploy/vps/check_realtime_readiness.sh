@@ -51,6 +51,10 @@ if not fanout_owner:
     blockers.append("realtime_fanout_owner_missing")
 if not socket_terminator:
     blockers.append("realtime_socket_terminator_missing")
+elif socket_terminator not in {"node", "rust"}:
+    blockers.append(f"realtime_socket_terminator_unknown:{socket_terminator}")
+elif socket_terminator == "rust" and transport.get("preferred") not in {None, "rust_socket_io_compat"}:
+    blockers.append(f"realtime_transport_preferred_mismatch:{transport.get('preferred')}")
 
 # Bus summaries may expose availability/errors depending on Redis state.
 for label, bus in (("eventBus", event_bus), ("deliveryBus", delivery_bus)):

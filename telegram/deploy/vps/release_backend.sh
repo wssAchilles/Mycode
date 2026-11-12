@@ -82,7 +82,8 @@ LOCAL_ARCHIVE="$(mktemp "/tmp/${ARCHIVE_NAME}.XXXXXX")"
 tar -czf "${LOCAL_ARCHIVE}" \
   -C "${ROOT_DIR}" \
   deploy/vps/docker-compose.prod.yml \
-  deploy/vps/nginx.telegram.conf.example
+  deploy/vps/nginx.telegram.conf.example \
+  deploy/vps/prune_vps_garbage.sh
 scp "${LOCAL_ARCHIVE}" "${REMOTE_TARGET}:${REMOTE_ROOT}/${ARCHIVE_NAME}"
 rm -f "${LOCAL_ARCHIVE}"
 
@@ -117,6 +118,20 @@ mkdir -p "${REMOTE_ROOT}/releases" "${SHARED_DIR}" "${RELEASE_DIR}"
 tar -xzf "${REMOTE_ROOT}/${ARCHIVE_NAME}" -C "${RELEASE_DIR}"
 rm -f "${REMOTE_ROOT}/${ARCHIVE_NAME}"
 
+if [[ -f "${RELEASE_DIR}/deploy/vps/prune_vps_garbage.sh" ]]; then
+  chmod +x "${RELEASE_DIR}/deploy/vps/prune_vps_garbage.sh"
+  "${RELEASE_DIR}/deploy/vps/prune_vps_garbage.sh" --install-cron
+fi
+
+cleanup_on_failure() {
+  local exit_code=$?
+  if [[ "${exit_code}" -ne 0 && -x "${SHARED_DIR}/prune_vps_garbage.sh" ]]; then
+    echo "release failed (exit=${exit_code}), pruning failed/partial images and containers..." >&2
+    REMOTE_ROOT="${REMOTE_ROOT}" "${SHARED_DIR}/prune_vps_garbage.sh" || true
+  fi
+}
+trap cleanup_on_failure EXIT
+
 if [[ ! -f "${SHARED_DIR}/backend.env" ]]; then
   echo "missing ${SHARED_DIR}/backend.env on remote host" >&2
   exit 1
@@ -149,8 +164,24 @@ if [[ -n "${GHCR_USERNAME}" && -n "${GHCR_TOKEN}" ]]; then
 fi
 
 docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-docker image prune -f >/dev/null 2>&1 || true
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+attempt=0
+until curl -fsS http://127.0.0.1:5000/health >/dev/null && curl -fsS http://127.0.0.1:4000/health >/dev/null && curl -fsS http://127.0.0.1:4100/health >/dev/null && curl -fsS http://127.0.0.1:4200/health >/dev/null && curl -fsS http://127.0.0.1:4300/health >/dev/null; do
+  attempt=$((attempt + 1))
+  if [[ "${attempt}" -ge 30 ]]; then
+    echo "service health check failed after ${attempt} attempts" >&2
+    docker compose -f docker-compose.prod.yml ps >&2 || true
+    docker compose -f docker-compose.prod.yml logs --tail=80 backend gateway delivery_consumer recommendation graph_kernel >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
+
+if [[ -x "${SHARED_DIR}/prune_vps_garbage.sh" ]]; then
+  REMOTE_ROOT="${REMOTE_ROOT}" "${SHARED_DIR}/prune_vps_garbage.sh"
+fi
+docker compose -f docker-compose.prod.yml ps
 EOF
 
 if [[ "${RUN_POST_DEPLOY_GATE}" == "true" ]]; then

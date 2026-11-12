@@ -9,9 +9,9 @@ services:
       - --save
       - ""
       - --maxmemory
-      - 256mb
+      - "${REDIS_MAXMEMORY:-192mb}"
       - --maxmemory-policy
-      - noeviction
+      - allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

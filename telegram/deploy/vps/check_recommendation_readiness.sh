@@ -41,6 +41,19 @@ mode = str(readiness.get("mode") or config.get("mode") or runtime.get("mode") or
 owner = str(ownership.get("owner") or config.get("mode") or "")
 
 # Map first blocker (joined) to a stable primary blocker token.
+cold_start_blockers = {
+    "waiting_for_traffic",
+    "insufficient_primary_samples",
+    "recommendation_rollout_insufficient_primary_samples",
+    "replay_logging_readiness_incomplete",
+    "replay_logging_readiness_missing",
+    "embedding_contract_evidence_missing",
+}
+probes_healthy = (
+    bool(rust.get("available"))
+    and bool((probes.get("nodeAdapter") or {}).get("available"))
+    and bool((probes.get("graphKernel") or {}).get("available"))
+)
 if not blockers:
     blocker = "none"
     action = "recommendation_ready"
@@ -48,7 +61,13 @@ if not blockers:
 else:
     blocker = blockers[0]
     action = ";".join(blockers)
-    if any("waiting_for_traffic" in b for b in blockers):
+    if any("waiting_for_traffic" in b for b in blockers) or (
+        probes_healthy
+        and all(
+            b in cold_start_blockers or "insufficient_primary_samples" in b
+            for b in blockers
+        )
+    ):
         blocker = "waiting_for_traffic"
         state = "waiting_for_traffic"
         action = "allow_traffic_or_extend_rollout_window"

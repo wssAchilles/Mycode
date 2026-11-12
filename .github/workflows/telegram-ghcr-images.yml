@@ -13,6 +13,7 @@ on:
       - "telegram/telegram-go-delivery-consumer/**"
       - "telegram/telegram-rust-workspace/**"
       - "telegram/telegram-cpp-graph-service/**"
+      - "telegram/fixtures/contracts/**"
       - "telegram/deploy/vps/**"
       - ".github/workflows/telegram-ghcr-images.yml"
   workflow_dispatch:
@@ -33,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.90.0
+        uses: dtolnay/rust-toolchain@1.93.0
         with:
           components: rustfmt, clippy
 
