@@ -175,7 +175,7 @@ C++基准输出采用JSON格式，主要包含快照发布、直接高出度查�
 
 \begin{terminal}[生产服务健康检查命令]
   curl https://api.xuziqi.tech/health
-  ssh root@159.203.142.13 '
+  ssh root@20.18.12.7 '
   for port in 5000 4000 4100 4200 4300; do
   curl --silent --show-error --max-time 10 \
   "http://127.0.0.1:${port}/health"

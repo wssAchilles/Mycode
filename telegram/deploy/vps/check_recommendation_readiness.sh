@@ -45,6 +45,7 @@ cold_start_blockers = {
     "waiting_for_traffic",
     "insufficient_primary_samples",
     "recommendation_rollout_insufficient_primary_samples",
+    "recommendation_rollout_primary_samples_insufficient",
     "replay_logging_readiness_incomplete",
     "replay_logging_readiness_missing",
     "embedding_contract_evidence_missing",

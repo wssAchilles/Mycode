@@ -13,7 +13,7 @@
                │                          │
                ▼                          ▼
 ┌──────────────────────┐    ┌──────────────────────────────┐
-│   Firebase Hosting   │    │    VPS (159.203.142.13)      │
+│   Firebase Hosting   │    │    VPS (20.18.12.7)      │
 │   telegram-467705    │    │    api.xuziqi.tech           │
 │                      │    │                              │
 │   前端 SPA           │    │   Nginx → Gateway(:4000)    │
@@ -105,9 +105,9 @@ firebase deploy --only hosting
 
 | 项目 | 值 |
 |------|-----|
-| IP | `159.203.142.13` |
+| IP | `20.18.12.7` |
 | 域名 | `api.xuziqi.tech` |
-| SSH | `root@159.203.142.13` |
+| SSH | `root@20.18.12.7` |
 | 远程目录 | `/opt/telegram` |
 | 当前版本链接 | `/opt/telegram/current` → `/opt/telegram/releases/<commit-hash>` |
 
@@ -220,7 +220,7 @@ docker manifest inspect ghcr.io/wssachilles/mycode-telegram-go-delivery-consumer
 
 ```bash
 # 在本地项目根目录执行
-bash deploy/vps/release_backend.sh root@159.203.142.13
+bash deploy/vps/release_backend.sh root@20.18.12.7
 ```
 
 ### 4.2 发布脚本做了什么
@@ -289,7 +289,7 @@ TAG=$(git rev-parse --short=7 HEAD)
 RELEASE_TAG="$TAG" \
 RUN_OPS_CHECKS=false \
 RELEASE_GATE_REPORT_PATH="/tmp/telegram-pre-release-gate-$TAG.json" \
-bash deploy/vps/release_gate.sh root@159.203.142.13
+bash deploy/vps/release_gate.sh root@20.18.12.7
 ```
 
 门禁默认覆盖：
@@ -332,21 +332,21 @@ done
 # 4. 发布前门禁
 RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false \
   RELEASE_GATE_REPORT_PATH="/tmp/telegram-pre-release-gate-$TAG.json" \
-  bash deploy/vps/release_gate.sh root@159.203.142.13
+  bash deploy/vps/release_gate.sh root@20.18.12.7
 
 # 5. 部署到 VPS
 RELEASE_ID="$TAG" RELEASE_TAG="$TAG" CHECK_IMAGE_MANIFESTS=true \
-  bash deploy/vps/release_backend.sh root@159.203.142.13
+  bash deploy/vps/release_backend.sh root@20.18.12.7
 
 # 6. 验证部署
 curl https://api.xuziqi.tech/health
-ssh root@159.203.142.13 "readlink /opt/telegram/current"
-ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose -f docker-compose.prod.yml ps"
+ssh root@20.18.12.7 "readlink /opt/telegram/current"
+ssh root@20.18.12.7 "cd /opt/telegram/current/deploy/vps && docker compose -f docker-compose.prod.yml ps"
 
 # 7. 发布后门禁
 RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false \
   RELEASE_GATE_REPORT_PATH="/tmp/telegram-post-release-gate-$TAG.json" \
-  bash deploy/vps/release_gate.sh root@159.203.142.13
+  bash deploy/vps/release_gate.sh root@20.18.12.7
 ```
 
 ### 5.2 仅部署前端
@@ -362,14 +362,14 @@ firebase deploy --only hosting
 
 ```bash
 # 确保镜像已构建（CI 完成或手动触发）
-bash deploy/vps/release_backend.sh root@159.203.142.13
+bash deploy/vps/release_backend.sh root@20.18.12.7
 ```
 
 ### 5.4 运行 demo 数据
 
 ```bash
 # 在 VPS 上执行
-ssh root@159.203.142.13 "docker exec vps-backend-1 node /app/dist/scripts/demo/prepareInterviewDemo.js --viewer-password <密码>"
+ssh root@20.18.12.7 "docker exec vps-backend-1 node /app/dist/scripts/demo/prepareInterviewDemo.js --viewer-password <密码>"
 ```
 
 ---
@@ -433,29 +433,29 @@ bash -n deploy/vps/release_gate.sh deploy/vps/gates/image_manifest_gate.sh
 
 ```bash
 TAG=$(git rev-parse --short=7 HEAD)
-RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false bash deploy/vps/release_gate.sh root@159.203.142.13
+RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false bash deploy/vps/release_gate.sh root@20.18.12.7
 ```
 
 ### 6.4 VPS 部署后服务不健康
 
 ```bash
 # SSH 到 VPS 检查容器状态
-ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose ps"
+ssh root@20.18.12.7 "cd /opt/telegram/current/deploy/vps && docker compose ps"
 
 # 查看某个服务的日志
-ssh root@159.203.142.13 "docker logs vps-backend-1 --tail 50"
-ssh root@159.203.142.13 "docker logs vps-gateway-1 --tail 50"
+ssh root@20.18.12.7 "docker logs vps-backend-1 --tail 50"
+ssh root@20.18.12.7 "docker logs vps-gateway-1 --tail 50"
 ```
 
 ### 6.5 回滚到之前的版本
 
 ```bash
 # 查看可用的 release
-ssh root@159.203.142.13 "ls -1dt /opt/telegram/releases/* | head -5"
+ssh root@20.18.12.7 "ls -1dt /opt/telegram/releases/* | head -5"
 
 # 手动切换（例如回滚到 abc1234）
-ssh root@159.203.142.13 "ln -sfn /opt/telegram/releases/abc1234 /opt/telegram/current"
-ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose pull && docker compose up -d"
+ssh root@20.18.12.7 "ln -sfn /opt/telegram/releases/abc1234 /opt/telegram/current"
+ssh root@20.18.12.7 "cd /opt/telegram/current/deploy/vps && docker compose pull && docker compose up -d"
 ```
 
 ### 6.6 健康检查端点
@@ -465,14 +465,14 @@ ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose p
 curl https://api.xuziqi.tech/health
 
 # 在 VPS 本机检查各服务
-ssh root@159.203.142.13 'for port in 5000 4000 4100 4200 4300; do
+ssh root@20.18.12.7 'for port in 5000 4000 4100 4200 4300; do
   printf "port=%s\n" "$port"
   curl --silent --show-error --max-time 10 "http://127.0.0.1:${port}/health" || true
   printf "\n"
 done'
 ```
 
-注意：公网 IP 直连 `http://159.203.142.13:<port>/health` 可能受 Nginx、防火墙或服务绑定策略影响，返回 empty reply 不一定代表容器异常。生产入口以 `https://api.xuziqi.tech/health` 和 VPS 本机 `127.0.0.1:<port>/health` 为准。
+注意：公网 IP 直连 `http://20.18.12.7:<port>/health` 可能受 Nginx、防火墙或服务绑定策略影响，返回 empty reply 不一定代表容器异常。生产入口以 `https://api.xuziqi.tech/health` 和 VPS 本机 `127.0.0.1:<port>/health` 为准。
 
 ---
 
@@ -482,7 +482,8 @@ done'
 |------|------|
 | `.github/workflows/firebase-hosting-merge.yml` | 前端自动部署工作流 |
 | `.github/workflows/telegram-ghcr-images.yml` | 后端镜像自动构建工作流 |
-| `deploy/vps/release_backend.sh` | VPS 发布脚本 |
+| `deploy/vps/release_backend.sh` | VPS 发布脚本（含自动清理与异常回滚清理） |
+| `deploy/vps/prune_vps_garbage.sh` | VPS 垃圾镜像、残次容器、历史发布目录与页缓存定期清理脚本 |
 | `deploy/vps/release_gate.sh` | 发布前/后检查脚本 |
 | `deploy/vps/gates/image_manifest_gate.sh` | GHCR 镜像 tag 存在性检查 |
 | `deploy/vps/gates/remote_runtime_gate.sh` | VPS current release、compose、gateway health 检查 |

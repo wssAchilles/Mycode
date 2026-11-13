@@ -11,10 +11,17 @@ fetch_ops_json() {
     --silent
     --show-error
     --fail
-    --max-time "${OPS_READINESS_CURL_TIMEOUT_SECS:-12}"
+    --noproxy "*"
+    --retry 3
+    --retry-delay 1
+    --retry-all-errors
+    --max-time "${OPS_READINESS_CURL_TIMEOUT_SECS:-15}"
     -H "x-internal-ops-client: readiness-gate"
     -H "Accept: application/json"
   )
+  if [[ "${url}" == https://api.xuziqi.tech* ]]; then
+    args+=(--resolve "api.xuziqi.tech:443:${OPS_RESOLVE_IP:-20.18.12.7}")
+  fi
   if [[ -n "${token}" ]]; then
     args+=(-H "x-ops-token: ${token}")
   fi

@@ -1,6 +1,6 @@
 server {
     listen 80;
-    server_name ${API_DOMAIN};
+    server_name api.xuziqi.tech;
 
     client_max_body_size 50m;
 

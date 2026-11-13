@@ -28,6 +28,9 @@ Path(sys.argv[1]).write_text(json.dumps({
 PY
 }
 
+# shellcheck source=deploy/vps/lib/ops_readiness.sh
+source "${SCRIPT_DIR}/lib/ops_readiness.sh"
+
 OPS_RECOMMENDATION_URL="${OPS_BASE_URL%/}/api/ops/recommendation"
 OPS_PLATFORM_URL="${OPS_BASE_URL%/}/api/ops/platform-bus"
 OPS_PLATFORM_PROBE_URL="${OPS_BASE_URL%/}/api/ops/platform-bus/probe"
@@ -45,6 +48,6 @@ fi
 if ! bash "${SCRIPT_DIR}/check_platform_replay_readiness.sh" "${OPS_PLATFORM_URL}" "${OPS_TOKEN}" > "${WORK_DIR}/platform_replay.json"; then
   json_error_file "${WORK_DIR}/platform_replay.json" "platform_replay" "platform_replay_readiness_check_failed" "inspect_platform_bus_ops_contract"
 fi
-if ! curl --silent --show-error --fail -H "x-ops-token: ${OPS_TOKEN}" "${OPS_PLATFORM_PROBE_URL}" > "${WORK_DIR}/platform_probe.json"; then
+if ! fetch_ops_json "${OPS_PLATFORM_PROBE_URL}" "${OPS_TOKEN}" > "${WORK_DIR}/platform_probe.json"; then
   json_error_file "${WORK_DIR}/platform_probe.json" "platform_probe" "platform_probe_failed" "inspect_delivery_consumer_platform_probe"
 fi
