@@ -50,15 +50,16 @@ def _extract_bundle() -> None:
     os.chdir(WORKDIR)
 
 
-def _ensure_dependencies(task: str) -> None:
+def _ensure_dependencies(task: str, *, need_gcs: bool = False, need_mongo: bool = False) -> None:
     needed = []
     deps = [
-        ("pymongo", "pymongo"),
-        ("google.cloud.storage", "google-cloud-storage"),
         ("sklearn", "scikit-learn"),
         ("tqdm", "tqdm"),
-        ("bson", "pymongo"),
     ]
+    if need_mongo:
+        deps.extend([("pymongo", "pymongo"), ("bson", "pymongo")])
+    if need_gcs:
+        deps.append(("google.cloud.storage", "google-cloud-storage"))
     if task == "two-tower":
         deps.append(("faiss", "faiss-cpu"))
     for mod, pkg in deps:
@@ -253,6 +254,44 @@ def _stage_base_serving_artifacts(
         blob.download_to_filename(str(dst_path))
 
 
+def _stage_base_serving_artifacts_from_drive(
+    *,
+    drive_base_dir: str,
+    faiss_index_type: str,
+    models_dir: Path,
+    data_dir: Path,
+) -> None:
+    base_root = Path(drive_base_dir)
+    if not base_root.exists():
+        raise FileNotFoundError(f"Drive 基线 Two-Tower/FAISS 目录不存在: {base_root}")
+
+    def _pick(sub: str, fname: str) -> Path | None:
+        for candidate in (base_root / sub / fname, base_root / fname):
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        return None
+
+    mappings = [
+        ("models", "two_tower_epoch_latest.pt", models_dir / "two_tower_epoch_latest.pt", True),
+        ("models", f"faiss_{faiss_index_type}.index", models_dir / f"faiss_{faiss_index_type}.index", True),
+        ("models", "faiss_id_mapping.pkl", models_dir / "faiss_id_mapping.pkl", True),
+        ("data", "news_vocab.pkl", data_dir / "news_vocab.pkl", True),
+        ("data", "user_vocab.pkl", data_dir / "user_vocab.pkl", True),
+        ("data", "item_embeddings.npy", data_dir / "item_embeddings.npy", False),
+        ("data", "news_dict.pkl", data_dir / "news_dict.pkl", False),
+        ("data", "preprocess_manifest.json", data_dir / "preprocess_manifest.json", False),
+    ]
+    for sub, fname, dst_path, required in mappings:
+        src_path = _pick(sub, fname)
+        if src_path is None:
+            if required:
+                raise FileNotFoundError(f"Drive 基线目录缺少必需文件 {sub}/{fname}: {base_root}")
+            continue
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[stage-base-drive] {src_path} -> {dst_path}", flush=True)
+        shutil.copy2(src_path, dst_path)
+
+
 def _create_smoke_fixture(data_dir: Path, models_dir: Path) -> Path:
     from recsys.contracts.actions import ACTION_TYPE_MAP
 
@@ -302,7 +341,25 @@ def _create_smoke_fixture(data_dir: Path, models_dir: Path) -> Path:
 def main() -> None:
     task = str(JOB_CONFIG["task"])
     _extract_bundle()
-    _ensure_dependencies(task)
+    drive_data_dir = str(JOB_CONFIG.get("drive_data_dir") or os.getenv("DRIVE_DATA_DIR", ""))
+    drive_output_dir = str(JOB_CONFIG.get("drive_output_dir") or os.getenv("DRIVE_OUTPUT_DIR", ""))
+    drive_init_from = str(JOB_CONFIG.get("drive_init_from") or os.getenv("DRIVE_INIT_FROM", ""))
+    drive_aux_samples_dir = str(JOB_CONFIG.get("drive_aux_samples_dir") or os.getenv("DRIVE_AUX_SAMPLES_DIR", ""))
+    drive_base_dir = str(JOB_CONFIG.get("drive_base_dir") or os.getenv("DRIVE_BASE_DIR", ""))
+    local_jsonl_dir = str(JOB_CONFIG.get("local_jsonl_dir") or os.getenv("LOCAL_JSONL_DIR", ""))
+    gcs_dataset_uri = str(JOB_CONFIG.get("gcs_dataset_uri") or os.getenv("GCS_DATASET_URI", ""))
+    gcs_bucket = str(JOB_CONFIG.get("gcs_bucket") or os.getenv("GCS_BUCKET", ""))
+    gcs_archive_uri = str(JOB_CONFIG.get("gcs_archive_uri") or os.getenv("GCS_ARCHIVE_URI", ""))
+    gcs_init_from_uri = str(JOB_CONFIG.get("gcs_init_from_uri") or os.getenv("GCS_INIT_FROM_URI", ""))
+    gcs_aux_samples_uri = str(JOB_CONFIG.get("gcs_aux_samples_uri") or os.getenv("GCS_AUX_SAMPLES_URI", ""))
+    base_version = str(JOB_CONFIG.get("base_artifact_version") or os.getenv("GCS_BASE_ARTIFACT_VERSION", ""))
+    faiss_index_type = str(JOB_CONFIG.get("faiss_index_type") or os.getenv("FAISS_INDEX_TYPE", "ivf_pq"))
+    allow_pretrain_publish = bool(JOB_CONFIG.get("allow_pretrain_publish", False))
+    mongo_uri = os.getenv("MONGO_URI", "")
+
+    need_gcs = bool(gcs_bucket or gcs_archive_uri or gcs_dataset_uri or gcs_init_from_uri or gcs_aux_samples_uri)
+    need_mongo = bool(mongo_uri) and task in ("phoenix-v2", "phoenix-v2-finetune", "sidecars")
+    _ensure_dependencies(task, need_gcs=need_gcs, need_mongo=need_mongo)
 
     from recsys.colab.gates import evaluate_promotion_gate
     from recsys.contracts.artifacts import build_serving_manifest
@@ -317,20 +374,6 @@ def main() -> None:
     models_dir = WORKDIR / "models"
     data_dir.mkdir(parents=True, exist_ok=True)
     models_dir.mkdir(parents=True, exist_ok=True)
-
-    drive_data_dir = str(JOB_CONFIG.get("drive_data_dir") or os.getenv("DRIVE_DATA_DIR", ""))
-    drive_output_dir = str(JOB_CONFIG.get("drive_output_dir") or os.getenv("DRIVE_OUTPUT_DIR", ""))
-    drive_init_from = str(JOB_CONFIG.get("drive_init_from") or os.getenv("DRIVE_INIT_FROM", ""))
-    drive_aux_samples_dir = str(JOB_CONFIG.get("drive_aux_samples_dir") or os.getenv("DRIVE_AUX_SAMPLES_DIR", ""))
-    gcs_dataset_uri = str(JOB_CONFIG.get("gcs_dataset_uri") or os.getenv("GCS_DATASET_URI", ""))
-    gcs_bucket = str(JOB_CONFIG.get("gcs_bucket") or os.getenv("GCS_BUCKET", ""))
-    gcs_archive_uri = str(JOB_CONFIG.get("gcs_archive_uri") or os.getenv("GCS_ARCHIVE_URI", ""))
-    gcs_init_from_uri = str(JOB_CONFIG.get("gcs_init_from_uri") or os.getenv("GCS_INIT_FROM_URI", ""))
-    gcs_aux_samples_uri = str(JOB_CONFIG.get("gcs_aux_samples_uri") or os.getenv("GCS_AUX_SAMPLES_URI", ""))
-    base_version = str(JOB_CONFIG.get("base_artifact_version") or os.getenv("GCS_BASE_ARTIFACT_VERSION", ""))
-    faiss_index_type = str(JOB_CONFIG.get("faiss_index_type") or os.getenv("FAISS_INDEX_TYPE", "ivf_pq"))
-    allow_pretrain_publish = bool(JOB_CONFIG.get("allow_pretrain_publish", False))
-    mongo_uri = os.getenv("MONGO_URI", "")
 
     report: dict = {}
     try:
@@ -424,13 +467,16 @@ def main() -> None:
                     raise RuntimeError("KuaiRand preprocessed dataset publish requires --allow-pretrain-publish")
                 target_uri = f"gs://{gcs_bucket}/datasets/kuairand_phoenix/{JOB_CONFIG['artifact_version']}"
                 _upload_directory_to_gcs(prep_out, target_uri)
+            print(f"[colab-worker] COMPLETED task={task} version={JOB_CONFIG['artifact_version']}", flush=True)
             return
         elif task == "phoenix-v2":
             samples_path = data_dir / "phoenix_v2_samples.pkl"
             if not samples_path.exists() and (drive_data_dir or gcs_dataset_uri):
                 _stage_local_or_gcs(drive_dir=drive_data_dir, gcs_uri=gcs_dataset_uri, target_dir=data_dir)
-            if not samples_path.exists() and (gcs_archive_uri or mongo_uri):
+            if not samples_path.exists() and (local_jsonl_dir or gcs_archive_uri or mongo_uri):
                 cmd = [sys.executable, str(WORKDIR / "scripts" / "export_training_data.py"), "--output", str(samples_path)]
+                if local_jsonl_dir:
+                    cmd.extend(["--local-jsonl-dir", local_jsonl_dir])
                 if gcs_archive_uri:
                     cmd.extend(["--gcs-archive-uri", gcs_archive_uri])
                 if mongo_uri:
@@ -535,13 +581,16 @@ def main() -> None:
                     ],
                     check=True,
                 )
+            print(f"[colab-worker] COMPLETED task={task} version={JOB_CONFIG['artifact_version']}", flush=True)
             return
         elif task == "phoenix-v2-finetune":
             samples_path = data_dir / "phoenix_v2_samples.pkl"
             if not samples_path.exists() and (drive_data_dir or gcs_dataset_uri):
                 _stage_local_or_gcs(drive_dir=drive_data_dir, gcs_uri=gcs_dataset_uri, target_dir=data_dir)
-            if not samples_path.exists() and (gcs_archive_uri or mongo_uri):
+            if not samples_path.exists() and (local_jsonl_dir or gcs_archive_uri or mongo_uri):
                 cmd = [sys.executable, str(WORKDIR / "scripts" / "export_training_data.py"), "--output", str(samples_path)]
+                if local_jsonl_dir:
+                    cmd.extend(["--local-jsonl-dir", local_jsonl_dir])
                 if gcs_archive_uri:
                     cmd.extend(["--gcs-archive-uri", gcs_archive_uri])
                 if mongo_uri:
@@ -566,7 +615,14 @@ def main() -> None:
                 aux_dir = data_dir / "aux_replay"
                 _download_gcs_prefix(gcs_aux_samples_uri, aux_dir)
 
-            if base_version and gcs_bucket:
+            if drive_base_dir:
+                _stage_base_serving_artifacts_from_drive(
+                    drive_base_dir=drive_base_dir,
+                    faiss_index_type=faiss_index_type,
+                    models_dir=models_dir,
+                    data_dir=data_dir,
+                )
+            elif base_version and gcs_bucket:
                 _stage_base_serving_artifacts(
                     gcs_bucket=gcs_bucket,
                     base_version=base_version,
@@ -627,7 +683,7 @@ def main() -> None:
             train_report=report,
             max_cpu_p95_ms=float(JOB_CONFIG["max_cpu_p95_ms"]),
             faiss_index_type=faiss_index_type,
-            require_serving_base=bool(base_version),
+            require_serving_base=bool(base_version or drive_base_dir),
         )
         print(json.dumps({"gatePassed": passed, "reasons": reasons, "details": gate_details}, ensure_ascii=False, indent=2), flush=True)
         if not passed:
@@ -667,6 +723,7 @@ def main() -> None:
                 ],
                 check=True,
             )
+        print(f"[colab-worker] COMPLETED task={task} version={JOB_CONFIG['artifact_version']}", flush=True)
     finally:
         stop_event.set()
 
@@ -689,6 +746,8 @@ def render_remote_worker_script(
     drive_output_dir: str = "",
     drive_init_from: str = "",
     drive_aux_samples_dir: str = "",
+    drive_base_dir: str = "",
+    local_jsonl_dir: str = "",
     gcs_init_from_uri: str = "",
     gcs_aux_samples_uri: str = "",
     aux_max_groups: int = 2000,
@@ -727,6 +786,8 @@ def render_remote_worker_script(
         "drive_output_dir": drive_output_dir,
         "drive_init_from": drive_init_from,
         "drive_aux_samples_dir": drive_aux_samples_dir,
+        "drive_base_dir": drive_base_dir,
+        "local_jsonl_dir": local_jsonl_dir,
         "gcs_init_from_uri": gcs_init_from_uri,
         "gcs_aux_samples_uri": gcs_aux_samples_uri,
         "aux_max_groups": int(aux_max_groups),

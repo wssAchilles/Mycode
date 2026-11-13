@@ -31,10 +31,10 @@ _EXCLUDED_BUNDLE_NAMES: Tuple[str, ...] = (
     ".venv",
     "venv",
     ".git",
-    "data",
-    "models",
     ".env",
 )
+# 仅排除 ml-services 根目录下的数据/模型大文件目录，绝不误伤 recsys/data 与 recsys/models 源码包
+_EXCLUDED_TOP_LEVEL_DIRS: Tuple[str, ...] = ("data", "models")
 
 
 @dataclass(frozen=True)
@@ -110,6 +110,7 @@ def build_colab_subprocess_env(
     env = dict(os.environ)
     env["CLOUDSDK_CONFIG"] = account.resolved_cloudsdk_dir()
     env["COLAB_CLI_REQUEST_TIMEOUT"] = str(int(account.request_timeout_sec))
+    env.setdefault("CLOUDSDK_CORE_CHECK_GCE", "False")
     if extra_local_env:
         for k, v in extra_local_env.items():
             env[str(k)] = str(v)
@@ -136,6 +137,8 @@ def format_redacted_command(args: Sequence[str]) -> str:
 
 
 def _should_exclude_from_bundle(rel_path: Path) -> bool:
+    if rel_path.parts and rel_path.parts[0] in _EXCLUDED_TOP_LEVEL_DIRS:
+        return True
     for part in rel_path.parts:
         if part in _EXCLUDED_BUNDLE_NAMES or part.startswith(".env"):
             return True

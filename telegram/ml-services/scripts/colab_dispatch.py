@@ -41,6 +41,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drive-output-dir", default="", help="预挂载 Drive 输出同步目录（自动写回模型产物与分片数据集）")
     parser.add_argument("--drive-init-from", default="", help="预挂载 Drive 预训练 Phoenix V2 检查点目录")
     parser.add_argument("--drive-aux-samples-dir", default="", help="预挂载 Drive 微调回放锚点数据目录")
+    parser.add_argument("--drive-base-dir", default="", help="预挂载 Drive 基线 Two-Tower/FAISS 输出目录（替代 GCS 拉取基线）")
+    parser.add_argument("--local-jsonl-dir", default="", help="远端已就绪的本地/Drive jsonl.gz 用户行为归档目录")
     parser.add_argument("--init-from-gcs", default="", help="预训练检查点 GCS URI（如 gs://.../pretrain/<ver>/phoenix_v2）")
     parser.add_argument("--aux-samples-uri", default="", help="迁移微调纯训练回放锚点数据 GCS 前缀")
     parser.add_argument("--aux-max-groups", type=int, default=2000, help="回放锚点最大混入 slate 组数")
@@ -124,6 +126,8 @@ def main() -> None:
         drive_output_dir=args.drive_output_dir,
         drive_init_from=args.drive_init_from,
         drive_aux_samples_dir=args.drive_aux_samples_dir,
+        drive_base_dir=args.drive_base_dir,
+        local_jsonl_dir=args.local_jsonl_dir,
         gcs_init_from_uri=args.init_from_gcs,
         gcs_aux_samples_uri=args.aux_samples_uri,
         aux_max_groups=args.aux_max_groups,

@@ -486,3 +486,73 @@ def test_kuairand_prep_worker_uses_drive_output_and_sharding() -> None:
     assert "output_dir=prep_out" in worker_text
     assert "shard_slates=" in worker_text
     assert "/content/drive/MyDrive/ml-services/data/kuairand_phoenix_pit_v1" in worker_text
+    assert "[colab-worker] COMPLETED " in worker_text
+
+
+def test_code_bundle_includes_recsys_models_and_data_packages(tmp_path: Path) -> None:
+    """回归防线：确保顶层 data/models 排除规则不会误删 recsys/models 与 recsys/data 源码包。"""
+    import tarfile
+    from recsys.colab.datasets import build_code_bundle
+
+    bundle_path = tmp_path / "bundle.tar.gz"
+    info = build_code_bundle(_ML_SERVICES_ROOT, bundle_path)
+    assert info["includedFiles"] > 0
+    with tarfile.open(bundle_path, "r:gz") as tar:
+        names = set(tar.getnames())
+    assert "recsys/models/phoenix_v2.py" in names
+    assert "recsys/data/kuairand_phoenix.py" in names
+    assert "recsys/colab/orchestrator.py" in names
+
+
+def test_exec_sentinel_fail_closed_and_drive_base_finetune_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """校验 colab exec 远端报错但返回码为 0 时必须拦截，且微调支持 Drive 基线与本地 jsonl 归档。"""
+    worker_ft = render_remote_worker_script(
+        profile=COLAB_PROFILES["phoenix-v2-finetune-t4"],
+        artifact_version="ft_drive_v1",
+        drive_base_dir="/content/drive/MyDrive/ml-services/out/two_tower_v1",
+        local_jsonl_dir="/content/ml-services/data/archives/user_actions",
+        drive_init_from="/content/drive/MyDrive/ml-services/out/pretrain_v1",
+        drive_aux_samples_dir="/content/drive/MyDrive/ml-services/data/kuairand_phoenix_pit_v1/train",
+        drive_output_dir="/content/drive/MyDrive/ml-services/out/ft_drive_v1",
+    )
+    compile(worker_ft, "worker_finetune_drive.py", "exec")
+    assert "_stage_base_serving_artifacts_from_drive" in worker_ft
+    assert "--local-jsonl-dir" in worker_ft
+    assert "[colab-worker] COMPLETED " in worker_ft
+
+    # 模拟 colab exec 打印 ModuleNotFoundError 但返回 exit code 0 -> 必须被 fail-closed 拦截
+    def _fake_run_traceback(cmd, env=None, check=False):  # noqa: ANN001, ARG001
+        if "exec" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="ModuleNotFoundError: No module named 'recsys.models'\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_traceback)
+    with pytest.raises(RuntimeError, match="COMPLETED"):
+        dispatch_colab_job(
+            profile_name="smoke-cpu",
+            artifact_version="fail_sentinel",
+            ml_services_dir=_ML_SERVICES_ROOT,
+            staging_dir=tmp_path / "fail_sentinel",
+            session_name="s1",
+            reuse_session=True,
+            keep_session=True,
+            dry_run=False,
+        )
+
+    def _fake_run_ok(cmd, env=None, check=False):  # noqa: ANN001, ARG001
+        if "exec" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="[colab-worker] COMPLETED task=smoke version=ok_s1\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_ok)
+    ok_res = dispatch_colab_job(
+        profile_name="smoke-cpu",
+        artifact_version="ok_s1",
+        ml_services_dir=_ML_SERVICES_ROOT,
+        staging_dir=tmp_path / "ok_s1",
+        session_name="s1",
+        reuse_session=True,
+        keep_session=True,
+        dry_run=False,
+    )
+    assert ok_res["executed"] is True

@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from recsys.colab.datasets import (
     _DEFAULT_ML_DIR,
@@ -25,6 +26,9 @@ from recsys.colab.profiles import (
     ColabTrainingProfile,
 )
 from recsys.colab.worker_template import render_remote_worker_script
+
+_ORIG_SUBPROCESS_RUN = subprocess.run
+_COMPLETED_SENTINEL = "[colab-worker] COMPLETED "
 
 __all__ = [
     "COLAB_PROFILES",
@@ -102,6 +106,37 @@ def build_colab_cli_plan(
     return plan
 
 
+def _run_exec_and_verify_sentinel(cmd: Sequence[str], env: Mapping[str, str]) -> None:
+    """执行 colab exec 并校验远端 Worker 打印 COMPLETED 哨兵，防止 colab exec 异常仍返回 0 导致误判成功。"""
+    if subprocess.run is _ORIG_SUBPROCESS_RUN:
+        captured: List[str] = []
+        proc = subprocess.Popen(
+            list(cmd),
+            env=dict(env),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            captured.append(line)
+        rc = proc.wait()
+        output_text = "".join(captured)
+        if rc != 0:
+            raise RuntimeError(f"colab exec 退出异常 (returncode={rc})")
+        if _COMPLETED_SENTINEL not in output_text:
+            raise RuntimeError("Colab 远端作业未输出 COMPLETED 哨兵标记，判定为远端异常失败（colab-cli 可能吞掉了异常退出码）")
+        return
+
+    res = subprocess.run(list(cmd), env=dict(env), check=True)
+    stdout_text = getattr(res, "stdout", None)
+    if isinstance(stdout_text, str) and _COMPLETED_SENTINEL not in stdout_text:
+        raise RuntimeError("Colab 远端作业未输出 COMPLETED 哨兵标记，判定为远端异常失败")
+
+
 def dispatch_colab_job(
     *,
     profile_name: str,
@@ -121,6 +156,8 @@ def dispatch_colab_job(
     drive_output_dir: str = "",
     drive_init_from: str = "",
     drive_aux_samples_dir: str = "",
+    drive_base_dir: str = "",
+    local_jsonl_dir: str = "",
     gcs_init_from_uri: str = "",
     gcs_aux_samples_uri: str = "",
     aux_max_groups: int = 2000,
@@ -173,6 +210,8 @@ def dispatch_colab_job(
         drive_output_dir=drive_output_dir,
         drive_init_from=drive_init_from,
         drive_aux_samples_dir=drive_aux_samples_dir,
+        drive_base_dir=drive_base_dir,
+        local_jsonl_dir=local_jsonl_dir,
         gcs_init_from_uri=gcs_init_from_uri,
         gcs_aux_samples_uri=gcs_aux_samples_uri,
         aux_max_groups=aux_max_groups,
@@ -205,6 +244,10 @@ def dispatch_colab_job(
         merged_remote_env["DRIVE_INIT_FROM"] = drive_init_from
     if drive_aux_samples_dir:
         merged_remote_env["DRIVE_AUX_SAMPLES_DIR"] = drive_aux_samples_dir
+    if drive_base_dir:
+        merged_remote_env["DRIVE_BASE_DIR"] = drive_base_dir
+    if local_jsonl_dir:
+        merged_remote_env["LOCAL_JSONL_DIR"] = local_jsonl_dir
     if gcs_init_from_uri:
         merged_remote_env["GCS_INIT_FROM_URI"] = gcs_init_from_uri
     if gcs_aux_samples_uri:
@@ -263,7 +306,7 @@ def dispatch_colab_job(
         elif not keep_session:
             should_stop = True
         subprocess.run(plan["upload"], env=sub_env, check=True)
-        subprocess.run(plan["exec"], env=sub_env, check=True)
+        _run_exec_and_verify_sentinel(plan["exec"], sub_env)
         result["executed"] = True
     finally:
         if should_stop and "stop" in plan:
