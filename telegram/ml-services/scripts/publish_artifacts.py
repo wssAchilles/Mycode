@@ -87,9 +87,19 @@ def main():
 
     two_tower = models_dir / "two_tower_epoch_latest.pt"
     phoenix = models_dir / "phoenix_epoch_latest.pt"
+    import json
+    import sys
+    import tempfile
+
+    root_dir = Path(__file__).resolve().parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+    from recsys.contracts.artifacts import build_serving_manifest
+
     faiss_index = models_dir / f"faiss_{args.faiss_index_type}.index"
     faiss_map = models_dir / "faiss_id_mapping.pkl"
-    serving_manifest = _write_serving_manifest(
+
+    manifest_payload = build_serving_manifest(
         version=args.version,
         profile=args.profile,
         faiss_index_type=args.faiss_index_type,
@@ -97,36 +107,47 @@ def main():
         data_dir=data_dir,
     )
 
-    files = [
-        (two_tower, f"artifacts/{args.version}/two_tower/model.pt", "application/octet-stream"),
-        (faiss_index, f"artifacts/{args.version}/faiss/faiss_{args.faiss_index_type}.index", "application/octet-stream"),
-        (faiss_map, f"artifacts/{args.version}/faiss/faiss_id_mapping.pkl", "application/octet-stream"),
-        (data_dir / "news_vocab.pkl", f"artifacts/{args.version}/data/news_vocab.pkl", "application/octet-stream"),
-        (data_dir / "user_vocab.pkl", f"artifacts/{args.version}/data/user_vocab.pkl", "application/octet-stream"),
-        # Optional provenance/contract metadata for KuaiRec/KuaiRand and future datasets.
-        (data_dir / "preprocess_manifest.json", f"artifacts/{args.version}/manifest/preprocess_manifest.json", "application/json"),
-        (serving_manifest, f"artifacts/{args.version}/manifest/serving_manifest.json", "application/json"),
-    ]
-    if args.profile == "full":
-        files.extend(
-            [
-                (phoenix, f"artifacts/{args.version}/phoenix/model.pt", "application/octet-stream"),
-                (data_dir / "item_embeddings.npy", f"artifacts/{args.version}/data/item_embeddings.npy", "application/octet-stream"),
-                # Optional corpus metadata used for one-time imports (not required for serving).
-                (data_dir / "news_dict.pkl", f"artifacts/{args.version}/data/news_dict.pkl", "application/octet-stream"),
-            ]
+    with tempfile.TemporaryDirectory(prefix="recsys_manifest_") as tmp_dir:
+        serving_manifest = Path(tmp_dir) / "serving_manifest.json"
+        serving_manifest.write_text(
+            json.dumps(manifest_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
-    missing = [str(src) for (src, _, _) in files if not src.exists()]
-    if missing:
-        print("⚠️ missing local files (will skip):")
-        for m in missing:
-            print(f" - {m}")
+        files = [
+            (two_tower, f"artifacts/{args.version}/two_tower/model.pt", "application/octet-stream"),
+            (faiss_index, f"artifacts/{args.version}/faiss/faiss_{args.faiss_index_type}.index", "application/octet-stream"),
+            (faiss_map, f"artifacts/{args.version}/faiss/faiss_id_mapping.pkl", "application/octet-stream"),
+            (data_dir / "news_vocab.pkl", f"artifacts/{args.version}/data/news_vocab.pkl", "application/octet-stream"),
+            (data_dir / "user_vocab.pkl", f"artifacts/{args.version}/data/user_vocab.pkl", "application/octet-stream"),
+            (data_dir / "preprocess_manifest.json", f"artifacts/{args.version}/manifest/preprocess_manifest.json", "application/json"),
+            (serving_manifest, f"artifacts/{args.version}/manifest/serving_manifest.json", "application/json"),
+            # 轻量校准、RealGraph 与 SocialPhoenix JSON 产物（如已生成则随任意 profile 发布）
+            (models_dir / "weighted_calibrator.json", f"artifacts/{args.version}/calibration/weighted_calibrator.json", "application/json"),
+            (models_dir / "realgraph_gbt.json", f"artifacts/{args.version}/realgraph/gbt_model.json", "application/json"),
+            (models_dir / "social_phoenix_linear.json", f"artifacts/{args.version}/social_phoenix/linear_model.json", "application/json"),
+        ]
+        if args.profile in ("full", "phoenix-v2"):
+            files.extend(
+                [
+                    (phoenix, f"artifacts/{args.version}/phoenix/model.pt", "application/octet-stream"),
+                    (models_dir / "phoenix_v2_inference.pt", f"artifacts/{args.version}/phoenix_v2/model.pt", "application/octet-stream"),
+                    (models_dir / "phoenix_v2_config.json", f"artifacts/{args.version}/phoenix_v2/config.json", "application/json"),
+                    (data_dir / "item_embeddings.npy", f"artifacts/{args.version}/data/item_embeddings.npy", "application/octet-stream"),
+                    (data_dir / "news_dict.pkl", f"artifacts/{args.version}/data/news_dict.pkl", "application/octet-stream"),
+                ]
+            )
 
-    for src, dst, ctype in files:
-        if not src.exists():
-            continue
-        _upload_file(bucket, src, dst, content_type=ctype)
+        missing = [str(src) for (src, _, _) in files if not src.exists()]
+        if missing:
+            print("⚠️ missing local files (will skip):")
+            for m in missing:
+                print(f" - {m}")
+
+        for src, dst, ctype in files:
+            if not src.exists():
+                continue
+            _upload_file(bucket, src, dst, content_type=ctype)
 
 
 if __name__ == "__main__":

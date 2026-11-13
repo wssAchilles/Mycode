@@ -31,6 +31,12 @@ from recsys_dedup import (
     related_post_ids_from_doc as _related_post_ids_from_doc,
     dedup_scored_by_related_ids as _dedup_scored_by_related_ids,
 )
+from recsys.contracts.ann import build_ann_response_evidence
+from recsys.contracts.artifacts import (
+    artifact_file_plan as _recsys_artifact_file_plan,
+    load_serving_manifest as _load_serving_manifest_file,
+    verify_manifest_checksums as _verify_manifest_checksums,
+)
 
 # ========== 配置 ==========
 DATA_DIR = Path(__file__).parent / "data"
@@ -136,6 +142,7 @@ PRELOAD_NEWS_MAPPING_ON_STARTUP = os.getenv("PRELOAD_NEWS_MAPPING_ON_STARTUP", "
 # - OON: only SAFE allowed by default
 VF_IN_NETWORK_ALLOW_LOW_RISK = os.getenv("VF_IN_NETWORK_ALLOW_LOW_RISK", "true").lower() == "true"
 VF_OON_ALLOW_LOW_RISK = os.getenv("VF_OON_ALLOW_LOW_RISK", "false").lower() == "true"
+VERIFY_ARTIFACT_CHECKSUMS = os.getenv("VERIFY_ARTIFACT_CHECKSUMS", "true").lower() == "true"
 
 # ========== 全局模型和索引 ==========
 two_tower_model = None
@@ -147,6 +154,8 @@ user_vocab = None
 news_id_to_idx = None
 idx_to_news_id = None
 models_loaded = False
+serving_manifest: Optional[dict] = None
+manifest_verified: Optional[bool] = None
 
 # ========== Pydantic 模型 (适配 Node.js Client) ==========
 
@@ -156,13 +165,25 @@ class ANNRequest(BaseModel):
     historyPostIds: List[str]
     keywords: Optional[List[str]] = None
     topK: int = 20
+    embeddingContract: Optional[Dict[str, Any]] = None
+    corpusContract: Optional[Dict[str, Any]] = None
+    expectedEvidence: Optional[Dict[str, Any]] = None
 
 class ANNCandidate(BaseModel):
     postId: str
     score: float
 
+class ANNResponseEvidence(BaseModel):
+    embeddingSpace: str
+    retrievalEmbeddingDim: int
+    modelVersion: str
+    artifactVersion: str
+    idNamespace: str
+    indexVersion: str
+
 class ANNResponse(BaseModel):
     candidates: List[ANNCandidate]
+    evidence: ANNResponseEvidence
 
 # 2. Phoenix Models
 class PhoenixCandidatePayload(BaseModel):
@@ -739,54 +760,15 @@ def _download_gcs_blob(bucket, blob_name: str, dst: Path) -> bool:
 
 
 def _artifact_file_plan(component: str) -> tuple[list[tuple[str, Path]], list[tuple[str, Path]]]:
-    """
-    Return required and optional GCS artifact files for a runtime component.
-
-    Components:
-    - two_tower: daily feature refresh path; no FAISS/Phoenix/corpus payload.
-    - retrieval: ANN path; Two-Tower + FAISS.
-    - corpus: one-off import path; external metadata only.
-    - full: legacy full runtime. In serving-lite profile this intentionally maps to retrieval.
-    """
-    normalized = (component or "full").strip().lower()
-    base_required = [
-        (f"artifacts/{{version}}/two_tower/model.pt", MODELS_DIR / "two_tower_epoch_latest.pt"),
-        (f"artifacts/{{version}}/data/news_vocab.pkl", DATA_DIR / "news_vocab.pkl"),
-        (f"artifacts/{{version}}/data/user_vocab.pkl", DATA_DIR / "user_vocab.pkl"),
-    ]
-    faiss_required = [
-        (f"artifacts/{{version}}/faiss/faiss_{FAISS_INDEX_TYPE}.index", MODELS_DIR / f"faiss_{FAISS_INDEX_TYPE}.index"),
-        (f"artifacts/{{version}}/faiss/faiss_id_mapping.pkl", MODELS_DIR / "faiss_id_mapping.pkl"),
-    ]
-    phoenix_required = [
-        (f"artifacts/{{version}}/phoenix/model.pt", MODELS_DIR / "phoenix_epoch_latest.pt"),
-    ]
-    corpus_required = [
-        (f"artifacts/{{version}}/data/news_dict.pkl", DATA_DIR / "news_dict.pkl"),
-    ]
-    manifests_optional = [
-        (f"artifacts/{{version}}/manifest/preprocess_manifest.json", DATA_DIR / "preprocess_manifest.json"),
-        (f"artifacts/{{version}}/manifest/serving_manifest.json", DATA_DIR / "serving_manifest.json"),
-    ]
-
-    if normalized == "two_tower":
-        return base_required, manifests_optional
-    if normalized == "phoenix":
-        return base_required + phoenix_required, manifests_optional
-    if normalized == "retrieval":
-        return base_required + faiss_required, manifests_optional
-    if normalized == "corpus":
-        return corpus_required, manifests_optional
-
-    optional = manifests_optional + corpus_required
-    if LOAD_ITEM_EMBEDDING_FALLBACK:
-        optional.append((f"artifacts/{{version}}/data/item_embeddings.npy", DATA_DIR / "item_embeddings.npy"))
-
-    if ARTIFACT_PROFILE == "serving-lite":
-        # serving-lite deliberately omits Phoenix and item_embeddings.npy/news_dict.pkl from online serving.
-        return base_required + faiss_required, optional
-
-    return base_required + phoenix_required + faiss_required, optional
+    """委托统一契约模块生成指定组件的 GCS 产物同步清单。"""
+    return _recsys_artifact_file_plan(
+        component,
+        models_dir=MODELS_DIR,
+        data_dir=DATA_DIR,
+        faiss_index_type=FAISS_INDEX_TYPE,
+        artifact_profile=ARTIFACT_PROFILE,
+        load_item_embedding_fallback=LOAD_ITEM_EMBEDDING_FALLBACK,
+    )
 
 
 def _format_artifact_plan(
@@ -794,6 +776,39 @@ def _format_artifact_plan(
     version: str,
 ) -> list[tuple[str, Path]]:
     return [(remote.format(version=version), local) for remote, local in plan]
+
+
+def _refresh_local_manifest_status() -> Optional[dict]:
+    """加载本地 serving_manifest.json 并按需校验产物 SHA-256。"""
+    global serving_manifest, manifest_verified
+    manifest = _load_serving_manifest_file(DATA_DIR / "serving_manifest.json")
+    serving_manifest = manifest
+    if manifest is None:
+        manifest_verified = None
+        return None
+    if not VERIFY_ARTIFACT_CHECKSUMS:
+        manifest_verified = None
+        return manifest
+    artifact_paths = {
+        "twoTowerModel": MODELS_DIR / "two_tower_epoch_latest.pt",
+        "phoenixModel": MODELS_DIR / "phoenix_epoch_latest.pt",
+        "phoenixV2Model": MODELS_DIR / "phoenix_v2_inference.pt",
+        "phoenixV2Config": MODELS_DIR / "phoenix_v2_config.json",
+        "faissIndex": MODELS_DIR / f"faiss_{FAISS_INDEX_TYPE}.index",
+        "faissIdMapping": MODELS_DIR / "faiss_id_mapping.pkl",
+        "newsVocab": DATA_DIR / "news_vocab.pkl",
+        "userVocab": DATA_DIR / "user_vocab.pkl",
+        "itemEmbeddings": DATA_DIR / "item_embeddings.npy",
+        "newsDict": DATA_DIR / "news_dict.pkl",
+        "weightedCalibrator": MODELS_DIR / "weighted_calibrator.json",
+        "realGraphGbt": MODELS_DIR / "realgraph_gbt.json",
+        "socialPhoenixLinear": MODELS_DIR / "social_phoenix_linear.json",
+    }
+    ok, errors = _verify_manifest_checksums(manifest, artifact_paths, strict=False)
+    manifest_verified = ok
+    if not ok:
+        print(f"  ❌ Artifact checksum mismatch: {errors}")
+    return manifest
 
 
 def sync_artifacts_from_gcs_if_configured(component: str = "full") -> bool:
@@ -841,6 +856,10 @@ def sync_artifacts_from_gcs_if_configured(component: str = "full") -> bool:
         if local.exists() and not should_refresh:
             continue
         _download_gcs_blob(bucket, remote, local)
+
+    manifest = _refresh_local_manifest_status()
+    if manifest is not None and manifest_verified is False:
+        ok = False
 
     if ok:
         try:
@@ -919,11 +938,11 @@ def load_two_tower_sync(allow_download: bool = False):
     print("🚀 Loading Two-Tower model...")
     _sync_runtime_artifacts("two_tower", allow_download)
     _ensure_vocab_loaded()
+    _refresh_local_manifest_status()
+    if manifest_verified is False:
+        raise RuntimeError("Two-Tower 产物 SHA-256 校验失败，拒绝加载已损坏文件")
 
-    import sys
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    from model_arch import TwoTowerModel
+    from recsys.models.two_tower import TwoTowerModel
 
     model = TwoTowerModel(
         num_users=len(user_vocab),
@@ -1035,8 +1054,33 @@ def load_models_sync(allow_download: bool = False):
 
 # ========== API Endpoints ==========
 
+def _current_ann_evidence() -> Dict[str, Any]:
+    """根据当前已加载的模型、词表与清单生成 ANN 契约响应证据。"""
+    active_dim = EMBEDDING_DIM
+    if two_tower_model is not None:
+        try:
+            active_dim = int(two_tower_model.news_encoder.news_embedding.embedding_dim)
+        except Exception:
+            active_dim = EMBEDDING_DIM
+    elif faiss_index is not None:
+        try:
+            active_dim = int(faiss_index.d)
+        except Exception:
+            active_dim = EMBEDDING_DIM
+
+    return build_ann_response_evidence(
+        retrieval_embedding_dim=active_dim,
+        artifact_version=ARTIFACT_VERSION,
+        model_version=os.getenv("TWO_TOWER_MODEL_VERSION", ""),
+        faiss_index_type=FAISS_INDEX_TYPE,
+        idx_to_news_id=idx_to_news_id,
+        manifest=serving_manifest,
+    )
+
+
 @app.get("/health")
 async def health_check():
+    evidence = _current_ann_evidence() if (two_tower_model is not None or faiss_index is not None) else None
     return {
         "status": "ok", 
         "models_loaded": models_loaded, 
@@ -1048,6 +1092,9 @@ async def health_check():
         "faiss_enabled": faiss_index is not None,
         "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None,
         "embedding_dim": EMBEDDING_DIM,
+        "id_namespace": evidence.get("idNamespace") if evidence else None,
+        "embedding_space": evidence.get("embeddingSpace") if evidence else None,
+        "manifest_verified": manifest_verified,
         "item_embedding_fallback_loaded": item_embeddings_tensor is not None,
         "item_embedding_fallback_enabled": LOAD_ITEM_EMBEDDING_FALLBACK,
         "news_mapping_loaded": bool(_external_id_to_post_id_cache),
@@ -1112,11 +1159,12 @@ async def ann_retrieve(request: ANNRequest):
     for score, idx in zip(top_scores, top_indices):
         if idx < 0:  # FAISS 可能返回 -1 表示不足 k 个结果
             continue
-        news_id = idx_to_news_id.get(idx, "<UNK>")
+        news_id = idx_to_news_id.get(int(idx), "<UNK>")
         if news_id not in ("<PAD>", "<UNK>"):
             candidates.append({"postId": news_id, "score": float(score)})
     
-    return ANNResponse(candidates=candidates)
+    evidence = ANNResponseEvidence(**_current_ann_evidence())
+    return ANNResponse(candidates=candidates, evidence=evidence)
 
 @app.post("/phoenix/predict", response_model=PhoenixResponse)
 async def phoenix_predict(request: PhoenixRequest):
@@ -2300,17 +2348,15 @@ def import_news_corpus_status(request: Request):
     }
 
 # ========== 定时任务 (News Crawler) ==========
-from apscheduler.schedulers.background import BackgroundScheduler
-from crawler.news_fetcher import NewsCrawler
-
-_crawler_singleton: Optional[NewsCrawler] = None
+_crawler_singleton: Optional[Any] = None
 
 
-def _get_crawler_singleton() -> NewsCrawler:
-    # Model/session init can be slow on cold starts. Reuse a single crawler instance
-    # per process for predictable latency in Cloud Scheduler calls.
+def _get_crawler_singleton():
+    # 按需延迟导入与单例缓存，避免冷启动及测试环境强依赖爬虫组件
     global _crawler_singleton
     if _crawler_singleton is None:
+        from crawler.news_fetcher import NewsCrawler
+
         _crawler_singleton = NewsCrawler()
     return _crawler_singleton
 
@@ -2372,6 +2418,8 @@ def start_scheduler():
     if not ENABLE_INTERNAL_SCHEDULER:
         print("⏸️ [Scheduler] Internal scheduler disabled by ENABLE_INTERNAL_SCHEDULER")
         return
+    from apscheduler.schedulers.background import BackgroundScheduler
+
     # 仅在非 Worker 进程中启动 (避免多进程重复执行，简单起见这里假设单进程)
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_crawler_job, 'interval', hours=1)
