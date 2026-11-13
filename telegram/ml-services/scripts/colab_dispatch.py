@@ -38,6 +38,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gcs-archive-uri", default="", help="可选用户行为归档 GCS URI（gs://...）")
     parser.add_argument("--dataset-uri", default="", help="数据集 GCS 前缀（如 gs://telegram-467705-recsys/datasets/...）")
     parser.add_argument("--drive-data-dir", default="", help="预挂载 Drive 数据目录（如 /content/drive/MyDrive/...）")
+    parser.add_argument("--drive-output-dir", default="", help="预挂载 Drive 输出同步目录（自动写回模型产物与分片数据集）")
+    parser.add_argument("--drive-init-from", default="", help="预挂载 Drive 预训练 Phoenix V2 检查点目录")
+    parser.add_argument("--drive-aux-samples-dir", default="", help="预挂载 Drive 微调回放锚点数据目录")
     parser.add_argument("--init-from-gcs", default="", help="预训练检查点 GCS URI（如 gs://.../pretrain/<ver>/phoenix_v2）")
     parser.add_argument("--aux-samples-uri", default="", help="迁移微调纯训练回放锚点数据 GCS 前缀")
     parser.add_argument("--aux-max-groups", type=int, default=2000, help="回放锚点最大混入 slate 组数")
@@ -61,6 +64,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None, help="覆盖 profile 默认 batch size")
     parser.add_argument("--lr", type=float, default=None, help="覆盖 profile 默认学习率")
     parser.add_argument("--backbone-lr-scale", type=float, default=None, help="覆盖微调主干差分学习率缩放因子")
+    parser.add_argument("--user-sample-mod", type=int, default=10, help="KuaiRand 确定性用户取模抽样比例（1 表示全量，10 表示 1/10）")
+    parser.add_argument("--max-train-slates", type=int, default=400_000, help="KuaiRand 预处理保留的最大训练 slate 数")
+    parser.add_argument("--max-val-rand-slates", type=int, default=50_000, help="KuaiRand 预处理保留的最大随机验证 slate 数")
+    parser.add_argument("--shard-slates", type=int, default=50_000, help="KuaiRand 流式分片大小（每个 part_*.pkl.gz 的 slate 数）")
     parser.add_argument("--max-cpu-p95-ms", type=float, default=120.0, help="Phoenix V2 推理 P95 门禁阈值(ms)")
     parser.add_argument(
         "--pass-env",
@@ -114,6 +121,9 @@ def main() -> None:
         max_cpu_p95_ms=args.max_cpu_p95_ms,
         gcs_dataset_uri=args.dataset_uri,
         drive_data_dir=args.drive_data_dir,
+        drive_output_dir=args.drive_output_dir,
+        drive_init_from=args.drive_init_from,
+        drive_aux_samples_dir=args.drive_aux_samples_dir,
         gcs_init_from_uri=args.init_from_gcs,
         gcs_aux_samples_uri=args.aux_samples_uri,
         aux_max_groups=args.aux_max_groups,
@@ -126,6 +136,10 @@ def main() -> None:
         batch_size_override=args.batch_size,
         lr_override=args.lr,
         backbone_lr_scale_override=args.backbone_lr_scale,
+        user_sample_mod=args.user_sample_mod,
+        max_train_slates=args.max_train_slates,
+        max_val_rand_slates=args.max_val_rand_slates,
+        shard_slates=args.shard_slates,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

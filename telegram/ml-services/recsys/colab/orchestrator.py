@@ -118,6 +118,9 @@ def dispatch_colab_job(
     max_cpu_p95_ms: float = 120.0,
     gcs_dataset_uri: str = "",
     drive_data_dir: str = "",
+    drive_output_dir: str = "",
+    drive_init_from: str = "",
+    drive_aux_samples_dir: str = "",
     gcs_init_from_uri: str = "",
     gcs_aux_samples_uri: str = "",
     aux_max_groups: int = 2000,
@@ -130,6 +133,10 @@ def dispatch_colab_job(
     batch_size_override: Optional[int] = None,
     lr_override: Optional[float] = None,
     backbone_lr_scale_override: Optional[float] = None,
+    user_sample_mod: int = 10,
+    max_train_slates: int = 400_000,
+    max_val_rand_slates: int = 50_000,
+    shard_slates: int = 50_000,
 ) -> Dict[str, Any]:
     """
     编排一次端到端的 Colab 远端训练作业：
@@ -163,6 +170,9 @@ def dispatch_colab_job(
         max_cpu_p95_ms=max_cpu_p95_ms,
         gcs_dataset_uri=gcs_dataset_uri,
         drive_data_dir=drive_data_dir,
+        drive_output_dir=drive_output_dir,
+        drive_init_from=drive_init_from,
+        drive_aux_samples_dir=drive_aux_samples_dir,
         gcs_init_from_uri=gcs_init_from_uri,
         gcs_aux_samples_uri=gcs_aux_samples_uri,
         aux_max_groups=aux_max_groups,
@@ -173,6 +183,10 @@ def dispatch_colab_job(
         batch_size_override=batch_size_override,
         lr_override=lr_override,
         backbone_lr_scale_override=backbone_lr_scale_override,
+        user_sample_mod=user_sample_mod,
+        max_train_slates=max_train_slates,
+        max_val_rand_slates=max_val_rand_slates,
+        shard_slates=shard_slates,
     )
     worker_path.write_text(worker_code, encoding="utf-8")
 
@@ -185,6 +199,12 @@ def dispatch_colab_job(
         merged_remote_env["GCS_DATASET_URI"] = gcs_dataset_uri
     if drive_data_dir:
         merged_remote_env["DRIVE_DATA_DIR"] = drive_data_dir
+    if drive_output_dir:
+        merged_remote_env["DRIVE_OUTPUT_DIR"] = drive_output_dir
+    if drive_init_from:
+        merged_remote_env["DRIVE_INIT_FROM"] = drive_init_from
+    if drive_aux_samples_dir:
+        merged_remote_env["DRIVE_AUX_SAMPLES_DIR"] = drive_aux_samples_dir
     if gcs_init_from_uri:
         merged_remote_env["GCS_INIT_FROM_URI"] = gcs_init_from_uri
     if gcs_aux_samples_uri:

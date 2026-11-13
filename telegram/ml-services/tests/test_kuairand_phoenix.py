@@ -169,3 +169,72 @@ def test_kuairand_pit_conversion_no_leakage_random_split_and_dataset_ingest(tmp_
     assert ds[0]["candidates"][1]["labels"]["dwell"] == 1.0
     saved_manifest = json.loads((out_dir / "kuairand_phoenix_manifest.json").read_text(encoding="utf-8"))
     assert saved_manifest["schema"] == "phoenix_v2_kuairand_pit_v1"
+
+
+def test_kuairand_sharded_output_readable_by_phoenix_dataset(tmp_path: Path) -> None:
+    """验证流式分片模式 (shard_slates=1) 产出多个 part_*.pkl.gz 且可被 PhoenixV2Dataset 直接读取。"""
+    raw_dir = tmp_path / "KuaiRand-27K" / "data"
+    out_dir = tmp_path / "out_sharded"
+
+    _write_csv(
+        raw_dir / "video_features_basic_27k.csv",
+        ["video_id", "author_id", "video_type"],
+        [[v, 8000 + v, "NORMAL"] for v in range(1, 10)],
+    )
+    cols = [
+        "user_id",
+        "video_id",
+        "time_ms",
+        "is_click",
+        "is_like",
+        "is_follow",
+        "is_comment",
+        "is_forward",
+        "is_hate",
+        "long_view",
+        "play_time_ms",
+        "duration_ms",
+        "is_profile_enter",
+        "is_rand",
+        "tab",
+    ]
+    base_ts = 1_650_000_000_000
+    rows_std = []
+    rows_rand = []
+    # 两位用户分别积累足够历史并产出 1 个 train slate + 1 个 eval_random slate
+    for uid in (1, 2):
+        rows_std.extend([
+            [uid, 1, base_ts + 1_000, 1, 1, 0, 0, 0, 0, 1, 10000, 15000, 0, 0, 0],
+            [uid, 2, base_ts + 2_000, 1, 0, 0, 0, 0, 0, 0, 4000, 12000, 0, 0, 1],
+            [uid, 3, base_ts + 3_000, 0, 0, 0, 0, 0, 1, 0, 1000, 12000, 0, 0, 1],
+            [uid, 4, base_ts + 4_000, 1, 1, 0, 0, 0, 0, 1, 12000, 15000, 0, 0, 1],
+            [uid, 5, base_ts + 4_000, 0, 0, 0, 0, 0, 0, 0, 800, 15000, 0, 0, 1],
+        ])
+        rows_rand.append([uid, 6, base_ts + 8_000, 1, 0, 0, 0, 0, 0, 1, 9000, 12000, 0, 1, 1])
+
+    _write_csv(raw_dir / "log_standard_4_08_to_4_21_27k_part1.csv", cols, rows_std)
+    _write_csv(raw_dir / "log_random_4_22_to_5_08_27k.csv", cols, rows_rand)
+
+    report = convert_kuairand_to_phoenix_v2(
+        KuaiRandConvertConfig(
+            kuairand_dir=raw_dir,
+            output_dir=out_dir,
+            min_history=3,
+            num_buckets=2,
+            shard_slates=1,
+            chunk_size=4,
+            user_sample_mod=1,
+        )
+    )
+    assert report["sharded"] is True
+    assert report["trainSlates"] == 2
+    assert report["valRandSlates"] == 2
+    train_parts = sorted((out_dir / "train").glob("part_*.pkl.gz"))
+    eval_parts = sorted((out_dir / "eval_random").glob("part_*.pkl.gz"))
+    assert len(train_parts) >= 2
+    assert len(eval_parts) >= 2
+
+    train_ds = PhoenixV2Dataset(out_dir / "train", max_history=32, max_candidates=16)
+    eval_ds = PhoenixV2Dataset(out_dir / "eval_random", max_history=32, max_candidates=16)
+    assert len(train_ds) == 2
+    assert len(eval_ds) == 2

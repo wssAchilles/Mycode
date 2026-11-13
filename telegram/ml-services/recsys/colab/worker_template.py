@@ -319,6 +319,9 @@ def main() -> None:
     models_dir.mkdir(parents=True, exist_ok=True)
 
     drive_data_dir = str(JOB_CONFIG.get("drive_data_dir") or os.getenv("DRIVE_DATA_DIR", ""))
+    drive_output_dir = str(JOB_CONFIG.get("drive_output_dir") or os.getenv("DRIVE_OUTPUT_DIR", ""))
+    drive_init_from = str(JOB_CONFIG.get("drive_init_from") or os.getenv("DRIVE_INIT_FROM", ""))
+    drive_aux_samples_dir = str(JOB_CONFIG.get("drive_aux_samples_dir") or os.getenv("DRIVE_AUX_SAMPLES_DIR", ""))
     gcs_dataset_uri = str(JOB_CONFIG.get("gcs_dataset_uri") or os.getenv("GCS_DATASET_URI", ""))
     gcs_bucket = str(JOB_CONFIG.get("gcs_bucket") or os.getenv("GCS_BUCKET", ""))
     gcs_archive_uri = str(JOB_CONFIG.get("gcs_archive_uri") or os.getenv("GCS_ARCHIVE_URI", ""))
@@ -383,15 +386,19 @@ def main() -> None:
                     raise FileNotFoundError("kuairand-prep 需要 --drive-data-dir 或 --dataset-uri")
                 _download_gcs_prefix(gcs_dataset_uri, raw_dir)
             prep_out = data_dir / "kuairand_phoenix"
-            stats = convert_kuairand_to_phoenix_v2(
+            report = convert_kuairand_to_phoenix_v2(
                 KuaiRandConvertConfig(
-                    raw_dir=raw_dir,
-                    out_dir=prep_out,
+                    kuairand_dir=raw_dir,
+                    output_dir=prep_out,
                     max_history=int(JOB_CONFIG["max_history"]),
                     max_candidates=int(JOB_CONFIG["max_candidates"]),
+                    max_train_slates=int(JOB_CONFIG.get("max_train_slates", 400_000)),
+                    max_val_rand_slates=int(JOB_CONFIG.get("max_val_rand_slates", 50_000)),
+                    num_buckets=int(JOB_CONFIG.get("num_buckets", 32)),
+                    user_sample_mod=int(JOB_CONFIG.get("user_sample_mod", 10)),
+                    shard_slates=int(JOB_CONFIG.get("shard_slates", 50_000)),
                 )
             )
-            report = stats.to_dict()
             (models_dir / "kuairand_prep_report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -406,6 +413,12 @@ def main() -> None:
             print(json.dumps({"gatePassed": passed, "reasons": reasons, "details": gate_details}, ensure_ascii=False, indent=2), flush=True)
             if not passed:
                 raise RuntimeError(f"KuaiRand prep gate blocked: {reasons}")
+            if drive_output_dir:
+                dst_prep = Path(drive_output_dir)
+                dst_prep.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(prep_out, dst_prep, dirs_exist_ok=True)
+                shutil.copy2(models_dir / "kuairand_prep_report.json", dst_prep / "kuairand_prep_report.json")
+                print(f"[drive-sync] saved preprocessed shards -> {dst_prep}", flush=True)
             if JOB_CONFIG.get("publish_to_gcs") and gcs_bucket:
                 if not allow_pretrain_publish:
                     raise RuntimeError("KuaiRand preprocessed dataset publish requires --allow-pretrain-publish")
@@ -487,6 +500,19 @@ def main() -> None:
             print(json.dumps({"gatePassed": passed, "reasons": reasons, "details": gate_details}, ensure_ascii=False, indent=2), flush=True)
             if not passed:
                 raise RuntimeError(f"Pretrain gate blocked upload: {reasons}")
+            if drive_output_dir:
+                dst_pre = Path(drive_output_dir)
+                dst_pre.mkdir(parents=True, exist_ok=True)
+                for fname in (
+                    "phoenix_v2_inference.pt",
+                    "phoenix_v2_config.json",
+                    "phoenix_v2_train_report.json",
+                ):
+                    src_f = models_dir / fname
+                    if src_f.exists():
+                        shutil.copy2(src_f, dst_pre / fname)
+                shutil.copy2(data_dir / "pretrain_manifest.json", dst_pre / "pretrain_manifest.json")
+                print(f"[drive-sync] saved pretrain artifacts -> {dst_pre}", flush=True)
             if JOB_CONFIG.get("publish_to_gcs") and gcs_bucket:
                 if not allow_pretrain_publish:
                     raise RuntimeError("Pretrain publish blocked: pass --allow-pretrain-publish to upload under pretrain/<version>/")
@@ -525,13 +551,18 @@ def main() -> None:
                 raise FileNotFoundError(f"微调样本文件缺失: {samples_path}")
 
             init_ckpt: Path | None = None
-            if gcs_init_from_uri:
+            if drive_init_from and Path(drive_init_from).exists():
+                src_init = Path(drive_init_from)
+                init_ckpt = src_init / "phoenix_v2_inference.pt" if src_init.is_dir() else src_init
+            elif gcs_init_from_uri:
                 init_ckpt = _download_pretrained_checkpoint(gcs_init_from_uri, models_dir / "pretrained_init")
             elif (models_dir / "pretrained_init" / "phoenix_v2_inference.pt").exists():
                 init_ckpt = models_dir / "pretrained_init" / "phoenix_v2_inference.pt"
 
             aux_dir: Path | None = None
-            if gcs_aux_samples_uri:
+            if drive_aux_samples_dir and Path(drive_aux_samples_dir).exists():
+                aux_dir = Path(drive_aux_samples_dir)
+            elif gcs_aux_samples_uri:
                 aux_dir = data_dir / "aux_replay"
                 _download_gcs_prefix(gcs_aux_samples_uri, aux_dir)
 
@@ -602,6 +633,19 @@ def main() -> None:
         if not passed:
             raise RuntimeError(f"Promotion gate blocked upload: {reasons}")
 
+        if drive_output_dir:
+            dst_root = Path(drive_output_dir)
+            (dst_root / "models").mkdir(parents=True, exist_ok=True)
+            (dst_root / "data").mkdir(parents=True, exist_ok=True)
+            for item in models_dir.iterdir():
+                if item.is_file():
+                    shutil.copy2(item, dst_root / "models" / item.name)
+            for d_name in ("news_vocab.pkl", "user_vocab.pkl", "news_dict.pkl", "item_embeddings.npy", "preprocess_manifest.json", "serving_manifest.json"):
+                d_src = data_dir / d_name
+                if d_src.exists():
+                    shutil.copy2(d_src, dst_root / "data" / d_name)
+            print(f"[drive-sync] saved serving bundle -> {dst_root}", flush=True)
+
         if JOB_CONFIG.get("publish_to_gcs") and gcs_bucket:
             pub_profile = "phoenix-v2" if task in ("smoke", "phoenix-v2", "phoenix-v2-finetune") else "full"
             subprocess.run(
@@ -642,12 +686,19 @@ def render_remote_worker_script(
     max_cpu_p95_ms: float = 120.0,
     gcs_dataset_uri: str = "",
     drive_data_dir: str = "",
+    drive_output_dir: str = "",
+    drive_init_from: str = "",
+    drive_aux_samples_dir: str = "",
     gcs_init_from_uri: str = "",
     gcs_aux_samples_uri: str = "",
     aux_max_groups: int = 2000,
     base_artifact_version: str = "",
     faiss_index_type: str = "ivf_pq",
     allow_pretrain_publish: bool = False,
+    user_sample_mod: int = 10,
+    max_train_slates: int = 400_000,
+    max_val_rand_slates: int = 50_000,
+    shard_slates: int = 50_000,
     epochs_override: Optional[int] = None,
     batch_size_override: Optional[int] = None,
     lr_override: Optional[float] = None,
@@ -673,6 +724,9 @@ def render_remote_worker_script(
         "gcs_archive_uri": gcs_archive_uri,
         "gcs_dataset_uri": gcs_dataset_uri,
         "drive_data_dir": drive_data_dir,
+        "drive_output_dir": drive_output_dir,
+        "drive_init_from": drive_init_from,
+        "drive_aux_samples_dir": drive_aux_samples_dir,
         "gcs_init_from_uri": gcs_init_from_uri,
         "gcs_aux_samples_uri": gcs_aux_samples_uri,
         "aux_max_groups": int(aux_max_groups),
@@ -680,6 +734,10 @@ def render_remote_worker_script(
         "faiss_index_type": faiss_index_type,
         "publish_to_gcs": bool(publish_to_gcs),
         "allow_pretrain_publish": bool(allow_pretrain_publish),
+        "user_sample_mod": int(user_sample_mod),
+        "max_train_slates": int(max_train_slates),
+        "max_val_rand_slates": int(max_val_rand_slates),
+        "shard_slates": int(shard_slates),
         "max_cpu_p95_ms": float(max_cpu_p95_ms),
     }
     config_json = json.dumps(payload, ensure_ascii=False, indent=2)

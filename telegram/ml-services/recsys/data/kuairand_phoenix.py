@@ -73,7 +73,7 @@ class KuaiRandConvertConfig:
     num_buckets: int = 16
     user_sample_mod: int = 1  # >1 时按确定性哈希抽取约 1/N 用户的完整时间线
     chunk_size: int = 250_000
-    shard_slates: int = 0  # >0 时额外写为分片目录或主文件名+分片
+    shard_slates: int = 0  # >0 时将样本流式写入 train/ 与 eval_random/ 压缩分片目录，显著降低内存峰值
     exclude_ads: bool = True
     seed: int = 42
 
@@ -451,10 +451,9 @@ def _partition_interactions_to_buckets(
                     if col not in chunk.columns:
                         chunk[col] = -1 if col == "tab" else 0
                 if user_sample_mod > 1:
-                    keep_mask = chunk["user_id"].astype(str).map(
-                        lambda u: _user_bucket(u, user_sample_mod) == 0
-                    )
-                    chunk = chunk.loc[keep_mask]
+                    uniq_uids = chunk["user_id"].unique()
+                    keep_uids = {u for u in uniq_uids if _user_bucket(str(u), user_sample_mod) == 0}
+                    chunk = chunk[chunk["user_id"].isin(keep_uids)]
                     if chunk.empty:
                         continue
 
@@ -463,10 +462,20 @@ def _partition_interactions_to_buckets(
 
                 # 统一按固定列顺序序列化到临时桶文件，确保缺失列也能安全对齐
                 fixed_cols = list(_INTERACTION_COLUMNS) + (["author_id"] if "author_id" in chunk.columns else [])
+                uid_bucket_cache: Dict[str, int] = {}
                 for row_tuple in chunk[fixed_cols].itertuples(index=False, name=None):
                     uid_str = str(row_tuple[0]).strip()
-                    b_idx = _user_bucket(uid_str, num_buckets)
+                    b_idx = uid_bucket_cache.get(uid_str)
+                    if b_idx is None:
+                        b_idx = _user_bucket(uid_str, num_buckets)
+                        uid_bucket_cache[uid_str] = b_idx
                     writers[b_idx].writerow(row_tuple)
+
+                if stats.raw_rows_read % (chunk_size * 10) < chunk_size:
+                    print(
+                        f"[kuairand-pass1] file={file_path.name} raw_rows={stats.raw_rows_read} selected_rows={stats.selected_rows}",
+                        flush=True,
+                    )
     finally:
         for h in handles:
             h.close()
@@ -474,12 +483,34 @@ def _partition_interactions_to_buckets(
     return needed_videos
 
 
+def _write_slates_sharded(
+    slates: Sequence[Dict[str, Any]],
+    *,
+    shard_dir: Path,
+    bucket_idx: int,
+    shard_slates: int,
+) -> List[str]:
+    """按分片上限流式写出 gzip 压缩的分片文件并返回路径列表。"""
+    if not slates:
+        return []
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    written: List[str] = []
+    step = max(1, int(shard_slates))
+    for sub_idx, start in enumerate(range(0, len(slates), step)):
+        chunk = list(slates[start : start + step])
+        out_path = shard_dir / f"part_{bucket_idx:04d}_{sub_idx:03d}.pkl.gz"
+        with gzip.open(out_path, "wb") as f:
+            pickle.dump(chunk, f, protocol=pickle.HIGHEST_PROTOCOL)
+        written.append(str(out_path))
+    return written
+
+
 def convert_kuairand_to_phoenix_v2(config: KuaiRandConvertConfig) -> Dict[str, Any]:
     """
     将 KuaiRand-27K 原始 CSV 目录转换为 Phoenix V2 预训练集与无偏随机测试集。
     产物：
-      - phoenix_v2_kuairand_train.pkl（log_standard PIT 序列 slate）
-      - phoenix_v2_kuairand_val_rand.pkl（log_random 无偏探索 slate）
+      - shard_slates == 0: phoenix_v2_kuairand_train.pkl / phoenix_v2_kuairand_val_rand.pkl
+      - shard_slates > 0: train/part_*.pkl.gz 与 eval_random/part_*.pkl.gz 流式分片目录
       - kuairand_phoenix_manifest.json（统计摘要）
     """
     std_files, rand_files, video_basic_path = discover_kuairand_files(config.kuairand_dir)
@@ -491,6 +522,11 @@ def convert_kuairand_to_phoenix_v2(config: KuaiRandConvertConfig) -> Dict[str, A
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = KuaiRandConvertStats()
 
+    use_shards = int(config.shard_slates) > 0
+    train_shard_dir = output_dir / "train"
+    val_shard_dir = output_dir / "eval_random"
+    shard_files_train: List[str] = []
+    shard_files_val: List[str] = []
     train_slates: List[Dict[str, Any]] = []
     val_rand_slates: List[Dict[str, Any]] = []
     num_buckets = max(1, int(config.num_buckets))
@@ -511,6 +547,7 @@ def convert_kuairand_to_phoenix_v2(config: KuaiRandConvertConfig) -> Dict[str, A
             needed_video_ids=needed_videos,
             chunk_size=max(50_000, int(config.chunk_size)),
         )
+        stats.video_metadata_matched = len(video_meta)
         del needed_videos
 
         # Pass 2：逐桶加载单个用户分片，构建严格 PIT 历史与多候选 Slate
@@ -542,6 +579,8 @@ def convert_kuairand_to_phoenix_v2(config: KuaiRandConvertConfig) -> Dict[str, A
                         continue
                     by_user[uid_raw].append((ts_ms, vid_raw, row_dict))
 
+            bucket_train: List[Dict[str, Any]] = [] if use_shards else train_slates
+            bucket_val: List[Dict[str, Any]] = [] if use_shards else val_rand_slates
             for uid_raw in sorted(by_user.keys()):
                 _emit_user_slates(
                     uid_raw,
@@ -552,29 +591,62 @@ def convert_kuairand_to_phoenix_v2(config: KuaiRandConvertConfig) -> Dict[str, A
                     max_candidates=max(1, int(config.max_candidates)),
                     exclude_ads=bool(config.exclude_ads),
                     stats=stats,
-                    train_out=train_slates,
-                    val_rand_out=val_rand_slates,
+                    train_out=bucket_train,
+                    val_rand_out=bucket_val,
                     max_train_slates=int(config.max_train_slates),
                     max_val_rand_slates=int(config.max_val_rand_slates),
                 )
             del by_user
 
-    train_slates.sort(key=lambda s: s["action_time"])
-    val_rand_slates.sort(key=lambda s: s["action_time"])
+            if use_shards:
+                bucket_train.sort(key=lambda s: s["action_time"])
+                bucket_val.sort(key=lambda s: s["action_time"])
+                shard_files_train.extend(
+                    _write_slates_sharded(
+                        bucket_train,
+                        shard_dir=train_shard_dir,
+                        bucket_idx=b_idx,
+                        shard_slates=config.shard_slates,
+                    )
+                )
+                shard_files_val.extend(
+                    _write_slates_sharded(
+                        bucket_val,
+                        shard_dir=val_shard_dir,
+                        bucket_idx=b_idx,
+                        shard_slates=config.shard_slates,
+                    )
+                )
+                del bucket_train
+                del bucket_val
 
-    train_path = output_dir / config.train_filename
-    val_rand_path = output_dir / config.val_rand_filename
-    with open(train_path, "wb") as f:
-        pickle.dump(train_slates, f, protocol=pickle.HIGHEST_PROTOCOL)
-    with open(val_rand_path, "wb") as f:
-        pickle.dump(val_rand_slates, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(
+                f"[kuairand-pass2] bucket={b_idx + 1}/{num_buckets} train_slates={stats.train_slates} eval_slates={stats.val_rand_slates}",
+                flush=True,
+            )
+
+    if use_shards:
+        train_out_path = train_shard_dir
+        val_out_path = val_shard_dir
+    else:
+        train_slates.sort(key=lambda s: s["action_time"])
+        val_rand_slates.sort(key=lambda s: s["action_time"])
+        train_out_path = output_dir / config.train_filename
+        val_out_path = output_dir / config.val_rand_filename
+        with open(train_out_path, "wb") as f:
+            pickle.dump(train_slates, f, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(val_out_path, "wb") as f:
+            pickle.dump(val_rand_slates, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     manifest = {
         "schema": "phoenix_v2_kuairand_pit_v1",
+        "sharded": use_shards,
         "kuairandDir": str(config.kuairand_dir),
         "videoBasicFile": str(video_basic_path) if video_basic_path else None,
-        "trainSamplesPath": str(train_path),
-        "valRandSamplesPath": str(val_rand_path),
+        "trainSamplesPath": str(train_out_path),
+        "valRandSamplesPath": str(val_out_path),
+        "trainShardCount": len(shard_files_train) if use_shards else 1,
+        "valRandShardCount": len(shard_files_val) if use_shards else 1,
         "rawRowsRead": stats.raw_rows_read,
         "selectedRows": stats.selected_rows,
         "usersEmitted": stats.users_emitted,
@@ -613,6 +685,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-buckets", type=int, default=16, help="流式分桶数（越大内存越省）")
     parser.add_argument("--user-sample-mod", type=int, default=1, help="大于 1 时按 1/N 完整抽取用户时间线")
     parser.add_argument("--chunk-size", type=int, default=250_000, help="pandas 读取分块大小")
+    parser.add_argument("--shard-slates", type=int, default=0, help="大于 0 时流式写出 gzip 压缩分片目录")
     parser.add_argument("--include-ads", action="store_true", help="是否保留 video_type=AD 的商业广告视频")
     return parser.parse_args()
 
@@ -632,6 +705,7 @@ def main() -> None:
         num_buckets=args.num_buckets,
         user_sample_mod=args.user_sample_mod,
         chunk_size=args.chunk_size,
+        shard_slates=args.shard_slates,
         exclude_ads=not args.include_ads,
     )
     manifest = convert_kuairand_to_phoenix_v2(cfg)

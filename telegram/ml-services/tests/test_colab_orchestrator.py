@@ -467,3 +467,22 @@ def test_stage_drive_to_gcs_dry_run_and_missing_required_fail_closed() -> None:
             list_files_fn=lambda fid, tok: {k: v for k, v in fake_drive_files["kuairand_raw_ok"].items() if k != "log_random_4_22_to_5_08_27k.csv"},  # noqa: ARG005
             gcs_bucket=_FakeGcsBucket(),
         )
+
+
+def test_kuairand_prep_worker_uses_drive_output_and_sharding() -> None:
+    """校验 kuairand-prep-cpu 生成的远端 Worker 正确传入 kuairand_dir/output_dir/shard_slates 与 Drive 同步目录。"""
+    worker_text = render_remote_worker_script(
+        profile=COLAB_PROFILES["kuairand-prep-cpu"],
+        artifact_version="kuairand_pit_v1",
+        drive_data_dir="/content/drive/MyDrive/ml-services/data/KuaiRand/KuaiRand-27K/data",
+        drive_output_dir="/content/drive/MyDrive/ml-services/data/kuairand_phoenix_pit_v1",
+        user_sample_mod=10,
+        max_train_slates=400_000,
+        max_val_rand_slates=50_000,
+        shard_slates=50_000,
+    )
+    compile(worker_text, "worker_kuairand_prep_drive.py", "exec")
+    assert "kuairand_dir=raw_dir" in worker_text
+    assert "output_dir=prep_out" in worker_text
+    assert "shard_slates=" in worker_text
+    assert "/content/drive/MyDrive/ml-services/data/kuairand_phoenix_pit_v1" in worker_text
