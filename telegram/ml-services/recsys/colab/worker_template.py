@@ -585,6 +585,22 @@ def main() -> None:
             return
         elif task == "phoenix-v2-finetune":
             samples_path = data_dir / "phoenix_v2_samples.pkl"
+            archive_tar = Path("/content/local_archives_user_actions.tar.gz")
+            if archive_tar.exists():
+                import inspect as _inspect
+
+                arch_root = data_dir / "archives"
+                arch_root.mkdir(parents=True, exist_ok=True)
+                target_arch = Path(local_jsonl_dir) if local_jsonl_dir else (arch_root / "user_actions")
+                if not target_arch.exists() or not any(target_arch.rglob("*.jsonl*")):
+                    extract_base = target_arch.parent if target_arch.name == "user_actions" else target_arch
+                    extract_base.mkdir(parents=True, exist_ok=True)
+                    with tarfile.open(archive_tar, "r:gz") as tar:
+                        if "filter" in _inspect.signature(tar.extractall).parameters:
+                            tar.extractall(extract_base, filter="data")
+                        else:
+                            tar.extractall(extract_base)
+                local_jsonl_dir = str(target_arch)
             if not samples_path.exists() and (drive_data_dir or gcs_dataset_uri):
                 _stage_local_or_gcs(drive_dir=drive_data_dir, gcs_uri=gcs_dataset_uri, target_dir=data_dir)
             if not samples_path.exists() and (local_jsonl_dir or gcs_archive_uri or mongo_uri):

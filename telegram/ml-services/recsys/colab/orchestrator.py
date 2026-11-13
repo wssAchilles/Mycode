@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from recsys.colab.datasets import (
@@ -299,7 +300,12 @@ def dispatch_colab_job(
 
     should_stop = False
     try:
-        subprocess.run(plan["usage"], env=sub_env, check=True)
+        try:
+            subprocess.run(plan["usage"], env=sub_env, check=True)
+        except subprocess.CalledProcessError:
+            # 防止 oauth2/gcloud 偶发单次超时误报未授权，退避 2s 自动重试一次
+            time.sleep(2.0)
+            subprocess.run(plan["usage"], env=sub_env, check=True)
         if "new" in plan:
             subprocess.run(plan["new"], env=sub_env, check=True)
             should_stop = not keep_session

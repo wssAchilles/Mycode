@@ -111,6 +111,9 @@ def build_colab_subprocess_env(
     env["CLOUDSDK_CONFIG"] = account.resolved_cloudsdk_dir()
     env["COLAB_CLI_REQUEST_TIMEOUT"] = str(int(account.request_timeout_sec))
     env.setdefault("CLOUDSDK_CORE_CHECK_GCE", "False")
+    adc_path = Path(account.resolved_cloudsdk_dir()) / "application_default_credentials.json"
+    if adc_path.exists():
+        env.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(adc_path))
     if extra_local_env:
         for k, v in extra_local_env.items():
             env[str(k)] = str(v)
