@@ -70,9 +70,9 @@ def main():
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent.parent / "data"))
     parser.add_argument(
         "--profile",
-        choices=["full", "serving-lite"],
+        choices=["full", "serving-lite", "phoenix-v2"],
         default=os.getenv("ARTIFACT_PROFILE") or "full",
-        help="full uploads all training artifacts; serving-lite uploads only online serving files.",
+        help="full uploads all training artifacts; serving-lite uploads only online serving files; phoenix-v2 uploads Phoenix V2 and serving files.",
     )
     args = parser.parse_args()
 
