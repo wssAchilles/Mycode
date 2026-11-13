@@ -993,8 +993,29 @@ def load_retrieval_sync(allow_download: bool = False):
     print(f"  ✅ Retrieval path loaded: faiss={faiss_index is not None}, tensor_fallback={item_embeddings_tensor is not None}")
 
 
+from recsys.serving.phoenix_adapter import (
+    is_phoenix_v2_model as _is_phoenix_v2_model,
+    load_phoenix_model as _load_phoenix_adapter_model,
+    predict_with_phoenix as _predict_with_phoenix_adapter,
+    resolve_phoenix_max_candidates as _resolve_phoenix_max_candidates,
+)
+
+
+def _load_optional_weighted_calibrator() -> Optional[dict]:
+    cal_path = MODELS_DIR / "weighted_calibrator.json"
+    if not cal_path.exists():
+        return None
+    try:
+        import json
+
+        data = json.loads(cal_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 def load_phoenix_sync(allow_download: bool = False):
-    """Load Phoenix only when a full ranking artifact is available."""
+    """按 ARTIFACT_PROFILE 与本地产物可用性加载 Phoenix V2 或 V1 排序模型。"""
     global phoenix_model
 
     if phoenix_model is not None:
@@ -1005,32 +1026,36 @@ def load_phoenix_sync(allow_download: bool = False):
 
     print("🚀 Loading Phoenix model...")
     _sync_runtime_artifacts("phoenix", allow_download)
-    _ensure_vocab_loaded()
+    _refresh_local_manifest_status()
+    if manifest_verified is False:
+        raise RuntimeError("Phoenix 产物 SHA-256 校验失败，拒绝加载已损坏文件")
 
-    import sys
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    from phoenix_model import PhoenixRanker
+    v2_ready = (MODELS_DIR / "phoenix_v2_inference.pt").exists() and (MODELS_DIR / "phoenix_v2_config.json").exists()
+    if (DATA_DIR / "news_vocab.pkl").exists() and (DATA_DIR / "user_vocab.pkl").exists():
+        _ensure_vocab_loaded()
+    elif ARTIFACT_PROFILE != "phoenix-v2" and not v2_ready:
+        _ensure_vocab_loaded()
 
-    phoenix_path = _resolve_latest_model(
+    v1_path = _resolve_latest_model(
         "phoenix",
         PHOENIX_MODEL_PATH,
         prefer_downloaded=bool(DRIVE_ID_PHOENIX),
     )
-    if not phoenix_path.exists():
-        raise FileNotFoundError(f"Phoenix model not found: {phoenix_path}")
 
-    model = PhoenixRanker(
-        num_news=len(news_vocab),
+    model, variant, loaded_path = _load_phoenix_adapter_model(
+        models_dir=MODELS_DIR,
+        scripts_dir=SCRIPTS_DIR,
+        news_vocab=news_vocab or {},
+        device=device,
+        artifact_profile=ARTIFACT_PROFILE,
+        v1_checkpoint_path=v1_path,
         embedding_dim=PHOENIX_EMBEDDING_DIM,
         num_heads=PHOENIX_NUM_HEADS,
         num_layers=PHOENIX_NUM_LAYERS,
-    ).to(device)
-    model.load_state_dict(torch.load(phoenix_path, map_location=device, weights_only=True))
-    model.eval()
+    )
     phoenix_model = model
     _refresh_models_loaded_state()
-    print(f"  ✅ Phoenix model loaded: {phoenix_path.name}")
+    print(f"  ✅ Phoenix {variant} model loaded: {loaded_path.name}")
     return phoenix_model
 
 
@@ -1089,6 +1114,7 @@ async def health_check():
         "device": str(device),
         "two_tower_loaded": two_tower_model is not None,
         "phoenix_loaded": phoenix_model is not None,
+        "phoenix_variant": ("v2" if _is_phoenix_v2_model(phoenix_model) else "v1") if phoenix_model is not None else None,
         "faiss_enabled": faiss_index is not None,
         "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None,
         "embedding_dim": EMBEDDING_DIM,
@@ -1168,124 +1194,23 @@ async def ann_retrieve(request: ANNRequest):
 
 @app.post("/phoenix/predict", response_model=PhoenixResponse)
 async def phoenix_predict(request: PhoenixRequest):
-    """Phoenix Ranking 排序 (适配 TS Client)"""
+    """Phoenix Ranking 排序 (兼容 V1 与 V2 多任务排序模型)"""
     load_phoenix_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
-    
+
     if phoenix_model is None:
         raise HTTPException(status_code=503, detail="Phoenix model not loaded")
-    
-    # 提取历史: 从 userActionSequence 中提取 targetPostId
-    history_ids = []
-    if request.userActionSequence:
-        for action in request.userActionSequence:
-            if "targetPostId" in action:
-                history_ids.append(str(action["targetPostId"]))
-    
-    # 如果没有行为序列，使用空
-    history_indices = [news_vocab.get(nid, news_vocab.get("<UNK>", 1)) for nid in history_ids]
-    
-    if len(history_indices) > PHOENIX_MAX_HISTORY:
-        history_indices = history_indices[-PHOENIX_MAX_HISTORY:]
-    else:
-        history_indices = history_indices + [0] * (PHOENIX_MAX_HISTORY - len(history_indices))
-        
-    # 提取候选: 从 candidates 对象列表中提取 postId
-    candidate_ids = [c.postId for c in request.candidates]
 
-    # Guard: PhoenixRanker uses a fixed-size positional embedding (default 512).
-    # If we pass too many candidates, seq_len will exceed position_embedding and crash.
-    try:
-        max_seq = int(getattr(getattr(phoenix_model, "position_embedding", None), "num_embeddings", 512))
-    except Exception:
-        max_seq = 512
-    max_candidates = max(1, max_seq - int(PHOENIX_MAX_HISTORY))
-    if len(candidate_ids) > max_candidates:
-        candidate_ids = candidate_ids[:max_candidates]
-    payload_candidates = request.candidates[: len(candidate_ids)]
-    candidate_indices = [news_vocab.get(nid, news_vocab.get("<UNK>", 1)) for nid in candidate_ids]
-    
-    history_tensor = torch.tensor([history_indices], dtype=torch.long, device=device)
-    candidate_tensor = torch.tensor([candidate_indices], dtype=torch.long, device=device)
-    
-    with torch.no_grad():
-        outputs = phoenix_model(history_tensor, candidate_tensor)
-        click_probs = torch.sigmoid(outputs["click"]).cpu().numpy()[0]
-        like_probs = torch.sigmoid(outputs["like"]).cpu().numpy()[0]
-        reply_probs = torch.sigmoid(outputs["reply"]).cpu().numpy()[0]
-        repost_probs = torch.sigmoid(outputs["repost"]).cpu().numpy()[0]
-
-    predictions = []
-    def _clamp01(x: float) -> float:
-        if x < 0.0:
-            return 0.0
-        if x > 1.0:
-            return 1.0
-        return x
-
-    for i, cid in enumerate(candidate_ids):
-        cand = payload_candidates[i] if i < len(payload_candidates) else None
-        in_net = bool(getattr(cand, "inNetwork", False)) if cand is not None else False
-        has_video = bool(getattr(cand, "hasVideo", False)) if cand is not None else False
-        video_dur = getattr(cand, "videoDurationSec", None) if cand is not None else None
-
-        click = float(click_probs[i])
-        like = float(like_probs[i])
-        reply = float(reply_probs[i])
-        repost = float(repost_probs[i])
-
-        # Enrich a fuller multi-action vector in a stable way.
-        # This keeps the API aligned with x-algorithm even when the local Phoenix model only has a subset of heads.
-        quote = _clamp01(repost * 0.25)
-        profile_click = _clamp01(click * 0.15)
-        share = _clamp01(repost * 0.20 + like * 0.10 + click * 0.05)
-        share_via_dm = _clamp01(share * 0.25)
-        share_via_copy = _clamp01(share * 0.20)
-        photo_expand = _clamp01(click * 0.10)
-        quoted_click = _clamp01(click * 0.10)
-        dwell = _clamp01(click * 0.20 + 0.02)
-        dwell_time = _clamp01(dwell)  # normalized continuous signal
-        follow_author = _clamp01(like * 0.03 + reply * 0.02)
-
-        # Negative actions: keep conservative small priors; prefer backend policy for stronger controls.
-        not_interested = _clamp01(0.02 + (0.01 if (not in_net) else 0.0) + (0.02 if click < 0.05 else 0.0))
-        block_author = _clamp01(0.001 + (0.001 if (not in_net) else 0.0) + (0.001 if not_interested > 0.04 else 0.0))
-        mute_author = _clamp01(0.002 + (0.001 if (not in_net) else 0.0))
-        report = _clamp01(0.0005 + (0.0005 if (not in_net) else 0.0))
-
-        # Video quality view: only meaningful for sufficiently long videos.
-        vqv = 0.0
-        try:
-            if has_video and video_dur is not None and float(video_dur) > 5.0:
-                vqv = _clamp01(click * 0.20)
-        except Exception:
-            vqv = 0.0
-
-        predictions.append({
-            "postId": cid,
-            "click": click,
-            "like": like,
-            "reply": reply,
-            "repost": repost,
-            "quote": quote,
-            "quotedClick": quoted_click,
-            "photoExpand": photo_expand,
-            "profileClick": profile_click,
-            "share": share,
-            "shareViaDm": share_via_dm,
-            "shareViaCopyLink": share_via_copy,
-            "dwell": dwell,
-            "videoQualityView": vqv,
-            "dwellTime": dwell_time,
-            "followAuthor": follow_author,
-            "notInterested": not_interested,
-            "blockAuthor": block_author,
-            "muteAuthor": mute_author,
-            "report": report,
-            # Backward compatible aliases
-            "dismiss": not_interested,
-            "block": block_author,
-        })
-    
+    calibrator = _load_optional_weighted_calibrator()
+    predictions = _predict_with_phoenix_adapter(
+        phoenix_model,
+        user_id=request.userId,
+        user_action_sequence=request.userActionSequence,
+        candidates=request.candidates,
+        news_vocab=news_vocab or {},
+        device=device,
+        phoenix_max_history=PHOENIX_MAX_HISTORY,
+        calibrator=calibrator,
+    )
     return PhoenixResponse(predictions=predictions)
 
 # ========== Combined Feed Recommend ==========
@@ -1523,13 +1448,11 @@ async def feed_recommend(request: FeedRecommendRequest):
 
     # Only score news posts that have `newsMetadata.externalId` with Phoenix.
     phoenix_candidates: List[PhoenixCandidatePayload] = []
-    phoenix_max_seq = 512
-    try:
-        if phoenix_model is not None:
-            phoenix_max_seq = int(getattr(getattr(phoenix_model, "position_embedding", None), "num_embeddings", 512))
-    except Exception:
-        phoenix_max_seq = 512
-    phoenix_max_candidates = max(1, phoenix_max_seq - int(PHOENIX_MAX_HISTORY))
+    phoenix_max_candidates = (
+        _resolve_phoenix_max_candidates(phoenix_model, int(PHOENIX_MAX_HISTORY))
+        if phoenix_model is not None
+        else max(1, 512 - int(PHOENIX_MAX_HISTORY))
+    )
 
     # If we have a lot of news candidates, only send a top slice into Phoenix to avoid seq-len overflow.
     # For the remainder, we fall back to the rule score (industrial degrade).
