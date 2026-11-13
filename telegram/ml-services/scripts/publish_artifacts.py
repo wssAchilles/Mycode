@@ -70,9 +70,9 @@ def main():
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent.parent / "data"))
     parser.add_argument(
         "--profile",
-        choices=["full", "serving-lite", "phoenix-v2"],
+        choices=["full", "serving-lite", "phoenix-v2", "pretrain"],
         default=os.getenv("ARTIFACT_PROFILE") or "full",
-        help="full uploads all training artifacts; serving-lite uploads only online serving files; phoenix-v2 uploads Phoenix V2 and serving files.",
+        help="full/serving-lite/phoenix-v2 publish under artifacts/<version>/; pretrain publishes strictly under pretrain/<version>/.",
     )
     args = parser.parse_args()
 
@@ -95,6 +95,34 @@ def main():
     if str(root_dir) not in sys.path:
         sys.path.insert(0, str(root_dir))
     from recsys.contracts.artifacts import build_serving_manifest
+
+    if args.profile == "pretrain":
+        v2_model = models_dir / "phoenix_v2_inference.pt"
+        v2_cfg = models_dir / "phoenix_v2_config.json"
+        if not v2_model.exists() or not v2_cfg.exists():
+            raise SystemExit("missing phoenix_v2_inference.pt or phoenix_v2_config.json for pretrain profile")
+        manifest_payload = build_serving_manifest(
+            version=args.version,
+            profile="pretrain",
+            faiss_index_type=args.faiss_index_type,
+            models_dir=models_dir,
+            data_dir=data_dir,
+            model_version=args.version,
+            include_checksums=True,
+        )
+        with tempfile.TemporaryDirectory(prefix="recsys_pretrain_manifest_") as tmp_dir:
+            pretrain_manifest = Path(tmp_dir) / "pretrain_manifest.json"
+            pretrain_manifest.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            pretrain_files = [
+                (v2_model, f"pretrain/{args.version}/phoenix_v2/model.pt", "application/octet-stream"),
+                (v2_cfg, f"pretrain/{args.version}/phoenix_v2/config.json", "application/json"),
+                (pretrain_manifest, f"pretrain/{args.version}/manifest/pretrain_manifest.json", "application/json"),
+                (models_dir / "phoenix_v2_train_report.json", f"pretrain/{args.version}/manifest/phoenix_v2_train_report.json", "application/json"),
+            ]
+            for src, dst, ctype in pretrain_files:
+                if src.exists():
+                    _upload_file(bucket, src, dst, content_type=ctype)
+        return
 
     faiss_index = models_dir / f"faiss_{args.faiss_index_type}.index"
     faiss_map = models_dir / "faiss_id_mapping.pkl"

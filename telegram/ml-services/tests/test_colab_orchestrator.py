@@ -237,3 +237,233 @@ def test_colab_dispatch_dry_run_cli_and_finally_stop_guard(tmp_path: Path, monke
 
     assert ["usage", "new", "upload", "exec", "stop"] == [c[5] for c in calls]
     assert calls[-1][-2:] == ["--session", "sess-guard-test"]
+
+
+def test_all_colab_profiles_compile_and_session_reuse_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """校验所有新增 Profile 远端 Worker 语法编译正确性，以及会话复用与保留生命周期契约。"""
+    for prof_name, profile in COLAB_PROFILES.items():
+        worker_text = render_remote_worker_script(
+            profile=profile,
+            artifact_version="v_test",
+            gcs_bucket="telegram-467705-recsys",
+            publish_to_gcs=True,
+            gcs_dataset_uri="gs://telegram-467705-recsys/datasets/kuairand_phoenix/v1",
+            gcs_init_from_uri="gs://telegram-467705-recsys/pretrain/pre_v1/phoenix_v2",
+            gcs_aux_samples_uri="gs://telegram-467705-recsys/datasets/kuairand_phoenix/v1/train",
+            base_artifact_version="2026-04-29_kuai_lite256",
+            allow_pretrain_publish=True,
+        )
+        compile(worker_text, f"worker_{prof_name}.py", "exec")
+        assert "[heartbeat]" in worker_text
+        if profile.task == "two-tower":
+            assert "build_faiss_index.py" in worker_text
+        if profile.task == "phoenix-v2-pretrain":
+            assert '"checkpoint_role": "pretrain_only"' in worker_text
+            assert '"pretrain"' in worker_text
+        if profile.task == "phoenix-v2-finetune":
+            assert "_stage_base_serving_artifacts" in worker_text
+            assert "reset_id_hash_embeddings_on_init" in worker_text
+
+    # reuse_session=True 必须显式指定 session_name（fail-closed）
+    with pytest.raises(ValueError, match="session_name"):
+        dispatch_colab_job(
+            profile_name="smoke-cpu",
+            artifact_version="reuse_err",
+            ml_services_dir=_ML_SERVICES_ROOT,
+            staging_dir=tmp_path / "reuse_err",
+            reuse_session=True,
+            dry_run=True,
+        )
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, env=None, check=False: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    res = dispatch_colab_job(
+        profile_name="phoenix-v2-pretrain-t4",
+        artifact_version="pre_v1",
+        ml_services_dir=_ML_SERVICES_ROOT,
+        staging_dir=tmp_path / "reuse_keep",
+        session_name="warm-t4-session",
+        reuse_session=True,
+        keep_session=True,
+        dry_run=False,
+    )
+    assert res["reuseSession"] is True and res["keepSession"] is True
+    assert ["usage", "upload", "exec"] == [c[5] for c in calls]
+
+
+def test_pretrain_isolation_two_tower_faiss_and_serving_base_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """校验 pretrain_only 阻断线上门禁、two-tower 强制校验 FAISS 索引以及 --profile pretrain 隔离路径上传。"""
+    import numpy as np
+
+    models_dir = tmp_path / "models"
+    data_dir = tmp_path / "data"
+    models_dir.mkdir(parents=True)
+    data_dir.mkdir(parents=True)
+
+    # 1. pretrain_only 模型默认必须被 serving 门禁拦截，即使权重和配置完整且延迟达标
+    (models_dir / "phoenix_v2_inference.pt").write_bytes(b"pt-bytes")
+    (models_dir / "phoenix_v2_config.json").write_text('{"dim": 128}', encoding="utf-8")
+    pre_manifest = build_serving_manifest(
+        version="pre_01",
+        profile="pretrain",
+        faiss_index_type="ivf_pq",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        include_checksums=True,
+    )
+    (data_dir / "pretrain_manifest.json").write_text(json.dumps(pre_manifest), encoding="utf-8")
+    (data_dir / "serving_manifest.json").write_text(json.dumps(pre_manifest), encoding="utf-8")
+    report_pre = {"checkpointRole": "pretrain_only", "cpuBenchmark": {"cpuFp32P95Ms": 12.0}, "epochs": [{"trainLoss": 0.4}]}
+
+    ok_serve, reasons_serve, _ = evaluate_promotion_gate(
+        profile_name="phoenix-v2-pretrain-t4",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        train_report=report_pre,
+        allow_pretrain_only=False,
+    )
+    assert not ok_serve and "pretrain_only_checkpoint_not_for_serving" in reasons_serve
+
+    ok_pre, reasons_pre, _ = evaluate_promotion_gate(
+        profile_name="phoenix-v2-pretrain-t4",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        train_report=report_pre,
+        allow_pretrain_only=True,
+        manifest_filename="pretrain_manifest.json",
+    )
+    assert ok_pre, reasons_pre
+
+    # 2. two-tower 缺少 FAISS 索引时必须被拦截，补齐后放行
+    (models_dir / "two_tower_epoch_latest.pt").write_bytes(b"tt-bytes")
+    np.save(data_dir / "item_embeddings.npy", np.ones((4, 8), dtype=np.float32))
+    (data_dir / "news_vocab.pkl").write_bytes(b"nv")
+    (data_dir / "user_vocab.pkl").write_bytes(b"uv")
+    tt_manifest_incomplete = build_serving_manifest(
+        version="tt_01",
+        profile="full",
+        faiss_index_type="ivf_pq",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        include_checksums=True,
+    )
+    (data_dir / "serving_manifest.json").write_text(json.dumps(tt_manifest_incomplete), encoding="utf-8")
+
+    ok_tt_bad, reasons_tt_bad, _ = evaluate_promotion_gate(
+        profile_name="two-tower-t4",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        train_report={"maxUnitNormError": 1e-6},
+    )
+    assert not ok_tt_bad and any("faiss_ivf_pq.index" in r for r in reasons_tt_bad)
+
+    (models_dir / "faiss_ivf_pq.index").write_bytes(b"faiss-idx")
+    (models_dir / "faiss_id_mapping.pkl").write_bytes(b"faiss-map")
+    tt_manifest_complete = build_serving_manifest(
+        version="tt_01",
+        profile="full",
+        faiss_index_type="ivf_pq",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        include_checksums=True,
+    )
+    (data_dir / "serving_manifest.json").write_text(json.dumps(tt_manifest_complete), encoding="utf-8")
+    ok_tt, reasons_tt, _ = evaluate_promotion_gate(
+        profile_name="two-tower-t4",
+        models_dir=models_dir,
+        data_dir=data_dir,
+        train_report={"maxUnitNormError": 1e-6},
+    )
+    assert ok_tt, reasons_tt
+
+    # 3. publish_artifacts.py --profile pretrain 只写入 pretrain/<ver>/，绝不触碰 artifacts/
+    import scripts.publish_artifacts as pub_mod
+
+    uploaded_keys = []
+
+    class _FakeBlob:
+        def __init__(self, key: str):
+            self.key = key
+
+        def upload_from_filename(self, filename: str, content_type: str = "") -> None:  # noqa: ARG002
+            uploaded_keys.append(self.key)
+
+    class _FakeBucket:
+        name = "test-bucket"
+
+        def blob(self, key: str) -> _FakeBlob:
+            return _FakeBlob(key)
+
+    monkeypatch.setattr(pub_mod, "_get_gcs_bucket", lambda name: _FakeBucket())  # noqa: ARG005
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "publish_artifacts.py",
+            "--bucket",
+            "test-bucket",
+            "--version",
+            "pre_kuairand_v1",
+            "--models-dir",
+            str(models_dir),
+            "--data-dir",
+            str(data_dir),
+            "--profile",
+            "pretrain",
+        ],
+    )
+    pub_mod.main()
+    assert uploaded_keys
+    assert all(k.startswith("pretrain/pre_kuairand_v1/") for k in uploaded_keys)
+    assert not any(k.startswith("artifacts/") for k in uploaded_keys)
+
+
+def test_stage_drive_to_gcs_dry_run_and_missing_required_fail_closed() -> None:
+    """校验 Drive->GCS 中转规划对已上传等字节文件的跳过逻辑，以及缺失必需文件的 fail-closed 拦截。"""
+    import scripts.stage_drive_to_gcs as stager
+
+    fake_drive_files = {
+        "kuairand_raw_ok": {
+            "video_features_basic_27k.csv": {"id": "f1", "name": "video_features_basic_27k.csv", "size": "100"},
+            "log_standard_4_08_to_4_21_27k_part1.csv": {"id": "f2", "name": "log_standard_4_08_to_4_21_27k_part1.csv", "size": "200"},
+            "log_standard_4_08_to_4_21_27k_part2.csv": {"id": "f3", "name": "log_standard_4_08_to_4_21_27k_part2.csv", "size": "200"},
+            "log_standard_4_22_to_5_08_27k_part1.csv": {"id": "f4", "name": "log_standard_4_22_to_5_08_27k_part1.csv", "size": "300"},
+            "log_standard_4_22_to_5_08_27k_part2.csv": {"id": "f5", "name": "log_standard_4_22_to_5_08_27k_part2.csv", "size": "300"},
+            "log_random_4_22_to_5_08_27k.csv": {"id": "f6", "name": "log_random_4_22_to_5_08_27k.csv", "size": "50"},
+        }
+    }
+
+    class _FakeGcsBlob:
+        def __init__(self, key: str):
+            self.key = key
+            self.size = 100 if key.endswith("video_features_basic_27k.csv") else None
+
+        def exists(self) -> bool:
+            return self.size is not None
+
+    class _FakeGcsBucket:
+        def blob(self, key: str) -> _FakeGcsBlob:
+            return _FakeGcsBlob(key)
+
+    report = stager.stage_datasets_to_gcs(
+        dataset="kuairand_raw",
+        bucket_name="telegram-467705-recsys",
+        execute=False,
+        drive_token="fake-token",
+        list_files_fn=lambda fid, tok: fake_drive_files["kuairand_raw_ok"],  # noqa: ARG005
+        gcs_bucket=_FakeGcsBucket(),
+    )
+    assert report["dryRun"] is True
+    assert report["skippedFiles"] == 1
+    assert report["uploadFiles"] == 5
+    assert report["uploadBytes"] == 1050
+
+    with pytest.raises(FileNotFoundError, match="log_random_4_22_to_5_08_27k.csv"):
+        stager.stage_datasets_to_gcs(
+            dataset="kuairand_raw",
+            bucket_name="telegram-467705-recsys",
+            execute=False,
+            drive_token="fake-token",
+            list_files_fn=lambda fid, tok: {k: v for k, v in fake_drive_files["kuairand_raw_ok"].items() if k != "log_random_4_22_to_5_08_27k.csv"},  # noqa: ARG005
+            gcs_bucket=_FakeGcsBucket(),
+        )

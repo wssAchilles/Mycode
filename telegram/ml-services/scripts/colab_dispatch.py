@@ -36,8 +36,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--colab-config", default="~/.config/colab-cli/acct1.json", help="colab-cli 会话凭证文件")
     parser.add_argument("--gcs-bucket", default="", help="目标产物 GCS 桶名（不含 gs://）")
     parser.add_argument("--gcs-archive-uri", default="", help="可选用户行为归档 GCS URI（gs://...）")
+    parser.add_argument("--dataset-uri", default="", help="数据集 GCS 前缀（如 gs://telegram-467705-recsys/datasets/...）")
+    parser.add_argument("--drive-data-dir", default="", help="预挂载 Drive 数据目录（如 /content/drive/MyDrive/...）")
+    parser.add_argument("--init-from-gcs", default="", help="预训练检查点 GCS URI（如 gs://.../pretrain/<ver>/phoenix_v2）")
+    parser.add_argument("--aux-samples-uri", default="", help="迁移微调纯训练回放锚点数据 GCS 前缀")
+    parser.add_argument("--aux-max-groups", type=int, default=2000, help="回放锚点最大混入 slate 组数")
+    parser.add_argument("--base-artifact-version", default="", help="微调发布合入的基线 Two-Tower/FAISS 版本号")
+    parser.add_argument(
+        "--faiss-index-type",
+        choices=["flat", "ivf", "hnsw", "ivf_pq"],
+        default="ivf_pq",
+        help="FAISS 索引构建与验证类型",
+    )
     parser.add_argument("--publish", action="store_true", help="通过门禁校验后上传产出到 GCS")
+    parser.add_argument(
+        "--allow-pretrain-publish",
+        action="store_true",
+        help="显式允许 pretrain/预处理阶段向隔离前缀 gs://<bucket>/pretrain/ 或 datasets/ 上传",
+    )
     parser.add_argument("--session", default=None, help="自定义远端会话名")
+    parser.add_argument("--reuse-session", action="store_true", help="复用已认证/挂载的现有具名会话（跳过 colab new）")
+    parser.add_argument("--keep-session", action="store_true", help="作业完成后保留会话不自动 colab stop")
+    parser.add_argument("--epochs", type=int, default=None, help="覆盖 profile 默认训练轮数")
+    parser.add_argument("--batch-size", type=int, default=None, help="覆盖 profile 默认 batch size")
+    parser.add_argument("--lr", type=float, default=None, help="覆盖 profile 默认学习率")
+    parser.add_argument("--backbone-lr-scale", type=float, default=None, help="覆盖微调主干差分学习率缩放因子")
     parser.add_argument("--max-cpu-p95-ms", type=float, default=120.0, help="Phoenix V2 推理 P95 门禁阈值(ms)")
     parser.add_argument(
         "--pass-env",
@@ -89,6 +112,20 @@ def main() -> None:
         session_name=args.session,
         dry_run=args.dry_run,
         max_cpu_p95_ms=args.max_cpu_p95_ms,
+        gcs_dataset_uri=args.dataset_uri,
+        drive_data_dir=args.drive_data_dir,
+        gcs_init_from_uri=args.init_from_gcs,
+        gcs_aux_samples_uri=args.aux_samples_uri,
+        aux_max_groups=args.aux_max_groups,
+        base_artifact_version=args.base_artifact_version,
+        faiss_index_type=args.faiss_index_type,
+        allow_pretrain_publish=args.allow_pretrain_publish,
+        reuse_session=args.reuse_session,
+        keep_session=args.keep_session,
+        epochs_override=args.epochs,
+        batch_size_override=args.batch_size,
+        lr_override=args.lr,
+        backbone_lr_scale_override=args.backbone_lr_scale,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
