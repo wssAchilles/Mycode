@@ -378,3 +378,125 @@ def test_sidecars_social_phoenix_realgraph_gbt_and_platt_contracts(tmp_path: Pat
     assert calibrator["method"] == "platt"
     calibrated = apply_platt_calibration("click", 0.5, calibrator)
     assert 0.0 <= calibrated <= 1.0
+
+
+def test_phoenix_v2_two_stage_pretrain_transfer_and_unbiased_eval(tmp_path: Path) -> None:
+    """验证 KuaiRand 预训练 -> 本域微调两阶段迁移契约：架构继承、ID 重置、差分学习率、仅训练回放与无偏评估。"""
+    import gzip
+
+    from recsys.training.phoenix_v2_trainer import (
+        PhoenixV2TrainConfig,
+        _build_optimizer_param_groups,
+        _load_pretrained_weights,
+        _select_model,
+        train_phoenix_v2,
+    )
+
+    pretrain_samples = _build_synthetic_training_samples(24)
+    eval_samples = _build_synthetic_training_samples(6)
+    finetune_samples = _build_synthetic_training_samples(16)
+
+    pretrain_dir = tmp_path / "pretrain_shards"
+    pretrain_dir.mkdir(parents=True, exist_ok=True)
+    with gzip.open(pretrain_dir / "train_000.pkl.gz", "wb") as f:
+        pickle.dump(pretrain_samples, f)
+
+    eval_path = tmp_path / "unbiased_eval.pkl"
+    with open(eval_path, "wb") as f:
+        pickle.dump(eval_samples, f)
+
+    finetune_path = tmp_path / "finetune_samples.pkl"
+    with open(finetune_path, "wb") as f:
+        pickle.dump(finetune_samples, f)
+
+    pre_models = tmp_path / "pre_models"
+    pre_report = train_phoenix_v2(
+        PhoenixV2TrainConfig(
+            data_dir=tmp_path,
+            models_dir=pre_models,
+            samples_path=pretrain_dir,
+            eval_samples_path=eval_path,
+            checkpoint_role="pretrain_only",
+            scale="mini",
+            epochs=1,
+            batch_size=4,
+            max_history=12,
+            max_candidates=6,
+            val_ratio=0.2,
+            seed=7,
+        )
+    )
+    assert pre_report["checkpointRole"] == "pretrain_only"
+    assert pre_report["unbiasedEval"] is not None
+    assert pre_report["unbiasedEval"]["numGroups"] >= 1
+    assert "unbiasedEvalLoss" in pre_report["epochs"][0]
+
+    init_ckpt = pre_models / "phoenix_v2_inference.pt"
+    pre_state = torch.load(init_ckpt, map_location="cpu", weights_only=True)
+
+    # 验证 reset_id_hash_embeddings_on_init 精确重置 ID 哈希表并完整保留主干/预测头参数，且 auto 自动继承 mini 配置
+    probe_cfg = PhoenixV2TrainConfig(
+        init_from=init_ckpt,
+        reset_id_hash_embeddings_on_init=True,
+        backbone_lr_scale=0.1,
+        scale="auto",
+        max_history=12,
+        max_candidates=6,
+    )
+    probe_model = _select_model(probe_cfg, num_users=2, num_posts=2)
+    assert probe_model.export_config() == pre_report["modelConfig"]
+    load_summary = _load_pretrained_weights(probe_model, init_ckpt, reset_id_hashes=True)
+    assert load_summary["resetIdHashKeys"] > 0
+    assert load_summary["loadedKeys"] > 0
+
+    probe_state = probe_model.state_dict()
+    assert torch.equal(
+        probe_state["transformer.layers.0.linear1.weight"],
+        pre_state["transformer.layers.0.linear1.weight"],
+    )
+    assert not torch.equal(
+        probe_state["user_emb.tables.0.weight"],
+        pre_state["user_emb.tables.0.weight"],
+    )
+
+    param_groups = _build_optimizer_param_groups(probe_model, lr=1e-3, backbone_lr_scale=0.1)
+    assert len(param_groups) == 2
+    assert param_groups[0]["lr"] == pytest.approx(1e-3)
+    assert param_groups[1]["lr"] == pytest.approx(1e-4)
+
+    ft_models = tmp_path / "ft_models"
+    ft_report = train_phoenix_v2(
+        PhoenixV2TrainConfig(
+            data_dir=tmp_path,
+            models_dir=ft_models,
+            samples_path=finetune_path,
+            eval_samples_path=eval_path,
+            aux_samples_path=pretrain_dir,
+            aux_sample_max_groups=3,
+            init_from=init_ckpt,
+            reset_id_hash_embeddings_on_init=True,
+            backbone_lr_scale=0.2,
+            checkpoint_role="serving",
+            scale="auto",
+            epochs=1,
+            batch_size=4,
+            max_history=12,
+            max_candidates=6,
+            val_ratio=0.2,
+            seed=9,
+        )
+    )
+    assert ft_report["checkpointRole"] == "serving"
+    assert ft_report["auxGroupsUsed"] == 3
+    assert ft_report["trainGroups"] == (ft_report["numGroups"] - ft_report["valGroups"]) + 3
+    assert ft_report["modelConfig"] == pre_report["modelConfig"]
+    assert ft_report["unbiasedEval"] is not None
+
+    # fail-closed: 显式指定与 checkpoint 不匹配的规模结构时必须拒绝热启动
+    with pytest.raises(ValueError, match="结构键集合不一致|形状不匹配"):
+        mismatch_model = _select_model(
+            PhoenixV2TrainConfig(scale="medium", max_history=12, max_candidates=6),
+            num_users=10,
+            num_posts=10,
+        )
+        _load_pretrained_weights(mismatch_model, init_ckpt, reset_id_hashes=True)

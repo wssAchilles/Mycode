@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import nullcontext
 from dataclasses import dataclass
+import gzip
 import json
 import math
 import pickle
@@ -14,7 +15,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -50,6 +51,13 @@ class PhoenixV2TrainConfig:
     data_dir: Path = _DEFAULT_ML_DIR / "data"
     models_dir: Path = _DEFAULT_ML_DIR / "models"
     samples_path: Optional[Path] = None
+    eval_samples_path: Optional[Path] = None
+    aux_samples_path: Optional[Path] = None
+    aux_sample_max_groups: int = 0
+    init_from: Optional[Path] = None
+    reset_id_hash_embeddings_on_init: bool = False
+    backbone_lr_scale: float = 1.0
+    checkpoint_role: str = "serving"  # "serving" | "pretrain_only"
     scale: str = "auto"  # "auto" | "mini" | "medium"
     epochs: int = 8
     batch_size: int = 32
@@ -120,7 +128,8 @@ def _extract_candidate_entry(sample: Dict[str, Any]) -> Dict[str, Any]:
 
     dwell_ms = float(sample.get("dwell_ms") or sample.get("dwellTimeMs") or 0.0)
     dwell_norm = min(1.0, math.log1p(max(0.0, dwell_ms)) / _DWELL_LOG_DENOM)
-    if dwell_ms > 0.0:
+    # 若上游样本已显式给出 dwell 布尔标签（例如 KuaiRand 对被动短滑过 <3s 置 0），绝不强制覆盖
+    if "dwell" not in raw_labels and dwell_ms >= 3000.0:
         labels["dwell"] = 1.0
 
     return {
@@ -133,11 +142,35 @@ def _extract_candidate_entry(sample: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _load_raw_samples(samples_path: Path) -> List[Dict[str, Any]]:
+    """从单个 .pkl/.pkl.gz 文件或包含分片文件的目录顺序读取训练样本。"""
+    target = Path(samples_path)
+    if target.is_dir():
+        shard_files = sorted(
+            [p for p in target.iterdir() if p.is_file() and (p.name.endswith(".pkl") or p.name.endswith(".pkl.gz"))]
+        )
+        if not shard_files:
+            raise FileNotFoundError(f"目录 {target} 下未找到任何 .pkl / .pkl.gz 样本分片")
+        merged: List[Dict[str, Any]] = []
+        for sf in shard_files:
+            opener = gzip.open if sf.name.endswith(".gz") else open
+            with opener(sf, "rb") as f:
+                part = pickle.load(f)
+            if isinstance(part, list):
+                merged.extend(part)
+        return merged
+
+    opener = gzip.open if target.name.endswith(".gz") else open
+    with opener(target, "rb") as f:
+        loaded = pickle.load(f)
+    return list(loaded)
+
+
 class PhoenixV2Dataset(Dataset):
     """
     Phoenix V2 排序样本集：
       - 按“用户 + 完全一致的 PIT 历史签名”安全分桶，绝不跨时刻混拼未来动作
-      - 支持单样本流与预分组多候选 slate 样本两种输入
+      - 支持单样本流、预分组多候选 slate 样本与分片目录三种输入
     """
 
     def __init__(
@@ -151,8 +184,7 @@ class PhoenixV2Dataset(Dataset):
         if samples is not None:
             raw_samples = list(samples)
         elif samples_path is not None:
-            with open(samples_path, "rb") as f:
-                raw_samples = pickle.load(f)
+            raw_samples = _load_raw_samples(Path(samples_path))
         else:
             raise ValueError("必须提供 samples_path 或 samples 序列")
 
@@ -436,17 +468,122 @@ def _benchmark_cpu_inference(
     }
 
 
+_ID_HASH_PREFIXES = (
+    "user_emb.",
+    "history_tokenizer.post_emb.",
+    "history_tokenizer.author_emb.",
+    "candidate_tokenizer.post_emb.",
+    "candidate_tokenizer.author_emb.",
+)
+
+
 def _select_model(
     config: PhoenixV2TrainConfig,
     num_users: int,
     num_posts: int,
 ) -> PhoenixV2Ranker:
-    kwargs = {"max_history_len": config.max_history, "max_candidates": config.max_candidates}
+    """依据 scale 或初始化检查点旁路配置构建 PhoenixV2Ranker 实例。"""
     if config.scale == "mini":
-        return create_mini_phoenix(**kwargs)
+        return create_mini_phoenix(max_history_len=config.max_history, max_candidates=config.max_candidates)
     if config.scale == "medium":
-        return create_medium_phoenix(**kwargs)
-    return create_phoenix_for_scale(num_users, num_posts, **kwargs)
+        return create_medium_phoenix(max_history_len=config.max_history, max_candidates=config.max_candidates)
+
+    if config.init_from is not None:
+        sibling_cfg = Path(config.init_from).parent / "phoenix_v2_config.json"
+        if sibling_cfg.exists():
+            raw = json.loads(sibling_cfg.read_text(encoding="utf-8"))
+            return PhoenixV2Ranker(
+                dim=int(raw["dim"]),
+                num_heads=int(raw["num_heads"]),
+                num_layers=int(raw["num_layers"]),
+                max_history_len=int(raw.get("max_history_len", config.max_history)),
+                max_candidates=int(raw.get("max_candidates", config.max_candidates)),
+                num_hashes=int(raw.get("num_hashes", 2)),
+            )
+
+    return create_phoenix_for_scale(
+        num_users,
+        num_posts,
+        max_history_len=config.max_history,
+        max_candidates=config.max_candidates,
+    )
+
+
+def _load_pretrained_weights(
+    model: PhoenixV2Ranker,
+    init_from: Path,
+    *,
+    reset_id_hashes: bool,
+) -> Dict[str, Any]:
+    """从预训练检查点严格对齐并加载权重，支持按需重置域相关 ID 哈希嵌入表。"""
+    ckpt_path = Path(init_from)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"预训练检查点不存在: {ckpt_path}")
+
+    loaded = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"预训练检查点格式无效，期望 state_dict 字典: {ckpt_path}")
+
+    target_state = model.state_dict()
+    missing = set(target_state.keys()) - set(loaded.keys())
+    unexpected = set(loaded.keys()) - set(target_state.keys())
+    if missing or unexpected:
+        raise ValueError(
+            "预训练检查点与当前模型结构键集合不一致: "
+            f"missing={sorted(missing)[:5]}, unexpected={sorted(unexpected)[:5]}"
+        )
+
+    for key, current_tensor in target_state.items():
+        incoming = loaded[key]
+        if tuple(incoming.shape) != tuple(current_tensor.shape):
+            raise ValueError(
+                f"预训练检查点参数形状不匹配 ({key}): "
+                f"checkpoint={tuple(incoming.shape)} vs model={tuple(current_tensor.shape)}"
+            )
+
+    loaded_keys = 0
+    reset_keys = 0
+    merged_state: Dict[str, torch.Tensor] = {}
+    for key, current_tensor in target_state.items():
+        if reset_id_hashes and key.startswith(_ID_HASH_PREFIXES):
+            merged_state[key] = current_tensor
+            reset_keys += 1
+        else:
+            merged_state[key] = loaded[key]
+            loaded_keys += 1
+
+    model.load_state_dict(merged_state, strict=True)
+    return {"loadedKeys": loaded_keys, "resetIdHashKeys": reset_keys}
+
+
+def _build_optimizer_param_groups(
+    model: PhoenixV2Ranker,
+    *,
+    lr: float,
+    backbone_lr_scale: float,
+) -> List[Dict[str, Any]]:
+    """按参数域构建差分学习率优化器参数组，避免微调阶段遗忘主干表征。"""
+    if backbone_lr_scale <= 0:
+        raise ValueError(f"backbone_lr_scale 必须大于 0，当前为: {backbone_lr_scale}")
+    if backbone_lr_scale == 1.0:
+        return [{"params": [p for p in model.parameters() if p.requires_grad], "lr": lr}]
+
+    id_hash_params: List[torch.Tensor] = []
+    backbone_params: List[torch.Tensor] = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.startswith(_ID_HASH_PREFIXES):
+            id_hash_params.append(param)
+        else:
+            backbone_params.append(param)
+
+    groups: List[Dict[str, Any]] = []
+    if id_hash_params:
+        groups.append({"params": id_hash_params, "lr": lr})
+    if backbone_params:
+        groups.append({"params": backbone_params, "lr": lr * backbone_lr_scale})
+    return groups
 
 
 def train_phoenix_v2(
@@ -454,7 +591,10 @@ def train_phoenix_v2(
     *,
     samples: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """执行 Phoenix V2 训练、时序验证与推理产物导出，并返回完整结构化报告。"""
+    """执行 Phoenix V2 训练、迁移微调、无偏评估与推理产物导出，并返回完整结构化报告。"""
+    if config.checkpoint_role not in {"serving", "pretrain_only"}:
+        raise ValueError(f"无效 checkpoint_role: {config.checkpoint_role}")
+
     _set_seed(config.seed)
     device = _resolve_device()
 
@@ -478,8 +618,39 @@ def train_phoenix_v2(
     val_count = int(total_groups * config.val_ratio) if (total_groups >= 10 and config.val_ratio > 0) else 0
     val_count = min(val_count, max(0, total_groups - 1))
 
-    train_groups = sorted_groups[: total_groups - val_count] if val_count > 0 else sorted_groups
+    primary_train_groups = sorted_groups[: total_groups - val_count] if val_count > 0 else list(sorted_groups)
     val_groups = sorted_groups[total_groups - val_count :] if val_count > 0 else []
+
+    all_users = set(dataset.unique_users)
+    all_posts = set(dataset.unique_posts)
+
+    # 可选仅训练回放锚点数据：严格只混入 train_groups，避免污染主验证集分布
+    train_groups = list(primary_train_groups)
+    aux_groups_used = 0
+    if config.aux_samples_path is not None:
+        aux_dataset = PhoenixV2Dataset(
+            Path(config.aux_samples_path),
+            max_history=config.max_history,
+            max_candidates=config.max_candidates,
+        )
+        aux_groups = list(aux_dataset.groups)
+        if config.aux_sample_max_groups > 0 and len(aux_groups) > config.aux_sample_max_groups:
+            aux_groups = random.Random(config.seed).sample(aux_groups, config.aux_sample_max_groups)
+        train_groups.extend(aux_groups)
+        aux_groups_used = len(aux_groups)
+        all_users |= aux_dataset.unique_users
+        all_posts |= aux_dataset.unique_posts
+
+    unbiased_eval_groups: List[Dict[str, Any]] = []
+    if config.eval_samples_path is not None:
+        eval_dataset = PhoenixV2Dataset(
+            Path(config.eval_samples_path),
+            max_history=config.max_history,
+            max_candidates=config.max_candidates,
+        )
+        if len(eval_dataset) == 0:
+            raise ValueError(f"显式评估数据集为空: {config.eval_samples_path}")
+        unbiased_eval_groups = list(eval_dataset.groups)
 
     class _GroupSliceDataset(Dataset):
         def __init__(self, items: Sequence[Dict[str, Any]]):
@@ -508,9 +679,28 @@ def train_phoenix_v2(
 
     train_loader = DataLoader(_GroupSliceDataset(train_groups), shuffle=True, **loader_kwargs)
     val_loader = DataLoader(_GroupSliceDataset(val_groups), shuffle=False, **loader_kwargs) if val_groups else None
+    unbiased_eval_loader = (
+        DataLoader(_GroupSliceDataset(unbiased_eval_groups), shuffle=False, **loader_kwargs)
+        if unbiased_eval_groups
+        else None
+    )
 
-    model = _select_model(config, len(dataset.unique_users), len(dataset.unique_posts)).to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    model = _select_model(config, len(all_users), len(all_posts))
+    init_summary: Optional[Dict[str, Any]] = None
+    if config.init_from is not None:
+        init_summary = _load_pretrained_weights(
+            model,
+            Path(config.init_from),
+            reset_id_hashes=config.reset_id_hash_embeddings_on_init,
+        )
+    model = model.to(device)
+
+    param_groups = _build_optimizer_param_groups(
+        model,
+        lr=config.lr,
+        backbone_lr_scale=config.backbone_lr_scale,
+    )
+    optimizer = optim.AdamW(param_groups, lr=config.lr, weight_decay=config.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.epochs))
 
     use_amp = device.type == "cuda"
@@ -528,6 +718,7 @@ def train_phoenix_v2(
     history_metrics: List[Dict[str, Any]] = []
     latest_path = models_dir / "phoenix_v2_epoch_latest.pt"
     best_val_loss = float("inf")
+    best_unbiased_metrics: Optional[Dict[str, Any]] = None
 
     for epoch in range(config.epochs):
         model.train()
@@ -585,26 +776,37 @@ def train_phoenix_v2(
         scheduler.step()
         train_loss = total_loss / max(1, steps)
         val_metrics = _evaluate_validation(model, val_loader, device, config.dwell_loss_weight)
+        unbiased_metrics = _evaluate_validation(model, unbiased_eval_loader, device, config.dwell_loss_weight)
 
+        effective_eval = val_metrics or unbiased_metrics
         epoch_record: Dict[str, Any] = {
             "epoch": epoch + 1,
             "trainLoss": round(train_loss, 6),
         }
-        if val_metrics:
-            epoch_record["valLoss"] = round(float(val_metrics["valLoss"]), 6)
+        if effective_eval:
+            epoch_record["valLoss"] = round(float(effective_eval["valLoss"]), 6)
             epoch_record["macroRocAuc"] = (
-                round(float(val_metrics["macroRocAuc"]), 6) if val_metrics["macroRocAuc"] is not None else None
+                round(float(effective_eval["macroRocAuc"]), 6) if effective_eval["macroRocAuc"] is not None else None
+            )
+        if unbiased_metrics:
+            epoch_record["unbiasedEvalLoss"] = round(float(unbiased_metrics["valLoss"]), 6)
+            epoch_record["unbiasedMacroRocAuc"] = (
+                round(float(unbiased_metrics["macroRocAuc"]), 6)
+                if unbiased_metrics["macroRocAuc"] is not None
+                else None
             )
         history_metrics.append(epoch_record)
 
         epoch_path = models_dir / f"phoenix_v2_epoch_{epoch + 1}.pt"
         torch.save(model.state_dict(), epoch_path)
-        if not val_metrics or float(val_metrics["valLoss"]) <= best_val_loss:
-            best_val_loss = float(val_metrics["valLoss"]) if val_metrics else train_loss
+        selection_loss = float(effective_eval["valLoss"]) if effective_eval else train_loss
+        if not effective_eval or selection_loss <= best_val_loss:
+            best_val_loss = selection_loss
+            best_unbiased_metrics = unbiased_metrics
             shutil.copyfile(epoch_path, latest_path)
 
     # 导出标准 CPU float32 推理权重与模型结构配置
-    cpu_model = _select_model(config, len(dataset.unique_users), len(dataset.unique_posts)).cpu()
+    cpu_model = _select_model(config, len(all_users), len(all_posts)).cpu()
     cpu_model.load_state_dict(torch.load(latest_path, map_location="cpu", weights_only=True))
     cpu_model.eval()
 
@@ -616,11 +818,39 @@ def train_phoenix_v2(
     bench = _benchmark_cpu_inference(cpu_model, config.max_history, config.max_candidates)
     total_params = sum(p.numel() for p in cpu_model.parameters())
 
+    unbiased_eval_summary: Optional[Dict[str, Any]] = None
+    if unbiased_eval_loader is not None:
+        final_unbiased = best_unbiased_metrics or _evaluate_validation(
+            cpu_model,
+            DataLoader(_GroupSliceDataset(unbiased_eval_groups), shuffle=False, batch_size=config.batch_size, collate_fn=collate),
+            torch.device("cpu"),
+            config.dwell_loss_weight,
+        )
+        if final_unbiased:
+            unbiased_eval_summary = {
+                "numGroups": len(unbiased_eval_groups),
+                "valLoss": round(float(final_unbiased["valLoss"]), 6),
+                "macroRocAuc": (
+                    round(float(final_unbiased["macroRocAuc"]), 6)
+                    if final_unbiased["macroRocAuc"] is not None
+                    else None
+                ),
+            }
+
     report = {
         "model": "phoenix_v2",
         "device": str(device),
         "gpuInfo": gpu_info,
         "scale": config.scale,
+        "checkpointRole": config.checkpoint_role,
+        "initFrom": str(config.init_from) if config.init_from else None,
+        "initSummary": init_summary,
+        "resetIdHashesOnInit": bool(config.reset_id_hash_embeddings_on_init),
+        "backboneLrScale": float(config.backbone_lr_scale),
+        "evalSamplesPath": str(config.eval_samples_path) if config.eval_samples_path else None,
+        "auxSamplesPath": str(config.aux_samples_path) if config.aux_samples_path else None,
+        "auxGroupsUsed": aux_groups_used,
+        "unbiasedEval": unbiased_eval_summary,
         "modelConfig": cpu_model.export_config(),
         "totalParams": int(total_params),
         "numGroups": total_groups,
@@ -642,6 +872,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=_DEFAULT_ML_DIR / "data")
     parser.add_argument("--models-dir", type=Path, default=_DEFAULT_ML_DIR / "models")
     parser.add_argument("--samples", type=Path, default=None)
+    parser.add_argument("--eval-samples", type=Path, default=None)
+    parser.add_argument("--aux-samples", type=Path, default=None)
+    parser.add_argument("--aux-max-groups", type=int, default=0)
+    parser.add_argument("--init-from", type=Path, default=None)
+    parser.add_argument("--reset-id-hashes", action="store_true")
+    parser.add_argument("--backbone-lr-scale", type=float, default=1.0)
+    parser.add_argument("--checkpoint-role", choices=["serving", "pretrain_only"], default="serving")
     parser.add_argument("--scale", choices=["auto", "mini", "medium"], default="auto")
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -663,6 +900,13 @@ def main() -> None:
         data_dir=args.data_dir,
         models_dir=args.models_dir,
         samples_path=args.samples,
+        eval_samples_path=args.eval_samples,
+        aux_samples_path=args.aux_samples,
+        aux_sample_max_groups=args.aux_max_groups,
+        init_from=args.init_from,
+        reset_id_hash_embeddings_on_init=args.reset_id_hashes,
+        backbone_lr_scale=args.backbone_lr_scale,
+        checkpoint_role=args.checkpoint_role,
         scale=args.scale,
         epochs=args.epochs,
         batch_size=args.batch_size,
