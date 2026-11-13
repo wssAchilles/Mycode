@@ -13,8 +13,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from bson import ObjectId
-
 from recsys.contracts.actions import ACTION_TYPE_MAP, PREDICTED_ACTIONS, canonicalize_action_name
 
 DEFAULT_SYNTHETIC_PREFIXES: Tuple[str, ...] = ("demo_", "seed_", "synthetic_", "test_synthetic_")
@@ -324,7 +322,9 @@ def build_post_metadata_map(db, post_ids: Iterable[str]) -> Dict[str, Dict[str, 
     if not unique_ids or db is None:
         return {}
 
-    obj_ids: List[ObjectId] = []
+    from bson import ObjectId
+
+    obj_ids: List[Any] = []
     ext_ids: List[str] = []
     for pid in unique_ids:
         try:
