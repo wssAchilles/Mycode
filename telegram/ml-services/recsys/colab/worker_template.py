@@ -57,7 +57,7 @@ def _ensure_dependencies(task: str, *, need_gcs: bool = False, need_mongo: bool 
         ("tqdm", "tqdm"),
     ]
     if need_mongo:
-        deps.extend([("pymongo", "pymongo"), ("bson", "pymongo")])
+        deps.extend([("pymongo", "pymongo[srv]"), ("bson", "pymongo"), ("dns.resolver", "dnspython")])
     if need_gcs:
         deps.append(("google.cloud.storage", "google-cloud-storage"))
     if task == "two-tower":
@@ -292,6 +292,31 @@ def _stage_base_serving_artifacts_from_drive(
         shutil.copy2(src_path, dst_path)
 
 
+def _run_export_training_data(
+    *,
+    samples_path: Path,
+    local_jsonl_dir: str,
+    gcs_archive_uri: str,
+    mongo_uri: str,
+    export_days: int,
+) -> None:
+    cmd = [
+        sys.executable,
+        str(WORKDIR / "scripts" / "export_training_data.py"),
+        "--output",
+        str(samples_path),
+        "--days",
+        str(int(export_days)),
+    ]
+    if local_jsonl_dir:
+        cmd.extend(["--local-jsonl-dir", local_jsonl_dir])
+    if gcs_archive_uri:
+        cmd.extend(["--gcs-archive-uri", gcs_archive_uri])
+    if mongo_uri:
+        cmd.extend(["--mongo-uri", mongo_uri, "--include-user-signals"])
+    subprocess.run(cmd, check=True)
+
+
 def _create_smoke_fixture(data_dir: Path, models_dir: Path) -> Path:
     from recsys.contracts.actions import ACTION_TYPE_MAP
 
@@ -474,14 +499,13 @@ def main() -> None:
             if not samples_path.exists() and (drive_data_dir or gcs_dataset_uri):
                 _stage_local_or_gcs(drive_dir=drive_data_dir, gcs_uri=gcs_dataset_uri, target_dir=data_dir)
             if not samples_path.exists() and (local_jsonl_dir or gcs_archive_uri or mongo_uri):
-                cmd = [sys.executable, str(WORKDIR / "scripts" / "export_training_data.py"), "--output", str(samples_path)]
-                if local_jsonl_dir:
-                    cmd.extend(["--local-jsonl-dir", local_jsonl_dir])
-                if gcs_archive_uri:
-                    cmd.extend(["--gcs-archive-uri", gcs_archive_uri])
-                if mongo_uri:
-                    cmd.extend(["--mongo-uri", mongo_uri])
-                subprocess.run(cmd, check=True)
+                _run_export_training_data(
+                    samples_path=samples_path,
+                    local_jsonl_dir=local_jsonl_dir,
+                    gcs_archive_uri=gcs_archive_uri,
+                    mongo_uri=mongo_uri,
+                    export_days=int(JOB_CONFIG.get("export_days", 3650)),
+                )
             report = train_phoenix_v2(
                 PhoenixV2TrainConfig(
                     data_dir=data_dir,
@@ -604,14 +628,13 @@ def main() -> None:
             if not samples_path.exists() and (drive_data_dir or gcs_dataset_uri):
                 _stage_local_or_gcs(drive_dir=drive_data_dir, gcs_uri=gcs_dataset_uri, target_dir=data_dir)
             if not samples_path.exists() and (local_jsonl_dir or gcs_archive_uri or mongo_uri):
-                cmd = [sys.executable, str(WORKDIR / "scripts" / "export_training_data.py"), "--output", str(samples_path)]
-                if local_jsonl_dir:
-                    cmd.extend(["--local-jsonl-dir", local_jsonl_dir])
-                if gcs_archive_uri:
-                    cmd.extend(["--gcs-archive-uri", gcs_archive_uri])
-                if mongo_uri:
-                    cmd.extend(["--mongo-uri", mongo_uri])
-                subprocess.run(cmd, check=True)
+                _run_export_training_data(
+                    samples_path=samples_path,
+                    local_jsonl_dir=local_jsonl_dir,
+                    gcs_archive_uri=gcs_archive_uri,
+                    mongo_uri=mongo_uri,
+                    export_days=int(JOB_CONFIG.get("export_days", 3650)),
+                )
             if not samples_path.exists():
                 raise FileNotFoundError(f"微调样本文件缺失: {samples_path}")
 

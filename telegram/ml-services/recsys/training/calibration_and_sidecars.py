@@ -466,6 +466,59 @@ def fit_weighted_calibrator(
     return artifact
 
 
+def extract_realgraph_records_from_mongo(
+    db: Any,
+    *,
+    limit: int = 100_000,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """从 MongoDB `real_graph_edges`（支持 rollupCounts 嵌套结构与平滑 recency 衰减）提取 RealGraph 训练边。"""
+    if db is None or "real_graph_edges" not in db.list_collection_names():
+        return []
+
+    ref_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    records: List[Dict[str, Any]] = []
+    for doc in db["real_graph_edges"].find({}).limit(max(1, int(limit))):
+        rollup = doc.get("rollupCounts") if isinstance(doc.get("rollupCounts"), Mapping) else {}
+        follow_raw = doc.get("followScore")
+        follow_score = (
+            float(follow_raw)
+            if follow_raw is not None
+            else (1.0 if float(rollup.get("followCount") or 0.0) > 0.0 else 0.0)
+        )
+
+        recency_raw = doc.get("recency")
+        if recency_raw is not None:
+            recency_score = float(recency_raw)
+        else:
+            last_ts = doc.get("lastInteractionAt")
+            if isinstance(last_ts, str):
+                try:
+                    last_ts = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                except ValueError:
+                    last_ts = None
+            if isinstance(last_ts, datetime):
+                ts_utc = last_ts.replace(tzinfo=timezone.utc) if last_ts.tzinfo is None else last_ts.astimezone(timezone.utc)
+                age_days = max(0.0, (ref_now - ts_utc).total_seconds() / 86400.0)
+                recency_score = math.exp(-age_days / 7.0)
+            else:
+                recency_score = 0.0
+
+        records.append(
+            {
+                "followScore": follow_score,
+                "likeCount": float(doc["likeCount"]) if doc.get("likeCount") is not None else float(rollup.get("likeCount") or 0.0),
+                "replyCount": float(doc["replyCount"]) if doc.get("replyCount") is not None else float(rollup.get("replyCount") or 0.0),
+                "retweetCount": float(doc["retweetCount"]) if doc.get("retweetCount") is not None else float(rollup.get("retweetCount") or 0.0),
+                "profileViewCount": float(doc["profileViewCount"]) if doc.get("profileViewCount") is not None else float(rollup.get("profileViewCount") or 0.0),
+                "dwellTimeMs": float(doc["dwellTimeMs"]) if doc.get("dwellTimeMs") is not None else float(rollup.get("dwellTimeMs") or 0.0),
+                "recency": float(recency_score),
+                "label": 1 if float(doc.get("decayedSum") or 0.0) > 0.0 else 0,
+            }
+        )
+    return records
+
+
 def run_sidecar_training(
     *,
     samples_path: Path,
@@ -492,25 +545,15 @@ def run_sidecar_training(
             from recsys.data.pit_export import connect_mongo
 
             db = connect_mongo(mongo_uri, db_name)
-            if "real_graph_edges" in db.list_collection_names():
-                for doc in db["real_graph_edges"].find({}).limit(100_000):
-                    edge_records.append(
-                        {
-                            "followScore": float(doc.get("followScore") or 0.0),
-                            "likeCount": float(doc.get("likeCount") or 0.0),
-                            "replyCount": float(doc.get("replyCount") or 0.0),
-                            "retweetCount": float(doc.get("retweetCount") or 0.0),
-                            "profileViewCount": float(doc.get("profileViewCount") or 0.0),
-                            "dwellTimeMs": float(doc.get("dwellTimeMs") or 0.0),
-                            "recency": float(doc.get("recency") or 0.0),
-                            "label": 1 if float(doc.get("decayedSum") or 0.0) > 0.0 else 0,
-                        }
-                    )
+            edge_records = extract_realgraph_records_from_mongo(db)
         except Exception:
             edge_records = []
 
-    if not edge_records:
-        edge_records = extract_realgraph_records_from_samples(samples)
+    sample_edge_records = extract_realgraph_records_from_samples(samples)
+    if edge_records:
+        edge_records.extend(sample_edge_records)
+    else:
+        edge_records = sample_edge_records
 
     realgraph_artifact = train_realgraph_gbt(edge_records, models_dir=models_dir)
     calibrator_artifact = fit_weighted_calibrator(samples, models_dir=models_dir)

@@ -556,3 +556,6 @@ def test_exec_sentinel_fail_closed_and_drive_base_finetune_wiring(tmp_path: Path
         dry_run=False,
     )
     assert ok_res["executed"] is True
+    assert "dnspython" in worker_ft
+    assert "--days" in worker_ft
+    assert "--include-user-signals" in worker_ft

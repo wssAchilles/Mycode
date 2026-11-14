@@ -500,3 +500,61 @@ def test_phoenix_v2_two_stage_pretrain_transfer_and_unbiased_eval(tmp_path: Path
             num_posts=10,
         )
         _load_pretrained_weights(mismatch_model, init_ckpt, reset_id_hashes=True)
+
+
+def test_extract_realgraph_records_from_mongo_nested_rollup_counts() -> None:
+    """验证 RealGraph Mongo 提取正确读取 nested rollupCounts 与 lastInteractionAt 衰减。"""
+    from recsys.training.calibration_and_sidecars import extract_realgraph_records_from_mongo
+
+    now = datetime(2026, 11, 14, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FakeCursor:
+        def __init__(self, docs):
+            self._docs = docs
+
+        def limit(self, n):
+            return self._docs[:n]
+
+    class _FakeCollection:
+        def __init__(self, docs):
+            self._docs = docs
+
+        def find(self, _query):
+            return _FakeCursor(self._docs)
+
+    class _FakeDb:
+        def __init__(self, docs):
+            self._col = _FakeCollection(docs)
+
+        def list_collection_names(self):
+            return ["real_graph_edges"]
+
+        def __getitem__(self, name):
+            assert name == "real_graph_edges"
+            return self._col
+
+    docs = [
+        {
+            "rollupCounts": {"followCount": 2, "likeCount": 5, "replyCount": 1, "retweetCount": 3, "profileViewCount": 4, "dwellTimeMs": 2500},
+            "decayedSum": 12.5,
+            "lastInteractionAt": now,
+        },
+        {
+            "rollupCounts": {"followCount": 0, "likeCount": 0, "blockCount": 1},
+            "decayedSum": -10.0,
+            "lastInteractionAt": now - timedelta(days=7),
+        },
+    ]
+    extracted = extract_realgraph_records_from_mongo(_FakeDb(docs), now=now)
+    assert len(extracted) == 2
+    assert extracted[0]["followScore"] == 1.0
+    assert extracted[0]["likeCount"] == 5.0
+    assert extracted[0]["replyCount"] == 1.0
+    assert extracted[0]["retweetCount"] == 3.0
+    assert extracted[0]["profileViewCount"] == 4.0
+    assert extracted[0]["dwellTimeMs"] == 2500.0
+    assert extracted[0]["recency"] == pytest.approx(1.0)
+    assert extracted[0]["label"] == 1
+    assert extracted[1]["followScore"] == 0.0
+    assert extracted[1]["recency"] == pytest.approx(2.718281828459045 ** -1, rel=1e-5)
+    assert extracted[1]["label"] == 0
