@@ -183,9 +183,11 @@ def load_actions_from_jsonl_files(
     excluded_user_ids: Optional[Set[str]] = None,
     exclude_synthetic: bool = True,
 ) -> List[Dict[str, Any]]:
-    """读取本地或从 GCS 拉取的 .jsonl / .jsonl.gz 用户行为归档。"""
+    """读取本地或从 GCS 拉取的 .jsonl / .jsonl.gz 用户行为归档（自动跳过 macOS ._ 元数据等隐藏文件）。"""
     records: List[Dict[str, Any]] = []
     for path in paths:
+        if path.name.startswith(".") or not path.is_file():
+            continue
         opener = gzip.open if path.name.endswith(".gz") else open
         with opener(path, "rt", encoding="utf-8") as f:
             for line in f:
@@ -543,7 +545,9 @@ def main() -> None:
 
     archive_files: List[Path] = []
     if args.local_jsonl_dir and args.local_jsonl_dir.exists():
-        archive_files.extend(sorted(args.local_jsonl_dir.rglob("*.jsonl*")))
+        archive_files.extend(
+            sorted(p for p in args.local_jsonl_dir.rglob("*.jsonl*") if p.is_file() and not p.name.startswith("."))
+        )
     if args.gcs_archive_uri:
         archive_files.extend(download_gcs_archive_files(args.gcs_archive_uri, cache_dir))
     if archive_files:

@@ -558,3 +558,26 @@ def test_extract_realgraph_records_from_mongo_nested_rollup_counts() -> None:
     assert extracted[1]["followScore"] == 0.0
     assert extracted[1]["recency"] == pytest.approx(2.718281828459045 ** -1, rel=1e-5)
     assert extracted[1]["label"] == 0
+
+
+def test_load_actions_from_jsonl_skips_macos_appledouble(tmp_path: Path) -> None:
+    """确认读取 .jsonl.gz 归档时跳过 macOS AppleDouble `._*` 隐藏元数据文件。"""
+    import gzip
+    from recsys.data.pit_export import load_actions_from_jsonl_files
+
+    bad_file = tmp_path / "._actions.jsonl.gz"
+    bad_file.write_bytes(b"\x00\x05\x16\x07appledouble")
+    good_file = tmp_path / "actions.jsonl.gz"
+    row = {
+        "userId": "u_real",
+        "action": "like",
+        "targetPostId": "p_real",
+        "timestamp": "2026-06-01T00:00:00Z",
+    }
+    with gzip.open(good_file, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+    records = load_actions_from_jsonl_files([bad_file, good_file])
+    assert len(records) == 1
+    assert records[0]["user_id"] == "u_real"
+    assert records[0]["post_id"] == "p_real"
