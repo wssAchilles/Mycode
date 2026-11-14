@@ -14,8 +14,20 @@ def _get_gcs_bucket(name: str):
 
 def _upload_file(bucket, src: Path, dst: str, content_type: str = "application/octet-stream"):
     blob = bucket.blob(dst)
-    blob.upload_from_filename(str(src), content_type=content_type)
-    print(f"✅ uploaded: {src} -> gs://{bucket.name}/{dst}")
+    # 仅大文件启用 4 MiB 分片断点续传并放宽超时/重试窗口，保持对轻量文件与测试替身的签名兼容
+    if src.stat().st_size > 4 * 1024 * 1024:
+        from google.cloud.storage.retry import DEFAULT_RETRY
+
+        blob.chunk_size = 4 * 1024 * 1024
+        blob.upload_from_filename(
+            str(src),
+            content_type=content_type,
+            timeout=(30, 180),
+            retry=DEFAULT_RETRY.with_deadline(600.0),
+        )
+    else:
+        blob.upload_from_filename(str(src), content_type=content_type)
+    print(f"✅ uploaded: {src} -> gs://{bucket.name}/{dst}", flush=True)
 
 
 def _file_size(path: Path) -> int:
