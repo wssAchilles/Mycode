@@ -542,14 +542,18 @@ def evaluate_phoenix_v3_slates(
     all_probs = []
     all_logits = []
     all_cread_logits = []
+    use_amp = target_device.type == "cuda" and torch.cuda.is_bf16_supported()
     for start in range(0, n, batch_size):
         idx = np.arange(start, min(n, start + batch_size))
         batch = _slice_slates_to_device(slates, idx, target_device)
         batch["cand_served_position"] = torch.zeros_like(batch["cand_served_position"])
-        out = _forward_model_on_batch(model, batch, apply_pal=False)
-        all_logits.append(out["action_logits"].detach().cpu().numpy())
-        all_cread_logits.append(out["cread_logits"].detach().cpu().numpy())
-        all_probs.append(torch.sigmoid(out["action_logits"]).detach().cpu().numpy())
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            out = _forward_model_on_batch(model, batch, apply_pal=False)
+        act_f = out["action_logits"].detach().float()
+        cread_f = out["cread_logits"].detach().float()
+        all_logits.append(act_f.cpu().numpy())
+        all_cread_logits.append(cread_f.cpu().numpy())
+        all_probs.append(torch.sigmoid(act_f).cpu().numpy())
 
     logits_np = np.concatenate(all_logits, axis=0)      # (S, C, 14)
     cread_np = np.concatenate(all_cread_logits, axis=0) # (S, C, 30)
@@ -589,6 +593,7 @@ def train_phoenix_v3_teacher(
     pl_weight: float = 0.25,
     cread_weight: float = 0.35,
     ema_decay: float = 0.99,
+    use_bf16_amp: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     init_model: Optional[PhoenixV3Model] = None,
     seed: int = 42,
@@ -598,6 +603,9 @@ def train_phoenix_v3_teacher(
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if target_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+    amp_enabled = bool(use_bf16_amp and target_device.type == "cuda" and torch.cuda.is_bf16_supported())
 
     cfg = init_model.config if init_model is not None else (config or PhoenixV3Config.teacher_preset())
     model = (init_model if init_model is not None else PhoenixV3Model(cfg, sid_artifact=sid_artifact)).to(target_device)
@@ -644,25 +652,28 @@ def train_phoenix_v3_teacher(
                     local_cur += len(b_idx)
                     batch = _slice_slates_to_device(train_slates, b_idx, target_device)
 
-                    out = _forward_model_on_batch(model, batch, apply_pal=True)
+                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                        out = _forward_model_on_batch(model, batch, apply_pal=True)
+                        debiased_out = (
+                            out
+                            if pl_weight <= 0.0
+                            else _forward_model_on_batch(
+                                model,
+                                {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])},
+                                apply_pal=False,
+                            )
+                        )
                     bce_loss = compute_masked_14head_bce(
-                        out["action_logits"], batch["labels_14"], batch["mask_14"], batch["cand_mask"]
+                        out["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
                     )
                     c_loss = compute_cread30_loss(
-                        out["cread_logits"], batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
+                        out["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
                     )
                     # Listwise 排序在剔除 PAL 位置偏置后的无偏分数上计算，避免位置偏差污染主序
-                    debiased_out = (
-                        out
-                        if pl_weight <= 0.0
-                        else _forward_model_on_batch(
-                            model,
-                            {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])},
-                            apply_pal=False,
-                        )
-                    )
                     rank_sc = compute_scalar_rank_utility(
-                        debiased_out["action_logits"], debiased_out["cread_logits"], cread_edges_ms=cread_edges
+                        debiased_out["action_logits"].float(),
+                        debiased_out["cread_logits"].float(),
+                        cread_edges_ms=cread_edges,
                     )
                     pl_loss = compute_plackett_luce_loss(rank_sc, batch["relevance_scores"], batch["cand_mask"])
                     total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
@@ -744,6 +755,7 @@ def distill_phoenix_v3_student(
     cread_weight: float = 0.35,
     temperature: float = 2.0,
     use_muon: bool = True,
+    use_bf16_amp: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     seed: int = 42,
     device: Optional[str] = None,
@@ -752,6 +764,9 @@ def distill_phoenix_v3_student(
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if target_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+    amp_enabled = bool(use_bf16_amp and target_device.type == "cuda" and torch.cuda.is_bf16_supported())
 
     s_cfg = student_config or PhoenixV3Config.student_preset()
     student = PhoenixV3Model(s_cfg, sid_artifact=sid_artifact).to(target_device)
@@ -805,34 +820,42 @@ def distill_phoenix_v3_student(
                     batch = _slice_slates_to_device(train_slates, b_idx, target_device)
 
                     # 1) 训练期允许 PAL 学习位置偏差以清洗主干特征
-                    out_pal = _forward_model_on_batch(student, batch, apply_pal=True)
+                    debiased_batch = {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])}
+                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                        out_pal = _forward_model_on_batch(student, batch, apply_pal=True)
+                        # 2) 无偏推理分支（served_position=0）与 Teacher 软排名对齐
+                        out_deb = _forward_model_on_batch(student, debiased_batch, apply_pal=False)
+                        t_out: Optional[Dict[str, torch.Tensor]] = None
+                        if teacher_model is not None and distill_weight > 0.0:
+                            with torch.no_grad():
+                                t_out = _forward_model_on_batch(teacher_model, debiased_batch, apply_pal=False)
+
                     bce_loss = compute_masked_14head_bce(
-                        out_pal["action_logits"], batch["labels_14"], batch["mask_14"], batch["cand_mask"]
+                        out_pal["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
                     )
                     c_loss = compute_cread30_loss(
-                        out_pal["cread_logits"], batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
+                        out_pal["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
                     )
 
-                    # 2) 无偏推理分支（served_position=0）与 Teacher 软排名对齐
-                    debiased_batch = {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])}
-                    out_deb = _forward_model_on_batch(student, debiased_batch, apply_pal=False)
+                    s_act_f = out_deb["action_logits"].float()
+                    s_cread_f = out_deb["cread_logits"].float()
                     s_scores = compute_scalar_rank_utility(
-                        out_deb["action_logits"], out_deb["cread_logits"], cread_edges_ms=cread_edges
+                        s_act_f, s_cread_f, cread_edges_ms=cread_edges
                     )
                     pl_loss = compute_plackett_luce_loss(s_scores, batch["relevance_scores"], batch["cand_mask"])
 
                     total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
-                    if teacher_model is not None and distill_weight > 0.0:
-                        with torch.no_grad():
-                            t_out = _forward_model_on_batch(teacher_model, debiased_batch, apply_pal=False)
-                            t_scores = compute_scalar_rank_utility(
-                                t_out["action_logits"], t_out["cread_logits"], cread_edges_ms=cread_edges
-                            )
+                    if t_out is not None:
+                        t_act_f = t_out["action_logits"].float()
+                        t_cread_f = t_out["cread_logits"].float()
+                        t_scores = compute_scalar_rank_utility(
+                            t_act_f, t_cread_f, cread_edges_ms=cread_edges
+                        )
                         derd_loss = compute_de_rrd_distill_loss(
-                            student_action_logits=out_deb["action_logits"],
-                            student_cread_logits=out_deb["cread_logits"],
-                            teacher_action_logits=t_out["action_logits"],
-                            teacher_cread_logits=t_out["cread_logits"],
+                            student_action_logits=s_act_f,
+                            student_cread_logits=s_cread_f,
+                            teacher_action_logits=t_act_f,
+                            teacher_cread_logits=t_cread_f,
                             student_scores=s_scores,
                             teacher_scores=t_scores,
                             cand_mask=batch["cand_mask"],

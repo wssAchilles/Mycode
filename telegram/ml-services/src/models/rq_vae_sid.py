@@ -700,6 +700,9 @@ def train_distilled_text_encoder(
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if target_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+    amp_enabled = target_device.type == "cuda" and torch.cuda.is_bf16_supported()
 
     model = DistilledTextEncoderV3(
         vocab_size=vocab_size,
@@ -723,10 +726,12 @@ def train_distilled_text_encoder(
         perm = torch.from_numpy(rng.permutation(n)).to(target_device)
         for start in range(0, n, eff_bs):
             idx = perm[start : start + eff_bs]
-            pred = model(x_ids[idx], x_mask[idx])
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                pred = model(x_ids[idx], x_mask[idx])
+            pred_f = pred.float()
             tgt = y_true[idx]
-            cos_loss = 1.0 - (pred * tgt).sum(dim=-1).mean()
-            mse_loss = F.mse_loss(pred, tgt)
+            cos_loss = 1.0 - (pred_f * tgt).sum(dim=-1).mean()
+            mse_loss = F.mse_loss(pred_f, tgt)
             loss = cos_loss + 0.5 * mse_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -739,7 +744,9 @@ def train_distilled_text_encoder(
     eval_bs = max(1, min(512, n))
     with torch.no_grad():
         for start in range(0, n, eval_bs):
-            eval_preds.append(model(x_ids[start : start + eval_bs], x_mask[start : start + eval_bs]))
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                out_p = model(x_ids[start : start + eval_bs], x_mask[start : start + eval_bs])
+            eval_preds.append(out_p.float())
         all_pred = torch.cat(eval_preds, dim=0)
         mean_cos = float((all_pred * y_true).sum(dim=-1).mean().item())
         mae = float(torch.abs(all_pred - y_true).mean().item())

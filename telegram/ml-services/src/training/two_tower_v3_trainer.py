@@ -311,12 +311,14 @@ def evaluate_retrieval_metrics(
 
     # 分批在线算分与实时定秩，彻底避免 n_eval × n_corpus 巨型矩阵内存爆炸
     c_vecs_t = c_vecs.T  # (D, M)
+    use_amp = target_device.type == "cuda" and torch.cuda.is_bf16_supported()
     for start in range(0, n_eval, batch_size):
         end = min(n_eval, start + batch_size)
         idx = np.arange(start, end)
         batch = _slice_batch_to_device(eval_split, idx, target_device)
-        user_vecs, _ = model.encode_user_batch(batch)  # (b, K, D)
-        u_np = user_vecs.detach().cpu().numpy()
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+            user_vecs, _ = model.encode_user_batch(batch)  # (b, K, D)
+        u_np = user_vecs.detach().float().cpu().numpy()
         bsz_cur, k_heads, dim = u_np.shape
         if not use_mol or k_heads == 1:
             scores = u_np[:, 0, :] @ c_vecs_t  # (b, M)
@@ -464,14 +466,18 @@ def train_two_tower_v3(
     use_mol: bool = True,
     mask_in_batch_false_negatives: bool = True,
     apply_log_q_correction: bool = True,
+    use_bf16_amp: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     seed: int = 42,
     device: Optional[str] = None,
 ) -> Tuple[TwoTowerV3Model, Dict[str, Any]]:
-    """执行 TwoTower V3 训练主循环，集成 OOM 缩容保护、断点续训与评估。"""
+    """执行 TwoTower V3 训练主循环，集成 OOM 缩容保护、BF16 TensorCore 加速、断点续训与评估。"""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    if target_device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+    amp_enabled = bool(use_bf16_amp and target_device.type == "cuda" and torch.cuda.is_bf16_supported())
 
     cfg = config or TwoTowerV3Config()
     text_dim = int(train_split.pos_text_emb.shape[1]) if train_split.pos_text_emb.ndim == 2 else 256
@@ -512,21 +518,22 @@ def train_two_tower_v3(
                     local_cursor += len(batch_idx)
                     batch = _slice_batch_to_device(train_split, batch_idx, target_device)
 
-                    user_vecs, user_ctx = model.encode_user_batch(batch)
-                    _, cand_mol_vecs, cand_ctx = model.encode_candidate_batch(batch, prefix="pos_")
-                    logits = model.scorer(
-                        user_vecs,
-                        cand_mol_vecs,
-                        user_ctx,
-                        cand_ctx,
-                        use_mol=use_mol,
-                    )
+                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                        user_vecs, user_ctx = model.encode_user_batch(batch)
+                        _, cand_mol_vecs, cand_ctx = model.encode_candidate_batch(batch, prefix="pos_")
+                        logits = model.scorer(
+                            user_vecs,
+                            cand_mol_vecs,
+                            user_ctx,
+                            cand_ctx,
+                            use_mol=use_mol,
+                        )
                     raw_loss = compute_two_tower_v3_loss(
-                        logits,
+                        logits.float(),
                         pos_post_hashes=batch["pos_post_hashes"],
                         cand_log_q=batch["pos_log_q"],
                         sample_weights=batch["sample_weights"],
-                        user_vecs=user_vecs if use_mol else None,
+                        user_vecs=user_vecs.float() if use_mol else None,
                         mask_in_batch_false_negatives=mask_in_batch_false_negatives,
                         apply_log_q_correction=apply_log_q_correction,
                     )
