@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+import tempfile
+
 import numpy as np
 import onnx
 from onnxruntime.quantization import QuantType, quantize_dynamic
+from onnxruntime.quantization.shape_inference import quant_pre_process
 import torch
 import torch.nn as nn
 
@@ -100,24 +103,41 @@ def quantize_onnx_dynamic_int8(
     int8_path: Path,
     *,
     op_types_to_quantize: Optional[Sequence[str]] = ("MatMul", "Gemm"),
+    per_channel: bool = True,
+    preprocess: bool = True,
 ) -> Path:
     """使用 ONNX Runtime 将 FP32 ONNX 线性矩阵权重动态量化为 QInt8。
 
-    默认仅量化 `MatMul` / `Gemm` 以兼顾压缩率与高余弦精度，避免离散查表 Embed 量化退化。
+    默认先做 ORT 符号形状推断与图预处理并启用 `per_channel=True` 仅量化 `MatMul` / `Gemm`，
+    以同时压低大型 Transformer logits 的量化 MAE 与消除离散查表 Embed 量化退化。
     """
     src = Path(fp32_path)
     dst = Path(int8_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    kwargs: Dict[str, Any] = {
-        "model_input": str(src),
-        "model_output": str(dst),
-        "weight_type": QuantType.QInt8,
-    }
-    if op_types_to_quantize is not None:
-        kwargs["op_types_to_quantize"] = list(op_types_to_quantize)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        quant_input = src
+        if preprocess:
+            pre_path = Path(tmp_dir) / f"{src.stem}_pre.onnx"
+            try:
+                quant_pre_process(str(src), str(pre_path), skip_symbolic_shape=False)
+                if pre_path.exists() and pre_path.stat().st_size > 0:
+                    quant_input = pre_path
+            except Exception:
+                # 若特定自定义符号维度预处理受限，安全回退原始 checked FP32 图
+                quant_input = src
 
-    quantize_dynamic(**kwargs)
+        kwargs: Dict[str, Any] = {
+            "model_input": str(quant_input),
+            "model_output": str(dst),
+            "weight_type": QuantType.QInt8,
+            "per_channel": bool(per_channel),
+        }
+        if op_types_to_quantize is not None:
+            kwargs["op_types_to_quantize"] = list(op_types_to_quantize)
+
+        quantize_dynamic(**kwargs)
+
     checked = onnx.load(str(dst))
     onnx.checker.check_model(checked)
     return dst

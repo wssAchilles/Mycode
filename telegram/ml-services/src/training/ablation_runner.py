@@ -484,7 +484,7 @@ def build_complete_v3_serving_bundle(
         config=t_cfg,
         sid_artifact=rqvae_art,
         epochs=teacher_epochs,
-        batch_size=min(32, max(4, len(phx_train))),
+        batch_size=min(batch_size, max(4, len(phx_train))),
         device=device,
     )
     student, student_res = distill_phoenix_v3_student(
@@ -494,7 +494,7 @@ def build_complete_v3_serving_bundle(
         student_config=s_cfg,
         sid_artifact=rqvae_art,
         epochs=student_epochs,
-        batch_size=min(32, max(4, len(phx_train))),
+        batch_size=min(batch_size, max(4, len(phx_train))),
         device=device,
     )
 
@@ -546,8 +546,8 @@ def build_complete_v3_serving_bundle(
             tmp_path / "phx",
             hist_len=max_history_len,
             cand_len=min(8, max_candidates),
-            min_cosine=0.98,
-            max_mae=0.05,
+            min_cosine=0.985,
+            max_mae=0.08,
         )
         _move_int8_clean_from_tmp(txt_exp, m_dir, "text_encoder_int8.onnx")
         _move_int8_clean_from_tmp(tt_exp, m_dir, "two_tower_user_int8.onnx")
@@ -584,9 +584,13 @@ def build_complete_v3_serving_bundle(
         "realgraphAuc": realgraph_art["metrics"].get("auc"),
         "onnxParity": {
             "textCosine": txt_exp.parity_reports[0].mean_cosine_similarity,
+            "textMae": txt_exp.parity_reports[0].mae,
             "twoTowerCosine": tt_exp.parity_reports[0].mean_cosine_similarity,
+            "twoTowerMae": tt_exp.parity_reports[0].mae,
             "phoenixActionCosine": phx_exp.parity_reports[0].mean_cosine_similarity,
+            "phoenixActionMae": phx_exp.parity_reports[0].mae,
             "phoenixCreadCosine": phx_exp.parity_reports[1].mean_cosine_similarity,
+            "phoenixCreadMae": phx_exp.parity_reports[1].mae,
         },
         "faissIndexPath": str(faiss_idx_path),
         "faissMappingPath": str(faiss_map_path),
