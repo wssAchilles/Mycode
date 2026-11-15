@@ -16,6 +16,7 @@ import tempfile
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
@@ -92,7 +93,7 @@ def deterministic_semantic_projection(
 
 def _split_train_val_rows(rows: Sequence[Mapping[str, Any]]) -> Tuple[List[Mapping[str, Any]], List[Mapping[str, Any]]]:
     train_rows = [r for r in rows if str(r.get("split") or "train").lower() == "train"]
-    val_rows = [r for r in rows if str(r.get("split") or "").lower() in ("val", "test", "eval")]
+    val_rows = [r for r in rows if str(r.get("split") or "").lower() in ("val", "test", "eval", "eval_random")]
     if not train_rows:
         cut = max(1, int(len(rows) * 0.8))
         train_rows = list(rows[:cut])
@@ -300,10 +301,24 @@ def load_v3_parquet_corpus_and_samples(
     *,
     max_samples: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """从 V3 PIT Parquet 目录（如 `ml-services/data/prod_pit_v3`）加载语料库和行为样本切片。"""
+    """从 V3 PIT Parquet 目录（兼容 prod_pit_v3 与多源合并 v3_posts_corpus/v3_samples_*.parquet）加载数据。"""
     root = Path(dataset_dir)
-    posts_table = pq.read_table(root / "prod_posts_corpus_v3.parquet")
-    samples_table = pq.read_table(root / "prod_pit_samples_v3.parquet")
+    posts_path = root / "prod_posts_corpus_v3.parquet"
+    if not posts_path.exists():
+        posts_path = root / "v3_posts_corpus.parquet"
+    if not posts_path.exists():
+        raise FileNotFoundError(f"未在 {root} 找到 prod_posts_corpus_v3.parquet 或 v3_posts_corpus.parquet")
+    posts_table = pq.read_table(posts_path)
+
+    samples_path = root / "prod_pit_samples_v3.parquet"
+    if samples_path.exists():
+        samples_table = pq.read_table(samples_path)
+    else:
+        split_paths = sorted(root.glob("v3_samples_*.parquet"))
+        if not split_paths:
+            raise FileNotFoundError(f"未在 {root} 找到 prod_pit_samples_v3.parquet 或 v3_samples_*.parquet")
+        samples_table = pa.concat_tables([pq.read_table(p) for p in split_paths], promote_options="default")
+
     if max_samples is not None and samples_table.num_rows > int(max_samples):
         samples_table = samples_table.slice(0, int(max_samples))
     return posts_table.to_pylist(), samples_table.to_pylist()
