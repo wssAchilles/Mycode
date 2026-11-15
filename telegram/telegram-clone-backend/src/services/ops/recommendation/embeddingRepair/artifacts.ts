@@ -124,9 +124,9 @@ export function validateEmbeddingMetadataBackup(value: unknown): EmbeddingMetada
             operation.restorePatch,
             { direction: 'restore' },
         );
+        // 仅拦截无效或未分类向量，放行已完成语义升级的 semantic_ready 向量记录
         if (operation.expectedVectors.some(({ classification }) => (
-            classification === 'semantic_ready'
-            || classification === 'invalid'
+            classification === 'invalid'
             || classification === 'unclassified'
         ))) {
             throw new EmbeddingRepairRejectedError('embedding_repair_backup_classification_not_authorizable');
@@ -418,8 +418,9 @@ function assertProposalAuthorizable(proposal: EmbeddingContractRepairProposal): 
     if (proposal.mode !== 'dry-run' || !proposal.fullScan) {
         throw new EmbeddingRepairRejectedError('embedding_repair_proposal_not_authorizable');
     }
+    // 放行合法 V3 semantic_ready 计数与向量记录，仅阻断无效与未分类向量
     const aggregate = proposal.evidence.aggregate;
-    if (aggregate.semantic_ready > 0 || aggregate.invalid > 0 || aggregate.unclassified > 0) {
+    if (aggregate.invalid > 0 || aggregate.unclassified > 0) {
         throw new EmbeddingRepairRejectedError('embedding_repair_classification_not_authorizable');
     }
     if (proposal.replay.user.mismatched > proposal.evidence.cohorts.userVectors.quarantined
@@ -429,8 +430,7 @@ function assertProposalAuthorizable(proposal: EmbeddingContractRepairProposal): 
     }
     for (const operation of proposal.operations) {
         for (const vector of operation.expectedVectors) {
-            if (vector.classification === 'semantic_ready'
-                || vector.classification === 'invalid'
+            if (vector.classification === 'invalid'
                 || vector.classification === 'unclassified') {
                 throw new EmbeddingRepairRejectedError('embedding_repair_classification_not_authorizable');
             }

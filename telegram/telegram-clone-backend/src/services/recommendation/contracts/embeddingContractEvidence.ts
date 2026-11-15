@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { isKnownSemanticEmbeddingContract } from './semanticEmbeddingContracts';
 
 import {
     HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
@@ -59,24 +60,22 @@ export function classifyEmbeddingContractEvidence(
 
     if (input.replayMatched === false) return 'invalid';
 
-    if (input.perVectorContract !== undefined && input.perVectorContract !== null) {
-        if (!isCompleteEmbeddingContract(input.perVectorContract)
-            || !isVectorCompatibleWithContract(input.vector, input.perVectorContract)) {
+    // 优先校验逐向量契约或重放契约，区分本地冷启动兜底与受信任 V3 语义契约
+    const contractToClassify = input.perVectorContract !== undefined && input.perVectorContract !== null
+        ? input.perVectorContract
+        : input.replayContract;
+    if (contractToClassify !== undefined && contractToClassify !== null) {
+        const usingReplayOnly = input.perVectorContract === undefined || input.perVectorContract === null;
+        if ((usingReplayOnly && input.replayMatched !== true)
+            || !isCompleteEmbeddingContract(contractToClassify)
+            || !isVectorCompatibleWithContract(input.vector, contractToClassify)) {
             return 'invalid';
         }
-        return isKnownLocalContract(input.perVectorContract)
-            ? 'verified_local_fallback'
-            : 'unclassified';
-    }
-
-    if (input.replayContract !== undefined && input.replayContract !== null) {
-        if (input.replayMatched !== true
-            || !isCompleteEmbeddingContract(input.replayContract)
-            || !isVectorCompatibleWithContract(input.vector, input.replayContract)) {
-            return 'invalid';
+        if (isKnownLocalContract(contractToClassify)) {
+            return 'verified_local_fallback';
         }
-        return isKnownLocalContract(input.replayContract)
-            ? 'verified_local_fallback'
+        return isKnownSemanticEmbeddingContract(contractToClassify)
+            ? 'semantic_ready'
             : 'unclassified';
     }
 

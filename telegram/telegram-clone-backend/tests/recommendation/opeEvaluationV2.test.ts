@@ -270,6 +270,78 @@ describe('OPE v2', () => {
     const fingerprint = 'a'.repeat(64);
     const result = evaluateRankingPromotionPolicyV2({ policy: { contractVersion: 'ranking_promotion_policy_v2', policyId: 'p', policyVersion: '1', estimand: 'mean_reward_per_logged_slot_v1', bindings: report.bindings, targetPolicyFingerprint: fingerprint, minimumSupportCoverage: 1, minimumEffectiveSampleSize: 1, candidateConfidenceInterval: { level: 0.95, maxHalfWidth: 10 }, constraints: [], segmentGuardrails: [] }, evidence: { opeReports: [{ objective: 'r', targetPolicyFingerprint: fingerprint, report }], targetPolicyFingerprint: fingerprint, rollback: { status: 'missing' }, independentApproval: { status: 'missing' } } });
     expect(result.blockers).not.toContain('report_bindings_mismatch');
+    expect(result.verdict).toBe('blocked');
+    expect(result.blockers).toEqual(['independent_approval_missing', 'rollback_evidence_missing']);
+
+    // 当回滚就绪、独立审批及统计约束均满足时，应真实放行产出 eligible 判定
+    const eligible = evaluateRankingPromotionPolicyV2({
+      policy: {
+        contractVersion: 'ranking_promotion_policy_v2',
+        policyId: 'p',
+        policyVersion: '1',
+        estimand: 'mean_reward_per_logged_slot_v1',
+        bindings: report.bindings,
+        targetPolicyFingerprint: fingerprint,
+        minimumSupportCoverage: 1,
+        minimumEffectiveSampleSize: 1,
+        candidateConfidenceInterval: { level: 0.95, maxHalfWidth: 10 },
+        constraints: [],
+        segmentGuardrails: [],
+      },
+      evidence: {
+        opeReports: [{ objective: 'r', targetPolicyFingerprint: fingerprint, report }],
+        targetPolicyFingerprint: fingerprint,
+        rollback: {
+          status: 'verified',
+          policySha256: result.policySha256!,
+          evidenceSha256: result.evidenceSha256!,
+        },
+        independentApproval: {
+          status: 'verified',
+          policySha256: result.policySha256!,
+          evidenceSha256: result.evidenceSha256!,
+          preparedBy: 'author-alice',
+          approvedBy: 'reviewer-bob',
+        },
+      },
+    });
+    expect(eligible.verdict).toBe('eligible');
+    expect(eligible.blockers).toEqual([]);
+
+    // 即使审批齐全，有效样本量不达标仍应 fail-closed 阻断
+    const lowEssBlocked = evaluateRankingPromotionPolicyV2({
+      policy: {
+        contractVersion: 'ranking_promotion_policy_v2',
+        policyId: 'p',
+        policyVersion: '1',
+        estimand: 'mean_reward_per_logged_slot_v1',
+        bindings: report.bindings,
+        targetPolicyFingerprint: fingerprint,
+        minimumSupportCoverage: 1,
+        minimumEffectiveSampleSize: 999,
+        candidateConfidenceInterval: { level: 0.95, maxHalfWidth: 10 },
+        constraints: [],
+        segmentGuardrails: [],
+      },
+      evidence: {
+        opeReports: [{ objective: 'r', targetPolicyFingerprint: fingerprint, report }],
+        targetPolicyFingerprint: fingerprint,
+        rollback: {
+          status: 'verified',
+          policySha256: result.policySha256!,
+          evidenceSha256: result.evidenceSha256!,
+        },
+        independentApproval: {
+          status: 'verified',
+          policySha256: result.policySha256!,
+          evidenceSha256: result.evidenceSha256!,
+          preparedBy: 'author-alice',
+          approvedBy: 'reviewer-bob',
+        },
+      },
+    });
+    expect(lowEssBlocked.verdict).toBe('blocked');
+    expect(lowEssBlocked.blockers).toContain('minimum_effective_sample_size_not_met');
   });
 
   it('honors configured minimum decision clusters in CI availability', () => {

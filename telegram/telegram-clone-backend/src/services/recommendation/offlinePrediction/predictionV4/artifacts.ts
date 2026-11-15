@@ -891,9 +891,10 @@ async function buildArtifacts(
     const combinedSpoolByteCount = trainingSpool.byteCount + predictionSpool.byteCount;
     if (
       trainingSpool.recordCount !== PREDICTION_V4_RESOURCE_LIMITS.maximumSupportActionRows
-      || predictionSpool.recordCount !== PREDICTION_V4_RESOURCE_LIMITS.maximumPredictionRecords
+      || predictionSpool.recordCount <= 0
+      || predictionSpool.recordCount > PREDICTION_V4_RESOURCE_LIMITS.maximumPredictionRecords
       || combinedSpoolRecordCount
-        !== PREDICTION_V4_RESOURCE_LIMITS.maximumCombinedSpoolRecords
+        > PREDICTION_V4_RESOURCE_LIMITS.maximumCombinedSpoolRecords
       || combinedSpoolByteCount > plan.conservativeCombinedSpoolByteCount
       || combinedSpoolByteCount > PREDICTION_V4_RESOURCE_LIMITS.maximumCombinedSpoolBytes
     ) return reject('resource_limit_exceeded');

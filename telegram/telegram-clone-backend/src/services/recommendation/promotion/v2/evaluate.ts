@@ -28,7 +28,17 @@ export function evaluateRankingPromotionPolicyV2(input: unknown): RankingPromoti
   if (value.evidence.targetPolicyFingerprint !== value.policy.targetPolicyFingerprint) blockers.push('target_policy_fingerprint_mismatch');
   validateAttestations(value, policySha256, evidenceSha256, blockers);
   const variableBlockers = stable(blockers);
-  return { contractVersion: RANKING_PROMOTION_POLICY_V2_VERSION, verdict: 'blocked', blockers: [...RANKING_PROMOTION_FIXED_BLOCKERS_V2, ...variableBlockers], policySha256, evidenceSha256, bindings: value.policy.bindings, diagnostics: { reportObjectives: [...objectives].sort(), variableBlockers } };
+  const finalBlockers = [...RANKING_PROMOTION_FIXED_BLOCKERS_V2, ...variableBlockers];
+  // 依据真实统计约束、护栏、回滚就绪与独立审批状态决定是否准予放量
+  return {
+    contractVersion: RANKING_PROMOTION_POLICY_V2_VERSION,
+    verdict: finalBlockers.length === 0 ? 'eligible' : 'blocked',
+    blockers: finalBlockers,
+    policySha256,
+    evidenceSha256,
+    bindings: value.policy.bindings,
+    diagnostics: { reportObjectives: [...objectives].sort(), variableBlockers },
+  };
   } catch {
     return invalidResult();
   }

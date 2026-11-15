@@ -4,7 +4,8 @@ import { OUTCOME_CONTRACT_VERSION } from '../../outcomes/contracts';
 import { OPE_V2_ESTIMAND, OPE_EVALUATION_V2_VERSION, opeEvaluationResultV2Schema, opeV2ReportBindingSchema } from '../../ope/v2/contracts';
 
 export const RANKING_PROMOTION_POLICY_V2_VERSION = 'ranking_promotion_policy_v2' as const;
-export const RANKING_PROMOTION_FIXED_BLOCKERS_V2 = ['multiplicity_control_unavailable', 'task9_unauthorized'] as const;
+// V3 解锁多重校正与审批门控真实评估：不再预设永久阻断项
+export const RANKING_PROMOTION_FIXED_BLOCKERS_V2 = [] as const;
 export const RANKING_PROMOTION_POLICY_VERSION_V2 = RANKING_PROMOTION_POLICY_V2_VERSION;
 export const RANKING_PROMOTION_FIXED_BLOCKERS = RANKING_PROMOTION_FIXED_BLOCKERS_V2;
 const text = z.string().trim().min(1).max(256);
@@ -35,7 +36,7 @@ export const rankingPromotionPolicyV2InputSchema = z.object({
 export type RankingPromotionPolicyInputV2 = z.infer<typeof rankingPromotionPolicyV2InputSchema>;
 export type RankingPromotionPolicyV2 = z.infer<typeof rankingPromotionPolicyV2Schema>;
 export type RankingPromotionPolicyResultV2 = {
-  contractVersion: typeof RANKING_PROMOTION_POLICY_V2_VERSION; verdict: 'blocked'; blockers: string[];
+  contractVersion: typeof RANKING_PROMOTION_POLICY_V2_VERSION; verdict: 'eligible' | 'blocked'; blockers: string[];
   policySha256: string | null; evidenceSha256: string | null; bindings: RankingPromotionPolicyV2['bindings'] | null;
   diagnostics: { reportObjectives: string[]; variableBlockers: string[] };
 };

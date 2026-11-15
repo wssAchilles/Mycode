@@ -298,4 +298,52 @@ describe('embedding contract evidence', () => {
             'twoTowerEmbeddingContract.embeddingSpace'
         ]).toBeDefined();
     });
+
+    it('classifies trusted V3 semantic contracts as semantic_ready while rejecting unknown producers and extra keys', async () => {
+        const {
+            V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+            V3_SEMANTIC_POST_EMBEDDING_CONTRACT,
+        } = await import('../../src/services/recommendation/contracts/semanticEmbeddingContracts');
+        const userVector = new Array(V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0.125);
+        const postVector = new Array(V3_SEMANTIC_POST_EMBEDDING_CONTRACT.retrievalEmbeddingDim).fill(0.25);
+
+        expect(classifyEmbeddingContractEvidence({
+            vector: userVector,
+            perVectorContract: V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+        })).toBe('semantic_ready');
+
+        expect(classifyEmbeddingContractEvidence({
+            vector: postVector,
+            perVectorContract: V3_SEMANTIC_POST_EMBEDDING_CONTRACT,
+        })).toBe('semantic_ready');
+
+        // 支持已通过严格特征重放校验的 replayContract 返回 semantic_ready
+        expect(classifyEmbeddingContractEvidence({
+            vector: userVector,
+            replayContract: V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+            replayMatched: true,
+        })).toBe('semantic_ready');
+
+        // 未授权外部 producer 与带未知字段的契约必须保持 fail-closed
+        expect(classifyEmbeddingContractEvidence({
+            vector: userVector,
+            perVectorContract: {
+                ...V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+                producer: 'unverified-external-producer',
+            },
+        })).toBe('unclassified');
+        expect(classifyEmbeddingContractEvidence({
+            vector: userVector,
+            perVectorContract: {
+                ...V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+                unknown: true,
+            } as unknown as EmbeddingContract,
+        })).toBe('unclassified');
+
+        // legacySharedContract 旧共享字段不得绕过端侧升级门槛直接获得 semantic_ready
+        expect(classifyEmbeddingContractEvidence({
+            vector: userVector,
+            legacySharedContract: V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+        })).toBe('unclassified');
+    });
 });

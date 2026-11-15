@@ -114,29 +114,45 @@ describe('daily recommendation refresh ops', () => {
         expect(mocks.postSnapshotFind).not.toHaveBeenCalled();
     });
 
-    it('treats fabricated semantic-ready persisted evidence as unavailable', async () => {
+    it('accepts consistent semantic-ready persisted evidence and still rejects mismatched semantic counts', async () => {
         mockCoverageCounts();
-        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({
-            embeddingEvidence: {
-                ...embeddingEvidence,
-                verified_local_fallback: 2,
-                semantic_ready: 1,
-                cohorts: {
-                    ...embeddingEvidence.cohorts,
-                    userVectors: {
-                        ...embeddingEvidence.cohorts.userVectors,
-                        verified_local_fallback: 1,
-                        semantic_ready: 1,
-                    },
+        const validSemanticEvidence = {
+            ...embeddingEvidence,
+            verified_local_fallback: 2,
+            semantic_ready: 1,
+            cohorts: {
+                ...embeddingEvidence.cohorts,
+                userVectors: {
+                    ...embeddingEvidence.cohorts.userVectors,
+                    verified_local_fallback: 1,
+                    semantic_ready: 1,
                 },
             },
+        };
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({
+            embeddingEvidence: validSemanticEvidence,
         })));
         mocks.jobRunFind.mockReturnValue(findManyResult([]));
 
-        const result = await buildDailyRecommendationRefreshOps();
+        const validResult = await buildDailyRecommendationRefreshOps();
 
-        expect(result.embeddingEvidence).toEqual({ status: 'unavailable' });
-        expect(result.users.compatibleDenseVectorRatio).toBe(0);
+        expect(validResult.embeddingEvidence).toMatchObject({
+            status: 'available',
+            semantic_ready: 1,
+        });
+        expect(validResult.users.compatibleDenseVectorRatio).toBe(1);
+
+        // 聚合字段与队列分桶不一致的伪造 semantic_ready 必须依然拒绝
+        mocks.jobRunFindOne.mockReturnValue(findOneResult(latestRun({
+            embeddingEvidence: {
+                ...validSemanticEvidence,
+                semantic_ready: 2,
+            },
+        })));
+        const fabricatedResult = await buildDailyRecommendationRefreshOps();
+
+        expect(fabricatedResult.embeddingEvidence).toEqual({ status: 'unavailable' });
+        expect(fabricatedResult.users.compatibleDenseVectorRatio).toBe(0);
     });
 
     it('fails closed when cohort counts do not add up to the aggregate', async () => {

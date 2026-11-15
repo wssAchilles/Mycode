@@ -150,7 +150,7 @@ describe('auditEmbeddingContracts exit contract', () => {
         })).toBe(2);
     });
 
-    it('rejects fabricated semantic-ready evidence', () => {
+    it('accepts consistent semantic-ready evidence and rejects fabricated semantic counts', () => {
         expect(resolveEmbeddingAuditExitCode({
             strict: true,
             diagnosticOnly: false,
@@ -160,6 +160,21 @@ describe('auditEmbeddingContracts exit contract', () => {
                     semantic_ready: 1,
                 },
             }).embeddingEvidence,
+            approvedQuarantineDigest: EMPTY_QUARANTINE_DIGEST,
+        })).toBe(0);
+
+        // 聚合计数与分桶不一致的伪造 semantic_ready 证据仍须拦截返回退出码 2
+        const fabricated = scanResult({
+            userVectors: {
+                verified_local_fallback: 1,
+                semantic_ready: 1,
+            },
+        });
+        fabricated.embeddingEvidence.semantic_ready = 0;
+        expect(resolveEmbeddingAuditExitCode({
+            strict: true,
+            diagnosticOnly: false,
+            embeddingEvidence: fabricated.embeddingEvidence,
             approvedQuarantineDigest: EMPTY_QUARANTINE_DIGEST,
         })).toBe(2);
     });

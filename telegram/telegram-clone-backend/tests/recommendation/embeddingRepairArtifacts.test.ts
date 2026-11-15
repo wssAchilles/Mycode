@@ -110,9 +110,6 @@ describe('embedding repair artifacts', () => {
         ['nonzero counters', {
             writeCounters: { mongo: 1, redis: 0, scheduler: 0, process: 0, python: 0 },
         }, 'embedding_repair_write_counters_nonzero'],
-        ['semantic evidence', {
-            evidence: evidence({ verified_local_fallback: 2, semantic_ready: 1 }),
-        }, 'embedding_repair_classification_not_authorizable'],
         ['invalid evidence', {
             evidence: evidence({ verified_local_fallback: 2, invalid: 1 }),
         }, 'embedding_repair_classification_not_authorizable'],
@@ -140,6 +137,21 @@ describe('embedding repair artifacts', () => {
     ])('rejects %s for apply', (_case, patch, message) => {
         const proposal = withDigest({ ...proposalInput(), ...patch } as EmbeddingContractRepairProposalInput);
         expect(() => validateEmbeddingRepairProposal(proposal, { forApply: true })).toThrow(message);
+    });
+
+    it('authorizes verified semantic_ready evidence alongside local fallback vectors for apply', () => {
+        const semanticAllowed = proposalInput();
+        semanticAllowed.evidence = {
+            aggregate: counts({ verified_local_fallback: 2, semantic_ready: 1 }),
+            cohorts: {
+                userVectors: counts({ verified_local_fallback: 1, semantic_ready: 1 }),
+                postFeatureSnapshots: counts({ verified_local_fallback: 1 }),
+            },
+        };
+        semanticAllowed.operations[1].expectedVectors[1].classification = 'semantic_ready';
+
+        expect(() => validateEmbeddingRepairProposal(withDigest(semanticAllowed), { forApply: true }))
+            .not.toThrow();
     });
 
     it('authorizes only user replay mismatches covered by user-vector quarantine evidence', () => {
@@ -446,8 +458,29 @@ describe('embedding repair metadata policy', () => {
         expect(() => assertMetadataOnlyOperations([operation])).toThrow(message);
     });
 
-    it('allows only expected per-vector user and post contract metadata with exact inverse patches', () => {
+    it('allows only expected per-vector user and post contract metadata with exact inverse patches', async () => {
         expect(() => assertMetadataOnlyOperations(proposalInput().operations)).not.toThrow();
+
+        // 允许受信任的 V3 语义契约通过元数据修复策略校验，同时继续拦截带未知扩展字段的对象
+        const {
+            V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+        } = await import('../../src/services/recommendation/contracts/semanticEmbeddingContracts');
+        const semanticOp = structuredClone(proposalInput().operations[1]);
+        semanticOp.expectedVectors[1].classification = 'semantic_ready';
+        semanticOp.patch.set.twoTowerEmbeddingContract = V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT;
+        semanticOp.expectedPostApplyMetadata.twoTowerEmbeddingContract =
+            V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT;
+        expect(() => assertMetadataOnlyOperations([semanticOp])).not.toThrow();
+
+        const semanticWithExtraKey = structuredClone(semanticOp);
+        const badSemanticContract = {
+            ...V3_SEMANTIC_USER_TWO_TOWER_EMBEDDING_CONTRACT,
+            unknown: true,
+        };
+        semanticWithExtraKey.patch.set.twoTowerEmbeddingContract = badSemanticContract;
+        semanticWithExtraKey.expectedPostApplyMetadata.twoTowerEmbeddingContract = badSemanticContract;
+        expect(() => assertMetadataOnlyOperations([semanticWithExtraKey]))
+            .toThrow('embedding_repair_contract_not_allowed:twoTowerEmbeddingContract');
     });
 
     it.each([

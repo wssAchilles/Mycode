@@ -20,8 +20,11 @@ report.fingerprints.evaluationSha256 = opeEvaluationReportSha256V2(report);
 describe('ranking promotion policy v2', () => {
   it('keeps fixed blockers first for valid and invalid input', () => {
     const input = { policy, evidence: { opeReports: [{ objective: 'r', targetPolicyFingerprint: sha, report }], targetPolicyFingerprint: sha, rollback: { status: 'missing' as const }, independentApproval: { status: 'missing' as const } } };
-    expect(evaluateRankingPromotionPolicyV2(input).blockers.slice(0, 2)).toEqual(['multiplicity_control_unavailable', 'task9_unauthorized']);
-    expect(evaluateRankingPromotionPolicyV2({}).blockers.slice(0, 2)).toEqual(['multiplicity_control_unavailable', 'task9_unauthorized']);
+    // V3 解除硬编码永久阻断后，合法输入仅返回真实缺失的审批与回滚阻断项
+    const unattestedResult = evaluateRankingPromotionPolicyV2(input);
+    expect(unattestedResult.verdict).toBe('blocked');
+    expect(unattestedResult.blockers).toEqual(['independent_approval_missing', 'rollback_evidence_missing']);
+    expect(evaluateRankingPromotionPolicyV2({}).blockers).toEqual(['invalid_input']);
   });
 
   it('uses inclusive CI bounds and enforces maximum half width', () => {
@@ -54,7 +57,7 @@ describe('ranking promotion policy v2', () => {
   it.each(['cycle', 'bigint'] as const)('fails closed for %s input', (kind) => {
     const value: any = { policy: kind === 'bigint' ? 1n : policy };
     if (kind === 'cycle') value.self = value;
-    expect(evaluateRankingPromotionPolicyV2(value).blockers).toEqual(['multiplicity_control_unavailable', 'task9_unauthorized', 'invalid_input']);
+    expect(evaluateRankingPromotionPolicyV2(value).blockers).toEqual(['invalid_input']);
   });
 
   it('rejects self-hashed cluster-count and binding fingerprint drift', () => {
@@ -90,6 +93,6 @@ describe('ranking promotion policy v2', () => {
       blockers: ['multiplicity_control_unavailable', 'holdout_use_registry_unavailable'],
     });
     expect(evaluatePromotionStatisticalReadinessV1({ ...base, holdoutDecisionIds: base.trainingDecisionIds }).blockers).toContain('decision_set_overlap');
-    expect(evaluateRankingPromotionPolicyV2({} as never).blockers.slice(0, 2)).toEqual(['multiplicity_control_unavailable', 'task9_unauthorized']);
+    expect(evaluateRankingPromotionPolicyV2({} as never).blockers).toEqual(['invalid_input']);
   });
 });

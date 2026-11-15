@@ -116,11 +116,45 @@ export function buildRecommendationDecisionLogV1(
   return recommendationDecisionLogSchema.parse(decision);
 }
 
+function hasVerifiedRandomizedEvidence(decision: RecommendationDecisionLogV1): boolean {
+  // 校验候选池支持完整性与哈希摘要一致性，禁止伪造或残缺证据入库
+  if (
+    decision.candidatePool.supportEvidence.status !== 'complete'
+    || decision.candidatePool.truncated
+    || decision.candidatePool.totalCount !== decision.candidatePool.candidates.length
+    || decision.candidatePool.candidatePoolSha256 !== candidatePoolSha256(decision.candidatePool.candidates)
+  ) {
+    return false;
+  }
+
+  // 校验行为策略及核心管线/策略版本均具备明确绑定版本
+  if (
+    decision.behaviorPolicy.policyVersion.status !== 'bound'
+    || decision.versions.policy.status !== 'bound'
+    || decision.versions.pipeline.status !== 'bound'
+  ) {
+    return false;
+  }
+
+  // 每条已记录动作必须携带位于 (0, 1] 区间内的合法随机 propensity 概率
+  if (decision.actions.length === 0) {
+    return false;
+  }
+
+  return decision.actions.every((action) => (
+    action.behaviorPropensity.status === 'logged_randomized'
+    && typeof action.behaviorPropensity.selectionProbability === 'number'
+    && Number.isFinite(action.behaviorPropensity.selectionProbability)
+    && action.behaviorPropensity.selectionProbability > 0
+    && action.behaviorPropensity.selectionProbability <= 1
+  ));
+}
+
 export async function persistRecommendationDecisionLogV1(
   value: RecommendationDecisionLogV1,
 ): Promise<void> {
   const decision = recommendationDecisionLogSchema.parse(value);
-  if (decision.behaviorPolicyKind === 'logged_randomized') {
+  if (decision.behaviorPolicyKind === 'logged_randomized' && !hasVerifiedRandomizedEvidence(decision)) {
     const code = 'decision_log_randomized_evidence_unverified' as const;
     throw Object.assign(new Error(code), { code });
   }

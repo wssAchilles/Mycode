@@ -111,9 +111,13 @@ export function isFullEmbeddingEvidenceSummary(
     if (!aggregate
         || !userVectors
         || !postFeatureSnapshots
-        || aggregate.semantic_ready !== 0
-        || userVectors.semantic_ready !== 0
-        || postFeatureSnapshots.semantic_ready !== 0
+        || !Number.isSafeInteger(aggregate.semantic_ready)
+        || aggregate.semantic_ready < 0
+        || !Number.isSafeInteger(userVectors.semantic_ready)
+        || userVectors.semantic_ready < 0
+        || !Number.isSafeInteger(postFeatureSnapshots.semantic_ready)
+        || postFeatureSnapshots.semantic_ready < 0
+        || aggregate.semantic_ready !== userVectors.semantic_ready + postFeatureSnapshots.semantic_ready
         || typeof evidence.quarantineDigest !== 'string'
         || !/^[a-f0-9]{64}$/.test(evidence.quarantineDigest)
         || !isNonNegativeInteger(scan.userDocuments)

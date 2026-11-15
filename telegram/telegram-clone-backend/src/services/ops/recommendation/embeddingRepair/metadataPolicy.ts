@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'util';
+import { isKnownSemanticEmbeddingContract } from '../../../recommendation/contracts/semanticEmbeddingContracts';
 
 import {
     HEURISTIC_POST_HASH_EMBEDDING_CONTRACT,
@@ -210,7 +211,8 @@ function assertMetadataValue(
     const expected = collection === 'post_feature_snapshots'
         ? HEURISTIC_POST_HASH_EMBEDDING_CONTRACT
         : REGISTERED_USER_COLD_START_EMBEDDING_CONTRACT;
-    if (!isDeepStrictEqual(value, expected)) {
+    // 允许本地基线契约或通过严格字段与生产者校验的受信任 V3 语义契约
+    if (!isDeepStrictEqual(value, expected) && !isKnownSemanticEmbeddingContract(value)) {
         throw new Error(`embedding_repair_contract_not_allowed:${field}`);
     }
 }

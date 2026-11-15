@@ -396,6 +396,49 @@ describe('recommendation decision log writer', () => {
         expect(updateOne).not.toHaveBeenCalled();
     });
 
+    it('persists verified logged_randomized decisions carrying complete support, bound versions, and valid propensity', async () => {
+        const decision = structuredClone(nodeDecision());
+        decision.behaviorPolicyKind = 'logged_randomized';
+        decision.behaviorPolicy = {
+            policyId: 'eps-plackett-luce-v2',
+            policyVersion: { status: 'bound', version: 'plackett-luce-v2.0' },
+        };
+        decision.versions.pipeline = { status: 'bound', version: 'pipeline-v3' };
+        decision.versions.policy = { status: 'bound', version: 'policy-v3' };
+        decision.candidatePool.supportEvidence = { status: 'complete' };
+        decision.actions = decision.actions.map((action) => ({
+            ...action,
+            behaviorPropensity: {
+                status: 'logged_randomized' as const,
+                selectionProbability: 0.4,
+            },
+        }));
+
+        const updateOne = vi.spyOn(RecommendationTrace, 'updateOne').mockResolvedValue({
+            acknowledged: true,
+            matchedCount: 1,
+            modifiedCount: 1,
+        } as any);
+
+        await persistRecommendationDecisionLogV1(decision);
+
+        expect(updateOne).toHaveBeenCalledOnce();
+        expect(updateOne.mock.calls[0][1]).toEqual({
+            $set: {
+                decisionLogV1: decision,
+                decisionLogV1Sha256: decisionLogSha256(decision),
+            },
+        });
+
+        // 若核心策略版本仍为 unavailable，即使带有 complete 候选池仍须阻断写库
+        const missingVersion = structuredClone(decision);
+        missingVersion.versions.policy = { status: 'unavailable', reason: 'not_bound' };
+        await expect(persistRecommendationDecisionLogV1(missingVersion)).rejects.toMatchObject({
+            code: 'decision_log_randomized_evidence_unverified',
+        });
+        expect(updateOne).toHaveBeenCalledOnce();
+    });
+
     it('stores decision identities and the structured log on the existing trace schema', () => {
         const decision = nodeDecision();
         const trace = new RecommendationTrace({

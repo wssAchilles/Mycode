@@ -34,6 +34,8 @@ import {
 } from '../../src/services/recommendation/offlinePrediction/predictionV3';
 import {
   isVerifiedMultiwayPredictionSetV4,
+  multiwayPredictionSetManifestV4Schema,
+  PREDICTION_V4_RESOURCE_LIMITS,
   produceMultiwayPredictionSetV4,
   verifyMultiwayPredictionSetV4,
 } from '../../src/services/recommendation/offlinePrediction/predictionV4';
@@ -1255,6 +1257,19 @@ describe('Phase 16 cohort prediction', () => {
       verificationPredictionStreamReadRows: 88,
       verificationPredictionStreamComparisonRows: 44,
     });
+    // 验证 V3 放宽的 predictionV4 资源上限可容纳 150+ 全页 Slate 记录并拦截超界值
+    expect(PREDICTION_V4_RESOURCE_LIMITS.maximumPredictionRecords).toBeGreaterThanOrEqual(150);
+    expect(PREDICTION_V4_RESOURCE_LIMITS.maximumCombinedSpoolRecords).toBeGreaterThanOrEqual(
+      PREDICTION_V4_RESOURCE_LIMITS.maximumPredictionRecords,
+    );
+    expect(multiwayPredictionSetManifestV4Schema.safeParse({
+      ...phase19Artifact.manifest,
+      physicalRecordCount: 160,
+    }).success).toBe(true);
+    expect(multiwayPredictionSetManifestV4Schema.safeParse({
+      ...phase19Artifact.manifest,
+      physicalRecordCount: PREDICTION_V4_RESOURCE_LIMITS.maximumPredictionRecords + 1,
+    }).success).toBe(false);
     expect(phase19Artifact.bundle).toMatchObject({
       sourcePredictionSetVersion: predictionSet.manifest.predictionSetVersion,
       sourcePredictionVerificationReceiptSha256: predictionSet.receipt.receiptSha256,
