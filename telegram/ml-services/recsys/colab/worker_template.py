@@ -34,7 +34,7 @@ def _extract_bundle() -> None:
 
     if WORKDIR.exists():
         # 清理旧代码目录，保障每次运行使用最新同步包
-        for sub in ("recsys", "scripts"):
+        for sub in ("recsys", "scripts", "src"):
             target = WORKDIR / sub
             if target.exists():
                 shutil.rmtree(target)
@@ -62,6 +62,17 @@ def _ensure_dependencies(task: str, *, need_gcs: bool = False, need_mongo: bool 
         deps.append(("google.cloud.storage", "google-cloud-storage"))
     if task == "two-tower":
         deps.append(("faiss", "faiss-cpu"))
+    if task.startswith("v3-"):
+        deps.extend(
+            [
+                ("safetensors", "safetensors"),
+                ("onnx", "onnx"),
+                ("onnxruntime", "onnxruntime"),
+                ("pyarrow", "pyarrow"),
+                ("scipy", "scipy"),
+                ("faiss", "faiss-cpu"),
+            ]
+        )
     for mod, pkg in deps:
         try:
             __import__(mod)
@@ -697,6 +708,146 @@ def main() -> None:
                 models_dir=models_dir,
                 mongo_uri=mongo_uri,
             )
+        elif task.startswith("v3-"):
+            from src.models.phoenix_v3 import PhoenixV3Config
+            from src.models.two_tower_v3 import TwoTowerV3Config
+            from src.training.ablation_runner import (
+                build_complete_v3_serving_bundle,
+                load_v3_parquet_corpus_and_samples,
+            )
+
+            _stage_local_or_gcs(
+                drive_dir=drive_data_dir,
+                gcs_uri=gcs_dataset_uri,
+                target_dir=data_dir,
+                required_files=("prod_posts_corpus_v3.parquet", "prod_pit_samples_v3.parquet"),
+            )
+            posts_rows, samples_rows = load_v3_parquet_corpus_and_samples(data_dir)
+            scale = str(JOB_CONFIG.get("scale", "large"))
+            epochs = int(JOB_CONFIG.get("epochs", 6))
+            batch_size = int(JOB_CONFIG.get("batch_size", 64))
+            max_history = int(JOB_CONFIG.get("max_history", 128))
+            max_candidates = int(JOB_CONFIG.get("max_candidates", 64))
+            artifact_version = str(JOB_CONFIG["artifact_version"])
+
+            if scale == "mini":
+                embedding_dim = 128
+                t_cfg = PhoenixV3Config(
+                    dim=64,
+                    num_layers=2,
+                    num_cand_only_layers=1,
+                    num_heads=4,
+                    num_kv_heads=2,
+                    max_history_len=max_history,
+                    max_candidates=max_candidates,
+                    post_hash_buckets=8192,
+                    author_hash_buckets=2048,
+                )
+                s_cfg = PhoenixV3Config(
+                    dim=32,
+                    num_layers=2,
+                    num_cand_only_layers=1,
+                    num_heads=4,
+                    num_kv_heads=2,
+                    max_history_len=max_history,
+                    max_candidates=max_candidates,
+                    post_hash_buckets=8192,
+                    author_hash_buckets=2048,
+                )
+                tt_cfg = TwoTowerV3Config(
+                    hidden_dim=64,
+                    embedding_dim=embedding_dim,
+                    num_layers=2,
+                    num_heads=4,
+                    num_kv_heads=2,
+                    mol_num_heads=4,
+                    max_history_len=max_history,
+                    post_hash_buckets=8192,
+                    author_hash_buckets=2048,
+                )
+                t_epochs = max(1, epochs)
+                s_epochs = max(1, epochs)
+                txt_epochs = max(1, epochs)
+                rq_epochs = max(2, epochs)
+                tt_epochs = max(1, epochs)
+            else:
+                embedding_dim = 256
+                use_large_teacher = task in ("v3-phoenix-teacher", "v3-full-pipeline")
+                t_cfg = (
+                    PhoenixV3Config.teacher_preset(max_history_len=max_history, max_candidates=max_candidates)
+                    if use_large_teacher
+                    else PhoenixV3Config.student_preset(max_history_len=max_history, max_candidates=max_candidates)
+                )
+                s_cfg = PhoenixV3Config.student_preset(max_history_len=max_history, max_candidates=max_candidates)
+                tt_cfg = TwoTowerV3Config(
+                    hidden_dim=256,
+                    embedding_dim=embedding_dim,
+                    num_layers=4,
+                    num_heads=8,
+                    num_kv_heads=2,
+                    mol_num_heads=4,
+                    max_history_len=max_history,
+                )
+                if task == "v3-sid-twotower":
+                    txt_epochs, rq_epochs, tt_epochs = max(8, epochs), max(16, epochs * 2), max(6, epochs)
+                    t_epochs, s_epochs = 2, 2
+                elif task == "v3-phoenix-teacher":
+                    txt_epochs, rq_epochs, tt_epochs = 6, 12, 3
+                    t_epochs, s_epochs = max(4, epochs), max(2, epochs // 2)
+                elif task == "v3-phoenix-distill":
+                    txt_epochs, rq_epochs, tt_epochs = 6, 12, 3
+                    t_epochs, s_epochs = max(4, epochs // 2), max(4, epochs)
+                else:
+                    txt_epochs, rq_epochs, tt_epochs = max(8, epochs), max(16, epochs * 2), max(4, epochs // 2)
+                    t_epochs, s_epochs = max(4, epochs), max(4, epochs)
+
+            report = build_complete_v3_serving_bundle(
+                posts_rows=posts_rows,
+                samples_rows=samples_rows,
+                models_dir=models_dir,
+                data_dir=data_dir,
+                artifact_version=artifact_version,
+                embedding_dim=embedding_dim,
+                text_epochs=txt_epochs,
+                rqvae_epochs=rq_epochs,
+                tt_epochs=tt_epochs,
+                teacher_epochs=t_epochs,
+                student_epochs=s_epochs,
+                batch_size=batch_size,
+                teacher_config=t_cfg,
+                student_config=s_cfg,
+                two_tower_config=tt_cfg,
+                max_history_len=max_history,
+                max_candidates=max_candidates,
+            )
+            report_path = data_dir / "v3_pipeline_report.json"
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+
+            if drive_output_dir:
+                dst_root = Path(drive_output_dir)
+                (dst_root / "models").mkdir(parents=True, exist_ok=True)
+                (dst_root / "data").mkdir(parents=True, exist_ok=True)
+                for item in models_dir.iterdir():
+                    if item.is_file():
+                        shutil.copy2(item, dst_root / "models" / item.name)
+                for d_name in ("cread_edges_ms.json", "serving_manifest_v3.json", "v3_pipeline_report.json"):
+                    d_src = data_dir / d_name
+                    if d_src.exists():
+                        shutil.copy2(d_src, dst_root / "data" / d_name)
+                print(f"[drive-sync] saved V3 serving bundle -> {dst_root}", flush=True)
+
+            if JOB_CONFIG.get("publish_to_gcs") and gcs_bucket and (task != "v3-phoenix-teacher" or allow_pretrain_publish):
+                _upload_directory_to_gcs(models_dir, f"gs://{gcs_bucket}/artifacts/{artifact_version}/models")
+                v3_data_stage = WORKDIR / "v3_data_out"
+                v3_data_stage.mkdir(parents=True, exist_ok=True)
+                for d_name in ("cread_edges_ms.json", "serving_manifest_v3.json", "v3_pipeline_report.json"):
+                    d_src = data_dir / d_name
+                    if d_src.exists():
+                        shutil.copy2(d_src, v3_data_stage / d_name)
+                _upload_directory_to_gcs(v3_data_stage, f"gs://{gcs_bucket}/artifacts/{artifact_version}/data")
+            print(f"[colab-worker] COMPLETED task={task} version={artifact_version}", flush=True)
+            return
         else:
             raise ValueError(f"Unsupported task: {task}")
 

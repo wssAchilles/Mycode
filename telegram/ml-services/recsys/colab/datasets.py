@@ -167,7 +167,7 @@ def build_code_bundle(
 
     included = 0
     excluded = 0
-    target_roots = ["recsys", "scripts"]
+    target_roots = ["recsys", "scripts", "src"]
 
     with tarfile.open(output_tar_gz, "w:gz") as tar:
         req_file = ml_dir / "requirements.txt"

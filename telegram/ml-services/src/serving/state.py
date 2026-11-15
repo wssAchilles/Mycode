@@ -167,7 +167,14 @@ class ServingState:
             # 加载 CREAD-30 分桶边界与 Platt 校准器
             cread_path = data_dir / "cread_edges_ms.json"
             cal_path = models_dir / "weighted_calibrator_v3.json"
-            cread_edges = json.loads(cread_path.read_text(encoding="utf-8")) if cread_path.exists() else None
+            cread_edges = None
+            if cread_path.exists():
+                raw_cread = json.loads(cread_path.read_text(encoding="utf-8"))
+                cread_edges = (
+                    raw_cread.get("edgesMs") or raw_cread.get("edges_ms")
+                    if isinstance(raw_cread, dict)
+                    else raw_cread
+                )
             calibrator = json.loads(cal_path.read_text(encoding="utf-8")) if cal_path.exists() else None
             self.phoenix = PhoenixV3OrtRunner(
                 self.pool,
