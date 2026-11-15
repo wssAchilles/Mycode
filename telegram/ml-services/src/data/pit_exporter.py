@@ -8,10 +8,22 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+
+
+def safe_finite_float(val: Any, default: float = 0.0) -> float:
+    """安全将 CSV 脏值/NaN/Inf/None 转为有限浮点数。"""
+    if val is None or val == "":
+        return float(default)
+    try:
+        out = float(val)
+    except (TypeError, ValueError):
+        return float(default)
+    return out if math.isfinite(out) else float(default)
 
 import pyarrow as pa
 import pyarrow.parquet as pq

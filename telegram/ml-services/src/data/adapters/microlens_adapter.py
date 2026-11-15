@@ -16,7 +16,7 @@ from src.contracts.actions import (
     get_dataset_action_mask,
 )
 from src.contracts.sid import WIRE_MISSING_SID
-from src.data.pit_exporter import anonymize_entity_id, detect_language_hint
+from src.data.pit_exporter import anonymize_entity_id, detect_language_hint, safe_finite_float
 from src.feature_adapters.history_packer import compute_time_bucket
 
 
@@ -109,7 +109,13 @@ def convert_microlens_to_v3_records(
             iid = str(row.get(i_col) or "").strip()
             if not uid or not iid:
                 continue
-            raw_ts = float(row.get(t_col) or (1_650_000_000 + raw_rows)) if t_col else float(1_650_000_000 + raw_rows)
+            raw_ts = (
+                safe_finite_float(row.get(t_col), float(1_650_000_000 + raw_rows))
+                if t_col
+                else float(1_650_000_000 + raw_rows)
+            )
+            if raw_ts <= 0.0:
+                raw_ts = float(1_650_000_000 + raw_rows)
             ts_ms = int(raw_ts if raw_ts > 1e12 else raw_ts * 1000.0)
             has_reply = 1 if (has_comment_col and str(row.get("comment") or row.get("review") or "").strip()) else 0
             by_user[uid].append((ts_ms, iid, has_reply))

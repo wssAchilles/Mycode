@@ -15,7 +15,7 @@ from src.contracts.actions import (
     get_dataset_action_mask,
 )
 from src.contracts.sid import WIRE_MISSING_SID
-from src.data.pit_exporter import anonymize_entity_id, detect_language_hint
+from src.data.pit_exporter import anonymize_entity_id, detect_language_hint, safe_finite_float
 from src.feature_adapters.history_packer import compute_time_bucket
 
 
@@ -88,7 +88,7 @@ def convert_kuairec_to_v3_records(
             stats["raw_rows"] += 1
             uid = str(row.get("user_id") or "").strip()
             vid = str(row.get("video_id") or "").strip()
-            raw_ts = float(row.get("timestamp") or row.get("time_ms") or 0.0)
+            raw_ts = safe_finite_float(row.get("timestamp") if row.get("timestamp") is not None else row.get("time_ms"), 0.0)
             if not uid or not vid or raw_ts <= 0.0:
                 continue
             ts_ms = int(raw_ts if raw_ts > 1e12 else raw_ts * 1000.0)
@@ -127,9 +127,15 @@ def convert_kuairec_to_v3_records(
                 for pos, row in enumerate(slate):
                     vid = row["_vid"]
                     post_id = f"kuairec_v_{vid}"
-                    watch_ratio = float(row.get("watch_ratio") or 0.0)
-                    play_ms = float(row.get("play_duration") or row.get("play_time_ms") or 0.0)
-                    dur_ms = float(row.get("video_duration") or row.get("duration_ms") or 0.0)
+                    watch_ratio = safe_finite_float(row.get("watch_ratio"), 0.0)
+                    play_ms = safe_finite_float(
+                        row.get("play_duration") if row.get("play_duration") is not None else row.get("play_time_ms"),
+                        0.0,
+                    )
+                    dur_ms = safe_finite_float(
+                        row.get("video_duration") if row.get("video_duration") is not None else row.get("duration_ms"),
+                        0.0,
+                    )
 
                     labels = [0] * NUM_PREDICTED_ACTIONS
                     labels[ACTION_INDEX_BY_NAME["click"]] = 1 if watch_ratio >= 0.55 else 0
@@ -181,7 +187,7 @@ def convert_kuairec_to_v3_records(
                 stats["skipped_cold_history"] += len(slate)
 
             for row in slate:
-                wr = float(row.get("watch_ratio") or 0.0)
+                wr = safe_finite_float(row.get("watch_ratio"), 0.0)
                 if wr < 0.12:
                     act_id = ACTION_TYPE_MAP["not_interested"]
                 elif wr >= 2.0:

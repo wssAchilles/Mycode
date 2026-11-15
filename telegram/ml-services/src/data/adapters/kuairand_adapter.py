@@ -17,7 +17,7 @@ from src.contracts.actions import (
     get_dataset_action_mask,
 )
 from src.contracts.sid import WIRE_MISSING_SID
-from src.data.pit_exporter import anonymize_entity_id, detect_language_hint
+from src.data.pit_exporter import anonymize_entity_id, detect_language_hint, safe_finite_float
 from src.feature_adapters.history_packer import compute_time_bucket
 
 _INTERACTION_COLS = (
@@ -151,16 +151,19 @@ def convert_kuairand_to_v3_records(
                         stats["skipped_ads"] += 1
                         continue
 
-                    ts_ms = int(float(row.get("time_ms") or 0))
+                    ts_ms = int(safe_finite_float(row.get("time_ms"), 0.0))
                     if ts_ms <= 0:
                         continue
 
-                    is_rand = int(row.get("is_rand", is_rand_default) or 0)
+                    is_rand = int(safe_finite_float(row.get("is_rand"), float(is_rand_default)))
                     row["_vid"] = vid
                     row["_ts_ms"] = ts_ms
                     row["_is_rand"] = 1 if is_rand > 0 else 0
                     row["_author_id"] = str(meta.get("author_id") or "unknown")
-                    row["_duration_ms"] = float(row.get("duration_ms") or meta.get("duration_ms") or 0.0)
+                    row["_duration_ms"] = safe_finite_float(
+                        row.get("duration_ms") if row.get("duration_ms") is not None else meta.get("duration_ms"),
+                        0.0,
+                    )
                     row["_title"] = str(meta.get("title") or "")
                     by_user[raw_uid].append(row)
 
@@ -200,20 +203,20 @@ def convert_kuairand_to_v3_records(
                     vid = row["_vid"]
                     post_id = f"kuairand_v_{vid}"
                     author_hash = anonymize_entity_id(row["_author_id"], prefix="kuai_a_", salt=salt)
-                    play_ms = float(row.get("play_time_ms") or 0.0)
-                    dur_ms = float(row.get("_duration_ms") or 0.0)
-                    is_click = int(float(row.get("is_click") or 0) > 0)
-                    long_view = int(float(row.get("long_view") or 0) > 0)
+                    play_ms = safe_finite_float(row.get("play_time_ms"), 0.0)
+                    dur_ms = safe_finite_float(row.get("_duration_ms"), 0.0)
+                    is_click = int(safe_finite_float(row.get("is_click"), 0.0) > 0)
+                    long_view = int(safe_finite_float(row.get("long_view"), 0.0) > 0)
 
                     labels = [0] * NUM_PREDICTED_ACTIONS
                     labels[ACTION_INDEX_BY_NAME["click"]] = is_click
-                    labels[ACTION_INDEX_BY_NAME["like"]] = int(float(row.get("is_like") or 0) > 0)
-                    labels[ACTION_INDEX_BY_NAME["reply"]] = int(float(row.get("is_comment") or 0) > 0)
-                    fwd = int(float(row.get("is_forward") or 0) > 0)
+                    labels[ACTION_INDEX_BY_NAME["like"]] = int(safe_finite_float(row.get("is_like"), 0.0) > 0)
+                    labels[ACTION_INDEX_BY_NAME["reply"]] = int(safe_finite_float(row.get("is_comment"), 0.0) > 0)
+                    fwd = int(safe_finite_float(row.get("is_forward"), 0.0) > 0)
                     labels[ACTION_INDEX_BY_NAME["repost"]] = fwd
                     labels[ACTION_INDEX_BY_NAME["share"]] = fwd
-                    labels[ACTION_INDEX_BY_NAME["follow_author"]] = int(float(row.get("is_follow") or 0) > 0)
-                    labels[ACTION_INDEX_BY_NAME["not_interested"]] = int(float(row.get("is_hate") or 0) > 0)
+                    labels[ACTION_INDEX_BY_NAME["follow_author"]] = int(safe_finite_float(row.get("is_follow"), 0.0) > 0)
+                    labels[ACTION_INDEX_BY_NAME["not_interested"]] = int(safe_finite_float(row.get("is_hate"), 0.0) > 0)
 
                     # 被动未点击且超短滑过 (例如 900ms) 严格不标 dwell 正例
                     engaged_any = any(labels[i] > 0 for i in range(6)) or labels[ACTION_INDEX_BY_NAME["follow_author"]] > 0
@@ -282,10 +285,10 @@ def convert_kuairand_to_v3_records(
             for row in slate:
                 chosen_action: Optional[str] = None
                 for col_name, act_name in _HISTORY_PRIORITY:
-                    if float(row.get(col_name) or 0.0) > 0.0:
+                    if safe_finite_float(row.get(col_name), 0.0) > 0.0:
                         chosen_action = act_name
                         break
-                if chosen_action is None and float(row.get("play_time_ms") or 0.0) >= 5_000.0:
+                if chosen_action is None and safe_finite_float(row.get("play_time_ms"), 0.0) >= 5_000.0:
                     chosen_action = "dwell"
                 if chosen_action is not None:
                     hist_item = dict(row)
