@@ -1,0 +1,20 @@
+# 离线训练 / 异步 Worker / 爬虫 / 数据导出全量依赖
+-r serving.txt
+torch>=2.3.0
+transformers>=4.41.0
+sentence-transformers>=3.0.0
+safetensors>=0.4.3
+onnx>=1.16.0
+pyarrow>=18.0.0
+pandas>=2.2.0
+scikit-learn>=1.5.0
+pymongo[srv]>=4.7.0
+dnspython>=2.6.0
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.1
+feedparser>=6.0.11
+newspaper3k>=0.2.8
+lxml_html_clean>=0.2.0
+apscheduler>=3.10.4
+requests>=2.31.0
+tqdm>=4.66.0

@@ -163,6 +163,9 @@ def _record_from_raw_event(
     action_name = canonicalize_action_name(raw_action)
     action_type_id = ACTION_TYPE_MAP.get(action_name, ACTION_TYPE_MAP["impression"])
 
+    raw_rank = doc.get("rank")
+    served_pos = int(raw_rank) if isinstance(raw_rank, (int, float)) and not isinstance(raw_rank, bool) and int(raw_rank) >= 0 else -1
+
     return {
         "user_id": str(uid),
         "post_id": str(doc.get("modelPostId") or pid),
@@ -174,6 +177,8 @@ def _record_from_raw_event(
         "dwell_ms": int(doc.get("dwellTimeMs") or 0),
         "in_network": bool(doc.get("inNetwork", False)),
         "recall_source": str(doc.get("recallSource") or ""),
+        "served_position": served_pos,
+        "request_id": str(doc.get("requestId") or ""),
     }
 
 
@@ -267,11 +272,14 @@ def export_user_actions_from_mongo(
 ) -> Dict[str, List[Dict[str, Any]]]:
     """从 MongoDB user_actions（及可选 user_signals / GCS 归档）联合导出并清理合成数据。"""
     excluded_uids = load_synthetic_user_ids_from_db(db) if exclude_synthetic else set()
-    since = datetime.utcnow() - timedelta(days=days)
+    time_filter: Dict[str, Any] = {}
+    if int(days) > 0:
+        since = datetime.utcnow() - timedelta(days=days)
+        time_filter = {"timestamp": {"$gte": since}}
 
     records: List[Dict[str, Any]] = list(extra_records)
     actions_cursor = db["user_actions"].find(
-        {"timestamp": {"$gte": since}},
+        time_filter,
         {
             "userId": 1,
             "action": 1,
@@ -280,6 +288,7 @@ def export_user_actions_from_mongo(
             "targetAuthorId": 1,
             "timestamp": 1,
             "dwellTimeMs": 1,
+            "rank": 1,
             "inNetwork": 1,
             "recallSource": 1,
             "requestId": 1,
@@ -295,7 +304,7 @@ def export_user_actions_from_mongo(
 
     if include_user_signals and "user_signals" in db.list_collection_names():
         sig_cursor = db["user_signals"].find(
-            {"timestamp": {"$gte": since}},
+            time_filter,
             {
                 "userId": 1,
                 "signalType": 1,
@@ -303,6 +312,7 @@ def export_user_actions_from_mongo(
                 "targetAuthorId": 1,
                 "timestamp": 1,
                 "dwellTimeMs": 1,
+                "rank": 1,
                 "productSurface": 1,
                 "metadata": 1,
             },
@@ -346,17 +356,36 @@ def build_post_metadata_map(db, post_ids: Iterable[str]) -> Dict[str, Dict[str, 
     post_meta_map: Dict[str, Dict[str, Any]] = {}
     for doc in db["posts"].find(
         query,
-        {"_id": 1, "authorId": 1, "isNews": 1, "media": 1, "newsMetadata.externalId": 1},
+        {
+            "_id": 1,
+            "authorId": 1,
+            "isNews": 1,
+            "media": 1,
+            "content": 1,
+            "title": 1,
+            "keywords": 1,
+            "tags": 1,
+            "createdAt": 1,
+            "newsMetadata.externalId": 1,
+            "newsMetadata.title": 1,
+            "newsMetadata.category": 1,
+        },
     ):
         media = doc.get("media") if isinstance(doc.get("media"), list) else []
         has_video = any(str((m or {}).get("type", "")).lower() == "video" for m in media)
+        news_meta = doc.get("newsMetadata") or {}
         info = {
             "author_id": str(doc.get("authorId") or ""),
             "is_news": bool(doc.get("isNews", False)),
             "has_video": has_video,
+            "content": str(doc.get("content") or ""),
+            "title": str(doc.get("title") or news_meta.get("title") or ""),
+            "keywords": [str(k) for k in (doc.get("keywords") or []) if k],
+            "tags": [str(t) for t in (doc.get("tags") or []) if t],
+            "created_at": doc.get("createdAt"),
         }
         post_meta_map[str(doc["_id"])] = info
-        ext = (doc.get("newsMetadata") or {}).get("externalId")
+        ext = news_meta.get("externalId")
         if ext:
             post_meta_map[str(ext)] = info
 

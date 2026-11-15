@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+# 独立异步 Worker / 爬虫 / SID 标注 / PIT 数据导出镜像
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/app
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libxml2-dev \
+    libxslt-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements/serving.txt /app/requirements/serving.txt
+COPY requirements/worker.txt /app/requirements/worker.txt
+RUN pip install --no-cache-dir -r /app/requirements/worker.txt
+
+COPY src /app/src
+COPY recsys /app/recsys
+COPY crawler /app/crawler
+COPY scripts/safety_module.py /app/scripts/safety_module.py
+
+RUN mkdir -p /app/models /app/data
+
+CMD ["python", "-m", "src.workers.sid_safety_async_worker"]

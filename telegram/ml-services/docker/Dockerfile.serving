@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1.7
+# 纯在线推理镜像：仅安装 ONNX Runtime INT8 + FAISS + FastAPI，彻底物理隔离 PyTorch 与爬虫重型依赖
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/app \
+    OMP_NUM_THREADS=4 \
+    ONNX_INTRA_OP_THREADS=4 \
+    ONNX_INTER_OP_THREADS=1 \
+    ARTIFACT_PROFILE=phoenix-v3
+
+WORKDIR /app
+
+# 仅安装运行时最小系统库（gomp 供 onnxruntime / faiss-cpu OpenMP 调度）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements/serving.txt /app/requirements/serving.txt
+RUN pip install --no-cache-dir -r /app/requirements/serving.txt
+
+# 仅复制精简后的推理运行域模块，不打包训练数据、爬虫与离线笔记本
+COPY src/contracts /app/src/contracts
+COPY src/feature_adapters /app/src/feature_adapters
+COPY src/onnx_runtime /app/src/onnx_runtime
+COPY src/serving /app/src/serving
+COPY src/__init__.py /app/src/__init__.py
+
+RUN mkdir -p /app/models /app/data
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "uvicorn src.serving.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

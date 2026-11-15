@@ -16,8 +16,12 @@ models/*.onnx
 # Large Data Files
 data/*.pkl
 data/*.npy
+data/*.parquet
+data/**/*.parquet
+data/prod_pit_v3/
 data/mind_large_*/
 data/last_crawl.json
+*.parquet
 
 # Logs
 *.log
