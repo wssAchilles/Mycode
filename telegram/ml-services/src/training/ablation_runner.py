@@ -8,7 +8,6 @@ Stage 5 (INT8 ONNX 量化 Parity Gate + ServingManifestV3 SHA-256 签名，零 .
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -43,8 +42,14 @@ from src.training.calibration_eb import (
     fit_pit_user_debias_udb1,
     optimize_value_model_weights_lbfgsb,
 )
+from src.training.e5_teacher_encoder import (
+    align_and_blend_multimodal_embeddings,
+    deterministic_semantic_projection,
+    encode_texts_with_hf_e5,
+)
 from src.training.pl_derd_distill import (
     PhoenixPreparedSlates,
+    concat_phoenix_slates,
     distill_phoenix_v3_student,
     evaluate_phoenix_v3_slates,
     prepare_phoenix_v3_slates,
@@ -57,38 +62,6 @@ from src.training.two_tower_v3_trainer import (
     prepare_two_tower_split,
     train_two_tower_v3,
 )
-
-
-def deterministic_semantic_projection(
-    texts: Sequence[str],
-    *,
-    dim: int = 256,
-    seed: int = 42,
-) -> np.ndarray:
-    """无外网/离线快速路径下构造稳定的字符 n-gram 随机投影归一化语义教师向量。"""
-    n = len(texts)
-    if n == 0:
-        return np.zeros((0, dim), dtype=np.float32)
-    mat = np.zeros((n, dim), dtype=np.float32)
-    for row_idx, raw in enumerate(texts):
-        s = str(raw or "").lower().strip()
-        if not s:
-            mat[row_idx, 0] = 1.0
-            continue
-        # 融合 unigram / bigram / trigram 确定性布隆投影，使同主题短文本具备高度一致的余弦结构
-        tokens = s.split()
-        grams: List[str] = list(tokens)
-        for ch_i in range(len(s)):
-            grams.append(s[ch_i : ch_i + 3])
-        if not grams:
-            grams = [s]
-        for g in grams[:128]:
-            h = int.from_bytes(hashlib.blake2b(g.encode("utf-8"), digest_size=8).digest(), "little")
-            col = h % dim
-            sign = 1.0 if ((h >> 8) & 1) == 0 else -1.0
-            mat[row_idx, col] += sign
-    norms = np.linalg.norm(mat, axis=1, keepdims=True) + 1e-12
-    return (mat / norms).astype(np.float32)
 
 
 def _split_train_val_rows(rows: Sequence[Mapping[str, Any]]) -> Tuple[List[Mapping[str, Any]], List[Mapping[str, Any]]]:
@@ -324,6 +297,62 @@ def load_v3_parquet_corpus_and_samples(
     return posts_table.to_pylist(), samples_table.to_pylist()
 
 
+def build_stage3b_finetune_slates(
+    train_rows: Sequence[Mapping[str, Any]],
+    *,
+    max_history_len: int,
+    max_candidates: int,
+    post_sid_wire_map: Optional[Mapping[str, Sequence[int]]] = None,
+    prod_source_name: str = "prod_pit_v3",
+    oversample: int = 6,
+    replay_ratio: float = 0.15,
+    seed: int = 42,
+) -> Tuple[Optional[PhoenixPreparedSlates], Optional[PhoenixPreparedSlates], Dict[str, int]]:
+    """构造无同批污染的 Stage 3B 增量微调与蒸馏补充 Slate 集（主产品过采样 + 多源防遗忘回放）。"""
+    prod_rows = [r for r in train_rows if str(r.get("source_dataset") or "") == prod_source_name]
+    if not prod_rows:
+        return None, None, {"prod_base_rows": 0, "prod_slates": 0, "replay_slates": 0}
+
+    prod_slates = prepare_phoenix_v3_slates(
+        prod_rows,
+        max_history_len=max_history_len,
+        max_candidates=max_candidates,
+        post_sid_wire_map=post_sid_wire_map,
+    )
+    rep = max(1, int(oversample))
+    oversampled_prod = concat_phoenix_slates([prod_slates] * rep)
+
+    other_rows = [r for r in train_rows if str(r.get("source_dataset") or "") != prod_source_name]
+    replay_slates: Optional[PhoenixPreparedSlates] = None
+    if other_rows and replay_ratio > 0.0:
+        replay_row_target = min(
+            len(other_rows),
+            max(1, int(round(len(prod_rows) * rep * float(replay_ratio)))),
+        )
+        rng = np.random.default_rng(seed)
+        picked_idx = rng.choice(len(other_rows), size=replay_row_target, replace=False)
+        picked_rows = [other_rows[int(i)] for i in picked_idx]
+        replay_slates = prepare_phoenix_v3_slates(
+            picked_rows,
+            max_history_len=max_history_len,
+            max_candidates=max_candidates,
+            post_sid_wire_map=post_sid_wire_map,
+        )
+
+    parts = [oversampled_prod] + ([replay_slates] if replay_slates is not None and len(replay_slates) > 0 else [])
+    stage3b_slates = concat_phoenix_slates(parts)
+    extra_prod_copies = max(0, rep - 1)
+    extra_prod_slates = concat_phoenix_slates([prod_slates] * extra_prod_copies) if extra_prod_copies > 0 else None
+    stats = {
+        "prod_base_rows": len(prod_rows),
+        "prod_slates": len(prod_slates),
+        "prod_oversampled_slates": len(oversampled_prod),
+        "replay_slates": len(replay_slates) if replay_slates is not None else 0,
+        "stage3b_total_slates": len(stage3b_slates),
+    }
+    return stage3b_slates, extra_prod_slates, stats
+
+
 def build_complete_v3_serving_bundle(
     *,
     posts_rows: Sequence[Mapping[str, Any]],
@@ -345,6 +374,18 @@ def build_complete_v3_serving_bundle(
     max_history_len: int = 32,
     max_candidates: int = 16,
     device: Optional[str] = None,
+    use_hf_e5: bool = False,
+    e5_model_name: str = "intfloat/multilingual-e5-base",
+    e5_batch_size: int = 256,
+    text_vocab_size: int = 512,
+    text_num_layers: int = 2,
+    multimodal_post_embeddings: Optional[Mapping[str, np.ndarray]] = None,
+    multimodal_text_weight: float = 0.72,
+    stage3b_prod_epochs: int = 0,
+    stage3b_prod_oversample: int = 6,
+    stage3b_replay_ratio: float = 0.15,
+    stage3b_lr: float = 1e-4,
+    faiss_hnsw_m: int = 16,
 ) -> Dict[str, Any]:
     """全栈端到端 V3 产物联产流水线：产出全套 ONNX INT8、Safetensors、HNSW-SQ8、侧车及签名清单。"""
     m_dir = Path(models_dir)
@@ -352,7 +393,7 @@ def build_complete_v3_serving_bundle(
     m_dir.mkdir(parents=True, exist_ok=True)
     d_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Stage 1: 多语言文本蒸馏与 6x256 RQ-VAE 码本生成
+    # 1. Stage 1: 多语言文本蒸馏与 6x256 RQ-VAE 码本生成（支持真实 HF E5-Base 与多模态融合）
     post_ids: List[str] = []
     texts: List[str] = []
     for i, post in enumerate(posts_rows):
@@ -361,18 +402,43 @@ def build_complete_v3_serving_bundle(
         body = str(post.get("content") or "")
         texts.append((f"{title}\n{body}").strip() or post_ids[-1])
 
-    teacher_embs = (
-        np.asarray(post_teacher_embeddings, dtype=np.float32)
-        if post_teacher_embeddings is not None
-        else deterministic_semantic_projection(texts, dim=embedding_dim)
-    )
+    e5_info: Dict[str, Any]
+    if post_teacher_embeddings is not None:
+        teacher_embs = np.asarray(post_teacher_embeddings, dtype=np.float32)
+        e5_info = {"backend": "precomputed_teacher_embeddings", "fallback": False, "encoded_count": len(texts)}
+    elif use_hf_e5:
+        teacher_embs, e5_info = encode_texts_with_hf_e5(
+            texts,
+            model_name=e5_model_name,
+            dim=embedding_dim,
+            batch_size=e5_batch_size,
+            max_length=128,
+            device=device,
+            allow_fallback=True,
+        )
+    else:
+        teacher_embs = deterministic_semantic_projection(texts, dim=embedding_dim)
+        e5_info = {"backend": "deterministic_projection", "fallback": False, "encoded_count": len(texts)}
+
+    if multimodal_post_embeddings:
+        teacher_embs, mm_blended = align_and_blend_multimodal_embeddings(
+            teacher_embs,
+            post_ids,
+            multimodal_post_vectors=multimodal_post_embeddings,
+            text_weight=multimodal_text_weight,
+        )
+        e5_info["multimodalBlendedPosts"] = int(mm_blended)
+    else:
+        e5_info["multimodalBlendedPosts"] = 0
+
     text_enc, text_metrics = train_distilled_text_encoder(
         texts,
         teacher_embs,
+        vocab_size=text_vocab_size,
         hidden_dim=min(256, max(64, embedding_dim)),
         embedding_dim=embedding_dim,
         max_length=128,
-        num_layers=2,
+        num_layers=max(1, int(text_num_layers)),
         epochs=text_epochs,
         batch_size=min(batch_size, max(8, len(texts))),
         device=device,
@@ -441,9 +507,14 @@ def build_complete_v3_serving_bundle(
         post_text_emb_map=post_text_emb_map,
         device=torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu")),
     )
-    faiss_idx_path, faiss_map_path = build_faiss_hnsw_sq8_index(corpus_vecs, corpus_pids, m_dir)
+    faiss_idx_path, faiss_map_path = build_faiss_hnsw_sq8_index(
+        corpus_vecs,
+        corpus_pids,
+        m_dir,
+        hnsw_m=max(4, int(faiss_hnsw_m)),
+    )
 
-    # 3. Stage 3: Phoenix V3 Teacher -> Student 联合蒸馏 (Muon + PL + CREAD-30 + DE-RRD)
+    # 3. Stage 3: Phoenix V3 Teacher Stage 3A 多源预训练 -> Stage 3B 主域过采样回放微调 -> Student 蒸馏
     phx_train = prepare_phoenix_v3_slates(
         train_rows,
         max_history_len=max_history_len,
@@ -487,22 +558,89 @@ def build_complete_v3_serving_bundle(
         batch_size=min(batch_size, max(4, len(phx_train))),
         device=device,
     )
+
+    eval_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    stage3b_metrics: Dict[str, Any] = {"enabled": bool(stage3b_prod_epochs > 0)}
+    student_train_slates = phx_train
+    prod_val_slates: Optional[PhoenixPreparedSlates] = None
+    if stage3b_prod_epochs > 0:
+        stage3b_slates, extra_prod_slates, s3b_stats = build_stage3b_finetune_slates(
+            train_rows,
+            max_history_len=max_history_len,
+            max_candidates=max_candidates,
+            post_sid_wire_map=post_sid_wire_map,
+            oversample=stage3b_prod_oversample,
+            replay_ratio=stage3b_replay_ratio,
+        )
+        if stage3b_slates is not None and len(stage3b_slates) > 0:
+            teacher, teacher_3b_res = train_phoenix_v3_teacher(
+                stage3b_slates,
+                val_slates=phx_val,
+                config=t_cfg,
+                sid_artifact=rqvae_art,
+                epochs=stage3b_prod_epochs,
+                batch_size=min(batch_size, max(4, len(stage3b_slates))),
+                lr=stage3b_lr,
+                init_model=teacher,
+                seed=103,
+                device=device,
+            )
+            if extra_prod_slates is not None and len(extra_prod_slates) > 0:
+                student_train_slates = concat_phoenix_slates([phx_train, extra_prod_slates])
+            stage3b_metrics.update(
+                {
+                    "executed": True,
+                    "stats": s3b_stats,
+                    "valMetrics": teacher_3b_res.get("val_metrics", {}),
+                }
+            )
+            prod_val_rows = [r for r in val_rows if str(r.get("source_dataset") or "") == "prod_pit_v3"]
+            if prod_val_rows:
+                prod_val_slates = prepare_phoenix_v3_slates(
+                    prod_val_rows,
+                    max_history_len=max_history_len,
+                    max_candidates=max_candidates,
+                    post_sid_wire_map=post_sid_wire_map,
+                )
+                pval_t = evaluate_phoenix_v3_slates(
+                    teacher,
+                    prod_val_slates,
+                    batch_size=max(64, batch_size),
+                    device=eval_device,
+                )
+                stage3b_metrics["prodValTeacher"] = {
+                    k: float(v) for k, v in pval_t.items() if isinstance(v, (int, float))
+                }
+        else:
+            stage3b_metrics.update({"executed": False, "reason": "no_prod_pit_v3_train_rows", "stats": s3b_stats})
+
     student, student_res = distill_phoenix_v3_student(
-        phx_train,
+        student_train_slates,
         teacher_model=teacher,
         val_slates=phx_val,
         student_config=s_cfg,
         sid_artifact=rqvae_art,
         epochs=student_epochs,
-        batch_size=min(batch_size, max(4, len(phx_train))),
+        batch_size=min(batch_size, max(4, len(student_train_slates))),
         device=device,
     )
+    if prod_val_slates is not None and len(prod_val_slates) > 0:
+        pval_s = evaluate_phoenix_v3_slates(
+            student,
+            prod_val_slates,
+            batch_size=max(64, batch_size),
+            device=eval_device,
+        )
+        stage3b_metrics["prodValStudent"] = {
+            k: float(v) for k, v in pval_s.items() if isinstance(v, (int, float))
+        }
 
     # 4. Stage 4: 校准 + Value Model + UDB1 + 16D RealGraph V3 侧车联产
     eval_out = evaluate_phoenix_v3_slates(
         student,
         phx_val,
-        device=torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu")),
+        batch_size=max(64, batch_size),
+        device=eval_device,
     )
     calibrator = fit_empirical_bayes_calibrator(
         eval_out["flat_probs"],
@@ -573,10 +711,12 @@ def build_complete_v3_serving_bundle(
     return {
         "artifactVersion": artifact_version,
         "manifestPath": str(manifest_path),
+        "e5EncoderInfo": e5_info,
         "textMetrics": text_metrics,
         "rqvaeMetrics": rqvae_metrics,
         "twoTowerMetrics": tt_metrics,
         "teacherMetrics": teacher_res.get("val_metrics", {}),
+        "stage3bMetrics": stage3b_metrics,
         "studentMetrics": student_res.get("val_metrics", {}),
         "calibratorSummary": {"meanEceBefore": calibrator["meanEceBefore"], "meanEceAfter": calibrator["meanEceAfter"]},
         "valueModelOptimizer": value_art["optimizer"],

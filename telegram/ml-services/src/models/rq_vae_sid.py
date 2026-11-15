@@ -317,7 +317,15 @@ def train_rqvae_codebook(
 
     with torch.no_grad():
         net.eval()
-        latent_init = net.encode(x_all).detach().cpu().numpy()
+        latent_chunks = [
+            net.encode(x_all[start : start + eff_bs]).detach().cpu().numpy()
+            for start in range(0, n_samples, eff_bs)
+        ]
+        latent_init = (
+            np.concatenate(latent_chunks, axis=0)
+            if latent_chunks
+            else np.zeros((0, latent_dim), dtype=np.float32)
+        )
     init_stages, _ = train_rq_kmeans(
         latent_init,
         num_levels=num_levels,
@@ -727,8 +735,12 @@ def train_distilled_text_encoder(
             final_loss = float(loss.item())
 
     model.eval()
+    eval_preds: List[torch.Tensor] = []
+    eval_bs = max(1, min(512, n))
     with torch.no_grad():
-        all_pred = model(x_ids, x_mask)
+        for start in range(0, n, eval_bs):
+            eval_preds.append(model(x_ids[start : start + eval_bs], x_mask[start : start + eval_bs]))
+        all_pred = torch.cat(eval_preds, dim=0)
         mean_cos = float((all_pred * y_true).sum(dim=-1).mean().item())
         mae = float(torch.abs(all_pred - y_true).mean().item())
 

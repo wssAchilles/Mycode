@@ -18,6 +18,7 @@ from src.serving.config import ServingConfig
 from src.serving.main import create_serving_app
 from src.training.ablation_runner import (
     build_complete_v3_serving_bundle,
+    build_stage3b_finetune_slates,
     load_v3_parquet_corpus_and_samples,
     run_ablation_1_sid_text,
     run_ablation_3_phoenix_loss_and_distill,
@@ -28,6 +29,10 @@ from src.training.calibration_eb import (
     fit_empirical_bayes_calibrator,
     fit_pit_user_debias_udb1,
     optimize_value_model_weights_lbfgsb,
+)
+from src.training.e5_teacher_encoder import (
+    align_and_blend_multimodal_embeddings,
+    project_embeddings_orthogonal,
 )
 from src.training.muon_adamw import (
     ModelEMA,
@@ -43,6 +48,7 @@ from src.training.pl_derd_distill import (
     compute_masked_14head_bce,
     compute_plackett_luce_loss,
     compute_scalar_rank_utility,
+    concat_phoenix_slates,
     prepare_phoenix_v3_slates,
 )
 from src.training.realgraph_v3 import (
@@ -589,3 +595,93 @@ def test_colab_v3_profiles_render_and_bundle_includes_src(tmp_path: Path) -> Non
     assert any(n.startswith("src/") for n in names)
     assert any(n.startswith("recsys/") for n in names)
     assert not any(".env" in n for n in names)
+
+
+def test_e5_multimodal_and_stage3b_incremental_pipeline(tmp_path: Path) -> None:
+    # 1. 验证高维正交投影 (SVD 主成分与 QR 回退) 及多模态球面融合契约
+    rng = np.random.default_rng(77)
+    raw_hi = rng.standard_normal((300, 768)).astype(np.float32)
+    proj_svd = project_embeddings_orthogonal(raw_hi, dim=64, seed=11)
+    assert proj_svd.shape == (300, 64)
+    np.testing.assert_allclose(np.linalg.norm(proj_svd, axis=1), np.ones(300, dtype=np.float32), atol=1e-4)
+
+    proj_qr = project_embeddings_orthogonal(raw_hi[:8], dim=64, seed=11)
+    assert proj_qr.shape == (8, 64)
+    np.testing.assert_allclose(np.linalg.norm(proj_qr, axis=1), np.ones(8, dtype=np.float32), atol=1e-4)
+
+    post_ids = [f"post_{i}" for i in range(24)]
+    mm_target = np.zeros(64, dtype=np.float32)
+    mm_target[0] = 1.0
+    blended, n_blended = align_and_blend_multimodal_embeddings(
+        proj_svd[:24],
+        post_ids,
+        multimodal_post_vectors={"post_0": mm_target, "post_5": mm_target},
+        text_weight=0.7,
+    )
+    assert n_blended == 2
+    assert not np.allclose(blended[0], proj_svd[0])
+    np.testing.assert_allclose(blended[1], proj_svd[1], atol=1e-6)
+
+    # 2. 验证 Stage 3B Slate 级过采样拼接不破坏单榜单边界，并端到端走通 Stage 3A -> Stage 3B
+    rows_other = _make_synthetic_slate_rows(num_slates=10, cands_per_slate=4, seed=101)
+    rows_prod = _make_synthetic_slate_rows(num_slates=6, cands_per_slate=4, seed=202)
+    for idx, r in enumerate(rows_prod):
+        r["source_dataset"] = "prod_pit_v3"
+        r["user_hash_id"] = f"prod_u_{idx // 4}"
+    all_rows = rows_other + rows_prod
+
+    train_rows = [r for r in all_rows if r["split"] == "train"]
+    stage3b_slates, extra_prod, s3b_stats = build_stage3b_finetune_slates(
+        train_rows,
+        max_history_len=16,
+        max_candidates=8,
+        oversample=3,
+        replay_ratio=0.25,
+    )
+    assert stage3b_slates is not None and extra_prod is not None
+    assert s3b_stats["prod_oversampled_slates"] == 3 * s3b_stats["prod_slates"]
+    assert len(stage3b_slates) == s3b_stats["prod_oversampled_slates"] + s3b_stats["replay_slates"]
+    assert len(extra_prod) == 2 * s3b_stats["prod_slates"]
+
+    concat_check = concat_phoenix_slates([stage3b_slates, extra_prod])
+    assert len(concat_check) == len(stage3b_slates) + len(extra_prod)
+
+    posts_rows = [
+        {
+            "post_id": f"post_{i}",
+            "author_hash": f"author_{i % 3}",
+            "title": f"multilingual post topic {i}",
+            "content": f"detailed synthetic content body for post {i}",
+            "has_video": 1 if i % 2 == 0 else 0,
+        }
+        for i in range(24)
+    ]
+    summary = build_complete_v3_serving_bundle(
+        posts_rows=posts_rows,
+        samples_rows=all_rows,
+        models_dir=tmp_path / "models",
+        data_dir=tmp_path / "data",
+        artifact_version="v3-stage3b-unit-check",
+        embedding_dim=64,
+        text_epochs=2,
+        rqvae_epochs=3,
+        tt_epochs=2,
+        teacher_epochs=1,
+        student_epochs=1,
+        stage3b_prod_epochs=1,
+        stage3b_prod_oversample=2,
+        stage3b_replay_ratio=0.5,
+        stage3b_lr=1e-4,
+        batch_size=16,
+        max_history_len=16,
+        max_candidates=8,
+        multimodal_post_embeddings={"post_0": mm_target, "post_5": mm_target},
+        faiss_hnsw_m=8,
+        device="cpu",
+    )
+    assert summary["e5EncoderInfo"]["multimodalBlendedPosts"] == 2
+    assert summary["stage3bMetrics"]["enabled"] is True
+    assert summary["stage3bMetrics"]["executed"] is True
+    assert "prodValTeacher" in summary["stage3bMetrics"]
+    assert "prodValStudent" in summary["stage3bMetrics"]
+    assert Path(summary["manifestPath"]).exists()

@@ -248,6 +248,39 @@ def prepare_phoenix_v3_slates(
     )
 
 
+def concat_phoenix_slates(slates_list: Sequence[PhoenixPreparedSlates]) -> PhoenixPreparedSlates:
+    """在榜单维度拼接多个 `PhoenixPreparedSlates`，保留每个 Slate 内部候选隔离边界。"""
+    valid = [s for s in slates_list if len(s) > 0]
+    if not valid:
+        raise ValueError("concat_phoenix_slates requires at least one non-empty PhoenixPreparedSlates")
+    if len(valid) == 1:
+        return valid[0]
+    return PhoenixPreparedSlates(
+        history_post_hashes=np.concatenate([s.history_post_hashes for s in valid], axis=0),
+        history_author_hashes=np.concatenate([s.history_author_hashes for s in valid], axis=0),
+        history_action_types=np.concatenate([s.history_action_types for s in valid], axis=0),
+        history_time_buckets=np.concatenate([s.history_time_buckets for s in valid], axis=0),
+        history_sids=np.concatenate([s.history_sids for s in valid], axis=0),
+        history_action_masks=np.concatenate([s.history_action_masks for s in valid], axis=0),
+        history_mask=np.concatenate([s.history_mask for s in valid], axis=0),
+        cand_post_hashes=np.concatenate([s.cand_post_hashes for s in valid], axis=0),
+        cand_author_hashes=np.concatenate([s.cand_author_hashes for s in valid], axis=0),
+        cand_sids=np.concatenate([s.cand_sids for s in valid], axis=0),
+        cand_in_network=np.concatenate([s.cand_in_network for s in valid], axis=0),
+        cand_has_video=np.concatenate([s.cand_has_video for s in valid], axis=0),
+        cand_served_position=np.concatenate([s.cand_served_position for s in valid], axis=0),
+        cand_mask=np.concatenate([s.cand_mask for s in valid], axis=0),
+        labels_14=np.concatenate([s.labels_14 for s in valid], axis=0),
+        mask_14=np.concatenate([s.mask_14 for s in valid], axis=0),
+        dwell_buckets=np.concatenate([s.dwell_buckets for s in valid], axis=0),
+        dwell_mask=np.concatenate([s.dwell_mask for s in valid], axis=0),
+        relevance_scores=np.concatenate([s.relevance_scores for s in valid], axis=0),
+        is_random_exposure=np.concatenate([s.is_random_exposure for s in valid], axis=0),
+        user_hash_ids=[uid for s in valid for uid in s.user_hash_ids],
+        cand_post_ids=[pids for s in valid for pids in s.cand_post_ids],
+    )
+
+
 def _slice_slates_to_device(
     slates: PhoenixPreparedSlates,
     indices: np.ndarray,
@@ -557,16 +590,17 @@ def train_phoenix_v3_teacher(
     cread_weight: float = 0.35,
     ema_decay: float = 0.99,
     checkpoint_manager: Optional[CheckpointManager] = None,
+    init_model: Optional[PhoenixV3Model] = None,
     seed: int = 42,
     device: Optional[str] = None,
 ) -> Tuple[PhoenixV3Model, Dict[str, Any]]:
-    """训练 Phoenix V3 Teacher（Muon+AdamW 分区优化 + ModelEMA + Plackett-Luce + CREAD-30 + PAL）。"""
+    """训练 Phoenix V3 Teacher（支持从 Stage 3A `init_model` 继续微调 + Muon+AdamW + EMA + PL + CREAD-30 + PAL）。"""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    cfg = config or PhoenixV3Config.teacher_preset()
-    model = PhoenixV3Model(cfg, sid_artifact=sid_artifact).to(target_device)
+    cfg = init_model.config if init_model is not None else (config or PhoenixV3Config.teacher_preset())
+    model = (init_model if init_model is not None else PhoenixV3Model(cfg, sid_artifact=sid_artifact)).to(target_device)
 
     optimizer: torch.optim.Optimizer
     if use_muon:
@@ -655,7 +689,9 @@ def train_phoenix_v3_teacher(
 
         if val_slates is not None and len(val_slates) > 0:
             with ema.use_ema(model):
-                val_res = evaluate_phoenix_v3_slates(model, val_slates, device=target_device)
+                val_res = evaluate_phoenix_v3_slates(
+                    model, val_slates, batch_size=max(64, batch_size), device=target_device
+                )
             val_score = float(val_res["early_stop_score"])
             epoch_info["early_stop_score"] = val_score
             epoch_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
@@ -680,7 +716,7 @@ def train_phoenix_v3_teacher(
     # 结束后应用 EMA 稳定权重作为最终模型产出
     ema.apply_shadow(model)
     final_eval = (
-        evaluate_phoenix_v3_slates(model, val_slates, device=target_device)
+        evaluate_phoenix_v3_slates(model, val_slates, batch_size=max(64, batch_size), device=target_device)
         if val_slates is not None and len(val_slates) > 0
         else {}
     )
@@ -828,7 +864,9 @@ def distill_phoenix_v3_student(
 
         if val_slates is not None and len(val_slates) > 0:
             with ema.use_ema(student):
-                val_res = evaluate_phoenix_v3_slates(student, val_slates, device=target_device)
+                val_res = evaluate_phoenix_v3_slates(
+                    student, val_slates, batch_size=max(64, batch_size), device=target_device
+                )
             val_score = float(val_res["early_stop_score"])
             ep_info["early_stop_score"] = val_score
             ep_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
@@ -852,7 +890,7 @@ def distill_phoenix_v3_student(
 
     ema.apply_shadow(student)
     final_eval = (
-        evaluate_phoenix_v3_slates(student, val_slates, device=target_device)
+        evaluate_phoenix_v3_slates(student, val_slates, batch_size=max(64, batch_size), device=target_device)
         if val_slates is not None and len(val_slates) > 0
         else {}
     )

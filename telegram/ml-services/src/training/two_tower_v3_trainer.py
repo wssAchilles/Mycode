@@ -305,42 +305,40 @@ def evaluate_retrieval_metrics(
     c_norms = np.linalg.norm(c_vecs, axis=1, keepdims=True) + 1e-12
     c_vecs = c_vecs / c_norms
 
-    all_scores: List[np.ndarray] = []
-    for start in range(0, n_eval, batch_size):
-        idx = np.arange(start, min(n_eval, start + batch_size))
-        batch = _slice_batch_to_device(eval_split, idx, target_device)
-        user_vecs, _ = model.encode_user_batch(batch)  # (b, K, D)
-        u_np = user_vecs.detach().cpu().numpy()
-        if not use_mol or u_np.shape[1] == 1:
-            q_np = u_np[:, 0, :]
-            scores = q_np @ c_vecs.T  # (b, M)
-        else:
-            # 对 MoL 多头检索分数取最大余弦激活（与线上多头并集召回一致）
-            scores_heads = np.einsum("bkd,md->bkm", u_np, c_vecs)
-            scores = np.max(scores_heads, axis=1)
-        all_scores.append(scores)
-
-    score_mat = np.concatenate(all_scores, axis=0)  # (n_eval, n_corpus)
     hits_by_k = {int(k): 0.0 for k in ks}
     mrr_sum = 0.0
     valid_eval = 0
 
-    for row_idx, true_pid in enumerate(eval_split.pos_post_ids):
-        target_col = pid_to_idx.get(true_pid)
-        if target_col is None:
-            continue
-        valid_eval += 1
-        order = np.argsort(-score_mat[row_idx])
-        # 找到真值在全候选序中的 1-indexed 排名
-        rank_arr = np.flatnonzero(order == target_col)
-        if rank_arr.size == 0:
-            continue
-        rank = int(rank_arr[0]) + 1
-        for k in ks:
-            if rank <= int(k):
-                hits_by_k[int(k)] += 1.0
-        if rank <= 100:
-            mrr_sum += 1.0 / float(rank)
+    # 分批在线算分与实时定秩，彻底避免 n_eval × n_corpus 巨型矩阵内存爆炸
+    c_vecs_t = c_vecs.T  # (D, M)
+    for start in range(0, n_eval, batch_size):
+        end = min(n_eval, start + batch_size)
+        idx = np.arange(start, end)
+        batch = _slice_batch_to_device(eval_split, idx, target_device)
+        user_vecs, _ = model.encode_user_batch(batch)  # (b, K, D)
+        u_np = user_vecs.detach().cpu().numpy()
+        bsz_cur, k_heads, dim = u_np.shape
+        if not use_mol or k_heads == 1:
+            scores = u_np[:, 0, :] @ c_vecs_t  # (b, M)
+        else:
+            # 使用 BLAS 矩阵乘替代 einsum 计算 MoL 多头最大余弦激活
+            scores = (u_np.reshape(bsz_cur * k_heads, dim) @ c_vecs_t).reshape(bsz_cur, k_heads, -1).max(axis=1)
+
+        for local_i, row_idx in enumerate(range(start, end)):
+            target_col = pid_to_idx.get(eval_split.pos_post_ids[row_idx])
+            if target_col is None:
+                continue
+            valid_eval += 1
+            row_scores = scores[local_i]
+            tgt_val = row_scores[target_col]
+            higher = int(np.sum(row_scores > tgt_val))
+            ties_before = int(np.sum(row_scores[:target_col] == tgt_val))
+            rank = higher + ties_before + 1
+            for k in ks:
+                if rank <= int(k):
+                    hits_by_k[int(k)] += 1.0
+            if rank <= 100:
+                mrr_sum += 1.0 / float(rank)
 
     denom = float(max(1, valid_eval))
     metrics = {f"recall@{k}": hits_by_k[int(k)] / denom for k in ks}
