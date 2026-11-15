@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-pub mod filter_trait;
+pub mod filter;
 pub mod quality_guard;
+pub use filter as filter_trait;
+pub use filter::FilterResult;
 pub use quality_guard::*;
 
 pub const FILTER_DECISION_SCHEMA_VERSION: &str = "filter_decision_v1";

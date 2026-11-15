@@ -299,6 +299,7 @@ mod tests {
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
             feature_switches: HashMap::new(),
+            ..Default::default()
         };
         let candidate = recommendation_candidate_fixture();
 
@@ -428,6 +429,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 }

@@ -6,7 +6,6 @@ use crate::contracts::{
 use telegram_component_primitives::filters::PREVIOUSLY_SEEN_POSTS_BACKUP_FILTER;
 use telegram_filter_primitives::FILTER_DROP_REASON_SEEN_POST;
 
-use super::TRUSTED_EMPTY_SELECTION_RECALL_SOURCES;
 use super::common::partition;
 use super::detail::{build_disabled_stage, build_stage};
 
@@ -46,17 +45,11 @@ pub(super) fn previously_seen_posts_backup_filter(
     let seen_set: HashSet<String> = seen_ids.into_iter().collect();
 
     let (kept, removed) = partition(candidates, |candidate| {
-        // Trusted recall sources bypass the backup filter (same as primary SeenPostFilter)
-        if let Some(ref source) = candidate.recall_source
-            && TRUSTED_EMPTY_SELECTION_RECALL_SOURCES.contains(&source.as_str())
-        {
-            return true;
-        }
-        // Primary check: exact post_id match
+        // 严格 Fail-Closed 检查：无论召回源是否为核心图路，已看过的帖子一律拦截，不允许绕过
         if seen_set.contains(&candidate.post_id) {
             return false;
         }
-        // Also check model_post_id if present
+        // 同时核对模型映射帖子 ID，防止双端 ID 不一致导致已看帖漏出
         if let Some(ref model_id) = candidate.model_post_id
             && seen_set.contains(model_id)
         {
@@ -151,6 +144,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 
@@ -194,6 +188,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -256,5 +251,17 @@ mod tests {
         assert_eq!(kept.len(), 2);
         assert_eq!(removed.len(), 0);
         assert_eq!(stage.removed_count, Some(0));
+    }
+
+    #[test]
+    fn drops_trusted_recall_source_when_in_seen_set() {
+        let query = query_with_seen(vec!["seen-trusted".to_string()]);
+        let mut trusted = candidate("seen-trusted");
+        trusted.recall_source = Some("GraphKernelSource".to_string());
+        let (kept, removed, _stage, enabled) =
+            previously_seen_posts_backup_filter(&query, vec![trusted]);
+        assert!(enabled);
+        assert_eq!(kept.len(), 0);
+        assert_eq!(removed.len(), 1);
     }
 }

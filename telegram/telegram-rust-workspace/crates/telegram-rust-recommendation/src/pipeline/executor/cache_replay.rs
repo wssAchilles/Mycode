@@ -47,7 +47,7 @@ impl RecommendationPipeline {
         cached_result.summary.serving.cursor = query.cursor;
         cached_result.summary.serving.serve_cache_hit = true;
 
-        let query_hydrators = &self.definition.query_hydrators;
+        let query_hydrators = self.definition.all_query_hydrators();
         let mut query_provider_keys = query_hydrators
             .iter()
             .map(|hydrator| query_hydrator_provider_key(hydrator))

@@ -1,0 +1,158 @@
+{
+  "postId": "post_golden_v3_1001",
+  "modelPostId": "model_post_v3_1001",
+  "authorId": "user_author_42",
+  "content": "Telegram V3 multi-language contract drift defense golden candidate.",
+  "createdAt": "2026-11-15T04:00:00.000Z",
+  "conversationId": "conv_99",
+  "isReply": false,
+  "isRepost": false,
+  "inNetwork": true,
+  "recallSource": "TwoTowerSource",
+  "retrievalLane": "heavy_ranker",
+  "interestPoolKind": "cluster_pool",
+  "topicIds": ["tech", "ai", "systems"],
+  "secondaryRecallSources": ["NewsAnnSource"],
+  "retrievalSources": [
+    {
+      "sourceType": "TwoTowerSource",
+      "cluster": 42,
+      "score": 0.91,
+      "position": 1
+    }
+  ],
+  "semanticIds": [12, 87, 203, 5, 199, 64],
+  "semanticEmbedding256d": [0.125, -0.25, 0.5, -0.125],
+  "authorCredScore": 0.875,
+  "hasVideo": true,
+  "hasImage": false,
+  "videoDurationSec": 42.5,
+  "hasMedia": true,
+  "mediaType": "video",
+  "videoDurationMs": 42500,
+  "media": [
+    {
+      "type": "video",
+      "url": "https://cdn.example.com/videos/1001.mp4",
+      "thumbnailUrl": "https://cdn.example.com/thumbs/1001.jpg"
+    }
+  ],
+  "likeCount": 128,
+  "commentCount": 32,
+  "repostCount": 16,
+  "viewCount": 2048,
+  "authorUsername": "alice_engineer",
+  "authorAvatarUrl": "https://cdn.example.com/avatars/alice.png",
+  "authorAffinityScore": 0.88,
+  "authorBlocksViewer": false,
+  "languageCode": "zh-CN",
+  "phoenixScores": {
+    "likeScore": 0.95,
+    "replyScore": 0.31,
+    "repostScore": 0.12,
+    "dwellScore": 0.78,
+    "videoViewScore": 0.64,
+    "expectedDwellSec": 27.5,
+    "videoContinuationSecs": 14.25,
+    "profileVisitSecs": 3.5,
+    "dwellProbs": [0.15, 0.35, 0.3, 0.12, 0.08]
+  },
+  "actionScores": {
+    "click": 0.85,
+    "like": 0.92,
+    "reply": 0.44,
+    "repost": 0.21,
+    "dwell": 0.65,
+    "negative": 0.01
+  },
+  "rankingSignals": {
+    "relevance": 0.91,
+    "freshness": 0.85,
+    "popularity": 0.75,
+    "quality": 0.95,
+    "authorAffinity": 0.88,
+    "topicAffinity": 0.72,
+    "sourceAffinity": 0.68,
+    "conversationAffinity": 0.5,
+    "sourceEvidence": 0.77,
+    "network": 0.82,
+    "negativeFeedback": 0.02,
+    "deliveryFatigue": 0.1,
+    "contentKind": 0.65,
+    "trend": 0.89,
+    "sourceQuality": 0.94
+  },
+  "recallEvidence": {
+    "primarySource": "TwoTowerSource",
+    "primaryLane": "heavy_ranker",
+    "sourceScore": 0.88,
+    "sourceCount": 2.0
+  },
+  "selectionPool": "heavy_ranker_v3",
+  "selectionReason": "dpp_slate_selected",
+  "scoreContractVersion": "score.v3",
+  "scoreBreakdownVersion": "breakdown.v3",
+  "weightedScore": 0.895,
+  "score": 0.912,
+  "isLikedByUser": false,
+  "isRepostedByUser": false,
+  "isNsfw": false,
+  "vfResult": {
+    "safe": true,
+    "level": "safe",
+    "score": 0.99
+  },
+  "contentSafetyLabels": {
+    "safe": true,
+    "level": "safe",
+    "labels": ["verified_source"],
+    "score": 0.02,
+    "source": "labeling_path_v3",
+    "assignedAtMs": 1763180000000
+  },
+  "isNews": true,
+  "newsMetadata": {
+    "title": "Industrial Contract Governance V3",
+    "source": "TechDaily",
+    "url": "https://news.example.com/1001",
+    "externalId": "ext_news_1001",
+    "clusterId": 8848
+  },
+  "isPinned": false,
+  "isSubscriptionOnly": false,
+  "_scoreBreakdown": {
+    "phoenix": 0.912,
+    "affinity": 0.88
+  },
+  "_pipelineScore": 0.912,
+  "graphScore": 0.88,
+  "graphPath": "user->cluster->post",
+  "graphRecallType": "bridge",
+  "postType": "article",
+  "mutualFollowJaccard": 0.625,
+  "followingReplied": true,
+  "slateContext": {
+    "k": 12,
+    "poolRank": 3,
+    "sidKnown": true,
+    "sidKL1": 12,
+    "sidKL2": 87,
+    "sidKL3": 203,
+    "sidGapL1": 1,
+    "sidGapL2": 2,
+    "sidGapL3": 0,
+    "reconCosMilli": 945,
+    "preDiversityScore": 1.375
+  },
+  "servedSlateContext": {
+    "k": 10,
+    "poolRank": 2,
+    "sidKnown": true,
+    "sidKL1": 12,
+    "sidKL2": 87,
+    "sidKL3": 203,
+    "preDiversityScore": 1.375
+  },
+  "pageDecodeSlot": 2,
+  "pageRlExplorationProb": 0.0625
+}

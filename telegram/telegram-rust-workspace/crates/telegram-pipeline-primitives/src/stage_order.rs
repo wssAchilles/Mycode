@@ -2,6 +2,7 @@ pub const PIPELINE_STAGE_ORDER_VERSION: &str = "pipeline_stage_order_v1";
 
 pub const CANONICAL_PIPELINE_STAGE_ORDER: &[&str] = &[
     crate::PIPELINE_STAGE_QUERY_HYDRATORS,
+    crate::PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS,
     crate::PIPELINE_STAGE_SOURCES,
     crate::PIPELINE_STAGE_CANDIDATE_HYDRATORS,
     crate::PIPELINE_STAGE_FILTERS,
@@ -44,8 +45,9 @@ mod tests {
         validate_pipeline_stage_order,
     };
     use crate::{
-        PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS,
-        PIPELINE_STAGE_SELECTORS, PIPELINE_STAGE_SOURCES,
+        PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS, PIPELINE_STAGE_FILTERS,
+        PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS,
+        PIPELINE_STAGE_SOURCES,
     };
 
     #[test]
@@ -56,16 +58,25 @@ mod tests {
             Some(PIPELINE_STAGE_QUERY_HYDRATORS)
         );
         assert_eq!(
+            CANONICAL_PIPELINE_STAGE_ORDER.get(1).copied(),
+            Some(PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS)
+        );
+        assert_eq!(
             CANONICAL_PIPELINE_STAGE_ORDER.last().copied(),
             Some(crate::PIPELINE_STAGE_SIDE_EFFECTS)
         );
         assert!(pipeline_stage_index(PIPELINE_STAGE_SCORERS).is_some());
+        assert_eq!(
+            pipeline_stage_index(PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS),
+            Some(1)
+        );
     }
 
     #[test]
     fn accepts_repeated_components_inside_the_same_stage() {
         let stages = [
             PIPELINE_STAGE_QUERY_HYDRATORS,
+            PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS,
             PIPELINE_STAGE_SOURCES,
             PIPELINE_STAGE_SOURCES,
             PIPELINE_STAGE_FILTERS,

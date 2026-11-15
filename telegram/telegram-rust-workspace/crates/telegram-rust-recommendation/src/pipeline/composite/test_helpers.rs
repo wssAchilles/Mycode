@@ -64,5 +64,6 @@ pub fn make_test_candidate(post_id: &str, author_id: &str) -> RecommendationCand
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+        ..Default::default()
     }
 }

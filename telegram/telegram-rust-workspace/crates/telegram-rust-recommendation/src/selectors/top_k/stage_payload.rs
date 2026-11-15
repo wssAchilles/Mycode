@@ -112,6 +112,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }];
         let report = SelectorSelectionReport {
             selection_mode: "policy_state_machine".to_string(),

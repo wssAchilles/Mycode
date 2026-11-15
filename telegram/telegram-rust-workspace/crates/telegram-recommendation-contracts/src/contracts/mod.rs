@@ -22,8 +22,9 @@ pub use backend::SuccessEnvelope;
 #[allow(unused_imports)]
 pub use candidate::{
     ActionScoresPayload, CandidateMediaPayload, CandidateNewsMetadataPayload,
-    CandidateVisibilityPayload, MediaType, PhoenixScoresPayload, RankingSignalsPayload,
-    RecallEvidencePayload, RecommendationCandidatePayload,
+    CandidateVisibilityPayload, ContentSafetyLabelsPayload, MediaType, PhoenixScoresPayload,
+    RankingSignalsPayload, RecallEvidencePayload, RecommendationCandidatePayload,
+    RetrievalSourcePayload, SlateContextPayload,
 };
 #[allow(unused_imports)]
 pub use canonical::{
@@ -74,9 +75,11 @@ pub use pipeline::{
 };
 #[allow(unused_imports)]
 pub use query::{
-    Demographics, EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
-    RecommendationQueryPatchPayload, RecommendationQueryPayload, SparseEmbeddingEntryPayload,
-    UserFeaturesPayload, UserStateContextPayload,
+    CachedPostEntryPayload, ColumnarActionStepPayload, Demographics, EmbeddingContextPayload,
+    EmbeddingContractPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
+    RankingPolicyPayload, RecommendationQueryPatchPayload, RecommendationQueryPayload,
+    ServedHistoryEntryPayload, SparseEmbeddingEntryPayload, UserFeaturesPayload,
+    UserSignalFeaturesPayload, UserStateContextPayload,
 };
 #[allow(unused_imports)]
 pub use randomized_slate::v2::*;

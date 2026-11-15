@@ -39,7 +39,7 @@ describe('VFFilter degrade policy', () => {
         expect(r.removed.map((c: any) => c.postId.toString())).toEqual([oon.postId.toString()]);
     });
 
-    it('keeps trusted primary recall OON when VF is missing and selection would be empty', async () => {
+    it('drops trusted primary recall OON when VF is missing (fail-closed)', async () => {
         const f = new VFFilter();
         const q = createFeedQuery('user', 20, false);
 
@@ -68,11 +68,15 @@ describe('VFFilter degrade policy', () => {
         } as any;
 
         const r = await f.filter(q as any, [graphCandidate, genericOon]);
-        expect(r.kept.map((c: any) => c.postId.toString())).toEqual([graphCandidate.postId.toString()]);
-        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([genericOon.postId.toString()]);
+        // 缺失 VF 审核结果时，域外内容一律 fail-closed 拦截
+        expect(r.kept).toHaveLength(0);
+        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([
+            graphCandidate.postId.toString(),
+            genericOon.postId.toString(),
+        ]);
     });
 
-    it('keeps trusted primary recall OON when VF marks it low risk and selection would be empty', async () => {
+    it('drops trusted primary recall OON when VF marks it low risk by default', async () => {
         const f = new VFFilter();
         const q = createFeedQuery('user', 20, false);
 
@@ -103,7 +107,11 @@ describe('VFFilter degrade policy', () => {
         } as any;
 
         const r = await f.filter(q as any, [graphCandidate, unsafeGraphCandidate]);
-        expect(r.kept.map((c: any) => c.postId.toString())).toEqual([graphCandidate.postId.toString()]);
-        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([unsafeGraphCandidate.postId.toString()]);
+        // OON low_risk 默认开关为 false 且已删除可信来源绕过后门
+        expect(r.kept).toHaveLength(0);
+        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([
+            graphCandidate.postId.toString(),
+            unsafeGraphCandidate.postId.toString(),
+        ]);
     });
 });

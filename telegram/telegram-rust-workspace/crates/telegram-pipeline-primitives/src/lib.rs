@@ -24,6 +24,7 @@ pub const PIPELINE_OWNER_NODE_PROVIDER: &str = "rust_orchestrated_node_provider"
 pub const PIPELINE_OWNER_CPP: &str = "cpp";
 
 pub const PIPELINE_STAGE_QUERY_HYDRATORS: &str = "query_hydrators";
+pub const PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS: &str = "dependent_query_hydrators";
 pub const PIPELINE_STAGE_SOURCES: &str = "sources";
 pub const PIPELINE_STAGE_CANDIDATE_HYDRATORS: &str = "candidate_hydrators";
 pub const PIPELINE_STAGE_FILTERS: &str = "filters";
@@ -66,6 +67,7 @@ pub const PIPELINE_MANIFEST_DISABLED_OFFLINE_ONLY_SOURCE: &str = "offlineOnlySou
 
 pub const PROVIDER_OWNED_PIPELINE_STAGES: &[&str] = &[
     PIPELINE_STAGE_QUERY_HYDRATORS,
+    PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS,
     PIPELINE_STAGE_SOURCES,
     PIPELINE_STAGE_CANDIDATE_HYDRATORS,
     PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
@@ -126,8 +128,8 @@ mod tests {
             "fail_open_keep_backup"
         );
         assert_eq!(PIPELINE_MANIFEST_CRITICALITY_CRITICAL, "critical");
-        assert_eq!(PROVIDER_OWNED_PIPELINE_STAGES.len(), 4);
+        assert_eq!(PROVIDER_OWNED_PIPELINE_STAGES.len(), 5);
         assert_eq!(RUST_OWNED_PIPELINE_STAGES.len(), 4);
-        assert_eq!(CANONICAL_PIPELINE_STAGE_ORDER.len(), 9);
+        assert_eq!(CANONICAL_PIPELINE_STAGE_ORDER.len(), 10);
     }
 }

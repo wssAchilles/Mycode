@@ -28,6 +28,12 @@ export interface PhoenixScores {
     photoExpandScore?: number;
     followAuthorScore?: number;
     videoQualityViewScore?: number;
+    // V3 新增正交观测/连续驻留预测字段
+    videoViewScore?: number;
+    expectedDwellSec?: number;
+    videoContinuationSecs?: number;
+    profileVisitSecs?: number;
+    dwellProbs?: number[];
     // 负向行为预测
     notInterestedScore?: number;
     dismissScore?: number;
@@ -315,6 +321,68 @@ export interface FeedCandidate {
     mutualFollowJaccard?: number;
     /** 关注的人是否已回复 */
     followingReplied?: boolean;
+
+    // ============================================
+    // V3 代际架构字段
+    // ============================================
+
+    /** V3 6 级 RQ-VAE Semantic ID（缺失槽位用 -1 占位） */
+    semanticIds?: number[];
+    /** V3 256 维内容语义向量 */
+    semanticEmbedding256d?: number[];
+    /** V3 多路召回溯源结构化清单 */
+    retrievalSources?: RetrievalSourcePayload[];
+    /** V3 作者历史可信度/声誉先验分 */
+    authorCredScore?: number;
+    /** V3 独立内容安全标签结构（不与召回业务耦合） */
+    contentSafetyLabels?: ContentSafetyLabelsPayload;
+    /** V3 DPP 候选池重排上下文特征 */
+    slateContext?: SlateContextPayload;
+    /** V3 最终下发页面位次与探索回执上下文 */
+    servedSlateContext?: SlateContextPayload;
+    /** V3 整页协同生成解码槽位序号 */
+    pageDecodeSlot?: number;
+    /** V3 页面级强化学习探索倾向概率 */
+    pageRlExplorationProb?: number;
+}
+
+/**
+ * V3 多路召回单条明细（保留集群簇号、原生相关性得分与池内位次）
+ */
+export interface RetrievalSourcePayload {
+    sourceType: string;
+    cluster?: number;
+    score?: number;
+    position?: number;
+}
+
+/**
+ * V3 与推荐业务正交解耦的独立内容安全标签结构
+ */
+export interface ContentSafetyLabelsPayload {
+    safe: boolean;
+    level?: string;
+    labels?: string[];
+    score?: number;
+    source?: string;
+    assignedAtMs?: number;
+}
+
+/**
+ * V3 DPP/Greedy Slate 协同重排与离线回放上下文特征
+ */
+export interface SlateContextPayload {
+    k?: number;
+    poolRank?: number;
+    sidKnown?: boolean;
+    sidKL1?: number;
+    sidKL2?: number;
+    sidKL3?: number;
+    sidGapL1?: number;
+    sidGapL2?: number;
+    sidGapL3?: number;
+    reconCosMilli?: number;
+    preDiversityScore?: number;
 }
 
 /**

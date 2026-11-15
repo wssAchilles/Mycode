@@ -1,0 +1,64 @@
+{
+  "requestId": "req_golden_v3_9001",
+  "decisionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "userId": "user_viewer_10",
+  "limit": 20,
+  "inNetworkOnly": false,
+  "seenIds": ["post_seen_1", "post_seen_2"],
+  "servedIds": ["post_served_1"],
+  "isBottomRequest": false,
+  "countryCode": "US",
+  "languageCode": "en",
+  "demographics": {
+    "country": "US",
+    "city": "San Francisco",
+    "gender": "O",
+    "ageRange": [18, 24],
+    "language": "en"
+  },
+  "featureSwitches": {
+    "enable_v3_dpp": true,
+    "enable_sid_retrieval": true
+  },
+  "columnarRetrievalSequence": [
+    {
+      "postIdHash": 1029384756,
+      "semanticIds": [12, 87, 203, 5, 199, 64],
+      "authorHash": 55667788,
+      "actionType": 1,
+      "actionMask": [1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+      "timeDeltaSec": 36.5
+    }
+  ],
+  "columnarScoringSequence": [
+    {
+      "postIdHash": 1029384756,
+      "semanticIds": [12, 87, 203, 5, 199, 64],
+      "authorHash": 55667788,
+      "actionType": 3,
+      "actionMask": [1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+      "timeDeltaSec": 12.25
+    }
+  ],
+  "bloomFilterEntries": [123456789, 987654321],
+  "servedHistory": [
+    {
+      "postId": "post_served_1",
+      "servedAtMs": 1763179900000,
+      "position": 0,
+      "source": "GraphSource"
+    }
+  ],
+  "cachedPosts": [
+    {
+      "postId": "post_cached_1",
+      "authorId": "user_author_9",
+      "createdAtMs": 1763179800000,
+      "semanticIds": [12, 87, 203, 5, 199, 64],
+      "recallSource": "ThunderSource"
+    }
+  ],
+  "hasCachedPosts": true,
+  "seedCandidatePostIds": ["post_seed_1", "post_seed_2"],
+  "predictionId": "pred_v3_0001"
+}

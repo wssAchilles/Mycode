@@ -15,18 +15,30 @@ const repoRoot = path.resolve(scriptDir, '../..');
 
 // 文件路径映射
 const PATHS = {
-  rustCandidate: path.join(repoRoot, 'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/candidate.rs'),
-  rustPipeline: path.join(repoRoot, 'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/pipeline.rs'),
+  rustCandidate: path.join(repoRoot, 'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/candidate'),
+  rustQuery: path.join(repoRoot, 'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/query'),
+  rustPipeline: path.join(repoRoot, 'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/pipeline'),
   nodeContracts: path.join(repoRoot, 'telegram-clone-backend/src/services/recommendation/rust/contracts.ts'),
   nodeFeedCandidate: path.join(repoRoot, 'telegram-clone-backend/src/services/recommendation/types/FeedCandidate.ts'),
+  nodeAlgorithmContract: path.join(repoRoot, 'telegram-clone-backend/src/services/recommendation/contracts/algorithmContract.ts'),
   nodeBusContracts: path.join(repoRoot, 'telegram-clone-backend/src/services/chatDelivery/busContracts.ts'),
   goDeliveryPayloads: path.join(repoRoot, 'telegram-go-delivery-consumer/internal/contracts/delivery_payloads.go'),
 };
 
 function read(p) {
   if (!fs.existsSync(p)) {
-    console.error(`[契约门禁错误] 文件不存在: ${p}`);
+    console.error(`[契约门禁错误] 路径不存在: ${p}`);
     process.exit(1);
+  }
+  const stat = fs.statSync(p);
+  if (stat.isDirectory()) {
+    // 递归按文件名序拼合拆分后的领域子模块文件，支撑 Anti-Flat 模块化校验
+    const files = fs
+      .readdirSync(p)
+      .filter(name => name.endsWith('.rs'))
+      .sort()
+      .map(name => fs.readFileSync(path.join(p, name), 'utf8'));
+    return files.join('\n');
   }
   return fs.readFileSync(p, 'utf8');
 }
@@ -255,6 +267,65 @@ let hasError = false;
     hasError = true;
   } else {
     console.log(`✅ [对齐] ProjectionPayload: ${goFields.length} 个字段在 Node 与 Go 间完全一致`);
+  }
+}
+
+// 检查 6: PhoenixScoresPayload (Rust PhoenixScoresPayload vs Node FeedCandidate::PhoenixScores vs algorithmContract::phoenixScoresSchema)
+{
+  const rustSrc = read(PATHS.rustCandidate);
+  const nodeFeedSrc = read(PATHS.nodeFeedCandidate);
+  const nodeAlgoSrc = read(PATHS.nodeAlgorithmContract);
+
+  const rustFields = extractRustWireFields(rustSrc, 'PhoenixScoresPayload');
+  const nodeFields = extractTsFields(nodeFeedSrc, 'PhoenixScores');
+  const zodFields = extractZodFields(nodeAlgoSrc, 'phoenixScoresSchema');
+
+  const rustSet = new Set(rustFields);
+  const nodeSet = new Set(nodeFields);
+  const zodSet = new Set(zodFields);
+
+  const missingInNode = [...rustSet].filter(f => !nodeSet.has(f));
+  const missingInZod = [...rustSet].filter(f => !zodSet.has(f));
+  if (missingInNode.length > 0 || missingInZod.length > 0) {
+    console.error('❌ [漂移检测] PhoenixScoresPayload 字段不一致:');
+    if (missingInNode.length > 0) {
+      console.error(`   - FeedCandidate.ts::PhoenixScores 缺失字段: ${missingInNode.join(', ')}`);
+    }
+    if (missingInZod.length > 0) {
+      console.error(`   - algorithmContract.ts::phoenixScoresSchema 缺失字段: ${missingInZod.join(', ')}`);
+    }
+    hasError = true;
+  } else {
+    console.log(`✅ [对齐] PhoenixScoresPayload: ${rustFields.length} 个打分/CREAD-30字段在 Rust/TS/Zod 间完全对齐`);
+  }
+}
+
+// 检查 7: RecommendationQueryPayload (Rust vs Node Interface vs Node Zod)
+{
+  const rustSrc = read(PATHS.rustQuery);
+  const nodeSrc = read(PATHS.nodeContracts);
+
+  const rustFields = extractRustWireFields(rustSrc, 'RecommendationQueryPayload');
+  const nodeFields = extractTsFields(nodeSrc, 'RecommendationQueryPayload');
+  const zodFields = extractZodFields(nodeSrc, 'recommendationQueryPayloadSchema');
+
+  const rustSet = new Set(rustFields);
+  const nodeSet = new Set(nodeFields);
+  const zodSet = new Set(zodFields);
+
+  const missingInNode = [...rustSet].filter(f => !nodeSet.has(f));
+  const missingInZod = [...rustSet].filter(f => !zodSet.has(f));
+  if (missingInNode.length > 0 || missingInZod.length > 0) {
+    console.error('❌ [漂移检测] RecommendationQueryPayload 字段不一致:');
+    if (missingInNode.length > 0) {
+      console.error(`   - Node Interface 缺失字段: ${missingInNode.join(', ')}`);
+    }
+    if (missingInZod.length > 0) {
+      console.error(`   - Node Zod Schema 缺失字段: ${missingInZod.join(', ')}`);
+    }
+    hasError = true;
+  } else {
+    console.log(`✅ [对齐] RecommendationQueryPayload: ${rustFields.length} 个字段在 Rust/TS/Zod 间完全一致`);
   }
 }
 

@@ -32,7 +32,7 @@ describe('SeenPostFilter / PreviouslyServedFilter', () => {
         expect(r.removed.map((c: any) => c.postId.toString())).toEqual([c1.postId.toString()]);
     });
 
-    it('SeenPostFilter keeps trusted primary recall when seen filtering would empty selection', async () => {
+    it('SeenPostFilter drops trusted primary recall when seen without empty-selection bypass', async () => {
         const seenGraph = oid('507f191e810c19729de86021').toString();
         const seenGeneric = oid('507f191e810c19729de86022').toString();
         const q = createFeedQuery('user', 20, false, { seenIds: [seenGraph, seenGeneric] });
@@ -47,8 +47,12 @@ describe('SeenPostFilter / PreviouslyServedFilter', () => {
         const f = new SeenPostFilter();
         const r = await f.filter(q, [graphCandidate as any, genericCandidate as any]);
 
-        expect(r.kept.map((c: any) => c.postId.toString())).toEqual([graphCandidate.postId.toString()]);
-        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([genericCandidate.postId.toString()]);
+        // 严格验证不再因来源是 GraphKernelSource 而把已看帖放回 kept
+        expect(r.kept).toHaveLength(0);
+        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([
+            graphCandidate.postId.toString(),
+            genericCandidate.postId.toString(),
+        ]);
     });
 
     it('PreviouslyServedFilter is only enabled on bottom request and filters by related ids', async () => {

@@ -78,6 +78,7 @@ fn builds_live_result_and_records_selection_degradation() {
         past_request_timestamps: Vec::new(),
         impressed_post_ids: Vec::new(),
         subscribed_user_ids: Vec::new(),
+        ..Default::default()
     };
     let candidate = candidate("post-1");
     let next_cursor = candidate.created_at;
@@ -484,9 +485,10 @@ async fn cache_replay_uses_current_query_stage_telemetry() {
 
     assert!(result.summary.serving.serve_cache_hit);
     assert_eq!(result.candidates[0].post_id, "cached-post");
+    // 两阶段 QueryHydrator 架构（Base + Dependent）各执行 1 次批请求，故 provider call 合计为 2
     assert_eq!(
         result.summary.provider_calls.get(CURRENT_QUERY_PROVIDER),
-        Some(&1)
+        Some(&2)
     );
     assert_eq!(
         result
@@ -756,5 +758,6 @@ fn candidate(post_id: &str) -> RecommendationCandidatePayload {
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+        ..Default::default()
     }
 }

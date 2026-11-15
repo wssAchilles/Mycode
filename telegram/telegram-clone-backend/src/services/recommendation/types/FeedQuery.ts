@@ -238,6 +238,70 @@ export interface FeedQuery {
 
     /** Rust/Node 共用的在线排序策略，缺省时由实验配置和服务默认值兜底 */
     rankingPolicy?: RankingPolicy;
+
+    /** 特性开关映射（与 Rust feature_switches 对齐） */
+    featureSwitches?: Record<string, boolean>;
+
+    // ============================================
+    // V3 代际架构序列与检索缓存上下文
+    // ============================================
+
+    /** V3 召回塔专用紧凑列式历史动作序列 */
+    columnarRetrievalSequence?: ColumnarActionStepPayload[];
+
+    /** V3 Heavy Ranker / ValueModel 专用高密度动作序列 */
+    columnarScoringSequence?: ColumnarActionStepPayload[];
+
+    /** V3 客户端/服务端 64-bit 布隆过滤器槽位数组 */
+    bloomFilterEntries?: number[];
+
+    /** V3 近期已下发历史明细 */
+    servedHistory?: ServedHistoryEntryPayload[];
+
+    /** V3 查询期预缓存关注/热点帖子切片 */
+    cachedPosts?: CachedPostEntryPayload[];
+
+    /** V3 显式标记查询是否命中缓存帖子池 */
+    hasCachedPosts?: boolean;
+
+    /** V3 上文种子帖子 ID 列表 */
+    seedCandidatePostIds?: string[];
+
+    /** V3 全链路唯一预测追踪 ID */
+    predictionId?: string;
+}
+
+/**
+ * V3 对标 X `ActionSeqFeatures` 的紧凑列式历史动作步
+ */
+export interface ColumnarActionStepPayload {
+    postIdHash: number;
+    semanticIds?: number[];
+    authorHash: number;
+    actionType: number;
+    actionMask?: number[];
+    timeDeltaSec: number;
+}
+
+/**
+ * V3 已下发历史条目（支撑会话疲劳惩罚与 DPP served-context 校验）
+ */
+export interface ServedHistoryEntryPayload {
+    postId: string;
+    servedAtMs: number;
+    position?: number;
+    source?: string;
+}
+
+/**
+ * V3 查询水合阶段预缓存热点帖子快照
+ */
+export interface CachedPostEntryPayload {
+    postId: string;
+    authorId: string;
+    createdAtMs: number;
+    semanticIds?: number[];
+    recallSource?: string;
 }
 
 /**

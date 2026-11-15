@@ -843,6 +843,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 
@@ -885,6 +886,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -932,6 +934,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -987,6 +990,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -1046,6 +1050,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let recent_match = UserActionProfile::from_query(&build_query(recent_timestamp))

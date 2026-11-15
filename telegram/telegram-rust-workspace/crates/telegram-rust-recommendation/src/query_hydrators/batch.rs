@@ -7,11 +7,66 @@ use telegram_pipeline_primitives::{
 
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::contracts::RecommendationQueryPayload;
-use crate::pipeline::utils::{dedup_strings, record_provider_call, record_provider_latency};
+use crate::pipeline::utils::{
+    dedup_strings, merge_provider_calls, merge_provider_latency, record_provider_call,
+    record_provider_latency,
+};
 
 use super::fallback::hydrate_query_parallel_bounded_fallback;
 use super::merge::merge_query_hydrator_results;
 use super::types::QueryHydrationOutput;
+
+/// 按 X-Algorithm 两阶段模型执行 Query Hydrator：先执行基础 stage 0 批次，再将已合并结果喂入依赖 stage 1 批次。
+pub(crate) async fn hydrate_query_two_stage_batch_or_fallback(
+    backend_client: &BackendRecommendationClient,
+    base_hydrator_names: &[String],
+    dependent_hydrator_names: &[String],
+    concurrency: usize,
+    query: &RecommendationQueryPayload,
+) -> QueryHydrationOutput {
+    let mut combined = if base_hydrator_names.is_empty() {
+        QueryHydrationOutput::new(
+            query.clone(),
+            Vec::new(),
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+        )
+    } else {
+        hydrate_query_patches_batch_or_fallback(
+            backend_client,
+            base_hydrator_names,
+            concurrency,
+            query,
+        )
+        .await
+    };
+
+    if dependent_hydrator_names.is_empty() {
+        return combined;
+    }
+
+    let dependent_output = hydrate_query_patches_batch_or_fallback(
+        backend_client,
+        dependent_hydrator_names,
+        concurrency,
+        &combined.hydrated_query,
+    )
+    .await;
+
+    combined.hydrated_query = dependent_output.hydrated_query;
+    combined.stages.extend(dependent_output.stages);
+    merge_provider_calls(&mut combined.provider_calls, &dependent_output.provider_calls);
+    merge_provider_latency(
+        &mut combined.provider_latency_ms,
+        &dependent_output.provider_latency_ms,
+    );
+    combined
+        .degraded_reasons
+        .extend(dependent_output.degraded_reasons);
+    dedup_strings(&mut combined.degraded_reasons);
+    combined
+}
 
 pub(crate) async fn hydrate_query_patches_batch_or_fallback(
     backend_client: &BackendRecommendationClient,
@@ -582,6 +637,7 @@ mod tests {
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
             feature_switches: HashMap::new(),
+            ..Default::default()
         }
     }
 

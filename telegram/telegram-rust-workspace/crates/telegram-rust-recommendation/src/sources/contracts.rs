@@ -322,6 +322,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 

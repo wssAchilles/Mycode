@@ -118,6 +118,7 @@ fn fixture_query() -> RecommendationQueryPayload {
         past_request_timestamps: Vec::new(),
         impressed_post_ids: Vec::new(),
         subscribed_user_ids: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -187,6 +188,7 @@ fn fixture_candidate(
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+        ..Default::default()
     }
 }
 

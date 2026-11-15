@@ -36,6 +36,26 @@ pub fn configured_query_hydrators() -> Vec<String> {
     to_component_names(QUERY_HYDRATOR_NAMES)
 }
 
+/// 返回基础阶段（Stage 0）并行的 QueryHydrator 列表。
+pub fn configured_base_query_hydrators() -> Vec<String> {
+    QUERY_HYDRATOR_NAMES
+        .iter()
+        .copied()
+        .filter(|name| query_hydrator_stage(name) == QUERY_HYDRATOR_BASE_STAGE)
+        .map(str::to_string)
+        .collect()
+}
+
+/// 返回依赖阶段（Stage 1，在基础 QueryHydrator 合入后执行）的 DependentQueryHydrator 列表。
+pub fn configured_dependent_query_hydrators() -> Vec<String> {
+    QUERY_HYDRATOR_NAMES
+        .iter()
+        .copied()
+        .filter(|name| query_hydrator_stage(name) == QUERY_HYDRATOR_DEPENDENT_STAGE)
+        .map(str::to_string)
+        .collect()
+}
+
 pub fn query_hydrator_stage(hydrator_name: &str) -> usize {
     match hydrator_name {
         MUTUAL_FOLLOW_QUERY_HYDRATOR | EXPERIMENT_QUERY_HYDRATOR | USER_STATE_QUERY_HYDRATOR => {

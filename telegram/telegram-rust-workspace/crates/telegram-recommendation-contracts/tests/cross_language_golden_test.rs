@@ -63,3 +63,54 @@ fn test_golden_query_flexible_age_range_deserialization() {
     let demographics = query.demographics.expect("demographics present");
     assert_eq!(demographics.age_range, Some((18, 24)));
 }
+
+#[test]
+fn test_golden_v3_candidate_and_query_roundtrip() {
+    let fixtures_dir = get_fixtures_dir();
+    let candidate_json = fs::read_to_string(fixtures_dir.join("golden_candidate_v3.json"))
+        .expect("read golden_candidate_v3.json");
+    let query_json = fs::read_to_string(fixtures_dir.join("golden_query_v3.json"))
+        .expect("read golden_query_v3.json");
+
+    let candidate: RecommendationCandidatePayload =
+        serde_json::from_str(&candidate_json).expect("deserialize golden v3 candidate");
+    assert_eq!(candidate.semantic_ids, Some([12, 87, 203, 5, 199, 64]));
+    assert_eq!(
+        candidate.semantic_embedding_256d.as_deref(),
+        Some([0.125_f32, -0.25, 0.5, -0.125].as_slice())
+    );
+    assert_eq!(candidate.retrieval_sources.len(), 1);
+    assert_eq!(candidate.retrieval_sources[0].cluster, Some(42));
+    assert_eq!(candidate.page_decode_slot, Some(2));
+    let scores = candidate
+        .phoenix_scores
+        .as_ref()
+        .expect("phoenix_scores present");
+    assert_eq!(scores.expected_dwell_sec, Some(27.5));
+    assert_eq!(scores.dwell_probs.as_ref().map(Vec::len), Some(5));
+    let safety = candidate
+        .content_safety_labels
+        .as_ref()
+        .expect("content_safety_labels present");
+    assert!(safety.safe);
+    assert_eq!(safety.labels, vec!["verified_source".to_string()]);
+    let slate = candidate
+        .slate_context
+        .as_ref()
+        .expect("slate_context present");
+    assert_eq!(slate.sid_k_l1, Some(12));
+    assert_eq!(slate.recon_cos_milli, Some(945));
+
+    let pool_hash = candidate_pool_sha256(&[candidate]).expect("compute v3 candidate pool hash");
+    assert!(!pool_hash.is_empty());
+
+    let query: RecommendationQueryPayload =
+        serde_json::from_str(&query_json).expect("deserialize golden v3 query");
+    assert_eq!(query.columnar_retrieval_sequence.len(), 1);
+    assert_eq!(query.columnar_scoring_sequence.len(), 1);
+    assert_eq!(query.columnar_retrieval_sequence[0].action_mask.len(), 13);
+    assert_eq!(query.bloom_filter_entries, vec![123456789, 987654321]);
+    assert_eq!(query.has_cached_posts, Some(true));
+    assert_eq!(query.prediction_id.as_deref(), Some("pred_v3_0001"));
+    assert!(query.feature_switch("enable_v3_dpp", false));
+}

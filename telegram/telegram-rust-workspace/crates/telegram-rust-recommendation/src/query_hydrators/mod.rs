@@ -11,4 +11,7 @@ pub(crate) mod stage_payload;
 pub mod subscribed_user_ids;
 pub(crate) mod types;
 
-pub use telegram_component_primitives::query_hydrators::configured_query_hydrators;
+pub use telegram_component_primitives::query_hydrators::{
+    configured_base_query_hydrators, configured_dependent_query_hydrators,
+    configured_query_hydrators,
+};

@@ -136,6 +136,7 @@ pub(super) fn make_test_candidate(
         is_pinned: Some(false),
         is_subscription_only: None,
         score_contract_version: None,
+        ..Default::default()
     }
 }
 

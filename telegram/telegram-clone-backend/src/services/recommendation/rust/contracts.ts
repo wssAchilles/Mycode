@@ -1,15 +1,25 @@
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import type { FeedCandidate, CandidateNewsMetadata, PhoenixScores } from '../types/FeedCandidate';
+import type {
+  ContentSafetyLabelsPayload,
+  FeedCandidate,
+  CandidateNewsMetadata,
+  PhoenixScores,
+  RetrievalSourcePayload,
+  SlateContextPayload,
+} from '../types/FeedCandidate';
 import type {
   ExperimentAssignment,
   ExperimentContext,
 } from '../../experiment/types';
 import type {
+  CachedPostEntryPayload,
+  ColumnarActionStepPayload,
   Demographics,
   EmbeddingContext,
   FeedQuery,
   RankingPolicy,
+  ServedHistoryEntryPayload,
   SparseEmbeddingEntry,
   UserFeatures,
   UserSignalFeatures,
@@ -86,6 +96,16 @@ export interface RecommendationQueryPayload {
   pastRequestTimestamps?: string[];
   impressedPostIds?: string[];
   subscribedUserIds?: string[];
+  featureSwitches?: Record<string, boolean>;
+  // V3 列式交互历史与检索上下文
+  columnarRetrievalSequence?: ColumnarActionStepPayload[];
+  columnarScoringSequence?: ColumnarActionStepPayload[];
+  bloomFilterEntries?: number[];
+  servedHistory?: ServedHistoryEntryPayload[];
+  cachedPosts?: CachedPostEntryPayload[];
+  hasCachedPosts?: boolean;
+  seedCandidatePostIds?: string[];
+  predictionId?: string;
 }
 
 export interface RecommendationQueryPatchPayload {
@@ -179,6 +199,16 @@ export interface RecommendationCandidatePayload {
   postType?: string;
   mutualFollowJaccard?: number;
   followingReplied?: boolean;
+  // V3 候选结构化溯源、语义 ID 与整页协同重排字段
+  retrievalSources?: RetrievalSourcePayload[];
+  semanticIds?: number[];
+  semanticEmbedding256d?: number[];
+  authorCredScore?: number;
+  contentSafetyLabels?: ContentSafetyLabelsPayload;
+  slateContext?: SlateContextPayload;
+  servedSlateContext?: SlateContextPayload;
+  pageDecodeSlot?: number;
+  pageRlExplorationProb?: number;
 }
 
 export interface RecommendationStagePayload {
@@ -543,6 +573,76 @@ const rankingPolicySchema = z.object({
   trendKeywords: z.array(z.string()).optional(),
 });
 
+const demographicsSchema = z.object({
+  ageRange: z
+    .union([
+      z.string(),
+      z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]),
+    ])
+    .optional(),
+  country: z.string().optional(),
+  city: z.string().optional(),
+  gender: z.string().optional(),
+  region: z.string().optional(),
+  language: z.string().optional(),
+});
+
+// V3 查询侧嵌套结构校验 Schema
+const columnarActionStepSchema = z.object({
+  postIdHash: z.number().int(),
+  semanticIds: z.array(z.number().int().min(-1).max(255)).length(6).optional(),
+  authorHash: z.number().int(),
+  actionType: z.number().int(),
+  actionMask: z.array(z.number().int().min(0).max(255)).optional(),
+  timeDeltaSec: z.number().finite(),
+});
+
+const servedHistoryEntrySchema = z.object({
+  postId: z.string().min(1),
+  servedAtMs: z.number().int(),
+  position: z.number().int().nonnegative().optional(),
+  source: z.string().optional(),
+});
+
+const cachedPostEntrySchema = z.object({
+  postId: z.string().min(1),
+  authorId: z.string(),
+  createdAtMs: z.number().int(),
+  semanticIds: z.array(z.number().int().min(-1).max(255)).length(6).optional(),
+  recallSource: z.string().optional(),
+});
+
+// V3 候选侧嵌套结构校验 Schema
+const retrievalSourceSchema = z.object({
+  sourceType: z.string().min(1),
+  cluster: z.number().int().optional(),
+  score: z.number().finite().optional(),
+  position: z.number().int().nonnegative().optional(),
+});
+
+const contentSafetyLabelsSchema = z.object({
+  safe: z.boolean(),
+  level: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+  score: z.number().finite().optional(),
+  source: z.string().optional(),
+  assignedAtMs: z.number().int().optional(),
+});
+
+const slateContextSchema = z.object({
+  k: z.number().int().nonnegative().optional(),
+  poolRank: z.number().int().nonnegative().optional(),
+  sidKnown: z.boolean().optional(),
+  sidKL1: z.number().int().nonnegative().optional(),
+  sidKL2: z.number().int().nonnegative().optional(),
+  sidKL3: z.number().int().nonnegative().optional(),
+  sidGapL1: z.number().int().optional(),
+  sidGapL2: z.number().int().optional(),
+  sidGapL3: z.number().int().optional(),
+  reconCosMilli: z.number().int().optional(),
+  preDiversityScore: z.number().finite().optional(),
+});
+
 export const recommendationQueryPayloadSchema = z.object({
   requestId: z.string().min(1),
   decisionId: z.string().uuid(),
@@ -567,9 +667,19 @@ export const recommendationQueryPayloadSchema = z.object({
   userSignalFeatures: userSignalFeaturesSchema.optional(),
   mutualFollowIds: z.array(z.string()).optional(),
   interestedTopics: z.array(z.string()).optional(),
+  demographics: demographicsSchema.optional(),
   pastRequestTimestamps: z.array(rfc3339DateTimeSchema).optional(),
   impressedPostIds: z.array(z.string()).optional(),
   subscribedUserIds: z.array(z.string()).optional(),
+  featureSwitches: z.record(z.string(), z.boolean()).optional(),
+  columnarRetrievalSequence: z.array(columnarActionStepSchema).optional(),
+  columnarScoringSequence: z.array(columnarActionStepSchema).optional(),
+  bloomFilterEntries: z.array(z.number().nonnegative()).optional(),
+  servedHistory: z.array(servedHistoryEntrySchema).optional(),
+  cachedPosts: z.array(cachedPostEntrySchema).optional(),
+  hasCachedPosts: z.boolean().optional(),
+  seedCandidatePostIds: z.array(z.string()).optional(),
+  predictionId: z.string().optional(),
 });
 
 export const recommendationQueryPatchPayloadSchema = z.object({
@@ -624,7 +734,7 @@ export const recommendationCandidatePayloadSchema = z.object({
   authorUsername: z.string().optional(),
   authorAvatarUrl: z.string().optional(),
   authorAffinityScore: z.number().optional(),
-  phoenixScores: z.record(z.string(), z.number()).optional(),
+  phoenixScores: z.record(z.string(), z.union([z.number(), z.array(z.number())])).optional(),
   actionScores: z.object({
     click: z.number(),
     like: z.number(),
@@ -682,6 +792,15 @@ export const recommendationCandidatePayloadSchema = z.object({
   postType: z.string().optional(),
   mutualFollowJaccard: z.number().optional(),
   followingReplied: z.boolean().optional(),
+  retrievalSources: z.array(retrievalSourceSchema).optional(),
+  semanticIds: z.array(z.number().int().min(-1).max(255)).length(6).optional(),
+  semanticEmbedding256d: z.array(z.number().finite()).optional(),
+  authorCredScore: z.number().finite().optional(),
+  contentSafetyLabels: contentSafetyLabelsSchema.optional(),
+  slateContext: slateContextSchema.optional(),
+  servedSlateContext: slateContextSchema.optional(),
+  pageDecodeSlot: z.number().int().nonnegative().optional(),
+  pageRlExplorationProb: z.number().finite().optional(),
 });
 
 const recommendationStagePayloadSchema = z.object({
@@ -1030,6 +1149,15 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
       : undefined,
     impressedPostIds: query.impressedPostIds ?? undefined,
     subscribedUserIds: query.userFeatures?.subscribedUserIds ?? undefined,
+    featureSwitches: query.featureSwitches ?? undefined,
+    columnarRetrievalSequence: query.columnarRetrievalSequence ?? undefined,
+    columnarScoringSequence: query.columnarScoringSequence ?? undefined,
+    bloomFilterEntries: query.bloomFilterEntries ?? undefined,
+    servedHistory: query.servedHistory ?? undefined,
+    cachedPosts: query.cachedPosts ?? undefined,
+    hasCachedPosts: query.hasCachedPosts ?? undefined,
+    seedCandidatePostIds: query.seedCandidatePostIds ?? undefined,
+    predictionId: query.predictionId ?? undefined,
   };
 }
 
@@ -1313,6 +1441,15 @@ export function deserializeRecommendationQuery(
       ? payload.pastRequestTimestamps.map((d) => new Date(d))
       : undefined,
     impressedPostIds: payload.impressedPostIds,
+    featureSwitches: payload.featureSwitches,
+    columnarRetrievalSequence: payload.columnarRetrievalSequence,
+    columnarScoringSequence: payload.columnarScoringSequence,
+    bloomFilterEntries: payload.bloomFilterEntries,
+    servedHistory: payload.servedHistory,
+    cachedPosts: payload.cachedPosts,
+    hasCachedPosts: payload.hasCachedPosts,
+    seedCandidatePostIds: payload.seedCandidatePostIds,
+    predictionId: payload.predictionId,
   };
 }
 
@@ -1460,6 +1597,15 @@ export function serializeRecommendationCandidate(
     postType: anyCandidate.postType,
     mutualFollowJaccard: anyCandidate.mutualFollowJaccard,
     followingReplied: anyCandidate.followingReplied,
+    retrievalSources: anyCandidate.retrievalSources,
+    semanticIds: anyCandidate.semanticIds,
+    semanticEmbedding256d: anyCandidate.semanticEmbedding256d,
+    authorCredScore: anyCandidate.authorCredScore,
+    contentSafetyLabels: anyCandidate.contentSafetyLabels,
+    slateContext: anyCandidate.slateContext,
+    servedSlateContext: anyCandidate.servedSlateContext,
+    pageDecodeSlot: anyCandidate.pageDecodeSlot,
+    pageRlExplorationProb: anyCandidate.pageRlExplorationProb,
   };
 }
 
@@ -1525,6 +1671,15 @@ export function deserializeRecommendationCandidate(
     ...(payload.postType ? { postType: payload.postType } : {}),
     ...(payload.mutualFollowJaccard !== undefined ? { mutualFollowJaccard: payload.mutualFollowJaccard } : {}),
     ...(payload.followingReplied !== undefined ? { followingReplied: payload.followingReplied } : {}),
+    ...(payload.retrievalSources ? { retrievalSources: payload.retrievalSources } : {}),
+    ...(payload.semanticIds ? { semanticIds: payload.semanticIds } : {}),
+    ...(payload.semanticEmbedding256d ? { semanticEmbedding256d: payload.semanticEmbedding256d } : {}),
+    ...(payload.authorCredScore !== undefined ? { authorCredScore: payload.authorCredScore } : {}),
+    ...(payload.contentSafetyLabels ? { contentSafetyLabels: payload.contentSafetyLabels } : {}),
+    ...(payload.slateContext ? { slateContext: payload.slateContext } : {}),
+    ...(payload.servedSlateContext ? { servedSlateContext: payload.servedSlateContext } : {}),
+    ...(payload.pageDecodeSlot !== undefined ? { pageDecodeSlot: payload.pageDecodeSlot } : {}),
+    ...(payload.pageRlExplorationProb !== undefined ? { pageRlExplorationProb: payload.pageRlExplorationProb } : {}),
   } as FeedCandidate;
 }
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::contracts::{RecommendationQueryPayload, RecommendationStagePayload};
-use crate::query_hydrators::batch::hydrate_query_patches_batch_or_fallback;
+use crate::query_hydrators::batch::hydrate_query_two_stage_batch_or_fallback;
 
 use super::RecommendationPipeline;
 
@@ -16,9 +16,10 @@ impl RecommendationPipeline {
         HashMap<String, u64>,
         Vec<String>,
     ) {
-        let output = hydrate_query_patches_batch_or_fallback(
+        let output = hydrate_query_two_stage_batch_or_fallback(
             &self.backend_client,
             &self.definition.query_hydrators,
+            &self.definition.dependent_query_hydrators,
             self.definition.query_hydrator_concurrency,
             query,
         )

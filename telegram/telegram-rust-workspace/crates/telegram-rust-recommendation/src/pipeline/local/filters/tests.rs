@@ -73,6 +73,7 @@ fn query() -> RecommendationQueryPayload {
         past_request_timestamps: Vec::new(),
         impressed_post_ids: Vec::new(),
         subscribed_user_ids: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -136,6 +137,7 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+        ..Default::default()
     }
 }
 
@@ -353,7 +355,7 @@ fn post_selection_filters_keep_best_conversation_and_safe_candidates() {
 }
 
 #[test]
-fn seen_filter_tops_up_underfilled_selection_with_trusted_recall() {
+fn seen_filter_never_reinjects_trusted_seen_posts_on_underfill() {
     let mut query = query();
     query.limit = 4;
     query.seen_ids = vec![
@@ -388,19 +390,9 @@ fn seen_filter_tops_up_underfilled_selection_with_trusted_recall() {
         ],
     );
 
-    assert_eq!(result.candidates.len(), 4);
-    assert!(
-        result
-            .candidates
-            .iter()
-            .any(|candidate| candidate.post_id == "post-unseen")
-    );
-    assert!(
-        result
-            .candidates
-            .iter()
-            .all(|candidate| candidate.post_id != "post-untrusted")
-    );
+    // 即使结果不足 limit，也绝不允许任何核心召回源的已看帖回流
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].post_id, "post-unseen");
 
     let seen_stage = result
         .stages
@@ -410,16 +402,17 @@ fn seen_filter_tops_up_underfilled_selection_with_trusted_recall() {
     let detail = seen_stage.detail.as_ref().expect("SeenPostFilter detail");
     assert_eq!(
         detail.get("trustedUnderfillFallbackUsed"),
-        Some(&serde_json::Value::Bool(true))
+        Some(&serde_json::Value::Bool(false))
     );
     assert_eq!(
         detail.get("trustedUnderfillFallbackCount"),
-        Some(&serde_json::Value::from(3_u64))
+        Some(&serde_json::Value::from(0_u64))
     );
+    assert_eq!(detail.get("failClosed"), Some(&serde_json::Value::Bool(true)));
 }
 
 #[test]
-fn vf_filter_tops_up_underfilled_selection_with_trusted_recall() {
+fn vf_filter_enforces_fail_closed_without_trusted_underfill_fallback() {
     let mut query = query();
     query.limit = 4;
 
@@ -462,19 +455,9 @@ fn vf_filter_tops_up_underfilled_selection_with_trusted_recall() {
         ],
     );
 
-    assert_eq!(result.candidates.len(), 4);
-    assert!(
-        result
-            .candidates
-            .iter()
-            .any(|candidate| candidate.post_id == "post-safe")
-    );
-    assert!(
-        result
-            .candidates
-            .iter()
-            .all(|candidate| candidate.post_id != "post-unsafe")
-    );
+    // 缺失 VF 审核结果或不安全的域外内容即使来源受信任也必须被严格拦截
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].post_id, "post-safe");
 
     let vf_stage = result
         .stages
@@ -484,12 +467,13 @@ fn vf_filter_tops_up_underfilled_selection_with_trusted_recall() {
     let detail = vf_stage.detail.as_ref().expect("VFFilter detail");
     assert_eq!(
         detail.get("trustedUnderfillFallbackUsed"),
-        Some(&serde_json::Value::Bool(true))
+        Some(&serde_json::Value::Bool(false))
     );
     assert_eq!(
         detail.get("trustedUnderfillFallbackCount"),
-        Some(&serde_json::Value::from(3_u64))
+        Some(&serde_json::Value::from(0_u64))
     );
+    assert_eq!(detail.get("failClosed"), Some(&serde_json::Value::Bool(true)));
 }
 
 #[test]
@@ -517,4 +501,25 @@ fn quality_guard_drops_empty_non_media_candidates() {
         .find(|stage| stage.name == "QualityGuardFilter")
         .expect("QualityGuardFilter stage");
     assert_eq!(stage.removed_count, Some(1));
+}
+
+#[test]
+fn duplicate_filter_preserves_secondary_recall_provenance() {
+    let mut primary = candidate("dup-post", "author-a");
+    primary.recall_source = Some("GraphKernelSource".to_string());
+
+    let mut duplicate = candidate("dup-post", "author-a");
+    duplicate.recall_source = Some("TwoTowerSource".to_string());
+    duplicate.secondary_recall_sources = Some(vec!["PopularSource".to_string()]);
+    duplicate.in_network = Some(true);
+
+    let result = run_pre_score_filters(&query(), vec![primary, duplicate]);
+    assert_eq!(result.candidates.len(), 1);
+    let kept = &result.candidates[0];
+    assert_eq!(kept.recall_source.as_deref(), Some("GraphKernelSource"));
+    assert_eq!(
+        kept.secondary_recall_sources.as_deref(),
+        Some(&["TwoTowerSource".to_string(), "PopularSource".to_string()][..])
+    );
+    assert_eq!(kept.in_network, Some(true));
 }

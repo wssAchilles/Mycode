@@ -17,10 +17,10 @@ use telegram_pipeline_primitives::{
     PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK, PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER,
     PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS, PIPELINE_MANIFEST_TRANSPORT_NONE, PIPELINE_OWNER_CPP,
     PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST, PIPELINE_STAGE_CANDIDATE_HYDRATORS,
-    PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER, PIPELINE_STAGE_POST_SELECTION_FILTERS,
-    PIPELINE_STAGE_POST_SELECTION_HYDRATORS, PIPELINE_STAGE_QUERY_HYDRATORS,
-    PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS, PIPELINE_STAGE_SIDE_EFFECTS,
-    PIPELINE_STAGE_SOURCES,
+    PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS, PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER,
+    PIPELINE_STAGE_POST_SELECTION_FILTERS, PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
+    PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS,
+    PIPELINE_STAGE_SIDE_EFFECTS, PIPELINE_STAGE_SOURCES,
 };
 use telegram_runtime_primitives::GRAPH_PROVIDER_DISABLED_MODE;
 
@@ -35,6 +35,18 @@ pub fn build_stage_manifest(
         &definition.query_hydrators,
         ComponentManifestSpec {
             stage: PIPELINE_STAGE_QUERY_HYDRATORS,
+            owner: PIPELINE_OWNER_NODE_PROVIDER,
+            execution_mode: &definition.query_hydrator_execution_mode,
+            transport_mode: &definition.query_hydrator_transport_mode,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
+    );
+    push_components(
+        &mut manifest,
+        &definition.dependent_query_hydrators,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_DEPENDENT_QUERY_HYDRATORS,
             owner: PIPELINE_OWNER_NODE_PROVIDER,
             execution_mode: &definition.query_hydrator_execution_mode,
             transport_mode: &definition.query_hydrator_transport_mode,
@@ -357,6 +369,19 @@ mod tests {
             .expect("query hydrator manifest entry");
         assert_eq!(query_hydrator.owner, "rust_orchestrated_node_provider");
         assert_eq!(query_hydrator.fallback_behavior, "fail_open_patch_merge");
+
+        let dependent_query_hydrator = manifest
+            .iter()
+            .find(|entry| entry.stage == "dependent_query_hydrators")
+            .expect("dependent query hydrator manifest entry");
+        assert_eq!(
+            dependent_query_hydrator.owner,
+            "rust_orchestrated_node_provider"
+        );
+        assert_eq!(
+            dependent_query_hydrator.fallback_behavior,
+            "fail_open_patch_merge"
+        );
 
         let source = manifest
             .iter()

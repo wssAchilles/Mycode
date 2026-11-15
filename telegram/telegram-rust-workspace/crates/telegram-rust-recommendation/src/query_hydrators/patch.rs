@@ -147,6 +147,7 @@ mod tests {
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
             feature_switches: std::collections::HashMap::new(),
+            ..Default::default()
         };
         let mut seen_fields = HashSet::new();
 

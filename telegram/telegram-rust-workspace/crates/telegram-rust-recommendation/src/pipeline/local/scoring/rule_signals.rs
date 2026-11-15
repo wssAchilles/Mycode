@@ -188,11 +188,15 @@ pub(super) fn visibility_gradient_signal(candidate: &RecommendationCandidatePayl
         return 0.0; // 不安全内容直接归零
     }
     // 利用 level 字段做梯度调整
+    // 同时覆盖风控安全级别与质量等级，确保风险分级可单调区分，避免静默落回 1.0
     let level_factor = match vf.level.as_deref() {
         Some("high_quality") => 1.08,
-        Some("standard") => 1.0,
+        Some("safe") | Some("standard") => 1.0,
+        Some("low_risk") => 0.90,
         Some("low_quality") => 0.82,
-        Some("borderline") => 0.64,
+        Some("medium") | Some("borderline") => 0.64,
+        Some("high") | Some("high_risk") => 0.35,
+        Some("blocked") => 0.05,
         _ => 1.0,
     };
     // 利用 score 字段做连续调整

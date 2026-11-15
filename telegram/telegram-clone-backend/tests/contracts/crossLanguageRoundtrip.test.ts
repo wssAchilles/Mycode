@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { describe, test, expect } from 'vitest';
 import {
   recommendationCandidatePayloadSchema,
+  recommendationQueryPayloadSchema,
   RecommendationCandidatePayload,
 } from '../../src/services/recommendation/rust/contracts';
+import { phoenixScoresSchema } from '../../src/services/recommendation/contracts/algorithmContract';
 import { canonicalDecisionJson } from '../../src/services/recommendation/decisionLog/contracts';
 
 describe('Cross-Language Contract Roundtrip Tests', () => {
@@ -65,5 +67,37 @@ describe('Cross-Language Contract Roundtrip Tests', () => {
 
     expect(rawQuery.demographics).toBeDefined();
     expect(rawQuery.demographics.ageRange).toBe('18-24');
+  });
+
+  test('golden_candidate_v3 and golden_query_v3 should roundtrip V3 fields losslessly through Zod', () => {
+    const rawCandidate = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'fixtures/contracts/golden_candidate_v3.json'), 'utf8'),
+    );
+    const rawQuery = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, 'fixtures/contracts/golden_query_v3.json'), 'utf8'),
+    );
+
+    const parsedCandidate = recommendationCandidatePayloadSchema.parse(rawCandidate) as unknown as Record<string, unknown>;
+    const parsedScores = phoenixScoresSchema.parse(rawCandidate.phoenixScores);
+    expect(parsedScores.expectedDwellSec).toBe(27.5);
+    expect(parsedScores.dwellProbs).toHaveLength(5);
+    expect(parsedCandidate.semanticIds).toEqual([12, 87, 203, 5, 199, 64]);
+    expect(parsedCandidate.pageDecodeSlot).toBe(2);
+    expect((parsedCandidate.contentSafetyLabels as Record<string, unknown>).safe).toBe(true);
+    expect((parsedCandidate.slateContext as Record<string, unknown>).sidKL1).toBe(12);
+
+    const parsedCandidateHash = createHash('sha256').update(canonicalDecisionJson(parsedCandidate)).digest('hex');
+    const rawCandidateHash = createHash('sha256').update(canonicalDecisionJson(rawCandidate)).digest('hex');
+    expect(parsedCandidateHash).toBe(rawCandidateHash);
+
+    const parsedQuery = recommendationQueryPayloadSchema.parse(rawQuery) as unknown as Record<string, unknown>;
+    expect(parsedQuery.predictionId).toBe('pred_v3_0001');
+    expect(parsedQuery.hasCachedPosts).toBe(true);
+    expect(parsedQuery.bloomFilterEntries).toEqual([123456789, 987654321]);
+    expect((parsedQuery.columnarRetrievalSequence as Array<Record<string, unknown>>)[0].actionMask).toHaveLength(13);
+
+    const parsedQueryHash = createHash('sha256').update(canonicalDecisionJson(parsedQuery)).digest('hex');
+    const rawQueryHash = createHash('sha256').update(canonicalDecisionJson(rawQuery)).digest('hex');
+    expect(parsedQueryHash).toBe(rawQueryHash);
   });
 });

@@ -245,6 +245,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 
@@ -331,6 +332,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
         let results =
             store.recent_hot_candidates(&query, &std::iter::once("p1".to_string()).collect());
@@ -372,6 +374,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let results = store.recent_hot_candidates(&query, &HashSet::new());

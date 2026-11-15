@@ -1,161 +1,18 @@
+//! 推荐核心候选结构 `RecommendationCandidatePayload` 及其身份归一化与分值提取方法。
+
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum MediaType {
-    #[default]
-    None,
-    Photo,
-    Video,
-    Gif,
-    Mixed,
-}
+use super::media::{CandidateMediaPayload, CandidateNewsMetadataPayload, MediaType};
+use super::safety::{CandidateVisibilityPayload, ContentSafetyLabelsPayload};
+use super::scores::{
+    ActionScoresPayload, PhoenixScoresPayload, RankingSignalsPayload, RecallEvidencePayload,
+};
+use super::v3::{RetrievalSourcePayload, SlateContextPayload};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CandidateMediaPayload {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thumbnail_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct PhoenixScoresPayload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub like_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repost_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quote_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub click_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quoted_click_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_click_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dwell_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dwell_time: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub share_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub share_via_dm_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub share_via_copy_link_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub photo_expand_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub follow_author_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub video_quality_view_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub not_interested_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dismiss_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_author_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mute_author_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub report_score: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ActionScoresPayload {
-    pub click: f64,
-    pub like: f64,
-    pub reply: f64,
-    pub repost: f64,
-    pub dwell: f64,
-    pub negative: f64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct RankingSignalsPayload {
-    pub relevance: f64,
-    pub freshness: f64,
-    pub popularity: f64,
-    pub quality: f64,
-    pub author_affinity: f64,
-    pub topic_affinity: f64,
-    pub source_affinity: f64,
-    pub conversation_affinity: f64,
-    pub source_evidence: f64,
-    pub network: f64,
-    pub negative_feedback: f64,
-    pub delivery_fatigue: f64,
-    pub content_kind: f64,
-    pub trend: f64,
-    pub source_quality: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct RecallEvidencePayload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub primary_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub primary_lane: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_rank: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_rank_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_score: Option<f64>,
-    pub source_count: f64,
-    pub same_lane_source_count: f64,
-    pub cross_lane_source_count: f64,
-    pub confidence: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct CandidateVisibilityPayload {
-    pub safe: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub level: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub violations: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requires_review: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct CandidateNewsMetadataPayload {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cluster_id: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-}
-
+/// 全链路（Node Provider <-> Rust Pipeline <-> C++ 图核 <-> Scorer）共享的核心候选载荷。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationCandidatePayload {
@@ -185,6 +42,18 @@ pub struct RecommendationCandidatePayload {
     pub topic_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_recall_sources: Option<Vec<String>>,
+    /// V3 多路召回溯源结构化清单。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retrieval_sources: Vec<RetrievalSourcePayload>,
+    /// V3 6 级 RQ-VAE Semantic ID 数组（每级取值 0..255，-1 表示缺失）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_ids: Option<[i32; 6]>,
+    /// V3 256 维内容语义向量，用于 ANN、SimClusters 与 DPP 核矩阵计算。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_embedding_256d: Option<Vec<f32>>,
+    /// V3 作者历史可信度/声誉先验分。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_cred_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_video: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,6 +114,9 @@ pub struct RecommendationCandidatePayload {
     pub is_nsfw: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vf_result: Option<CandidateVisibilityPayload>,
+    /// V3 独立内容安全标签结构（不与召回业务耦合）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_safety_labels: Option<ContentSafetyLabelsPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_news: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -269,6 +141,18 @@ pub struct RecommendationCandidatePayload {
     pub mutual_follow_jaccard: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub following_replied: Option<bool>,
+    /// V3 DPP 候选池重排上下文特征。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slate_context: Option<Box<SlateContextPayload>>,
+    /// V3 最终下发页面位次与探索回执上下文。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_slate_context: Option<Box<SlateContextPayload>>,
+    /// V3 整页协同生成时对应的解码槽位序号。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_decode_slot: Option<u32>,
+    /// V3 页面级强化学习探索倾向概率（用于 OPE 逆倾向加权）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_rl_exploration_prob: Option<f64>,
 }
 
 impl RecommendationCandidatePayload {
@@ -383,63 +267,10 @@ mod tests {
     fn candidate_payload_omits_absent_optional_fields() {
         let payload = RecommendationCandidatePayload {
             post_id: "507f191e810c19729de8c001".to_string(),
-            model_post_id: None,
             author_id: "author-1".to_string(),
             content: "candidate".to_string(),
             created_at: Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap(),
-            conversation_id: None,
-            is_reply: false,
-            reply_to_post_id: None,
-            is_repost: false,
-            original_post_id: None,
-            in_network: None,
-            recall_source: None,
-            retrieval_lane: None,
-            interest_pool_kind: None,
-            topic_ids: Vec::new(),
-            secondary_recall_sources: None,
-            has_video: None,
-            has_image: None,
-            video_duration_sec: None,
-            has_media: false,
-            media_type: MediaType::None,
-            video_duration_ms: None,
-            media: None,
-            like_count: None,
-            comment_count: None,
-            repost_count: None,
-            view_count: None,
-            author_username: None,
-            author_avatar_url: None,
-            author_affinity_score: None,
-            author_blocks_viewer: None,
-            language_code: None,
-            phoenix_scores: None,
-            action_scores: None,
-            ranking_signals: None,
-            recall_evidence: None,
-            selection_pool: None,
-            selection_reason: None,
-            score_contract_version: None,
-            score_breakdown_version: None,
-            weighted_score: None,
-            score: None,
-            is_liked_by_user: None,
-            is_reposted_by_user: None,
-            is_nsfw: None,
-            vf_result: None,
-            is_news: None,
-            news_metadata: None,
-            is_pinned: None,
-            is_subscription_only: None,
-            score_breakdown: None,
-            pipeline_score: None,
-            graph_score: None,
-            graph_path: None,
-            graph_recall_type: None,
-            post_type: None,
-            mutual_follow_jaccard: None,
-            following_replied: None,
+            ..Default::default()
         };
 
         let serialized = serde_json::to_value(payload).expect("serialize candidate payload");
@@ -451,7 +282,70 @@ mod tests {
         assert!(!object.contains_key("conversationId"));
         assert!(!object.contains_key("replyToPostId"));
         assert!(!object.contains_key("newsMetadata"));
+        assert!(!object.contains_key("semanticIds"));
+        assert!(!object.contains_key("slateContext"));
         assert!(!contains_null(&serialized));
+    }
+
+    #[test]
+    fn candidate_payload_v3_fields_roundtrip_without_nulls() {
+        let payload = RecommendationCandidatePayload {
+            post_id: "507f191e810c19729de8c009".to_string(),
+            author_id: "author-v3".to_string(),
+            content: "v3 semantic post".to_string(),
+            created_at: Utc.with_ymd_and_hms(2026, 11, 15, 0, 0, 0).unwrap(),
+            semantic_ids: Some([12, 44, 78, 99, 128, 255]),
+            semantic_embedding_256d: Some(vec![0.25, -0.5]),
+            retrieval_sources: vec![RetrievalSourcePayload {
+                source_type: "TwoTowerSource".to_string(),
+                cluster: Some(7),
+                score: Some(0.91),
+                position: Some(1),
+            }],
+            author_cred_score: Some(0.88),
+            content_safety_labels: Some(ContentSafetyLabelsPayload {
+                safe: true,
+                level: Some("safe".to_string()),
+                labels: vec!["verified".to_string()],
+                score: Some(0.99),
+                source: Some("vf-v3".to_string()),
+                assigned_at_ms: Some(1700000000000),
+            }),
+            slate_context: Some(Box::new(SlateContextPayload {
+                k: Some(0),
+                pool_rank: Some(2),
+                sid_known: Some(true),
+                sid_k_l1: Some(12),
+                ..Default::default()
+            })),
+            page_decode_slot: Some(0),
+            page_rl_exploration_prob: Some(0.05),
+            phoenix_scores: Some(PhoenixScoresPayload {
+                like_score: Some(0.8),
+                video_view_score: Some(0.6),
+                expected_dwell_sec: Some(28.4),
+                dwell_probs: Some(vec![0.1, 0.4, 0.5]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serde_json::to_value(&payload).expect("serialize v3 candidate");
+        assert_eq!(
+            serialized.get("semanticEmbedding256d").and_then(Value::as_array).map(|v| v.len()),
+            Some(2)
+        );
+        assert!(serialized.get("semanticIds").is_some());
+        assert!(!contains_null(&serialized));
+
+        let decoded: RecommendationCandidatePayload =
+            serde_json::from_value(serialized).expect("deserialize v3 candidate");
+        assert_eq!(decoded.semantic_ids, Some([12, 44, 78, 99, 128, 255]));
+        assert_eq!(decoded.page_decode_slot, Some(0));
+        assert_eq!(
+            decoded.phoenix_scores.as_ref().and_then(|s| s.expected_dwell_sec),
+            Some(28.4)
+        );
     }
 
     #[test]
@@ -462,63 +356,15 @@ mod tests {
             author_id: "author-1".to_string(),
             content: "candidate".to_string(),
             created_at: Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap(),
-            conversation_id: None,
-            is_reply: false,
-            reply_to_post_id: None,
-            is_repost: false,
-            original_post_id: None,
-            in_network: None,
-            recall_source: None,
-            retrieval_lane: None,
-            interest_pool_kind: None,
-            topic_ids: Vec::new(),
-            secondary_recall_sources: None,
-            has_video: None,
-            has_image: None,
-            video_duration_sec: None,
-            has_media: false,
-            media_type: MediaType::None,
-            video_duration_ms: None,
-            media: None,
-            like_count: None,
-            comment_count: None,
-            repost_count: None,
-            view_count: None,
-            author_username: None,
-            author_avatar_url: None,
-            author_affinity_score: None,
-            author_blocks_viewer: None,
-            language_code: None,
-            phoenix_scores: None,
-            action_scores: None,
-            ranking_signals: None,
-            recall_evidence: None,
-            selection_pool: None,
-            selection_reason: None,
-            score_contract_version: None,
-            score_breakdown_version: None,
             weighted_score: Some(0.4),
-            score: None,
-            is_liked_by_user: None,
-            is_reposted_by_user: None,
-            is_nsfw: None,
-            vf_result: None,
             is_news: Some(true),
             news_metadata: Some(CandidateNewsMetadataPayload {
                 external_id: Some("external-1".to_string()),
                 source_url: Some("https://www.example.com/a?b=1#frag".to_string()),
                 ..CandidateNewsMetadataPayload::default()
             }),
-            is_pinned: None,
-            is_subscription_only: None,
-            score_breakdown: None,
             pipeline_score: Some(0.6),
-            graph_score: None,
-            graph_path: None,
-            graph_recall_type: None,
-            post_type: None,
-            mutual_follow_jaccard: None,
-            following_replied: None,
+            ..Default::default()
         };
 
         assert_eq!(

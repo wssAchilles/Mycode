@@ -5,7 +5,9 @@ use crate::{
     config::RecommendationConfig,
     filters::{configured_filters, post_selection::configured_post_selection_filters},
     pipeline::local::ranking::RANKING_LADDER_VERSION,
-    query_hydrators::configured_query_hydrators,
+    query_hydrators::{
+        configured_base_query_hydrators, configured_dependent_query_hydrators,
+    },
     scorers::configured_scorers,
     selectors::{self, top_k::SELECTOR_POLICY_VERSION},
     serving::cursor::{CURSOR_MODE, SERVING_VERSION},
@@ -61,6 +63,8 @@ pub struct RecommendationPipelineDefinition {
     pub candidate_hydrator_concurrency: usize,
     pub post_selection_hydrator_concurrency: usize,
     pub query_hydrators: Vec<String>,
+    /// 依赖阶段（Stage 1，在基础 QueryHydrator 合入后执行）水合器列表。
+    pub dependent_query_hydrators: Vec<String>,
     pub sources: Vec<String>,
     pub candidate_hydrators: Vec<String>,
     pub filters: Vec<String>,
@@ -80,12 +84,22 @@ impl RecommendationPipelineDefinition {
         )
         .to_string()
     }
+
+    /// 按运行顺序列出全部两阶段 QueryHydrator，用于元数据展示与缓存重放清理。
+    pub fn all_query_hydrators(&self) -> Vec<String> {
+        self.query_hydrators
+            .iter()
+            .chain(self.dependent_query_hydrators.iter())
+            .cloned()
+            .collect()
+    }
 }
 
 pub fn build_pipeline_definition(
     config: &RecommendationConfig,
 ) -> RecommendationPipelineDefinition {
-    let query_hydrators = configured_query_hydrators();
+    let query_hydrators = configured_base_query_hydrators();
+    let dependent_query_hydrators = configured_dependent_query_hydrators();
     let sources = configured_sources(&config.source_order);
     let candidate_hydrators = configured_candidate_hydrators();
     let filters = configured_filters();
@@ -96,6 +110,7 @@ pub fn build_pipeline_definition(
     let side_effects = configured_side_effects();
     let component_order_hash = build_component_order_hash(&[
         query_hydrators.as_slice(),
+        dependent_query_hydrators.as_slice(),
         sources.as_slice(),
         candidate_hydrators.as_slice(),
         filters.as_slice(),
@@ -141,6 +156,7 @@ pub fn build_pipeline_definition(
         candidate_hydrator_concurrency: CANDIDATE_HYDRATOR_CONCURRENCY,
         post_selection_hydrator_concurrency: POST_SELECTION_HYDRATOR_CONCURRENCY,
         query_hydrators,
+        dependent_query_hydrators,
         sources,
         candidate_hydrators,
         filters,
@@ -155,7 +171,10 @@ pub fn build_pipeline_definition(
 
 #[cfg(test)]
 mod tests {
-    use telegram_component_primitives::query_hydrators::configured_query_hydrators;
+    use telegram_component_primitives::query_hydrators::{
+        configured_base_query_hydrators, configured_dependent_query_hydrators,
+        configured_query_hydrators,
+    };
     use telegram_pipeline_primitives::{
         RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
@@ -260,7 +279,15 @@ mod tests {
             definition.post_selection_hydrator_concurrency,
             POST_SELECTION_HYDRATOR_CONCURRENCY
         );
-        assert_eq!(definition.query_hydrators, configured_query_hydrators());
+        assert_eq!(definition.query_hydrators, configured_base_query_hydrators());
+        assert_eq!(
+            definition.dependent_query_hydrators,
+            configured_dependent_query_hydrators()
+        );
+        assert_eq!(
+            definition.all_query_hydrators().len(),
+            configured_query_hydrators().len()
+        );
         assert_eq!(
             definition.sources,
             vec![

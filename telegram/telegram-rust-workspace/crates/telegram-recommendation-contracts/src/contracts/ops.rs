@@ -162,6 +162,9 @@ pub struct RecommendationOpsRuntime {
     pub graph_provider_mode: String,
     pub graph_kernel_url: String,
     pub query_hydrators: Vec<String>,
+    /// 依赖阶段水合器列表（与 `query_hydrators` 合称完整 10 阶段中的前两阶段）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependent_query_hydrators: Vec<String>,
     pub source_order: Vec<String>,
     pub candidate_hydrators: Vec<String>,
     pub filters: Vec<String>,

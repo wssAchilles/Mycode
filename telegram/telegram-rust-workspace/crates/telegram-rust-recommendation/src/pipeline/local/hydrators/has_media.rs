@@ -158,6 +158,7 @@ mod tests {
             post_type: None,
             mutual_follow_jaccard: None,
             following_replied: None,
+            ..Default::default()
         }
     }
 
@@ -199,6 +200,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let (candidates, stage) = has_media_hydrator(&query, vec![candidate]);
@@ -245,6 +247,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let (candidates, _) = has_media_hydrator(&query, vec![candidate]);
@@ -297,6 +300,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let (candidates, _) = has_media_hydrator(&query, vec![candidate]);
@@ -339,6 +343,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let (candidates, _) = has_media_hydrator(&query, vec![candidate]);
@@ -379,6 +384,7 @@ mod tests {
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
             subscribed_user_ids: Vec::new(),
+            ..Default::default()
         };
 
         let (candidates, _) = has_media_hydrator(&query, vec![candidate]);

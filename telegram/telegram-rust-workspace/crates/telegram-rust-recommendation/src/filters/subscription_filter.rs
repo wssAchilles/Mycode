@@ -109,6 +109,7 @@ mod tests {
             following_replied: None,
             pipeline_score: None,
             score_breakdown: None,
+            ..Default::default()
         }
     }
 

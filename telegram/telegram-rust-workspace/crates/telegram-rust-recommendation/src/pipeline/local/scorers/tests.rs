@@ -225,6 +225,7 @@ fn query() -> RecommendationQueryPayload {
         past_request_timestamps: Vec::new(),
         impressed_post_ids: Vec::new(),
         subscribed_user_ids: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -295,6 +296,7 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         post_type: None,
         mutual_follow_jaccard: None,
         following_replied: None,
+        ..Default::default()
     }
 }
 
@@ -361,6 +363,7 @@ fn weighted_fixture_candidate(case: &serde_json::Value) -> RecommendationCandida
             block_score: optional_fixture_number(scores, "block"),
             mute_author_score: optional_fixture_number(scores, "muteAuthor"),
             report_score: optional_fixture_number(scores, "report"),
+            ..Default::default()
         });
     candidate.action_scores = input
         .get("actionScores")
