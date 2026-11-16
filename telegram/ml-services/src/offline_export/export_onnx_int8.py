@@ -98,6 +98,104 @@ def export_fp32_onnx(
     return target
 
 
+def _prepare_quant_input(src: Path, tmp_dir: str, preprocess: bool) -> Path:
+    """可选执行 ORT 图预处理与符号形状推断，失败时安全回退原始 FP32 图。"""
+    if not preprocess:
+        return src
+    pre_path = Path(tmp_dir) / f"{src.stem}_pre.onnx"
+    try:
+        quant_pre_process(str(src), str(pre_path), skip_symbolic_shape=False)
+        if pre_path.exists() and pre_path.stat().st_size > 0:
+            return pre_path
+    except Exception:
+        # 若特定自定义符号维度预处理受限，安全回退原始 checked FP32 图
+        return src
+    return src
+
+
+def _collect_static_linear_nodes(onnx_path: Path, op_types: Sequence[str] = ("MatMul", "Gemm")) -> List[str]:
+    """提取携带静态权重 initializer 的线性矩阵算子名称。"""
+    model = onnx.load(str(onnx_path))
+    inits = {init.name for init in model.graph.initializer}
+    op_set = set(op_types)
+    return [
+        n.name
+        for n in model.graph.node
+        if n.name and n.op_type in op_set and any(inp in inits for inp in n.input)
+    ]
+
+
+def _build_mixed_precision_exclusion_tiers(static_nodes: Sequence[str]) -> List[List[str]]:
+    """构造保留大部分权重仍处于 INT8 的敏感层混合精度分级回退方案。"""
+    total = len(static_nodes)
+    if total < 8:
+        return []
+
+    max_excluded = max(0, total - max(1, total // 4))
+    candidates: List[List[str]] = [
+        [n for n in static_nodes if n.startswith(("/joint_layers.0/", "/action_mask_proj/", "/sid_embedder/", "/sid_embedder_1/"))],
+        [
+            n
+            for n in static_nodes
+            if n.startswith(("/joint_layers.0/", "/joint_layers.1/", "/joint_layers.2/", "/action_mask_proj/", "/sid_embedder/", "/sid_embedder_1/"))
+            or any(n.startswith(p) for p in ("/cand_only_layers.0/k_proj", "/cand_only_layers.0/q_proj"))
+        ],
+        [
+            n
+            for n in static_nodes
+            if any(
+                n.startswith(p)
+                for p in (
+                    "/joint_layers.",
+                    "/action_mask_proj/",
+                    "/sid_embedder",
+                    "/cand_only_layers.0/k_proj",
+                    "/cand_only_layers.0/q_proj",
+                    "/ple_head/pos_head/",
+                    "/ple_head/neg_head/",
+                )
+            )
+        ],
+        [
+            n
+            for n in static_nodes
+            if any(
+                n.startswith(p)
+                for p in (
+                    "/joint_layers.",
+                    "/action_mask_proj/",
+                    "/sid_embedder",
+                    "/cand_only_layers.0/k_proj",
+                    "/cand_only_layers.0/q_proj",
+                    "/cand_only_layers.1/k_proj",
+                    "/cand_only_layers.1/q_proj",
+                    "/ple_head/pos_head/",
+                    "/ple_head/neg_head/",
+                    "/ple_head/cread_head/",
+                    "/ple_head/gates.",
+                )
+            )
+        ],
+    ]
+
+    # 补充通用位置回退档（排除头尾少数敏感投影，始终确保至少 1/3 节点维持 INT8）
+    head_k = max(1, total // 3)
+    tail_m = min(4, max(1, total // 10))
+    candidates.append(list(static_nodes[:head_k]) + list(static_nodes[-tail_m:]))
+
+    seen: set[Tuple[str, ...]] = set()
+    valid_tiers: List[List[str]] = []
+    for excl in candidates:
+        unique_excl = [n for n in static_nodes if n in set(excl)]
+        if not unique_excl or len(unique_excl) > max_excluded:
+            continue
+        sig = tuple(unique_excl)
+        if sig not in seen:
+            seen.add(sig)
+            valid_tiers.append(unique_excl)
+    return valid_tiers
+
+
 def quantize_onnx_dynamic_int8(
     fp32_path: Path,
     int8_path: Path,
@@ -105,6 +203,7 @@ def quantize_onnx_dynamic_int8(
     op_types_to_quantize: Optional[Sequence[str]] = ("MatMul", "Gemm"),
     per_channel: bool = True,
     preprocess: bool = True,
+    nodes_to_exclude: Optional[Sequence[str]] = None,
 ) -> Path:
     """使用 ONNX Runtime 将 FP32 ONNX 线性矩阵权重动态量化为 QInt8。
 
@@ -116,16 +215,7 @@ def quantize_onnx_dynamic_int8(
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        quant_input = src
-        if preprocess:
-            pre_path = Path(tmp_dir) / f"{src.stem}_pre.onnx"
-            try:
-                quant_pre_process(str(src), str(pre_path), skip_symbolic_shape=False)
-                if pre_path.exists() and pre_path.stat().st_size > 0:
-                    quant_input = pre_path
-            except Exception:
-                # 若特定自定义符号维度预处理受限，安全回退原始 checked FP32 图
-                quant_input = src
+        quant_input = _prepare_quant_input(src, tmp_dir, preprocess)
 
         kwargs: Dict[str, Any] = {
             "model_input": str(quant_input),
@@ -135,12 +225,40 @@ def quantize_onnx_dynamic_int8(
         }
         if op_types_to_quantize is not None:
             kwargs["op_types_to_quantize"] = list(op_types_to_quantize)
+        if nodes_to_exclude:
+            kwargs["nodes_to_exclude"] = list(nodes_to_exclude)
 
         quantize_dynamic(**kwargs)
 
     checked = onnx.load(str(dst))
     onnx.checker.check_model(checked)
     return dst
+
+
+def _run_parity_all_outputs(
+    fp32_path: Path,
+    int8_path: Path,
+    sample_feeds: Mapping[str, np.ndarray],
+    output_names: Sequence[str],
+    *,
+    min_cosine: float,
+    max_mae: float,
+) -> Tuple[bool, List[ParityCheckReport]]:
+    reports: List[ParityCheckReport] = []
+    all_passed = True
+    for out_idx in range(len(output_names)):
+        report = validate_fp32_int8_parity(
+            fp32_path,
+            int8_path,
+            sample_feeds,
+            min_cosine=min_cosine,
+            max_mae=max_mae,
+            output_index=out_idx,
+        )
+        reports.append(report)
+        if not report.passed:
+            all_passed = False
+    return all_passed, reports
 
 
 def export_and_quantize_with_parity(
@@ -168,22 +286,53 @@ def export_and_quantize_with_parity(
         opset_version=opset_version,
     )
     exported_int8 = quantize_onnx_dynamic_int8(exported_fp32, int8_path)
+    all_passed, reports = _run_parity_all_outputs(
+        exported_fp32,
+        exported_int8,
+        sample_feeds,
+        output_names,
+        min_cosine=min_cosine,
+        max_mae=max_mae,
+    )
 
-    reports: List[ParityCheckReport] = []
-    for out_idx in range(len(output_names)):
-        report = validate_fp32_int8_parity(
-            exported_fp32,
-            exported_int8,
-            sample_feeds,
-            min_cosine=min_cosine,
-            max_mae=max_mae,
-            output_index=out_idx,
-        )
-        reports.append(report)
-        if fail_on_parity and not report.passed:
-            raise RuntimeError(
-                f"ONNX FP32 vs INT8 parity check failed on output[{out_idx}]={output_names[out_idx]}: {report.reasons}"
-            )
+    if not all_passed:
+        # 若全量 INT8 在强训练大模型上因浅层 Attention Q/K 离群激活触发 MAE 门禁，则按严格不放宽门槛原则尝试敏感节点混合精度回退
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            quant_input = _prepare_quant_input(exported_fp32, tmp_dir, True)
+            static_nodes = _collect_static_linear_nodes(quant_input, ("MatMul", "Gemm"))
+            for excl in _build_mixed_precision_exclusion_tiers(static_nodes):
+                candidate_path = Path(tmp_dir) / "candidate_int8.onnx"
+                quantize_onnx_dynamic_int8(
+                    quant_input,
+                    candidate_path,
+                    preprocess=False,
+                    nodes_to_exclude=excl,
+                )
+                cand_ok, cand_reports = _run_parity_all_outputs(
+                    exported_fp32,
+                    candidate_path,
+                    sample_feeds,
+                    output_names,
+                    min_cosine=min_cosine,
+                    max_mae=max_mae,
+                )
+                if cand_ok:
+                    Path(int8_path).write_bytes(candidate_path.read_bytes())
+                    exported_int8 = Path(int8_path)
+                    reports = cand_reports
+                    all_passed = True
+                    print(
+                        f"[onnx_export] mixed-precision INT8 selected: quantized={len(static_nodes) - len(excl)}/{len(static_nodes)} static nodes",
+                        flush=True,
+                    )
+                    break
+
+    if fail_on_parity and not all_passed:
+        for out_idx, report in enumerate(reports):
+            if not report.passed:
+                raise RuntimeError(
+                    f"ONNX FP32 vs INT8 parity check failed on output[{out_idx}]={output_names[out_idx]}: {report.reasons}"
+                )
 
     return OnnxExportResult(
         fp32_path=exported_fp32,
