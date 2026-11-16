@@ -19,6 +19,13 @@ from src.contracts.sid import SID_NUM_LEVELS, WIRE_MISSING_SID, wire_to_model_si
 from src.feature_adapters.history_packer import stable_id_hash_u64
 from src.models.two_tower_v3 import TwoTowerV3Config, TwoTowerV3Model
 from src.training.checkpoint_manager import CheckpointManager, OomSafeBatchController
+from src.training.muon_adamw import ModelEMA
+from src.training.runtime import (
+    AsyncMicroBatchPrefetcher,
+    BestStateTracker,
+    WarmupCosineLR,
+    slice_mapping_to_device,
+)
 
 
 @dataclass
@@ -201,29 +208,33 @@ def prepare_two_tower_split(
     )
 
 
+def _build_two_tower_field_map(split: TwoTowerPreparedSplit) -> Dict[str, np.ndarray]:
+    """构建 TwoTowerPreparedSplit 的零拷贝字段映射，供异步预取与切片共用。"""
+    return {
+        "history_post_hashes": split.history_post_hashes,
+        "history_author_hashes": split.history_author_hashes,
+        "history_action_types": split.history_action_types,
+        "history_time_buckets": split.history_time_buckets,
+        "history_sids": split.history_sids,
+        "history_action_masks": split.history_action_masks,
+        "attention_mask": split.attention_mask,
+        "pos_post_hashes": split.pos_post_hashes,
+        "pos_author_hashes": split.pos_author_hashes,
+        "pos_sids": split.pos_sids,
+        "pos_in_network": split.pos_in_network,
+        "pos_has_video": split.pos_has_video,
+        "pos_text_emb": split.pos_text_emb,
+        "pos_log_q": split.pos_log_q,
+        "sample_weights": split.sample_weights,
+    }
+
+
 def _slice_batch_to_device(
     split: TwoTowerPreparedSplit,
     indices: np.ndarray,
     device: torch.device,
 ) -> Dict[str, torch.Tensor]:
-    idx = np.asarray(indices, dtype=np.int64)
-    return {
-        "history_post_hashes": torch.from_numpy(split.history_post_hashes[idx]).to(device),
-        "history_author_hashes": torch.from_numpy(split.history_author_hashes[idx]).to(device),
-        "history_action_types": torch.from_numpy(split.history_action_types[idx]).to(device),
-        "history_time_buckets": torch.from_numpy(split.history_time_buckets[idx]).to(device),
-        "history_sids": torch.from_numpy(split.history_sids[idx]).to(device),
-        "history_action_masks": torch.from_numpy(split.history_action_masks[idx]).to(device),
-        "attention_mask": torch.from_numpy(split.attention_mask[idx]).to(device),
-        "pos_post_hashes": torch.from_numpy(split.pos_post_hashes[idx]).to(device),
-        "pos_author_hashes": torch.from_numpy(split.pos_author_hashes[idx]).to(device),
-        "pos_sids": torch.from_numpy(split.pos_sids[idx]).to(device),
-        "pos_in_network": torch.from_numpy(split.pos_in_network[idx]).to(device),
-        "pos_has_video": torch.from_numpy(split.pos_has_video[idx]).to(device),
-        "pos_text_emb": torch.from_numpy(split.pos_text_emb[idx]).to(device),
-        "pos_log_q": torch.from_numpy(split.pos_log_q[idx]).to(device),
-        "sample_weights": torch.from_numpy(split.sample_weights[idx]).to(device),
-    }
+    return slice_mapping_to_device(_build_two_tower_field_map(split), indices, device)
 
 
 def compute_two_tower_v3_loss(
@@ -467,11 +478,17 @@ def train_two_tower_v3(
     mask_in_batch_false_negatives: bool = True,
     apply_log_q_correction: bool = True,
     use_bf16_amp: bool = True,
+    lr_schedule: str = "none",
+    warmup_ratio: float = 0.08,
+    min_lr_ratio: float = 0.02,
+    restore_best_state: bool = False,
+    ema_decay: float = 0.0,
+    use_async_prefetch: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     seed: int = 42,
     device: Optional[str] = None,
 ) -> Tuple[TwoTowerV3Model, Dict[str, Any]]:
-    """执行 TwoTower V3 训练主循环，集成 OOM 缩容保护、BF16 TensorCore 加速、断点续训与评估。"""
+    """执行 TwoTower V3 训练主循环，集成异步 H2D 预取、Warmup-Cosine 退火、EMA 与最佳权重回滚。"""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -483,12 +500,13 @@ def train_two_tower_v3(
     text_dim = int(train_split.pos_text_emb.shape[1]) if train_split.pos_text_emb.ndim == 2 else 256
     model = TwoTowerV3Model(cfg, text_input_dim=text_dim, sid_artifact=sid_artifact).to(target_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema: Optional[ModelEMA] = ModelEMA(model, decay=ema_decay) if ema_decay > 0.0 else None
 
     start_epoch = 0
     global_step = 0
     best_score = -1.0
     if checkpoint_manager is not None:
-        resumed = checkpoint_manager.resume_latest(model, optimizer=optimizer, map_location=target_device)
+        resumed = checkpoint_manager.resume_latest(model, optimizer=optimizer, ema=ema, map_location=target_device)
         if resumed is not None:
             start_epoch = int(resumed.get("epoch", 0))
             global_step = int(resumed.get("step", 0))
@@ -498,99 +516,162 @@ def train_two_tower_v3(
     n_train = len(train_split)
     oom_ctrl = OomSafeBatchController(initial_batch_size=min(batch_size, max(4, n_train)), min_batch_size=4)
     loss_history: List[float] = []
+    epoch_history: List[Dict[str, Any]] = []
+    field_map = _build_two_tower_field_map(train_split)
+    scheduler = WarmupCosineLR.maybe_create(
+        optimizer,
+        lr_schedule=lr_schedule,
+        n_train=n_train,
+        batch_size=oom_ctrl.micro_batch_size,
+        epochs=epochs,
+        warmup_ratio=warmup_ratio,
+        min_lr_ratio=min_lr_ratio,
+        start_step=global_step,
+    )
+    best_tracker = BestStateTracker() if restore_best_state else None
 
     for epoch in range(start_epoch, max(1, epochs)):
         model.train()
         perm = rng.permutation(n_train)
         cursor = 0
         epoch_losses: List[float] = []
-
-        while cursor < n_train:
-            def _do_accum_step(cur_bs: int, accum_steps: int) -> float:
-                optimizer.zero_grad(set_to_none=True)
-                total_step_loss = 0.0
-                steps_run = 0
-                local_cursor = cursor
-                for _ in range(accum_steps):
-                    if local_cursor >= n_train:
-                        break
-                    batch_idx = perm[local_cursor : local_cursor + cur_bs]
-                    local_cursor += len(batch_idx)
-                    batch = _slice_batch_to_device(train_split, batch_idx, target_device)
-
-                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
-                        user_vecs, user_ctx = model.encode_user_batch(batch)
-                        _, cand_mol_vecs, cand_ctx = model.encode_candidate_batch(batch, prefix="pos_")
-                        logits = model.scorer(
-                            user_vecs,
-                            cand_mol_vecs,
-                            user_ctx,
-                            cand_ctx,
-                            use_mol=use_mol,
+        prefetcher = (
+            AsyncMicroBatchPrefetcher(
+                field_map,
+                perm,
+                batch_size=oom_ctrl.micro_batch_size,
+                device=target_device,
+            )
+            if use_async_prefetch and n_train > 0
+            else None
+        )
+        try:
+            while cursor < n_train:
+                def _do_accum_step(cur_bs: int, accum_steps: int) -> float:
+                    optimizer.zero_grad(set_to_none=True)
+                    total_step_loss = 0.0
+                    steps_run = 0
+                    local_cursor = cursor
+                    for _ in range(accum_steps):
+                        if local_cursor >= n_train:
+                            break
+                        actual_bs = min(cur_bs, n_train - local_cursor)
+                        batch = AsyncMicroBatchPrefetcher.fetch_or_slice(
+                            prefetcher, field_map, perm, local_cursor, actual_bs, target_device
                         )
-                    raw_loss = compute_two_tower_v3_loss(
-                        logits.float(),
-                        pos_post_hashes=batch["pos_post_hashes"],
-                        cand_log_q=batch["pos_log_q"],
-                        sample_weights=batch["sample_weights"],
-                        user_vecs=user_vecs.float() if use_mol else None,
-                        mask_in_batch_false_negatives=mask_in_batch_false_negatives,
-                        apply_log_q_correction=apply_log_q_correction,
-                    )
-                    (raw_loss / float(accum_steps)).backward()
-                    total_step_loss += float(raw_loss.item())
-                    steps_run += 1
+                        local_cursor += actual_bs
 
-                if steps_run > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    optimizer.step()
-                return total_step_loss / float(max(1, steps_run))
+                        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                            user_vecs, user_ctx = model.encode_user_batch(batch)
+                            _, cand_mol_vecs, cand_ctx = model.encode_candidate_batch(batch, prefix="pos_")
+                            logits = model.scorer(
+                                user_vecs,
+                                cand_mol_vecs,
+                                user_ctx,
+                                cand_ctx,
+                                use_mol=use_mol,
+                            )
+                        raw_loss = compute_two_tower_v3_loss(
+                            logits.float(),
+                            pos_post_hashes=batch["pos_post_hashes"],
+                            cand_log_q=batch["pos_log_q"],
+                            sample_weights=batch["sample_weights"],
+                            user_vecs=user_vecs.float() if use_mol else None,
+                            mask_in_batch_false_negatives=mask_in_batch_false_negatives,
+                            apply_log_q_correction=apply_log_q_correction,
+                        )
+                        (raw_loss / float(accum_steps)).backward()
+                        total_step_loss += float(raw_loss.item())
+                        steps_run += 1
 
-            step_loss = oom_ctrl.run_step_with_backoff(_do_accum_step)
-            cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
-            global_step += 1
-            epoch_losses.append(step_loss)
+                    if steps_run > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        if ema is not None:
+                            ema.update(model)
+                    return total_step_loss / float(max(1, steps_run))
+
+                step_loss = oom_ctrl.run_step_with_backoff(_do_accum_step)
+                cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
+                global_step += 1
+                if scheduler is not None:
+                    scheduler.step(global_step)
+                epoch_losses.append(step_loss)
+        finally:
+            if prefetcher is not None:
+                prefetcher.close()
 
         mean_epoch_loss = float(np.mean(epoch_losses)) if epoch_losses else 0.0
         loss_history.append(mean_epoch_loss)
 
         cur_metric = -mean_epoch_loss
-        if val_split is not None and corpus_posts:
-            c_vecs, c_pids = encode_corpus_candidates(
-                model,
-                corpus_posts,
-                text_dim=text_dim,
-                post_sid_wire_map=post_sid_wire_map,
-                post_text_emb_map=post_text_emb_map,
-                device=target_device,
-            )
-            val_metrics = evaluate_retrieval_metrics(
-                model,
-                val_split,
-                corpus_vectors=c_vecs,
-                corpus_post_ids=c_pids,
-                use_mol=use_mol,
-                device=target_device,
-            )
-            cur_metric = float(val_metrics.get("recall@50", 0.0) + 0.5 * val_metrics.get("mrr@100", 0.0))
+        ep_record: Dict[str, Any] = {
+            "epoch": epoch + 1,
+            "train_loss": mean_epoch_loss,
+            "lr": float(optimizer.param_groups[0]["lr"]),
+        }
 
-        is_best = cur_metric > best_score
-        if is_best:
-            best_score = cur_metric
+        def _eval_current() -> None:
+            nonlocal cur_metric
+            if val_split is not None and corpus_posts:
+                c_vecs, c_pids = encode_corpus_candidates(
+                    model,
+                    corpus_posts,
+                    text_dim=text_dim,
+                    post_sid_wire_map=post_sid_wire_map,
+                    post_text_emb_map=post_text_emb_map,
+                    device=target_device,
+                )
+                val_metrics = evaluate_retrieval_metrics(
+                    model,
+                    val_split,
+                    corpus_vectors=c_vecs,
+                    corpus_post_ids=c_pids,
+                    use_mol=use_mol,
+                    device=target_device,
+                )
+                cur_metric = float(val_metrics.get("recall@50", 0.0) + 0.5 * val_metrics.get("mrr@100", 0.0))
+                ep_record.update({k: float(v) for k, v in val_metrics.items() if isinstance(v, (int, float))})
+
+        if ema is not None:
+            with ema.use_ema(model):
+                _eval_current()
+                is_best = cur_metric > best_score
+                if is_best:
+                    best_score = cur_metric
+                if best_tracker is not None:
+                    best_tracker.update(model, metric=cur_metric, epoch=epoch + 1, is_best=is_best)
+        else:
+            _eval_current()
+            is_best = cur_metric > best_score
+            if is_best:
+                best_score = cur_metric
+            if best_tracker is not None:
+                best_tracker.update(model, metric=cur_metric, epoch=epoch + 1, is_best=is_best)
+
+        epoch_history.append(ep_record)
         if checkpoint_manager is not None:
             checkpoint_manager.save(
                 step=global_step,
                 epoch=epoch + 1,
                 model=model,
                 optimizer=optimizer,
+                ema=ema,
                 metric_value=cur_metric,
                 is_best=is_best,
                 extra={"loss": mean_epoch_loss},
             )
 
+    restored_best = bool(best_tracker is not None and best_tracker.restore(model, device=target_device))
+    if not restored_best and ema is not None:
+        ema.apply_shadow(model)
+
     eval_summary: Dict[str, Any] = {
         "final_loss": loss_history[-1] if loss_history else 0.0,
         "loss_history": loss_history,
+        "history": epoch_history,
+        "best_score": best_score,
+        "best_epoch": best_tracker.best_epoch if restored_best and best_tracker is not None else len(loss_history),
         "oom_events": oom_ctrl.oom_events,
     }
     if val_split is not None and corpus_posts:

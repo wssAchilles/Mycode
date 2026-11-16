@@ -36,6 +36,12 @@ from src.training.muon_adamw import (
     clip_grad_norm_partitioned,
     compute_v3_early_stop_metric,
 )
+from src.training.runtime import (
+    AsyncMicroBatchPrefetcher,
+    BestStateTracker,
+    WarmupCosineLR,
+    slice_mapping_to_device,
+)
 
 
 @dataclass
@@ -281,33 +287,37 @@ def concat_phoenix_slates(slates_list: Sequence[PhoenixPreparedSlates]) -> Phoen
     )
 
 
+def _build_slates_field_map(slates: PhoenixPreparedSlates) -> Dict[str, np.ndarray]:
+    """构建 PhoenixPreparedSlates 的字段数组映射视图（无数据拷贝），供同步与异步预取共用。"""
+    return {
+        "history_post_hashes": slates.history_post_hashes,
+        "history_author_hashes": slates.history_author_hashes,
+        "history_action_types": slates.history_action_types,
+        "history_time_buckets": slates.history_time_buckets,
+        "history_sids": slates.history_sids,
+        "history_action_masks": slates.history_action_masks,
+        "history_mask": slates.history_mask,
+        "cand_post_hashes": slates.cand_post_hashes,
+        "cand_author_hashes": slates.cand_author_hashes,
+        "cand_sids": slates.cand_sids,
+        "cand_in_network": slates.cand_in_network,
+        "cand_has_video": slates.cand_has_video,
+        "cand_served_position": slates.cand_served_position,
+        "cand_mask": slates.cand_mask,
+        "labels_14": slates.labels_14,
+        "mask_14": slates.mask_14,
+        "dwell_buckets": slates.dwell_buckets,
+        "dwell_mask": slates.dwell_mask,
+        "relevance_scores": slates.relevance_scores,
+    }
+
+
 def _slice_slates_to_device(
     slates: PhoenixPreparedSlates,
     indices: np.ndarray,
     device: torch.device,
 ) -> Dict[str, torch.Tensor]:
-    idx = np.asarray(indices, dtype=np.int64)
-    return {
-        "history_post_hashes": torch.from_numpy(slates.history_post_hashes[idx]).to(device),
-        "history_author_hashes": torch.from_numpy(slates.history_author_hashes[idx]).to(device),
-        "history_action_types": torch.from_numpy(slates.history_action_types[idx]).to(device),
-        "history_time_buckets": torch.from_numpy(slates.history_time_buckets[idx]).to(device),
-        "history_sids": torch.from_numpy(slates.history_sids[idx]).to(device),
-        "history_action_masks": torch.from_numpy(slates.history_action_masks[idx]).to(device),
-        "history_mask": torch.from_numpy(slates.history_mask[idx]).to(device),
-        "cand_post_hashes": torch.from_numpy(slates.cand_post_hashes[idx]).to(device),
-        "cand_author_hashes": torch.from_numpy(slates.cand_author_hashes[idx]).to(device),
-        "cand_sids": torch.from_numpy(slates.cand_sids[idx]).to(device),
-        "cand_in_network": torch.from_numpy(slates.cand_in_network[idx]).to(device),
-        "cand_has_video": torch.from_numpy(slates.cand_has_video[idx]).to(device),
-        "cand_served_position": torch.from_numpy(slates.cand_served_position[idx]).to(device),
-        "cand_mask": torch.from_numpy(slates.cand_mask[idx]).to(device),
-        "labels_14": torch.from_numpy(slates.labels_14[idx]).to(device),
-        "mask_14": torch.from_numpy(slates.mask_14[idx]).to(device),
-        "dwell_buckets": torch.from_numpy(slates.dwell_buckets[idx]).to(device),
-        "dwell_mask": torch.from_numpy(slates.dwell_mask[idx]).to(device),
-        "relevance_scores": torch.from_numpy(slates.relevance_scores[idx]).to(device),
-    }
+    return slice_mapping_to_device(_build_slates_field_map(slates), indices, device)
 
 
 def _forward_model_on_batch(
@@ -594,12 +604,17 @@ def train_phoenix_v3_teacher(
     cread_weight: float = 0.35,
     ema_decay: float = 0.99,
     use_bf16_amp: bool = True,
+    lr_schedule: str = "none",
+    warmup_ratio: float = 0.08,
+    min_lr_ratio: float = 0.05,
+    restore_best_state: bool = False,
+    use_async_prefetch: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     init_model: Optional[PhoenixV3Model] = None,
     seed: int = 42,
     device: Optional[str] = None,
 ) -> Tuple[PhoenixV3Model, Dict[str, Any]]:
-    """训练 Phoenix V3 Teacher（支持从 Stage 3A `init_model` 继续微调 + Muon+AdamW + EMA + PL + CREAD-30 + PAL）。"""
+    """训练 Phoenix V3 Teacher（支持从 Stage 3A `init_model` 继续微调 + Muon+AdamW + EMA + 异步 H2D 预取）。"""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -632,86 +647,118 @@ def train_phoenix_v3_teacher(
     oom_ctrl = OomSafeBatchController(initial_batch_size=min(batch_size, max(2, n_train)), min_batch_size=2)
     cread_edges = build_cread_bin_edges_ms()
     history_logs: List[Dict[str, float]] = []
+    field_map = _build_slates_field_map(train_slates)
+    scheduler = WarmupCosineLR.maybe_create(
+        optimizer,
+        lr_schedule=lr_schedule,
+        n_train=n_train,
+        batch_size=oom_ctrl.micro_batch_size,
+        epochs=epochs,
+        warmup_ratio=warmup_ratio,
+        min_lr_ratio=min_lr_ratio,
+        start_step=global_step,
+    )
+    best_tracker = BestStateTracker() if restore_best_state else None
 
     for epoch in range(start_epoch, max(1, epochs)):
         model.train()
         perm = rng.permutation(n_train)
         cursor = 0
         losses: List[float] = []
-
-        while cursor < n_train:
-            def _accum_step(cur_bs: int, accum_steps: int) -> float:
-                optimizer.zero_grad(set_to_none=True)
-                acc_loss = 0.0
-                ran = 0
-                local_cur = cursor
-                for _ in range(accum_steps):
-                    if local_cur >= n_train:
-                        break
-                    b_idx = perm[local_cur : local_cur + cur_bs]
-                    local_cur += len(b_idx)
-                    batch = _slice_slates_to_device(train_slates, b_idx, target_device)
-
-                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
-                        out = _forward_model_on_batch(model, batch, apply_pal=True)
-                        debiased_out = (
-                            out
-                            if pl_weight <= 0.0
-                            else _forward_model_on_batch(
-                                model,
-                                {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])},
-                                apply_pal=False,
-                            )
+        prefetcher = (
+            AsyncMicroBatchPrefetcher(
+                field_map,
+                perm,
+                batch_size=oom_ctrl.micro_batch_size,
+                device=target_device,
+            )
+            if use_async_prefetch and n_train > 0
+            else None
+        )
+        try:
+            while cursor < n_train:
+                def _accum_step(cur_bs: int, accum_steps: int) -> float:
+                    optimizer.zero_grad(set_to_none=True)
+                    acc_loss = 0.0
+                    ran = 0
+                    local_cur = cursor
+                    for _ in range(accum_steps):
+                        if local_cur >= n_train:
+                            break
+                        actual_bs = min(cur_bs, n_train - local_cur)
+                        batch = AsyncMicroBatchPrefetcher.fetch_or_slice(
+                            prefetcher, field_map, perm, local_cur, actual_bs, target_device
                         )
-                    bce_loss = compute_masked_14head_bce(
-                        out["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
-                    )
-                    c_loss = compute_cread30_loss(
-                        out["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
-                    )
-                    # Listwise 排序在剔除 PAL 位置偏置后的无偏分数上计算，避免位置偏差污染主序
-                    rank_sc = compute_scalar_rank_utility(
-                        debiased_out["action_logits"].float(),
-                        debiased_out["cread_logits"].float(),
-                        cread_edges_ms=cread_edges,
-                    )
-                    pl_loss = compute_plackett_luce_loss(rank_sc, batch["relevance_scores"], batch["cand_mask"])
-                    total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
-                    (total / float(accum_steps)).backward()
-                    acc_loss += float(total.item())
-                    ran += 1
+                        local_cur += actual_bs
 
-                if ran > 0:
-                    if isinstance(optimizer, MuonAdamW):
-                        clip_grad_norm_partitioned(optimizer, max_norm=1.0)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    optimizer.step()
-                    ema.update(model)
-                return acc_loss / float(max(1, ran))
+                        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                            out = _forward_model_on_batch(model, batch, apply_pal=True)
+                            debiased_out = (
+                                out
+                                if pl_weight <= 0.0
+                                else _forward_model_on_batch(
+                                    model,
+                                    {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])},
+                                    apply_pal=False,
+                                )
+                            )
+                        bce_loss = compute_masked_14head_bce(
+                            out["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
+                        )
+                        c_loss = compute_cread30_loss(
+                            out["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
+                        )
+                        # Listwise 排序在剔除 PAL 位置偏置后的无偏分数上计算，避免位置偏差污染主序
+                        rank_sc = compute_scalar_rank_utility(
+                            debiased_out["action_logits"].float(),
+                            debiased_out["cread_logits"].float(),
+                            cread_edges_ms=cread_edges,
+                        )
+                        pl_loss = compute_plackett_luce_loss(rank_sc, batch["relevance_scores"], batch["cand_mask"])
+                        total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
+                        (total / float(accum_steps)).backward()
+                        acc_loss += float(total.item())
+                        ran += 1
 
-            losses.append(oom_ctrl.run_step_with_backoff(_accum_step))
-            cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
-            global_step += 1
+                    if ran > 0:
+                        if isinstance(optimizer, MuonAdamW):
+                            clip_grad_norm_partitioned(optimizer, max_norm=1.0)
+                        else:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        ema.update(model)
+                    return acc_loss / float(max(1, ran))
+
+                losses.append(oom_ctrl.run_step_with_backoff(_accum_step))
+                cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
+                global_step += 1
+                if scheduler is not None:
+                    scheduler.step(global_step)
+        finally:
+            if prefetcher is not None:
+                prefetcher.close()
 
         mean_loss = float(np.mean(losses)) if losses else 0.0
         val_score = -mean_loss
         epoch_info: Dict[str, float] = {"epoch": float(epoch + 1), "train_loss": mean_loss}
 
-        if val_slates is not None and len(val_slates) > 0:
-            with ema.use_ema(model):
+        with ema.use_ema(model):
+            if val_slates is not None and len(val_slates) > 0:
                 val_res = evaluate_phoenix_v3_slates(
                     model, val_slates, batch_size=max(64, batch_size), device=target_device
                 )
-            val_score = float(val_res["early_stop_score"])
-            epoch_info["early_stop_score"] = val_score
-            epoch_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
-            epoch_info["negative_auc"] = float(val_res["negative_auc"])
+                val_score = float(val_res["early_stop_score"])
+                epoch_info["early_stop_score"] = val_score
+                epoch_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
+                epoch_info["negative_auc"] = float(val_res["negative_auc"])
+
+            is_best = val_score > best_score
+            if is_best:
+                best_score = val_score
+            if best_tracker is not None:
+                best_tracker.update(model, metric=val_score, epoch=epoch + 1, is_best=is_best)
 
         history_logs.append(epoch_info)
-        is_best = val_score > best_score
-        if is_best:
-            best_score = val_score
         if checkpoint_manager is not None:
             checkpoint_manager.save(
                 step=global_step,
@@ -724,8 +771,10 @@ def train_phoenix_v3_teacher(
                 extra=epoch_info,
             )
 
-    # 结束后应用 EMA 稳定权重作为最终模型产出
-    ema.apply_shadow(model)
+    # 若启用最佳权重回滚且本轮次有快照，优先恢复最佳 Epoch 的 EMA 权重；否则按常规应用最终 EMA
+    restored_best = bool(best_tracker is not None and best_tracker.restore(model, device=target_device))
+    if not restored_best:
+        ema.apply_shadow(model)
     final_eval = (
         evaluate_phoenix_v3_slates(model, val_slates, batch_size=max(64, batch_size), device=target_device)
         if val_slates is not None and len(val_slates) > 0
@@ -734,6 +783,7 @@ def train_phoenix_v3_teacher(
     summary = {
         "final_loss": history_logs[-1]["train_loss"] if history_logs else 0.0,
         "best_early_stop_score": best_score,
+        "best_epoch": best_tracker.best_epoch if restored_best and best_tracker is not None else len(history_logs),
         "history": history_logs,
         "val_metrics": {k: v for k, v in final_eval.items() if isinstance(v, float)},
     }
@@ -756,11 +806,16 @@ def distill_phoenix_v3_student(
     temperature: float = 2.0,
     use_muon: bool = True,
     use_bf16_amp: bool = True,
+    lr_schedule: str = "none",
+    warmup_ratio: float = 0.08,
+    min_lr_ratio: float = 0.05,
+    restore_best_state: bool = False,
+    use_async_prefetch: bool = True,
     checkpoint_manager: Optional[CheckpointManager] = None,
     seed: int = 42,
     device: Optional[str] = None,
 ) -> Tuple[PhoenixV3Model, Dict[str, Any]]:
-    """使用 Teacher 指导 Student 训练，联合优化硬真值 + DE-RRD 排序蒸馏 + Plackett-Luce。"""
+    """使用 Teacher 指导 Student 训练，联合优化硬真值 + DE-RRD 排序蒸馏 + Plackett-Luce（支持异步 H2D 预取）。"""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     target_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -799,106 +854,138 @@ def distill_phoenix_v3_student(
     oom_ctrl = OomSafeBatchController(initial_batch_size=min(batch_size, max(2, n_train)), min_batch_size=2)
     cread_edges = build_cread_bin_edges_ms()
     history_logs: List[Dict[str, float]] = []
+    field_map = _build_slates_field_map(train_slates)
+    scheduler = WarmupCosineLR.maybe_create(
+        optimizer,
+        lr_schedule=lr_schedule,
+        n_train=n_train,
+        batch_size=oom_ctrl.micro_batch_size,
+        epochs=epochs,
+        warmup_ratio=warmup_ratio,
+        min_lr_ratio=min_lr_ratio,
+        start_step=global_step,
+    )
+    best_tracker = BestStateTracker() if restore_best_state else None
 
     for epoch in range(start_epoch, max(1, epochs)):
         student.train()
         perm = rng.permutation(n_train)
         cursor = 0
         losses: List[float] = []
-
-        while cursor < n_train:
-            def _accum_distill(cur_bs: int, accum_steps: int) -> float:
-                optimizer.zero_grad(set_to_none=True)
-                acc_loss = 0.0
-                ran = 0
-                local_cur = cursor
-                for _ in range(accum_steps):
-                    if local_cur >= n_train:
-                        break
-                    b_idx = perm[local_cur : local_cur + cur_bs]
-                    local_cur += len(b_idx)
-                    batch = _slice_slates_to_device(train_slates, b_idx, target_device)
-
-                    # 1) 训练期允许 PAL 学习位置偏差以清洗主干特征
-                    debiased_batch = {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])}
-                    with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
-                        out_pal = _forward_model_on_batch(student, batch, apply_pal=True)
-                        # 2) 无偏推理分支（served_position=0）与 Teacher 软排名对齐
-                        out_deb = _forward_model_on_batch(student, debiased_batch, apply_pal=False)
-                        t_out: Optional[Dict[str, torch.Tensor]] = None
-                        if teacher_model is not None and distill_weight > 0.0:
-                            with torch.no_grad():
-                                t_out = _forward_model_on_batch(teacher_model, debiased_batch, apply_pal=False)
-
-                    bce_loss = compute_masked_14head_bce(
-                        out_pal["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
-                    )
-                    c_loss = compute_cread30_loss(
-                        out_pal["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
-                    )
-
-                    s_act_f = out_deb["action_logits"].float()
-                    s_cread_f = out_deb["cread_logits"].float()
-                    s_scores = compute_scalar_rank_utility(
-                        s_act_f, s_cread_f, cread_edges_ms=cread_edges
-                    )
-                    pl_loss = compute_plackett_luce_loss(s_scores, batch["relevance_scores"], batch["cand_mask"])
-
-                    total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
-                    if t_out is not None:
-                        t_act_f = t_out["action_logits"].float()
-                        t_cread_f = t_out["cread_logits"].float()
-                        t_scores = compute_scalar_rank_utility(
-                            t_act_f, t_cread_f, cread_edges_ms=cread_edges
+        prefetcher = (
+            AsyncMicroBatchPrefetcher(
+                field_map,
+                perm,
+                batch_size=oom_ctrl.micro_batch_size,
+                device=target_device,
+            )
+            if use_async_prefetch and n_train > 0
+            else None
+        )
+        try:
+            while cursor < n_train:
+                def _accum_distill(cur_bs: int, accum_steps: int) -> float:
+                    optimizer.zero_grad(set_to_none=True)
+                    acc_loss = 0.0
+                    ran = 0
+                    local_cur = cursor
+                    for _ in range(accum_steps):
+                        if local_cur >= n_train:
+                            break
+                        actual_bs = min(cur_bs, n_train - local_cur)
+                        batch = AsyncMicroBatchPrefetcher.fetch_or_slice(
+                            prefetcher, field_map, perm, local_cur, actual_bs, target_device
                         )
-                        derd_loss = compute_de_rrd_distill_loss(
-                            student_action_logits=s_act_f,
-                            student_cread_logits=s_cread_f,
-                            teacher_action_logits=t_act_f,
-                            teacher_cread_logits=t_cread_f,
-                            student_scores=s_scores,
-                            teacher_scores=t_scores,
-                            cand_mask=batch["cand_mask"],
-                            mask_14=batch["mask_14"],
-                            temperature=temperature,
+                        local_cur += actual_bs
+
+                        # 1) 训练期允许 PAL 学习位置偏差以清洗主干特征
+                        debiased_batch = {**batch, "cand_served_position": torch.zeros_like(batch["cand_served_position"])}
+                        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=amp_enabled):
+                            out_pal = _forward_model_on_batch(student, batch, apply_pal=True)
+                            # 2) 无偏推理分支（served_position=0）与 Teacher 软排名对齐
+                            out_deb = _forward_model_on_batch(student, debiased_batch, apply_pal=False)
+                            t_out: Optional[Dict[str, torch.Tensor]] = None
+                            if teacher_model is not None and distill_weight > 0.0:
+                                with torch.no_grad():
+                                    t_out = _forward_model_on_batch(teacher_model, debiased_batch, apply_pal=False)
+
+                        bce_loss = compute_masked_14head_bce(
+                            out_pal["action_logits"].float(), batch["labels_14"], batch["mask_14"], batch["cand_mask"]
                         )
-                        total = total + distill_weight * derd_loss
+                        c_loss = compute_cread30_loss(
+                            out_pal["cread_logits"].float(), batch["dwell_buckets"], batch["dwell_mask"], batch["cand_mask"]
+                        )
 
-                    (total / float(accum_steps)).backward()
-                    acc_loss += float(total.item())
-                    ran += 1
+                        s_act_f = out_deb["action_logits"].float()
+                        s_cread_f = out_deb["cread_logits"].float()
+                        s_scores = compute_scalar_rank_utility(
+                            s_act_f, s_cread_f, cread_edges_ms=cread_edges
+                        )
+                        pl_loss = compute_plackett_luce_loss(s_scores, batch["relevance_scores"], batch["cand_mask"])
 
-                if ran > 0:
-                    if isinstance(optimizer, MuonAdamW):
-                        clip_grad_norm_partitioned(optimizer, max_norm=1.0)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=1.0)
-                    optimizer.step()
-                    ema.update(student)
-                return acc_loss / float(max(1, ran))
+                        total = bce_loss + cread_weight * c_loss + pl_weight * pl_loss
+                        if t_out is not None:
+                            t_act_f = t_out["action_logits"].float()
+                            t_cread_f = t_out["cread_logits"].float()
+                            t_scores = compute_scalar_rank_utility(
+                                t_act_f, t_cread_f, cread_edges_ms=cread_edges
+                            )
+                            derd_loss = compute_de_rrd_distill_loss(
+                                student_action_logits=s_act_f,
+                                student_cread_logits=s_cread_f,
+                                teacher_action_logits=t_act_f,
+                                teacher_cread_logits=t_cread_f,
+                                student_scores=s_scores,
+                                teacher_scores=t_scores,
+                                cand_mask=batch["cand_mask"],
+                                mask_14=batch["mask_14"],
+                                temperature=temperature,
+                            )
+                            total = total + distill_weight * derd_loss
 
-            losses.append(oom_ctrl.run_step_with_backoff(_accum_distill))
-            cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
-            global_step += 1
+                        (total / float(accum_steps)).backward()
+                        acc_loss += float(total.item())
+                        ran += 1
+
+                    if ran > 0:
+                        if isinstance(optimizer, MuonAdamW):
+                            clip_grad_norm_partitioned(optimizer, max_norm=1.0)
+                        else:
+                            torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        ema.update(student)
+                    return acc_loss / float(max(1, ran))
+
+                losses.append(oom_ctrl.run_step_with_backoff(_accum_distill))
+                cursor += oom_ctrl.micro_batch_size * oom_ctrl.grad_accum_steps
+                global_step += 1
+                if scheduler is not None:
+                    scheduler.step(global_step)
+        finally:
+            if prefetcher is not None:
+                prefetcher.close()
 
         mean_loss = float(np.mean(losses)) if losses else 0.0
         val_score = -mean_loss
         ep_info: Dict[str, float] = {"epoch": float(epoch + 1), "train_loss": mean_loss}
 
-        if val_slates is not None and len(val_slates) > 0:
-            with ema.use_ema(student):
+        with ema.use_ema(student):
+            if val_slates is not None and len(val_slates) > 0:
                 val_res = evaluate_phoenix_v3_slates(
                     student, val_slates, batch_size=max(64, batch_size), device=target_device
                 )
-            val_score = float(val_res["early_stop_score"])
-            ep_info["early_stop_score"] = val_score
-            ep_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
-            ep_info["negative_auc"] = float(val_res["negative_auc"])
+                val_score = float(val_res["early_stop_score"])
+                ep_info["early_stop_score"] = val_score
+                ep_info["unbiased_macro_roc_auc"] = float(val_res["unbiased_macro_roc_auc"])
+                ep_info["negative_auc"] = float(val_res["negative_auc"])
+
+            is_best = val_score > best_score
+            if is_best:
+                best_score = val_score
+            if best_tracker is not None:
+                best_tracker.update(student, metric=val_score, epoch=epoch + 1, is_best=is_best)
 
         history_logs.append(ep_info)
-        is_best = val_score > best_score
-        if is_best:
-            best_score = val_score
         if checkpoint_manager is not None:
             checkpoint_manager.save(
                 step=global_step,
@@ -911,7 +998,9 @@ def distill_phoenix_v3_student(
                 extra=ep_info,
             )
 
-    ema.apply_shadow(student)
+    restored_best = bool(best_tracker is not None and best_tracker.restore(student, device=target_device))
+    if not restored_best:
+        ema.apply_shadow(student)
     final_eval = (
         evaluate_phoenix_v3_slates(student, val_slates, batch_size=max(64, batch_size), device=target_device)
         if val_slates is not None and len(val_slates) > 0
@@ -920,6 +1009,7 @@ def distill_phoenix_v3_student(
     return student, {
         "final_loss": history_logs[-1]["train_loss"] if history_logs else 0.0,
         "best_early_stop_score": best_score,
+        "best_epoch": best_tracker.best_epoch if restored_best and best_tracker is not None else len(history_logs),
         "history": history_logs,
         "val_metrics": {k: v for k, v in final_eval.items() if isinstance(v, float)},
     }
