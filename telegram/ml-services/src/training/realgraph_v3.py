@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy import sparse
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import log_loss, roc_auc_score
 
@@ -100,9 +101,14 @@ def compute_local_pagerank_author_cred(
         return {authors[0]: 1.0}
 
     a_idx = {a: i for i, a in enumerate(authors)}
-    # 构建用户中继后的 Author->Author 共享受众转移矩阵 W[src, dst]
-    trans = np.zeros((n_auth, n_auth), dtype=np.float64)
+    # 构建用户中继后的 Author->Author 稀疏共享受众转移矩阵（避免 O(V^2) 稠密分配触发大作者集 OOM）
     in_deg = np.zeros(n_auth, dtype=np.float64)
+    trans_csr = sparse.csr_matrix((n_auth, n_auth), dtype=np.float64)
+    batch_rows: List[int] = []
+    batch_cols: List[int] = []
+    batch_vals: List[float] = []
+    max_authors_per_user = 128
+    flush_edge_threshold = 1_500_000
 
     for _, auth_weights in user_to_authors.items():
         items = list(auth_weights.items())
@@ -110,20 +116,51 @@ def compute_local_pagerank_author_cred(
             in_deg[a_idx[aid]] += w
         if len(items) < 2:
             continue
+        if len(items) > max_authors_per_user:
+            items.sort(key=lambda kv: (-kv[1], kv[0]))
+            items = items[:max_authors_per_user]
         for a1, w1 in items:
+            i1 = a_idx[a1]
             for a2, w2 in items:
                 if a1 != a2:
-                    trans[a_idx[a1], a_idx[a2]] += min(w1, w2)
+                    batch_rows.append(i1)
+                    batch_cols.append(a_idx[a2])
+                    batch_vals.append(min(w1, w2))
+        if len(batch_vals) >= flush_edge_threshold:
+            trans_csr = trans_csr + sparse.csr_matrix(
+                (batch_vals, (batch_rows, batch_cols)),
+                shape=(n_auth, n_auth),
+                dtype=np.float64,
+            )
+            batch_rows.clear()
+            batch_cols.clear()
+            batch_vals.clear()
 
-    row_sums = trans.sum(axis=1, keepdims=True)
+    if batch_vals:
+        trans_csr = trans_csr + sparse.csr_matrix(
+            (batch_vals, (batch_rows, batch_cols)),
+            shape=(n_auth, n_auth),
+            dtype=np.float64,
+        )
+        batch_rows.clear()
+        batch_cols.clear()
+        batch_vals.clear()
+
+    row_sums = np.asarray(trans_csr.sum(axis=1)).ravel()
+    has_out = row_sums > 0.0
+    inv_row = np.zeros(n_auth, dtype=np.float64)
+    inv_row[has_out] = 1.0 / row_sums[has_out]
+    is_dangling = ~has_out
+
     # 阻尼悬挂节点采用历史交互度数比例作个性化重置向量，避免冷启动归零
     deg_sum = float(in_deg.sum())
     personalize = (in_deg / deg_sum) if deg_sum > 0.0 else np.full(n_auth, 1.0 / float(n_auth))
-    stochastic = np.where(row_sums > 0.0, trans / np.where(row_sums > 0.0, row_sums, 1.0), personalize[None, :])
 
     rank = personalize.copy()
     for _ in range(max(5, int(iters))):
-        rank = (1.0 - damping) * personalize + damping * (rank @ stochastic)
+        dangling_mass = float(rank[is_dangling].sum())
+        walk = (rank * inv_row) @ trans_csr + dangling_mass * personalize
+        rank = (1.0 - damping) * personalize + damping * walk
 
     max_r = float(np.max(rank))
     min_r = float(np.min(rank))
