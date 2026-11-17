@@ -12,7 +12,7 @@
 | 实时边界 | **Phase 23 / rust_edge_primary** | `GATEWAY_REALTIME_ROLLOUT_STAGE=rust_edge_primary` | socket terminator 仍为 `node`（2A） |
 | Socket 终结 | **Phase 26 / 2B rust** | `GATEWAY_REALTIME_SOCKET_TERMINATOR=rust`；`GATEWAY_REALTIME_SESSION_LEASE_TTL_SECS=100` | 修复 await 遗失并引入 100s 租约，40+4 测试全绿 |
 | 图数据面 | **Phase 28D / 实时增量断边** | `CPP_GRAPH_KERNEL_ENABLED=true`；`GRAPH_KERNEL_REDIS_STREAM_ENABLED=true` | `hiredis` 消费 `recsys:events:v1` + `DeltaEdgeOverlay` 秒级断边 + `AuthorCredScore` |
-| 推荐管道 | **Phase 28D 完成 / 28E Rust 重构就绪** | `ML_SERVICE_URL` 100% 切流至纯 ONNXRT Revision (`telegram-ml-services-00046-lur`) | Cloud Run 实测 `516MB` RSS、`P95=9.03ms`，Node `426/426` 现有帖 `100% semantic_ready` |
+| 推荐管道 | **Phase 28E / Rust X-Algorithm V3 重构完成** | Rust 15 crates 全量测试 + 4 端跨语言防漂移门禁 + `ML_SERVICE_URL` 纯 ONNXRT Revision (`telegram-ml-services-00046-lur`) | 完成 Thunder 三池+Stream、V3 Value Model+PIT Debias、SID 前缀召回、FairShare/VF/Beta-TS、Cholesky DPP(<0.3ms) 与 ε-PL 在线探索；Rust 771 项测试全绿 |
 | Rust Workspace | **16A–16C 完成** | `workspace-transition.json`：`recommendation_service_migrated` | 15 shared crates |
 | Embedding 契约修复 | **Phase 0.5** | `reports/recommendation/embedding-contract-remediation/` | packet：`CODE_AND_DRY_RUN_READY` / 生产 **NOT GRANTED**；本地 18 文件 gate 已复验通过（2026-07-16）；Task 9 待 operator 授权 |
 | 推荐研究文档 | 至 phase155 | `docs/research/phase*.md` | 算法证据矩阵，非运行时 phase |
@@ -66,6 +66,7 @@
 | 推荐对标X闭环接线 | **Phase 25 / 完成** | 对标 x-algorithm: ThunderStore 批量查询 + ImpressionBloom 过滤 + Redis 实时特征 fail-open | 451 单元 + 3 管道集成测试 100% 通过 |
 | 实时网关Rust终结与Node退役 | **Phase 26 / 完成** | 彻底修复 10 处 Ingress await 缺失，落地 100s AP 租约与防惊群缓存，具备灰度切流与回退预案 | 40 单元 + 4 契约测试 100% 通过，0 warnings |
 | 统一契约Codegen与防漂移门禁 | **Phase 27 / 完成** | 修复 12 项重大跨语言契约漂移，消除 Zod strip 与 ageRange 崩溃，落地 Golden Roundtrip 与全自动 CI 阻断门禁 | 跨语言静态门禁 + 3 端 Golden Roundtrip 100% 通过 |
+| Rust 推荐管道 X-Algorithm V3 重构 | **Phase 28E / 完成** | 落地 Thunder 三池+Redis Stream、14 头 V3 价值模型+PIT Debias、SID 前缀索引+Popular/Cached 召回、Hamilton Fair-Share+声明式 VF+Beta-TS、O(KND) Cholesky DPP 与在线 ε-Plackett-Luce | 全工作区 15 crates 771 项测试 + 4 端跨语言防漂移门禁 + boundary-gate 100% 通过，release DPP Top-150 实测 ~0.13-0.29ms |
 | delivery DLQ 自动回放 | 无 | 需人工或外部工具 |
 
 Capability readiness 脚本已落地：`deploy/vps/check_{realtime,recommendation,graph,platform_replay}_readiness.sh`（由 `gates/ops_readiness_gate.sh` 调用）。

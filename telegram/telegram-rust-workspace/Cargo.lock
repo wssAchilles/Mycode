@@ -1554,6 +1554,7 @@ dependencies = [
 name = "telegram-ranking-primitives"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
 ]
 
@@ -1667,6 +1668,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "redis",
  "serde",
  "serde_json",
  "tokio",

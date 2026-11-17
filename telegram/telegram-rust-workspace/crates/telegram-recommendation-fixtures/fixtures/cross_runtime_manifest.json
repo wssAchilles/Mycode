@@ -70,7 +70,7 @@
       "domain": "target-distribution-stream-receipt",
       "version": "target_distribution_stream_receipt_fixture_v2",
       "fixtures": [
-        { "path": "target_distribution_stream_receipt_v2.json", "digest": "ad2a4b69df98d082f726dd5ce4f63251c5141888e93f0a9d064ab33884907c68" }
+        { "path": "target_distribution_stream_receipt_v2.json", "digest": "b1620073bbad1927c03b2f3cd5103b8625c0d3058db5beff344d467209118005" }
       ]
     }
   ]
