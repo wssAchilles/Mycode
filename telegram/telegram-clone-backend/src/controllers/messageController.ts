@@ -15,6 +15,7 @@ import { updateService } from '../services/updateService';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
+import { advanceChatLastReadSeq } from '../utils/chatReadState';
 import { sendSuccess, sendCreated, sendError, errors, ErrorCode } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 
@@ -702,8 +703,8 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
     return errors.unauthorized(res);
   }
 
-  if (!chatId || typeof seq !== 'number') {
-    return errors.badRequest(res, 'chatId 或 seq 不能为空');
+  if (!chatId || typeof seq !== 'number' || !Number.isFinite(seq) || seq < 1) {
+    return errors.badRequest(res, 'chatId 或 seq 参数无效');
   }
 
   try {
@@ -717,39 +718,45 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
     return errors.badRequest(res, '非法 chatId');
   }
 
-  // 更新当前用户已读序列
-  await ChatMemberState.updateOne(
-    { chatId, userId },
-    { $max: { lastReadSeq: seq }, $set: { lastSeenAt: new Date() } },
-    { upsert: true }
-  );
+  const canonicalChatId =
+    parsed.type === 'private' && parsed.userIds && parsed.userIds.length === 2
+      ? buildPrivateChatId(parsed.userIds[0], parsed.userIds[1])
+      : chatId;
 
-  let readCount = 1;
-  // parsed 已在上方确保非空
   if (parsed.type === 'group' && parsed.groupId) {
     const isMember = await GroupMember.isMember(parsed.groupId, userId);
     if (!isMember) {
       return errors.forbidden(res, '您不是该群组成员');
     }
+  } else if (parsed.type === 'private') {
+    if (!parsed.userIds || parsed.userIds.length !== 2 || !parsed.userIds.includes(userId)) {
+      return errors.forbidden(res, '无权标记该私聊已读');
+    }
+  }
 
+  // 原子推进当前用户已读序列，仅在 seq 实际增大时下发 Update 事件
+  const seqAdvanced = await advanceChatLastReadSeq(canonicalChatId, userId, seq);
+
+  let readCount = 1;
+  if (parsed.type === 'group' && parsed.groupId) {
     readCount = await ChatMemberState.countDocuments({
-      chatId,
+      chatId: canonicalChatId,
       lastReadSeq: { $gte: seq }
     });
-  } else if (parsed.type === 'private') {
-    const otherUserId = getPrivateOtherUserId(chatId, userId);
+  } else if (parsed.type === 'private' && seqAdvanced) {
+    const otherUserId = getPrivateOtherUserId(canonicalChatId, userId);
     if (otherUserId) {
       await updateService.appendUpdate({
         userId: otherUserId,
         type: 'read',
-        chatId,
+        chatId: canonicalChatId,
         seq,
         payload: { readerId: userId, readCount: 1 }
       });
     }
   }
 
-  sendSuccess(res, { chatId, seq, readCount });
+  sendSuccess(res, { chatId: canonicalChatId, seq, readCount, deduplicated: !seqAdvanced });
 });
 
 /**

@@ -290,6 +290,41 @@ describe('DailyRecommendationRefreshJob', () => {
         expect(job.running).toBe(false);
         expect(mocks.jobRunUpdateOne).not.toHaveBeenCalled();
     });
+
+    it('triggers bounded historical post snapshot backfill when 30-day window scan is empty', async () => {
+        const historicalId = new mongoose.Types.ObjectId('000000000000000000000099');
+        mocks.jobRunCreate.mockResolvedValue({ _id: 'job-run-empty-window' });
+        mocks.bootstrapBackfill.mockResolvedValue({ scanned: 0, created: 0 });
+        mocks.userFindAll.mockResolvedValue([]);
+        mocks.applyDailyDecay.mockResolvedValue({ totalProcessed: 0 });
+        mocks.backfillPredictionMetadata.mockResolvedValue({ matched: 0, updated: 0, dryRun: false });
+        // 首次近期窗口返回空，第二次历史窗口返回 1 条帖子
+        mocks.postFind
+            .mockReturnValueOnce(findPostsResult([]))
+            .mockReturnValueOnce(findPostsResult([{ _id: historicalId, createdAt: new Date('2026-01-01T00:00:00.000Z') }]));
+        mocks.refreshSnapshotsByPostIds.mockResolvedValueOnce(new Map([[historicalId.toString(), {}]]));
+        mocks.scanEmbeddingContractEvidence
+            .mockResolvedValueOnce({ embeddingEvidence: embeddingEvidenceSummary })
+            .mockResolvedValueOnce({ embeddingEvidence: embeddingEvidenceSummary });
+
+        const result = await new DailyRecommendationRefreshJob().run({
+            trigger: 'manual',
+            userLimit: 1,
+            postDays: 30,
+            postBatchSize: 50,
+            skipFeatureExport: true,
+        });
+
+        expect(result.posts).toEqual({ scanned: 0, refreshed: 0 });
+        expect(result.postDiagnostics).toMatchObject({
+            windowDays: 30,
+            historicalBackfillTriggered: true,
+            reason: 'empty_recent_window',
+            historicalScanned: 1,
+            historicalRefreshed: 1,
+        });
+        expect(mocks.refreshSnapshotsByPostIds).toHaveBeenCalledWith([historicalId]);
+    });
 });
 
 const embeddingEvidenceSummary = {

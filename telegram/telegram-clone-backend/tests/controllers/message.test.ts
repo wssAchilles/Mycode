@@ -366,6 +366,53 @@ describe('MessageController', () => {
     });
   });
 
+  describe('markChatAsRead', () => {
+    it('deduplicates UpdateLog read events when seq does not advance', async () => {
+      const ChatMemberState = (await import('../../src/models/ChatMemberState')).default as any;
+      const { updateService } = await import('../../src/services/updateService');
+      ChatMemberState.findOne = vi.fn()
+        .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(null) })
+        .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue({ lastReadSeq: 5 }) })
+        .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue({ lastReadSeq: 5 }) });
+
+      const { markChatAsRead } = await import('../../src/controllers/messageController');
+
+      // 首次标记 seq=5 应写入 read Update
+      const req1 = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { chatId: 'p:user1:user2' },
+        body: { seq: 5 },
+      });
+      const res1 = createMockResponse();
+      await markChatAsRead(req1, res1);
+      expect(res1._statusCode).toBe(200);
+      expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+
+      // 重复相同 seq=5 不应再写 Update
+      const req2 = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { chatId: 'p:user1:user2' },
+        body: { seq: 5 },
+      });
+      const res2 = createMockResponse();
+      await markChatAsRead(req2, res2);
+      expect(res2._statusCode).toBe(200);
+      expect((res2._jsonBody as any).data.deduplicated).toBe(true);
+      expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+
+      // 更低 seq=3 也不应再写 Update
+      const req3 = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { chatId: 'p:user1:user2' },
+        body: { seq: 3 },
+      });
+      const res3 = createMockResponse();
+      await markChatAsRead(req3, res3);
+      expect(res3._statusCode).toBe(200);
+      expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('deleteMessage', () => {
     it('should return 401 if user is not authenticated', async () => {
       const { deleteMessage } = await import('../../src/controllers/messageController');

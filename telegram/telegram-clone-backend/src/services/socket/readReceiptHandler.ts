@@ -4,6 +4,7 @@ import { waitForMongoReady } from '../../config/db';
 import { updateService } from '../updateService';
 import { chatRuntimeMetrics } from '../chatRuntimeMetrics';
 import { parseChatId, getPrivateOtherUserId } from '../../utils/chat';
+import { advanceChatLastReadSeq } from '../../utils/chatReadState';
 import { Op } from 'sequelize';
 import { createChildLogger } from '../../utils/logger';
 import type { TypedSocketIOServer, TypedSocket, RealtimeBatchEvent } from './types';
@@ -26,7 +27,7 @@ export class ReadReceiptHandler {
 
     const startedAt = Date.now();
     const { chatId, seq } = data || {};
-    if (!chatId || typeof seq !== 'number') return;
+    if (!chatId || typeof seq !== 'number' || !Number.isFinite(seq) || seq < 1) return;
 
     try {
       await waitForMongoReady(15000);
@@ -37,11 +38,12 @@ export class ReadReceiptHandler {
     const parsed = parseChatId(chatId);
     if (!parsed) return;
 
-    await ChatMemberState.updateOne(
-      { chatId, userId },
-      { $max: { lastReadSeq: seq }, $set: { lastSeenAt: new Date() } },
-      { upsert: true },
-    );
+    // 幂等校验：若已标记至相同或更高 seq，跳过冗余 read 更新与广播
+    const seqAdvanced = await advanceChatLastReadSeq(chatId, userId, seq);
+    if (!seqAdvanced) {
+      chatRuntimeMetrics.observeDuration('socket.readChat.latencyMs', Date.now() - startedAt);
+      return;
+    }
 
     if (parsed.type === 'group' && parsed.groupId) {
       await this.handleGroupReadReceipt(parsed.groupId, chatId, seq, userId);

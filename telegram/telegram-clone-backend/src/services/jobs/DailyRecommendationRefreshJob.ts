@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Op } from 'sequelize';
 import User from '../../models/User';
 import Post from '../../models/Post';
+import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
 import RecommendationJobRun from '../../models/RecommendationJobRun';
 import { simClustersService } from '../recommendation/SimClustersService';
 import { realGraphService } from '../recommendation/RealGraphService';
@@ -40,6 +41,15 @@ export interface DailyRecommendationRefreshResult {
         scanned: number;
         refreshed: number;
     };
+    postDiagnostics?: {
+        windowDays: number;
+        historicalBackfillTriggered: boolean;
+        reason: 'none' | 'empty_recent_window' | 'invalid_snapshots_detected' | 'empty_recent_window_and_invalid_snapshots';
+        historicalScanned: number;
+        historicalRefreshed: number;
+        invalidSnapshotsBefore: number;
+        invalidSnapshotsAfter: number;
+    };
     featureExport?: {
         usersExported: number;
         clustersExported: number;
@@ -54,6 +64,7 @@ const CONFIG = {
     userLimit: Math.max(1, parseInt(String(process.env.DAILY_RECOMMENDATION_REFRESH_USER_LIMIT || '100000'), 10) || 100000),
     postDays: Math.max(1, parseInt(String(process.env.DAILY_RECOMMENDATION_REFRESH_POST_DAYS || '30'), 10) || 30),
     postBatchSize: Math.max(1, parseInt(String(process.env.DAILY_RECOMMENDATION_REFRESH_POST_BATCH || '200'), 10) || 200),
+    historicalPostBackfillLimit: Math.max(1, parseInt(String(process.env.DAILY_RECOMMENDATION_HISTORICAL_POST_BACKFILL_LIMIT || '500'), 10) || 500),
 };
 
 export class DailyRecommendationRefreshJob {
@@ -130,10 +141,42 @@ export class DailyRecommendationRefreshJob {
             force: true,
         });
         const postRefresh = await this.refreshRecentPostSnapshots(postDays, postBatchSize);
+        let { embeddingEvidence } = await scanEmbeddingContractEvidence({ limit: undefined });
+        const invalidSnapshotsBefore = embeddingEvidence.cohorts?.postFeatureSnapshots?.invalid ?? 0;
+
+        const emptyRecentWindow = postRefresh.scanned === 0;
+        const hasInvalidSnapshots = invalidSnapshotsBefore > 0;
+        let historicalScanned = 0;
+        let historicalRefreshed = 0;
+
+        // 当最近 N 天扫描为空或检测到 invalid 快照时，执行有界增量历史快照补齐
+        if (emptyRecentWindow || hasInvalidSnapshots) {
+            const backfill = await this.backfillHistoricalPostSnapshots({
+                batchSize: postBatchSize,
+                limit: CONFIG.historicalPostBackfillLimit,
+                preferInvalidSnapshots: hasInvalidSnapshots,
+                createdBefore: new Date(Date.now() - postDays * 24 * 60 * 60 * 1000),
+            });
+            historicalScanned = backfill.scanned;
+            historicalRefreshed = backfill.refreshed;
+            if (historicalRefreshed > 0) {
+                const refreshedEvidence = await scanEmbeddingContractEvidence({ limit: undefined });
+                embeddingEvidence = refreshedEvidence.embeddingEvidence;
+            }
+        }
+
+        const invalidSnapshotsAfter = embeddingEvidence.cohorts?.postFeatureSnapshots?.invalid ?? 0;
+        const backfillReason = emptyRecentWindow && hasInvalidSnapshots
+            ? 'empty_recent_window_and_invalid_snapshots'
+            : emptyRecentWindow
+                ? 'empty_recent_window'
+                : hasInvalidSnapshots
+                    ? 'invalid_snapshots_detected'
+                    : 'none';
+
         const featureExport = options.skipFeatureExport
             ? undefined
             : await featureExportJob.run();
-        const { embeddingEvidence } = await scanEmbeddingContractEvidence({ limit: undefined });
 
         return {
             users: {
@@ -149,6 +192,15 @@ export class DailyRecommendationRefreshJob {
                 predictionUpdated: realGraphPrediction.updated,
             },
             posts: postRefresh,
+            postDiagnostics: {
+                windowDays: postDays,
+                historicalBackfillTriggered: emptyRecentWindow || hasInvalidSnapshots,
+                reason: backfillReason,
+                historicalScanned,
+                historicalRefreshed,
+                invalidSnapshotsBefore,
+                invalidSnapshotsAfter,
+            },
             featureExport,
             embeddingEvidence,
         };
@@ -243,6 +295,76 @@ export class DailyRecommendationRefreshJob {
         }
 
         return { scanned, refreshed };
+    }
+
+    /**
+     * 安全增量补齐历史帖子快照：
+     * - 仅在最近窗口无帖子或存在 invalid 快照时触发
+     * - 每次受 limit 上限约束，避免全表扫爆内存或连接
+     */
+    private async backfillHistoricalPostSnapshots(options: {
+        batchSize: number;
+        limit: number;
+        preferInvalidSnapshots: boolean;
+        createdBefore: Date;
+    }): Promise<{ scanned: number; refreshed: number }> {
+        const candidateIds: mongoose.Types.ObjectId[] = [];
+        const seenIds = new Set<string>();
+
+        if (options.preferInvalidSnapshots && typeof (PostFeatureSnapshot as any)?.find === 'function') {
+            const staleSnapshots = await PostFeatureSnapshot.find({
+                $or: [
+                    { embeddingContract: { $exists: false } },
+                    { embeddingContract: null },
+                    { denseEmbedding: { $exists: false } },
+                    { denseEmbedding: { $size: 0 } },
+                ],
+            })
+                .sort({ computedAt: 1, _id: 1 })
+                .limit(options.limit)
+                .select('postId')
+                .lean();
+
+            for (const snap of staleSnapshots) {
+                const rawId = (snap as { postId?: mongoose.Types.ObjectId }).postId;
+                const key = rawId ? String(rawId) : '';
+                if (!key || seenIds.has(key)) continue;
+                seenIds.add(key);
+                candidateIds.push(rawId as mongoose.Types.ObjectId);
+            }
+        }
+
+        if (candidateIds.length < options.limit) {
+            const remaining = options.limit - candidateIds.length;
+            const historicalPosts = await Post.find({
+                deletedAt: null,
+                createdAt: { $lt: options.createdBefore },
+            })
+                .select('_id')
+                .sort({ createdAt: -1, _id: -1 })
+                .limit(remaining)
+                .lean();
+
+            for (const post of historicalPosts) {
+                const rawId = post._id as mongoose.Types.ObjectId;
+                const key = rawId ? String(rawId) : '';
+                if (!key || seenIds.has(key)) continue;
+                seenIds.add(key);
+                candidateIds.push(rawId);
+            }
+        }
+
+        let refreshed = 0;
+        for (let i = 0; i < candidateIds.length; i += options.batchSize) {
+            const chunk = candidateIds.slice(i, i + options.batchSize);
+            const updated = await postFeatureSnapshotService.refreshSnapshotsByPostIds(chunk);
+            refreshed += updated.size;
+        }
+
+        return {
+            scanned: candidateIds.length,
+            refreshed,
+        };
     }
 
     get running(): boolean {

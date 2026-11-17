@@ -312,7 +312,7 @@ class SpaceService {
         }
 
         try {
-            const trends = await this.getTrendingTags(8, DEFAULT_TREND_WINDOW_HOURS);
+            const trends = await this.getTrendingTags(8);
             const keywords = mergeFeedTrendKeywords(
                 [],
                 trends.flatMap((trend) => [
@@ -548,8 +548,9 @@ class SpaceService {
     /**
      * 获取热门话题 (显式 keywords 优先，缺失时从正文/新闻元信息提取)
      */
-    async getTrendingTags(limit: number = 6, sinceHours: number = DEFAULT_TREND_WINDOW_HOURS): Promise<SpaceTrendResult[]> {
-        const windowHours = Number.isFinite(sinceHours) && sinceHours > 0
+    async getTrendingTags(limit: number = 6, sinceHours?: number): Promise<SpaceTrendResult[]> {
+        const hasExplicitSinceHours = sinceHours !== undefined && Number.isFinite(sinceHours) && sinceHours > 0;
+        const windowHours = hasExplicitSinceHours
             ? sinceHours
             : DEFAULT_TREND_WINDOW_HOURS;
         const mode = getNewsTrendsRustMode();
@@ -577,19 +578,33 @@ class SpaceService {
         }
 
         const tags = await this.collectTrendingTags(limit, windowHours);
-
-        const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
-        const socialTrends = tags.slice(0, limit).map((t) => ({
-            tag: t.tag,
-            count: t.count,
-            heat: Math.round((t.count / max) * 100),
-        }));
+        const socialTrends = this.formatSocialTrends(tags, limit);
         if (socialTrends.length >= limit) {
             return socialTrends;
         }
 
         const newsTrends = await this.getNewsTopicTrendFallback(limit - socialTrends.length);
-        return this.dedupeTrendsByTag([...socialTrends, ...newsTrends]).slice(0, limit);
+        const combined = this.dedupeTrendsByTag([...socialTrends, ...newsTrends]).slice(0, limit);
+        if (combined.length > 0 || hasExplicitSinceHours) {
+            return combined;
+        }
+
+        // 默认窗口（最宽 168 小时）与新闻话题均为空时，回退至最近活跃帖子聚合以防探索页空白
+        const recentPosts = await this.loadRecentActivePostsForTrends();
+        const fallbackTags = this.aggregateTrendingTagsFromPosts(recentPosts, limit);
+        return this.formatSocialTrends(fallbackTags, limit);
+    }
+
+    private formatSocialTrends(
+        tags: Array<{ tag: string; count: number }>,
+        limit: number
+    ): SpaceTrendResult[] {
+        const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
+        return tags.slice(0, limit).map((t) => ({
+            tag: t.tag,
+            count: t.count,
+            heat: Math.round((t.count / max) * 100),
+        }));
     }
 
     private async getNewsTopicTrendFallback(limit: number): Promise<SpaceTrendResult[]> {
@@ -675,7 +690,13 @@ class SpaceService {
 
     private async collectTrendingTagsForWindow(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
         const posts = await this.loadTrendingPostsForWindow(sinceHours);
+        return this.aggregateTrendingTagsFromPosts(posts, limit);
+    }
 
+    private aggregateTrendingTagsFromPosts(
+        posts: SpaceTrendPostInput[],
+        limit: number
+    ): Array<{ tag: string; count: number }> {
         const counts = new Map<string, { tag: string; count: number; latestAt: number }>();
         for (const post of posts) {
             const keywords = this.extractTrendKeywords(post);
@@ -707,6 +728,16 @@ class SpaceService {
         return Post.find({
             deletedAt: null,
             createdAt: { $gte: since },
+        })
+            .sort({ createdAt: -1 })
+            .limit(MAX_TREND_SCAN_POSTS)
+            .select('content keywords isNews newsMetadata.title newsMetadata.summary newsMetadata.source newsMetadata.url newsMetadata.sourceUrl newsMetadata.clusterId stats engagementScore createdAt updatedAt')
+            .lean<SpaceTrendPostInput[]>();
+    }
+
+    private async loadRecentActivePostsForTrends(): Promise<SpaceTrendPostInput[]> {
+        return Post.find({
+            deletedAt: null,
         })
             .sort({ createdAt: -1 })
             .limit(MAX_TREND_SCAN_POSTS)

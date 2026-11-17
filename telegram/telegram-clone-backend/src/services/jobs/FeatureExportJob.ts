@@ -65,6 +65,14 @@ interface ExportMetadata {
 
 type ExportArtifactMetadata = Omit<ExportMetadata, 'exportedAt' | 'version'>;
 
+export interface PostExportDiagnostics {
+    scanned: number;
+    exported: number;
+    skippedEmptyVector: number;
+    skippedNonSemantic: number;
+    skippedIncompatibleContract: number;
+}
+
 // ========== 作业类 ==========
 export class FeatureExportJob {
     private isRunning = false;
@@ -82,6 +90,7 @@ export class FeatureExportJob {
         clustersExported: number;
         postsExported: number;
         durationMs: number;
+        postDiagnostics?: PostExportDiagnostics;
     }> {
         if (this.isRunning) {
             throw new Error('[FeatureExportJob] Job is already running');
@@ -93,6 +102,7 @@ export class FeatureExportJob {
         let clustersExported = 0;
         let postsExported = 0;
         let publishedUserCount: number | undefined;
+        let postDiagnostics: PostExportDiagnostics | undefined;
 
         const outputDir = options?.outputDir || CONFIG.exportDir;
         const exportUsers = !options?.onlyClusters && !options?.onlyPosts;
@@ -125,8 +135,13 @@ export class FeatureExportJob {
             }
 
             if (exportPosts) {
-                postsExported = await this.exportPostEmbeddings(outputDir);
-                console.log(`[FeatureExportJob] Exported ${postsExported} post embeddings`);
+                const postExport = await this.exportPostEmbeddings(outputDir);
+                postsExported = postExport.exported;
+                postDiagnostics = postExport;
+                console.log(
+                    `[FeatureExportJob] Exported ${postsExported} post embeddings ` +
+                    `(scanned=${postExport.scanned}, nonSemantic=${postExport.skippedNonSemantic}, incompatible=${postExport.skippedIncompatibleContract})`
+                );
             }
 
             const artifactPublished = publishedUserCount !== undefined || exportClusters || exportPosts;
@@ -166,7 +181,13 @@ export class FeatureExportJob {
             `users: ${usersExported}, clusters: ${clustersExported}, posts: ${postsExported}`
         );
 
-        return { usersExported, clustersExported, postsExported, durationMs };
+        return {
+            usersExported,
+            clustersExported,
+            postsExported,
+            durationMs,
+            ...(postDiagnostics ? { postDiagnostics } : {}),
+        };
     }
 
     /**
@@ -259,9 +280,13 @@ export class FeatureExportJob {
         return centroids.length;
     }
 
-    private async exportPostEmbeddings(outputDir: string): Promise<number> {
+    private async exportPostEmbeddings(outputDir: string): Promise<PostExportDiagnostics> {
         const embeddings: ExportedEmbedding[] = [];
         let skip = 0;
+        let scanned = 0;
+        let skippedEmptyVector = 0;
+        let skippedNonSemantic = 0;
+        let skippedIncompatibleContract = 0;
 
         while (embeddings.length < CONFIG.maxExportSize) {
             const batch = await PostFeatureSnapshot.find({
@@ -278,14 +303,17 @@ export class FeatureExportJob {
             if (batch.length === 0) break;
 
             for (const post of batch) {
+                scanned++;
                 if (!Array.isArray((post as any).denseEmbedding) || (post as any).denseEmbedding.length === 0) {
+                    skippedEmptyVector++;
                     continue;
                 }
-                if (
-                    !(post as any).embeddingContract
-                    || (post as any).embeddingContract.semantic !== true
-                    || !isVectorCompatibleWithContract((post as any).denseEmbedding, (post as any).embeddingContract)
-                ) {
+                if (!(post as any).embeddingContract || (post as any).embeddingContract.semantic !== true) {
+                    skippedNonSemantic++;
+                    continue;
+                }
+                if (!isVectorCompatibleWithContract((post as any).denseEmbedding, (post as any).embeddingContract)) {
+                    skippedIncompatibleContract++;
                     continue;
                 }
                 embeddings.push({
@@ -311,7 +339,13 @@ export class FeatureExportJob {
 
         const outputPath = path.join(outputDir, CONFIG.files.postEmbeddings);
         await fs.promises.writeFile(outputPath, JSON.stringify(embeddings, null, 2));
-        return embeddings.length;
+        return {
+            scanned,
+            exported: embeddings.length,
+            skippedEmptyVector,
+            skippedNonSemantic,
+            skippedIncompatibleContract,
+        };
     }
 
     /**

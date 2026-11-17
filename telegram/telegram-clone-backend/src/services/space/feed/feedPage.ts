@@ -151,6 +151,8 @@ export async function recordServedFeedTrace(
         }
     }
 
+const SELF_POST_FRESH_WINDOW_MS = 5 * 60 * 1000;
+
 export async function getFeedPage(
         userId: string,
         limit: number = 20,
@@ -392,28 +394,41 @@ export async function getFeedPage(
         const terminalCursorAbstention = cursor !== undefined
             && pageMeta?.continuationAbstained === true;
 
-        if (includeSelf && !terminalCursorAbstention) {
+        if (includeSelf && !cursor && !terminalCursorAbstention) {
             const selfLimit = Math.min(5, limit);
             const [selfPosts, userMap] = await Promise.all([
-                resolveUserPosts(userId, selfLimit, cursor),
+                resolveUserPosts(userId, selfLimit, undefined),
                 resolveUserMap([userId]),
             ]);
 
-            if (selfPosts.length > 0) {
+            // 仅筛选近 5 分钟内新发或已置顶的自发帖插入安全位置，严禁重排 policyFeed 原生顺序
+            const nowMs = Date.now();
+            const eligibleSelfPosts = selfPosts.filter((post) => {
+                const raw = typeof (post as any)?.toObject === 'function' ? (post as any).toObject() : post;
+                if (raw?.isPinned === true) return true;
+                const createdAtMs = raw?.createdAt ? new Date(raw.createdAt).getTime() : NaN;
+                return Number.isFinite(createdAtMs) && nowMs - createdAtMs <= SELF_POST_FRESH_WINDOW_MS;
+            });
+
+            if (eligibleSelfPosts.length > 0) {
                 const user = userMap.get(userId);
-                const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
-                    const base = createFeedCandidate(post.toObject());
+                const policyById = new Map(
+                    policyFeed.map((candidate) => [candidate.postId.toString(), candidate]),
+                );
+                const selfCandidates: FeedCandidate[] = eligibleSelfPosts.map((post) => {
+                    const raw = typeof (post as any)?.toObject === 'function' ? (post as any).toObject() : post;
+                    const base = createFeedCandidate(raw);
+                    const policyMatch = policyById.get(base.postId.toString());
                     return {
                         ...base,
-                        authorUsername: user?.username || 'Unknown',
-                        authorAvatarUrl: user?.avatarUrl ?? undefined,
-                        isLikedByUser: false,
-                        isRepostedByUser: false,
+                        ...(policyMatch ?? {}),
+                        authorUsername: user?.username || policyMatch?.authorUsername || 'Unknown',
+                        authorAvatarUrl: user?.avatarUrl ?? policyMatch?.authorAvatarUrl ?? undefined,
+                        isLikedByUser: policyMatch?.isLikedByUser ?? false,
+                        isRepostedByUser: policyMatch?.isRepostedByUser ?? false,
                     };
                 });
-                const merged = [...selfCandidates, ...policyFeed].sort((a, b) => {
-                    return b.createdAt.getTime() - a.createdAt.getTime();
-                });
+                const merged = [...selfCandidates, ...policyFeed];
                 const seen = new Set<string>();
                 finalServedCandidates = [];
                 for (const item of merged) {

@@ -250,7 +250,7 @@ describe('spaceService trace request ownership', () => {
                 _id: selfId,
                 authorId: 'trace-request-user',
                 content: 'self post',
-                createdAt: new Date('2026-07-16T08:00:00.000Z'),
+                createdAt: new Date(),
             }),
         }]);
         vi.spyOn(spaceService as any, 'getUserMap').mockResolvedValueOnce(new Map([
@@ -323,7 +323,7 @@ describe('spaceService trace request ownership', () => {
                 _id: selfId,
                 authorId: 'trace-request-user',
                 content: 'self post',
-                createdAt: new Date('2026-07-16T07:00:00.000Z'),
+                createdAt: new Date(),
             }),
         }]);
         vi.spyOn(spaceService as any, 'getUserMap').mockResolvedValueOnce(new Map([
@@ -355,5 +355,98 @@ describe('spaceService trace request ownership', () => {
             outOfNetworkCount: 2,
         });
         expect(recorder.mock.calls[0][2]).toBe(page.candidates);
+    });
+
+    it('preserves Rust V3/DPP policyFeed order and excludes stale unpinned self posts when includeSelf=true', async () => {
+        // olderButHigherScore 的发布时间早于 newerButLowerScore，但 Rust V3 将其排在第一位
+        const olderButHigherScore = {
+            postId: new mongoose.Types.ObjectId('507f191e810c19729de8c101'),
+            authorId: 'author-v3-top',
+            content: 'high quality older post',
+            createdAt: new Date('2026-07-01T00:00:00.000Z'),
+            score: 9.5,
+            isReply: false,
+            isRepost: false,
+            recallSource: 'PhoenixSource',
+        };
+        const newerButLowerScore = {
+            postId: new mongoose.Types.ObjectId('507f191e810c19729de8c102'),
+            authorId: 'author-v3-second',
+            content: 'newer lower score post',
+            createdAt: new Date('2026-07-16T00:00:00.000Z'),
+            score: 4.2,
+            isReply: false,
+            isRepost: false,
+            recallSource: 'FollowingSource',
+        };
+        const staleSelfId = new mongoose.Types.ObjectId('507f191e810c19729de8c103');
+        const pinnedSelfId = new mongoose.Types.ObjectId('507f191e810c19729de8c104');
+
+        mocks.mixerGetFeed.mockResolvedValueOnce([olderButHigherScore, newerButLowerScore]);
+        vi.spyOn(spaceService as any, 'getUserPosts').mockResolvedValueOnce([
+            {
+                toObject: () => ({
+                    _id: staleSelfId,
+                    authorId: 'trace-request-user',
+                    content: 'stale unpinned self post',
+                    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+                    isPinned: false,
+                }),
+            },
+            {
+                toObject: () => ({
+                    _id: pinnedSelfId,
+                    authorId: 'trace-request-user',
+                    content: 'pinned self post',
+                    createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                    isPinned: true,
+                }),
+            },
+        ]);
+        vi.spyOn(spaceService as any, 'getUserMap').mockResolvedValueOnce(new Map([
+            ['trace-request-user', { id: 'trace-request-user', username: 'viewer' }],
+        ]));
+        vi.spyOn(spaceService as any, 'recordServedFeedTrace').mockResolvedValue(undefined);
+
+        const page = await spaceService.getFeedPage(
+            'trace-request-user',
+            5,
+            undefined,
+            true,
+            { requestId: '11111111-2222-4333-8444-555555555555' },
+        );
+
+        // 置顶自发帖安全前置，陈旧非置顶自发帖被过滤，policyFeed 原生顺序 (olderButHigherScore -> newerButLowerScore) 绝不被时间重排
+        expect(page.candidates.map((c) => c.postId.toString())).toEqual([
+            pinnedSelfId.toString(),
+            olderButHigherScore.postId.toString(),
+            newerButLowerScore.postId.toString(),
+        ]);
+    });
+
+    it('skips self-post merge when cursor pagination is active', async () => {
+        const policyA = {
+            postId: new mongoose.Types.ObjectId('507f191e810c19729de8c201'),
+            authorId: 'author-a',
+            content: 'page 2 item',
+            createdAt: new Date('2026-07-10T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+            recallSource: 'FollowingSource',
+        };
+        mocks.mixerGetFeed.mockResolvedValueOnce([policyA]);
+        const getUserPosts = vi.spyOn(spaceService as any, 'getUserPosts');
+        vi.spyOn(spaceService as any, 'recordServedFeedTrace').mockResolvedValue(undefined);
+
+        const page = await spaceService.getFeedPage(
+            'trace-request-user',
+            5,
+            new Date('2026-07-15T00:00:00.000Z'),
+            true,
+            { requestId: '22222222-3333-4444-8555-666666666666' },
+        );
+
+        expect(getUserPosts).not.toHaveBeenCalled();
+        expect(page.candidates.map((c) => c.postId.toString())).toEqual([policyA.postId.toString()]);
     });
 });
