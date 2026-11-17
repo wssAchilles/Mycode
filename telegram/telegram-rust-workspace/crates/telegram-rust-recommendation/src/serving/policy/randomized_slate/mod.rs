@@ -13,7 +13,10 @@ use telegram_recommendation_contracts::{
     compute_simulation_sha256, sha256_hex,
 };
 
+mod online;
 mod v2;
+
+pub use online::apply_online_epsilon_plackett_luce_slate;
 
 const MAX_CANDIDATE_POOL_SIZE: usize = 2_048;
 const MAX_SLATE_SIZE: usize = 64;

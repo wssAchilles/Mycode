@@ -22,11 +22,7 @@ impl RecommendationPipeline {
             Arc::clone(&self.metrics),
             Arc::clone(&self.recent_store),
             self.serve_cache.clone(),
-            PostResponseQueryIdentity {
-                user_id: hydrated_query.user_id.clone(),
-                decision_id: hydrated_query.decision_id.clone(),
-                query_fingerprint,
-            },
+            PostResponseQueryIdentity::from_query(hydrated_query, query_fingerprint),
             result,
             cache_store_policy.cacheable,
         );

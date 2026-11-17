@@ -25,6 +25,7 @@ use telegram_selector_primitives::{
 };
 
 use crate::contracts::RecommendationCandidatePayload;
+use crate::selectors::dpp_ranker::{DppMetrics, insert_dpp_stage_detail};
 
 use super::{SelectorSelectionReport, build_selector_audit};
 
@@ -34,6 +35,25 @@ pub fn build_selector_stage_detail(
     oversample_factor: usize,
     max_selector_size: usize,
     author_soft_cap: usize,
+) -> HashMap<String, Value> {
+    build_selector_stage_detail_with_dpp(
+        report,
+        selected,
+        oversample_factor,
+        max_selector_size,
+        author_soft_cap,
+        None,
+    )
+}
+
+/// 构建带可选 DPP 多样性重排可观测统计的 Selector Stage Detail。
+pub fn build_selector_stage_detail_with_dpp(
+    report: &SelectorSelectionReport,
+    selected: &[RecommendationCandidatePayload],
+    oversample_factor: usize,
+    max_selector_size: usize,
+    author_soft_cap: usize,
+    dpp_metrics: Option<&DppMetrics>,
 ) -> HashMap<String, Value> {
     let selector_audit = build_selector_audit(selected);
     let mut detail = HashMap::from([
@@ -161,6 +181,24 @@ pub fn build_selector_stage_detail(
         SELECTOR_DETAIL_RELAXED_DEFERRED_REASON_COUNTS_FIELD.to_string(),
         selector_count_map_json(report.relaxed_deferred_reason_counts.clone()),
     );
+
+    if let Some(metrics) = dpp_metrics {
+        insert_dpp_stage_detail(&mut detail, metrics);
+    } else if let Some(first) = selected.first()
+        && let Some(breakdown) = first.score_breakdown.as_ref()
+        && let (Some(&cos_before), Some(&cos_after)) = (
+            breakdown.get("dppAvgPairwiseCosineBefore"),
+            breakdown.get("dppAvgPairwiseCosineAfter"),
+        )
+    {
+        // 兼容旧调用签名：从首条候选随路分项中回填 DPP 平均余弦对比指标。
+        detail.insert("dppApplied".to_string(), Value::Bool(true));
+        detail.insert(
+            "avgPairwiseCosineBefore".to_string(),
+            Value::from(cos_before),
+        );
+        detail.insert("avgPairwiseCosineAfter".to_string(), Value::from(cos_after));
+    }
 
     annotate_stage_contract_detail(
         &mut detail,

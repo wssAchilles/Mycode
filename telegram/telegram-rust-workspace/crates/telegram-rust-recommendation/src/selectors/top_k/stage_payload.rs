@@ -1,7 +1,9 @@
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
+use crate::selectors::dpp_ranker::DppMetrics;
 
+use super::detail::build_selector_stage_detail_with_dpp;
 use super::{SelectorSelectionReport, build_selector_stage_detail};
 
 pub(crate) struct SelectorStageInput<'a> {
@@ -21,6 +23,31 @@ pub(crate) fn build_selector_stage(input: SelectorStageInput<'_>) -> Recommendat
         input.oversample_factor,
         input.max_selector_size,
         input.author_soft_cap,
+    );
+
+    RecommendationStagePayload {
+        name: RUST_TOP_K_SELECTOR.to_string(),
+        enabled: true,
+        duration_ms: input.duration_ms,
+        input_count: input.input_count,
+        output_count: input.selected.len(),
+        removed_count: Some(input.input_count.saturating_sub(input.selected.len())),
+        detail: Some(detail),
+    }
+}
+
+/// 构造携带 DPP 多样性可观测详情的 Selector Stage Payload。
+pub(crate) fn build_selector_stage_with_dpp(
+    input: SelectorStageInput<'_>,
+    dpp_metrics: Option<&DppMetrics>,
+) -> RecommendationStagePayload {
+    let detail = build_selector_stage_detail_with_dpp(
+        input.report,
+        input.selected,
+        input.oversample_factor,
+        input.max_selector_size,
+        input.author_soft_cap,
+        dpp_metrics,
     );
 
     RecommendationStagePayload {

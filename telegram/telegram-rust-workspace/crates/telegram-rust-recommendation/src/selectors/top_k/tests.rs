@@ -956,3 +956,86 @@ fn selector_reserves_news_visibility_when_news_pool_exists() {
 
     assert!(selected.iter().any(|candidate| candidate.post_id == "n1"));
 }
+
+#[test]
+fn selector_activates_dpp_and_populates_slate_context_and_stage_detail() {
+    let mut query = query("warm", 6);
+    query
+        .feature_switches
+        .insert("enable_v3_dpp".to_string(), true);
+
+    let mut candidates = Vec::new();
+    // 构造 8 条语义高度相似（同向向量 + 同 L1/L2 SID）的高分候选
+    for i in 0..8 {
+        let mut cand = candidate(
+            &format!("sim-{i}"),
+            &format!("author-sim-{i}"),
+            "interest",
+            false,
+            10.0 - (i as f64) * 0.05,
+        );
+        cand.semantic_embedding_256d = Some(vec![1.0, (i as f32) * 0.01, 0.0, 0.0]);
+        cand.semantic_ids = Some([12, 34, i, 1, 2, 3]);
+        candidates.push(cand);
+    }
+    // 再构造各车道多样化正交候选，分数略低于前 8 条
+    let mut c_in = candidate("orth-in", "author-orth-in", "in_network", true, 9.2);
+    c_in.semantic_embedding_256d = Some(vec![0.0, 1.0, 0.0, 0.0]);
+    c_in.semantic_ids = Some([40, 1, 2, 3, 4, 5]);
+    candidates.push(c_in);
+
+    let mut c_soc = candidate(
+        "orth-soc",
+        "author-orth-soc",
+        "social_expansion",
+        false,
+        9.1,
+    );
+    c_soc.semantic_embedding_256d = Some(vec![0.0, 0.0, 1.0, 0.0]);
+    c_soc.semantic_ids = Some([70, 2, 3, 4, 5, 6]);
+    candidates.push(c_soc);
+
+    let mut c_int = candidate("orth-int", "author-orth-int", "interest", false, 9.0);
+    c_int.semantic_embedding_256d = Some(vec![0.0, 0.0, 0.0, 1.0]);
+    c_int.semantic_ids = Some([100, 3, 4, 5, 6, 7]);
+    candidates.push(c_int);
+
+    let output = select_candidates_with_report(&query, &candidates, 1, 20, 2);
+    let metrics = output.dpp_metrics.as_ref().expect("DPP 指标必须存在");
+    assert!(metrics.applied);
+    assert!(
+        metrics.avg_pairwise_cosine_after < metrics.avg_pairwise_cosine_before,
+        "DPP 选择器必须显式降低平均两两余弦相似度: before={}, after={}",
+        metrics.avg_pairwise_cosine_before,
+        metrics.avg_pairwise_cosine_after
+    );
+
+    // 验证 SlateContextPayload 已完整填充
+    for (idx, cand) in output.candidates.iter().enumerate() {
+        let slate = cand.slate_context.as_ref().expect("slate_context 必须填充");
+        assert_eq!(slate.k, Some(idx as u32));
+        assert!(slate.pre_diversity_score.is_some());
+        assert_eq!(slate.sid_known, Some(true));
+    }
+
+    // 验证 Stage Detail 携带完整余弦统计且不破坏原契约门禁
+    let detail = super::build_selector_stage_detail_with_dpp(
+        &output.report,
+        &output.candidates,
+        1,
+        20,
+        2,
+        output.dpp_metrics.as_ref(),
+    );
+    assert!(selector_detail_contract_violations(Some(&detail)).is_empty());
+    assert_eq!(detail.get("dppApplied"), Some(&json!(true)));
+    let cos_before = detail
+        .get("avgPairwiseCosineBefore")
+        .and_then(serde_json::Value::as_f64)
+        .expect("avgPairwiseCosineBefore");
+    let cos_after = detail
+        .get("avgPairwiseCosineAfter")
+        .and_then(serde_json::Value::as_f64)
+        .expect("avgPairwiseCosineAfter");
+    assert!(cos_after < cos_before);
+}

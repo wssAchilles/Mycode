@@ -1,3 +1,4 @@
+pub mod dpp_ranker;
 pub mod quality_factor;
 pub mod top_k;
 
