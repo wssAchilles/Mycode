@@ -1,17 +1,13 @@
 /**
- * PostComposer Styles v4.0 - Twitter/X Premium Design
- * 发帖组件：精致输入区 + 高亮按钮
+ * PostComposer Styles v6.0 (X Light 极简发帖栏)
  */
 
-/* ========================================
-   发帖容器
-   ======================================== */
 .post-composer {
     display: flex;
-    gap: var(--space-3);
+    gap: 12px;
     padding: 14px 16px 12px;
-    border-bottom: 1px solid var(--tg-separator);
-    background: var(--tg-bg-surface);
+    border-bottom: 1px solid #EFF3F4;
+    background: #FFFFFF;
 }
 
 .post-composer__sr-only {
@@ -26,20 +22,18 @@
     border: 0;
 }
 
-/* ========================================
-   头像
-   ======================================== */
+/* 头像 */
 .post-composer__avatar {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     border-radius: var(--radius-full);
-    background: var(--tg-blue-bg);
-    border: 1px solid rgba(42, 171, 238, 0.24);
+    background: #0F1419;
+    border: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    font-weight: var(--font-semibold);
+    color: #FFFFFF;
+    font-weight: 700;
     font-size: 15px;
     flex-shrink: 0;
 }
@@ -51,14 +45,12 @@
     object-fit: cover;
 }
 
-/* ========================================
-   输入区域
-   ======================================== */
+/* 输入区域 */
 .post-composer__form {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .post-composer__input-wrapper {
@@ -74,49 +66,48 @@
     border: none;
     outline: none;
     resize: none;
-    color: var(--tg-text-primary);
-    font-size: 15.5px;
+    color: #0F1419;
+    font-size: 18px;
     font-family: var(--font-family);
-    line-height: 1.5;
+    line-height: 1.45;
 }
 
 .post-composer__textarea::placeholder {
-    color: var(--tg-text-muted);
+    color: #536471;
 }
 
-/* 字符计数 */
 .post-composer__char-count {
     position: absolute;
-    bottom: var(--space-2);
-    right: var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--tg-text-muted);
+    bottom: 6px;
+    right: 4px;
+    font-size: 12px;
+    color: #536471;
+    font-variant-numeric: tabular-nums;
 }
 
 .post-composer__char-count--warning {
-    color: var(--tg-orange);
+    color: var(--tg-amber);
 }
 
 .post-composer__char-count--error {
     color: var(--tg-red);
 }
 
-/* ========================================
-   媒体预览
-   ======================================== */
+/* 媒体预览 */
 .post-composer__media-preview {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 .post-composer__media-item {
     position: relative;
     aspect-ratio: 1;
-    border-radius: var(--radius-lg);
+    border-radius: 14px;
     overflow: hidden;
-    background: var(--tg-bg-tertiary);
+    background: #F7F9F9;
+    border: 1px solid #EFF3F4;
 }
 
 .post-composer__media-item img,
@@ -128,35 +119,33 @@
 
 .post-composer__media-remove {
     position: absolute;
-    top: var(--space-1);
-    right: var(--space-1);
+    top: 6px;
+    right: 6px;
     width: 28px;
     height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 20, 25, 0.78);
     border: none;
-    border-radius: var(--radius-full);
-    color: white;
+    border-radius: 9999px;
+    color: #FFFFFF;
     cursor: pointer;
-    font-size: var(--text-lg);
+    font-size: 16px;
 }
 
-/* ========================================
-   工具栏
-   ======================================== */
+/* 工具栏 */
 .post-composer__toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding-top: 10px;
-    border-top: 1px solid var(--tg-separator);
+    border-top: 1px solid #EFF3F4;
 }
 
 .post-composer__tools {
     display: flex;
-    gap: var(--space-1);
+    gap: 4px;
 }
 
 .post-composer__tool-btn {
@@ -165,18 +154,18 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius-full);
+    border-radius: 9999px;
     background: transparent;
     border: none;
     cursor: pointer;
-    color: var(--tg-text-secondary);
+    color: #1D9BF0;
     font-size: 18px;
-    transition: background var(--duration-fast) var(--ease-out);
+    transition: background-color 0.15s ease;
 }
 
 .post-composer__tool-btn:hover {
-    background: var(--tg-bg-hover);
-    color: var(--tg-blue);
+    background: rgba(29, 155, 240, 0.10);
+    color: #1D9BF0;
 }
 
 .post-composer__tool-btn:disabled {
@@ -196,15 +185,14 @@
     outline-offset: 2px;
 }
 
-/* ========================================
-   GIF / Emoji 面板
-   ======================================== */
+/* GIF / Emoji 选择面板（纯净白浮层） */
 .post-composer__panel {
-    margin-top: var(--space-2);
+    margin-top: 8px;
     padding: 12px;
-    background: var(--tg-bg-elevated);
-    border: 1px solid var(--tg-separator);
-    border-radius: 14px;
+    background: #FFFFFF;
+    border: 1px solid #EFF3F4;
+    border-radius: 16px;
+    box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -214,63 +202,58 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    color: var(--tg-text-primary);
-    font-weight: 600;
+    color: #0F1419;
+    font-size: 14px;
+    font-weight: 700;
 }
 
 .post-composer__panel-header button {
-    background: var(--tg-bg-hover);
+    background: #EFF3F4;
     border: none;
-    color: var(--tg-text-primary);
+    color: #0F1419;
     width: 28px;
     height: 28px;
-    border-radius: 10px;
+    border-radius: 9999px;
     cursor: pointer;
 }
 
-.post-composer__panel-body {
-    display: flex;
-    gap: 10px;
+.post-composer__panel-header button:hover {
+    background: #E2E8F0;
 }
 
-.post-composer__panel-body input {
+.post-composer__panel-body,
+.post-composer__panel-search {
+    display: flex;
+    gap: 8px;
+}
+
+.post-composer__panel-body input,
+.post-composer__panel-search input {
     flex: 1;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid var(--tg-separator);
-    background: rgba(10, 13, 18, 0.72);
-    color: var(--tg-text-primary);
+    padding: 9px 14px;
+    border-radius: 9999px;
+    border: 1px solid #CFD9DE;
+    background: #FFFFFF;
+    color: #0F1419;
+    font-size: 14px;
 }
 
 .post-composer__panel-body input:focus-visible,
 .post-composer__panel-search input:focus-visible {
-    outline: 2px solid rgba(42, 171, 238, 0.6);
-    outline-offset: 2px;
-    border-color: rgba(42, 171, 238, 0.5);
+    outline: 2px solid #1D9BF0;
+    outline-offset: 1px;
+    border-color: #1D9BF0;
 }
 
 .post-composer__panel-btn {
-    padding: 8px 14px;
-    border-radius: 10px;
+    padding: 8px 16px;
+    border-radius: 9999px;
     border: none;
-    background: var(--tg-blue);
-    color: white;
+    background: #0F1419;
+    color: #FFFFFF;
     cursor: pointer;
-    font-weight: 600;
-}
-
-.post-composer__panel-search {
-    display: flex;
-    gap: 10px;
-}
-
-.post-composer__panel-search input {
-    flex: 1;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid var(--tg-separator);
-    background: rgba(10, 13, 18, 0.72);
-    color: var(--tg-text-primary);
+    font-size: 13.5px;
+    font-weight: 700;
 }
 
 .post-composer__gif-section {
@@ -281,9 +264,10 @@
 
 .post-composer__gif-title {
     font-size: 12px;
-    color: var(--tg-text-muted);
+    font-weight: 600;
+    color: #536471;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.06em;
 }
 
 .post-composer__gif-grid {
@@ -296,13 +280,13 @@
 }
 
 .post-composer__gif-item {
-    border: none;
+    border: 1px solid #EFF3F4;
     padding: 0;
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.04);
+    background: #F7F9F9;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: transform 0.15s ease;
 }
 
 .post-composer__gif-item:hover {
@@ -318,7 +302,7 @@
 
 .post-composer__gif-empty {
     padding: 12px;
-    color: var(--tg-text-muted);
+    color: #536471;
     font-size: 13px;
 }
 
@@ -329,72 +313,65 @@
 .post-composer__emoji-grid {
     display: grid;
     grid-template-columns: repeat(10, 1fr);
-    gap: 6px;
+    gap: 4px;
 }
 
 .post-composer__emoji-btn {
-    background: rgba(132, 149, 173, 0.08);
-    border: 1px solid transparent;
-    border-radius: 10px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
     padding: 6px;
     cursor: pointer;
     font-size: 18px;
-    transition: transform 0.15s ease;
+    transition: background-color 0.12s ease;
 }
 
 .post-composer__emoji-btn:hover {
-    border-color: rgba(42, 171, 238, 0.28);
-    transform: none;
+    background: #EFF3F4;
 }
 
-/* ========================================
-   发布按钮
-   ======================================== */
+/* 发布按钮 - 实心深黑高对比胶囊 */
 .post-composer__submit {
-    padding: var(--space-2) var(--space-5);
-    background: var(--tg-blue);
-    color: white;
+    padding: 8px 20px;
+    background: #0F1419;
+    color: #FFFFFF;
     border: none;
-    border-radius: var(--radius-full);
-    font-size: 14px;
-    font-weight: var(--font-semibold);
+    border-radius: 9999px;
+    font-size: 14.5px;
+    font-weight: 700;
     cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+    transition: background-color 0.15s ease;
     box-shadow: none;
 }
 
 .post-composer__submit:hover:not(:disabled) {
-    background: var(--tg-blue-hover);
+    background: #272C30;
 }
 
 .post-composer__submit:disabled {
-    background: rgba(132, 149, 173, 0.12);
-    color: var(--tg-text-disabled);
-    border: 1px solid rgba(132, 149, 173, 0.16);
-    opacity: 1;
+    background: #0F1419;
+    color: #FFFFFF;
+    border: none;
+    opacity: 0.42;
     cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
 }
 
-/* ========================================
-   安全警告
-   ======================================== */
+/* 安全警告 */
 .post-composer__safety-warning {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: rgba(255, 87, 51, 0.12);
-    border: 1px solid rgba(255, 87, 51, 0.3);
-    border-radius: var(--radius-md);
-    color: #ff5733;
-    font-size: var(--text-sm);
+    gap: 8px;
+    padding: 8px 12px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 12px;
+    color: #B91C1C;
+    font-size: 13.5px;
     animation: fadeIn 0.2s ease-out;
 }
 
 .post-composer__safety-icon {
-    font-size: var(--text-base);
+    font-size: 15px;
 }
 
 .post-composer__safety-dismiss {
@@ -403,42 +380,26 @@
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: var(--text-lg);
+    font-size: 16px;
     opacity: 0.7;
-    transition: opacity var(--duration-fast);
 }
 
 .post-composer__safety-dismiss:hover {
     opacity: 1;
 }
 
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-4px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-/* ========================================
-   响应式
-   ======================================== */
 @media (max-width: 640px) {
     .post-composer {
-        padding: var(--space-3);
+        padding: 12px 14px;
     }
 
     .post-composer__avatar {
-        width: 40px;
-        height: 40px;
+        width: 38px;
+        height: 38px;
     }
 
     .post-composer__textarea {
-        font-size: var(--text-lg);
-        min-height: 56px;
+        font-size: 16.5px;
+        min-height: 52px;
     }
 }

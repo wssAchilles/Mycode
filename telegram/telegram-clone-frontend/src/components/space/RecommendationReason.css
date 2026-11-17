@@ -1,120 +1,79 @@
-/* RecommendationReason.css */
+/* 推荐理由徽标与可解释性浮层 - 淡色高对比极简风 */
 
 .recommendation-reason {
     position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 13px;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    font-size: 12px;
     font-weight: 500;
     cursor: pointer;
     overflow: hidden;
-    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), border-color 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), color 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-
-    /* Premium Glass border */
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-
-    /* Text gradient background for shimmer effect */
-    background: linear-gradient(135deg,
-            rgba(255, 255, 255, 0.1) 0%,
-            rgba(255, 255, 255, 0.05) 100%);
-    overflow: hidden;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    border: 1px solid #EFF3F4;
+    background: #F7F9F9;
+    color: #536471;
+    box-shadow: none;
 }
 
-/* Shimmer Animation */
 .recommendation-reason::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 200%;
-    height: 100%;
-    background: linear-gradient(90deg,
-            transparent,
-            rgba(255, 255, 255, 0.2),
-            transparent);
-    transition: left 0.5s ease;
-    transform: skewX(-20deg);
-    pointer-events: none;
+    display: none;
 }
 
-.recommendation-reason:hover::before {
-    left: 100%;
-    transition: left 0.8s ease;
-}
-
-/* Glass Background Layer */
 .reason-glass-bg {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    z-index: -1;
+    display: none;
 }
 
-/* Hover State */
 .recommendation-reason:hover {
-    transform: translateY(-2px) scale(1.02);
-    background: linear-gradient(135deg,
-            rgba(255, 255, 255, 0.2) 0%,
-            rgba(255, 255, 255, 0.1) 100%);
-    box-shadow:
-        0 8px 16px rgba(var(--reason-color), 0.2),
-        0 2px 4px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.4);
+    background: #EFF3F4;
+    border-color: #CFD9DE;
+    color: #0F1419;
 }
 
 .recommendation-reason:active {
-    transform: translateY(0) scale(0.98);
+    transform: scale(0.985);
 }
 
-/* Icon Styling */
 .reason-icon {
-    /* Ensure SVG fills currentColor */
     fill: none;
-    stroke: var(--reason-color);
-    filter: drop-shadow(0 0 6px rgba(var(--reason-color), 0.5));
+    stroke: var(--reason-color, #1D9BF0);
+    flex-shrink: 0;
 }
 
-/* Label Styling */
 .reason-label {
-    /* High contrast text */
-    color: #e0e0e0;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    color: #536471;
     font-weight: 600;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.01em;
+}
+
+.recommendation-reason:hover .reason-label {
+    color: #0F1419;
 }
 
 .reason-signal {
     display: inline-flex;
     align-items: center;
     height: 16px;
-    padding: 0 5px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--reason-color) 22%, transparent);
-    color: #f8fbff;
-    border: 1px solid color-mix(in srgb, var(--reason-color) 42%, transparent);
-    font-size: 10px;
+    padding: 0 6px;
+    border-radius: 9999px;
+    background: #FFFFFF;
+    color: #536471;
+    border: 1px solid #E2E8F0;
+    font-size: 10.5px;
+    font-weight: 600;
     line-height: 1;
     white-space: nowrap;
 }
 
-/* Compact Mode */
 .recommendation-reason.compact {
-    padding: 4px 8px;
-    font-size: 11px;
+    padding: 2px 8px;
+    font-size: 11.5px;
     gap: 4px;
-    border-radius: 12px;
+    border-radius: 9999px;
 }
 
-/* Multi Reason Container */
 .multi-reason {
     display: flex;
     gap: 6px;
@@ -123,42 +82,41 @@
 }
 
 .reason-more {
-    font-size: 11px;
-    color: #aaa;
+    font-size: 11.5px;
+    color: #536471;
     padding: 2px 6px;
-    background: rgba(255, 255, 255, 0.05);
+    background: #F7F9F9;
     border-radius: 8px;
 }
 
-/* ===== 展开图标 ===== */
 .reason-expand-icon {
-    color: rgba(255, 255, 255, 0.5);
-    transition: transform 0.2s;
+    color: #536471;
+    transition: transform 0.15s ease, color 0.15s ease;
     flex-shrink: 0;
 }
 
 .recommendation-reason:hover .reason-expand-icon {
-    color: rgba(255, 255, 255, 0.8);
+    color: #0F1419;
 }
 
-/* ===== Popover ===== */
+/* ===== 推荐可解释性 Popover（纯白浮层） ===== */
 .reason-popover {
     z-index: 1100;
-    width: 280px;
-    background: var(--card-bg, #1e1f22);
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-    border-radius: 14px;
+    width: 288px;
+    background: #FFFFFF;
+    border: 1px solid #EFF3F4;
+    border-radius: 16px;
     padding: 14px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 12px 32px rgba(15, 20, 25, 0.12), 0 2px 8px rgba(15, 20, 25, 0.06);
     animation: popoverFadeIn 0.15s ease-out;
-    color: var(--text-primary, #e5e7eb);
+    color: #0F1419;
     font-size: 13px;
 }
 
 @keyframes popoverFadeIn {
     from {
         opacity: 0;
-        transform: scale(0.96) translateY(-4px);
+        transform: scale(0.97) translateY(-4px);
     }
     to {
         opacity: 1;
@@ -170,10 +128,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 14px;
-    margin-bottom: 12px;
-    color: #fff;
+    margin-bottom: 10px;
+    color: #0F1419;
 }
 
 .reason-popover__section {
@@ -186,9 +144,10 @@
 
 .reason-popover__section-title {
     font-size: 11px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.04em;
+    color: #536471;
     margin-bottom: 6px;
 }
 
@@ -203,16 +162,17 @@
     align-items: center;
     height: 22px;
     padding: 0 8px;
-    border-radius: 6px;
-    background: rgba(59, 130, 246, 0.15);
-    color: #93c5fd;
+    border-radius: 9999px;
+    background: rgba(29, 155, 240, 0.10);
+    color: #0369A1;
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .reason-popover__value {
-    color: #e5e7eb;
+    color: #0F1419;
     font-size: 13px;
+    line-height: 1.45;
 }
 
 .reason-popover__signals {
@@ -229,14 +189,16 @@
 }
 
 .reason-popover__signal-key {
-    color: rgba(255, 255, 255, 0.6);
+    color: #536471;
     font-size: 12px;
 }
 
 .reason-popover__signal-value {
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
     font-size: 12px;
-    color: #a5b4fc;
+    font-weight: 600;
+    color: #0F1419;
+    font-variant-numeric: tabular-nums;
 }
 
 .reason-popover__actions {
@@ -244,7 +206,7 @@
     gap: 8px;
     margin-top: 12px;
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid #EFF3F4;
 }
 
 .reason-popover__action-btn {
@@ -254,24 +216,25 @@
     justify-content: center;
     gap: 6px;
     padding: 8px 0;
-    border: none;
-    background: rgba(255, 255, 255, 0.06);
-    color: #e5e7eb;
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 8px;
+    border: 1px solid #EFF3F4;
+    background: #F7F9F9;
+    color: #0F1419;
+    font-size: 12.5px;
+    font-weight: 600;
+    border-radius: 9999px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background-color 0.15s ease;
 }
 
 .reason-popover__action-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: #EFF3F4;
 }
 
 .reason-popover__action-btn--negative {
-    color: #f87171;
+    color: #DC2626;
 }
 
 .reason-popover__action-btn--negative:hover {
-    background: rgba(248, 113, 113, 0.1);
+    background: #FEF2F2;
+    border-color: #FECACA;
 }

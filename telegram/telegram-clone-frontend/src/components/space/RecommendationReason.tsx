@@ -56,54 +56,54 @@ export interface RecommendationReasonProps {
     onShowMore?: (postId: string) => void;
 }
 
-// 映射配置 (Lucide Icons)
+// 映射配置 (Lucide Icons - 适配淡色高对比主题)
 const SOURCE_CONFIG: Record<RecallSource, {
     icon: React.ElementType;
     label: string;
-    color: string; // Gradient Start
-    colorEnd: string; // Gradient End
+    color: string;
+    colorEnd: string;
 }> = {
     embedding: {
         icon: Sparkles,
         label: '为你推荐',
-        color: '#3390ec',
-        colorEnd: '#00bfa5'
+        color: '#1D9BF0',
+        colorEnd: '#0284C7'
     },
     graph: {
         icon: Users,
         label: '好友关注',
-        color: '#8774e1',
-        colorEnd: '#b39ddb'
+        color: '#6D28D9',
+        colorEnd: '#7C3AED'
     },
     trending: {
         icon: Flame,
         label: '热门趋势',
-        color: '#ff5252',
-        colorEnd: '#ff1744'
+        color: '#E11D48',
+        colorEnd: '#BE123C'
     },
     following: {
         icon: UserPlus,
         label: '关注用户',
-        color: '#f5a623',
-        colorEnd: '#ff9800'
+        color: '#D97706',
+        colorEnd: '#B45309'
     },
     topic: {
         icon: Hash,
         label: '话题推荐',
-        color: '#29b6f6',
-        colorEnd: '#0288d1'
+        color: '#0284C7',
+        colorEnd: '#0369A1'
     },
     engagement: {
         icon: MessageCircle,
         label: '基于互动',
-        color: '#66bb6a',
-        colorEnd: '#43a047'
+        color: '#059669',
+        colorEnd: '#047857'
     },
     random: {
         icon: Dices,
         label: '发现新奇',
-        color: '#78909c',
-        colorEnd: '#546e7a'
+        color: '#475569',
+        colorEnd: '#334155'
     },
 };
 

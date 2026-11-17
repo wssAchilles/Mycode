@@ -1,20 +1,17 @@
 /**
- * SpaceTimeline Styles v4.0 - Twitter/X Premium Design
- * 时间线组件：精致头部 + 无限滚动列表
+ * SpaceTimeline Styles v6.0 (X Light 极简时间线)
+ * 粘性磨砂白顶栏 + 底部蓝线 Tab + 1px 发丝横线分割流
  */
 
-/* ========================================
-   时间线容器
-   ======================================== */
 .space-timeline {
     display: flex;
     flex-direction: column;
     min-height: 100%;
-    background: var(--tg-bg-secondary);
+    background: #FFFFFF;
 }
 
 /* ========================================
-   时间线头部
+   时间线顶部（粘性磨砂白 + 底部蓝线 Tab）
    ======================================== */
 .space-timeline__header {
     position: sticky;
@@ -23,63 +20,74 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-4);
-    background: rgba(var(--tg-bg-secondary-rgb), 0.85);
+    gap: 16px;
+    background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--tg-separator);
-    padding: 14px 16px;
+    border-bottom: 1px solid #EFF3F4;
+    padding: 0 16px;
+    height: 52px;
 }
 
 .space-timeline__title {
-    font-size: 18px;
-    font-weight: var(--font-semibold);
-    color: var(--tg-text-primary);
+    font-size: 19px;
+    font-weight: 800;
+    color: #0F1419;
     margin: 0;
+    letter-spacing: -0.01em;
     font-family: var(--font-family);
 }
 
-/* ========================================
-   Feed Toggle (全部 / 好友)
-   ======================================== */
+/* Feed Toggle（去外框胶囊，改为 X 式底部蓝线指示器） */
 .space-timeline__feed-toggle {
     display: inline-flex;
-    align-items: center;
+    align-items: stretch;
+    height: 100%;
     gap: 4px;
-    padding: 4px;
-    border-radius: 999px;
-    border: 1px solid var(--tg-separator);
-    background: rgba(10, 13, 18, 0.48);
-    box-shadow: none;
+    padding: 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
 }
 
 .space-timeline__feed-tab {
+    position: relative;
     appearance: none;
     border: 0;
-    border-radius: 999px;
-    padding: 7px 13px;
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--tg-text-muted);
+    border-radius: 0;
+    padding: 0 18px;
+    height: 100%;
+    font-size: 15px;
+    font-weight: 500;
+    color: #536471;
     background: transparent;
     cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out),
-        background var(--duration-fast) var(--ease-out),
-        color var(--duration-fast) var(--ease-out);
+    transition: background-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .space-timeline__feed-tab:hover {
-    color: var(--tg-text-primary);
+    background-color: #EFF3F4;
+    color: #0F1419;
 }
 
 .space-timeline__feed-tab.is-active {
-    color: var(--tg-text-primary);
-    background: var(--tg-blue-bg);
-    box-shadow: none;
+    color: #0F1419;
+    font-weight: 700;
+    background: transparent;
 }
 
-.space-timeline__feed-tab:active {
-    transform: scale(0.98);
+.space-timeline__feed-tab.is-active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 14px;
+    right: 14px;
+    height: 3.5px;
+    border-radius: 9999px;
+    background: #1D9BF0;
 }
 
 .space-timeline__feed-tab:focus-visible,
@@ -89,8 +97,12 @@
     outline-offset: 2px;
 }
 
+.space-timeline__divider {
+    display: none;
+}
+
 /* ========================================
-   Empty Hero (new)
+   空状态容器
    ======================================== */
 .space-timeline__empty-hero {
     display: flex;
@@ -104,11 +116,12 @@
 }
 
 .space-timeline__inline-error {
-    padding: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid #EFF3F4;
 }
 
 /* ========================================
-   帖子列表
+   帖子流（无边距平铺 + 1px 底线分割）
    ======================================== */
 .space-timeline__posts {
     flex: 1;
@@ -117,22 +130,23 @@
 .space-timeline__post-stack {
     display: flex;
     flex-direction: column;
-    padding: 0 12px 12px;
+    padding: 0;
 }
 
 .space-timeline__post-item + .space-timeline__post-item {
-    margin-top: 12px;
+    margin-top: 0;
 }
 
 /* ========================================
-   加载状态
+   骨架屏加载状态
    ======================================== */
 .space-timeline__loading {
     display: grid;
     grid-template-columns: 42px minmax(0, 1fr);
     align-items: center;
-    padding: 14px 16px;
+    padding: 16px;
     gap: 12px;
+    border-bottom: 1px solid #EFF3F4;
 }
 
 .space-timeline__loading-avatar {
@@ -157,22 +171,22 @@
 }
 
 /* ========================================
-   空状态 - 高级设计
+   空状态视图
    ======================================== */
 .space-timeline__empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: var(--space-16) var(--space-6);
+    padding: 56px 24px;
     text-align: center;
 }
 
 .space-timeline__empty-icon {
-    width: 96px;
-    height: 96px;
-    margin-bottom: var(--space-6);
-    background: var(--tg-blue-bg);
+    width: 80px;
+    height: 80px;
+    margin-bottom: 20px;
+    background: #F7F9F9;
     border-radius: var(--radius-full);
     display: flex;
     align-items: center;
@@ -180,76 +194,65 @@
 }
 
 .space-timeline__empty-icon svg {
-    width: 48px;
-    height: 48px;
-    color: var(--tg-purple);
+    width: 40px;
+    height: 40px;
+    color: var(--tg-blue);
 }
 
 .space-timeline__empty-title {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--tg-text-primary);
-    margin: 0 0 var(--space-2) 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: #0F1419;
+    margin: 0 0 8px 0;
 }
 
 .space-timeline__empty-desc {
-    font-size: var(--text-base);
-    color: var(--tg-text-muted);
-    max-width: 280px;
-    line-height: var(--leading-relaxed);
-    margin: 0 0 var(--space-6) 0;
+    font-size: 15px;
+    color: #536471;
+    max-width: 300px;
+    line-height: 1.55;
+    margin: 0 0 24px 0;
 }
 
 .space-timeline__empty-btn {
-    padding: var(--space-3) var(--space-6);
-    background: var(--tg-blue);
-    color: white;
+    padding: 10px 24px;
+    background: #0F1419;
+    color: #FFFFFF;
     border: none;
-    border-radius: var(--radius-full);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
+    border-radius: 9999px;
+    font-size: 15px;
+    font-weight: 700;
     cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-    box-shadow: none;
+    transition: background-color 0.15s ease;
 }
 
 .space-timeline__empty-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: none;
+    background: #272C30;
 }
 
 /* ========================================
-   新帖子提示
+   新动态提示条（X 式蓝字白底边框）
    ======================================== */
 .space-timeline__new-posts {
-    position: sticky;
-    top: 60px;
-    z-index: 5;
-    margin: var(--space-4);
-    padding: var(--space-3) var(--space-4);
-    background: var(--tg-blue);
-    color: white;
-    border-radius: var(--radius-full);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
+    border-bottom: 1px solid #EFF3F4;
+    background: #FFFFFF;
     text-align: center;
-    cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-    box-shadow: 0 10px 24px rgba(2, 7, 16, 0.28);
-}
-
-.space-timeline__new-posts:hover {
-    background: var(--tg-blue-light);
-    transform: translateY(-2px);
 }
 
 .space-timeline__new-posts-btn {
     width: 100%;
+    padding: 12px 16px;
     border: none;
     background: transparent;
-    color: inherit;
-    font: inherit;
+    color: #1D9BF0;
+    font-size: 14.5px;
+    font-weight: 600;
     cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.space-timeline__new-posts-btn:hover {
+    background: rgba(29, 155, 240, 0.06);
 }
 
 /* ========================================
@@ -258,23 +261,23 @@
 .space-timeline__load-more {
     display: flex;
     justify-content: center;
-    padding: var(--space-6);
+    padding: 20px 16px;
 }
 
 .space-timeline__load-more-btn {
-    padding: var(--space-3) var(--space-8);
-    background: transparent;
-    color: var(--tg-blue);
-    border: 1px solid var(--tg-blue);
-    border-radius: var(--radius-full);
-    font-size: var(--text-base);
-    font-weight: var(--font-medium);
+    padding: 9px 24px;
+    background: #FFFFFF;
+    color: #0F1419;
+    border: 1px solid #CFD9DE;
+    border-radius: 9999px;
+    font-size: 14.5px;
+    font-weight: 700;
     cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+    transition: background-color 0.15s ease;
 }
 
-.space-timeline__load-more-btn:hover {
-    background: var(--tg-blue-bg);
+.space-timeline__load-more-btn:hover:not(:disabled) {
+    background: #EFF3F4;
 }
 
 .space-timeline__load-more-btn:disabled {
@@ -282,35 +285,33 @@
     cursor: not-allowed;
 }
 
-/* 已到底部提示 */
 .space-timeline__end {
     text-align: center;
-    padding: var(--space-6);
-    color: var(--tg-text-muted);
-    font-size: var(--text-sm);
+    padding: 24px 16px;
+    color: #536471;
+    font-size: 13.5px;
 }
 
 /* ========================================
-   Staggered Animation (交错入场)
+   入场动画
    ======================================== */
 @keyframes scaleFadeIn {
     from {
         opacity: 0;
-        transform: scale(0.96) translateY(20px);
+        transform: translateY(6px);
     }
 
     to {
         opacity: 1;
-        transform: scale(1) translateY(0);
+        transform: translateY(0);
     }
 }
 
 .space-post-enter {
-    animation: scaleFadeIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    animation: scaleFadeIn 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
     opacity: 0;
-    /* 初始隐藏，动画开始后显示 */
 }
 
 .space-post-enter + .space-post-enter {
-    margin-top: 12px;
+    margin-top: 0;
 }
