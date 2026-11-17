@@ -238,7 +238,11 @@ pub fn compute_v3_batch_scores<S: AsRef<str>>(
             } else {
                 1.0
             };
-            let oon = if input.out_of_network { oon_factor } else { 1.0 };
+            let oon = if input.out_of_network {
+                oon_factor
+            } else {
+                1.0
+            };
             sanitize_finite(w * diversity * oon)
         })
         .collect();

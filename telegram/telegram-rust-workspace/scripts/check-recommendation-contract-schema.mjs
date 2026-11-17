@@ -7,7 +7,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptDir, '../..');
 const rustPipelineContractPath = path.join(
   projectDir,
-  'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/pipeline.rs',
+  'telegram-rust-workspace/crates/telegram-recommendation-contracts/src/contracts/pipeline/stage.rs',
 );
 const nodeContractPath = path.join(
   projectDir,

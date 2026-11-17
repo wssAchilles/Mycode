@@ -5,9 +5,7 @@ use crate::{
     config::RecommendationConfig,
     filters::{configured_filters, post_selection::configured_post_selection_filters},
     pipeline::local::ranking::RANKING_LADDER_VERSION,
-    query_hydrators::{
-        configured_base_query_hydrators, configured_dependent_query_hydrators,
-    },
+    query_hydrators::{configured_base_query_hydrators, configured_dependent_query_hydrators},
     scorers::configured_scorers,
     selectors::{self, top_k::SELECTOR_POLICY_VERSION},
     serving::cursor::{CURSOR_MODE, SERVING_VERSION},
@@ -279,7 +277,10 @@ mod tests {
             definition.post_selection_hydrator_concurrency,
             POST_SELECTION_HYDRATOR_CONCURRENCY
         );
-        assert_eq!(definition.query_hydrators, configured_base_query_hydrators());
+        assert_eq!(
+            definition.query_hydrators,
+            configured_base_query_hydrators()
+        );
         assert_eq!(
             definition.dependent_query_hydrators,
             configured_dependent_query_hydrators()

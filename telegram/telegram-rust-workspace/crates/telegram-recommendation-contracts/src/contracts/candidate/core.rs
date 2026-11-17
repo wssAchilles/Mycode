@@ -332,7 +332,10 @@ mod tests {
 
         let serialized = serde_json::to_value(&payload).expect("serialize v3 candidate");
         assert_eq!(
-            serialized.get("semanticEmbedding256d").and_then(Value::as_array).map(|v| v.len()),
+            serialized
+                .get("semanticEmbedding256d")
+                .and_then(Value::as_array)
+                .map(|v| v.len()),
             Some(2)
         );
         assert!(serialized.get("semanticIds").is_some());
@@ -343,7 +346,10 @@ mod tests {
         assert_eq!(decoded.semantic_ids, Some([12, 44, 78, 99, 128, 255]));
         assert_eq!(decoded.page_decode_slot, Some(0));
         assert_eq!(
-            decoded.phoenix_scores.as_ref().and_then(|s| s.expected_dwell_sec),
+            decoded
+                .phoenix_scores
+                .as_ref()
+                .and_then(|s| s.expected_dwell_sec),
             Some(28.4)
         );
     }

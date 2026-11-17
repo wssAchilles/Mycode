@@ -54,7 +54,10 @@ pub(super) fn seen_post_filter(
         "trustedUnderfillFallbackUsed".to_string(),
         Value::Bool(false),
     );
-    detail.insert("trustedUnderfillFallbackCount".to_string(), Value::from(0_u64));
+    detail.insert(
+        "trustedUnderfillFallbackCount".to_string(),
+        Value::from(0_u64),
+    );
     detail.insert("failClosed".to_string(), Value::Bool(true));
 
     (

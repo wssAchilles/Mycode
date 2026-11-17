@@ -1926,7 +1926,10 @@ fn local_scorers_integrate_cold_start_ts_consistently_across_fused_and_unfused_p
             config: HashMap::from([
                 ("cold_start_slot_min".to_string(), json!(0)),
                 ("cold_start_slot_max".to_string(), json!(2)),
-                ("low_impressions_max_boost_position_ratio".to_string(), json!(1.0)),
+                (
+                    "low_impressions_max_boost_position_ratio".to_string(),
+                    json!(1.0),
+                ),
             ]),
             in_experiment: true,
         }],
@@ -1996,7 +1999,10 @@ fn local_scorers_integrate_cold_start_ts_consistently_across_fused_and_unfused_p
         let fb = fc.score_breakdown.as_ref().expect("fused breakdown");
         let ub = uc.score_breakdown.as_ref().expect("unfused breakdown");
         assert_eq!(fb.get("coldStartTsSelected"), ub.get("coldStartTsSelected"));
-        assert_eq!(fb.get("coldStartTsBetaSample"), ub.get("coldStartTsBetaSample"));
+        assert_eq!(
+            fb.get("coldStartTsBetaSample"),
+            ub.get("coldStartTsBetaSample")
+        );
         assert_eq!(
             fb.get("coldStartTsLiftedScore"),
             ub.get("coldStartTsLiftedScore")

@@ -13,8 +13,6 @@ mod tests;
 pub use cache_store::{CacheStore, MokaCacheStore};
 pub use cached_fetch::CachedFetch;
 pub use cached_hydrator::{CachedHydrator, CachedHydratorExecutor};
-pub use helpers::{
-    cache_stage_detail, candidate_hydrator_cache_key, query_hydrator_cache_key,
-};
+pub use helpers::{cache_stage_detail, candidate_hydrator_cache_key, query_hydrator_cache_key};
 pub use traits::{Hydrator, HydratorOutput, checked_len};
 pub use two_phase::TwoPhaseHydrator;

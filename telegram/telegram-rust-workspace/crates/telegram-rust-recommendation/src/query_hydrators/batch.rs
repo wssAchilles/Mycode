@@ -56,7 +56,10 @@ pub(crate) async fn hydrate_query_two_stage_batch_or_fallback(
 
     combined.hydrated_query = dependent_output.hydrated_query;
     combined.stages.extend(dependent_output.stages);
-    merge_provider_calls(&mut combined.provider_calls, &dependent_output.provider_calls);
+    merge_provider_calls(
+        &mut combined.provider_calls,
+        &dependent_output.provider_calls,
+    );
     merge_provider_latency(
         &mut combined.provider_latency_ms,
         &dependent_output.provider_latency_ms,

@@ -333,9 +333,5 @@ fn sanitize_non_negative(value: f64) -> f64 {
 }
 
 pub(super) fn sanitize_abs(value: f64) -> f64 {
-    if value.is_finite() {
-        value.abs()
-    } else {
-        0.0
-    }
+    if value.is_finite() { value.abs() } else { 0.0 }
 }

@@ -2,15 +2,12 @@
 
 use std::collections::HashSet;
 
-use telegram_component_primitives::filters::{
-    AGE_FILTER, MUTED_KEYWORD_FILTER, SELF_POST_FILTER,
-};
+use telegram_component_primitives::filters::{AGE_FILTER, MUTED_KEYWORD_FILTER, SELF_POST_FILTER};
 use telegram_filter_primitives::{
     FILTER_DROP_REASON_AGE_LIMIT, FILTER_DROP_REASON_MUTED_KEYWORD, FILTER_DROP_REASON_SELF_POST,
 };
 use telegram_source_primitives::{
-    COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE,
-    POPULAR_SOURCE,
+    COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, POPULAR_SOURCE,
 };
 
 use crate::contracts::{

@@ -12,6 +12,4 @@ pub use features::{
 };
 pub use policy::{ExperimentAssignmentPayload, ExperimentContextPayload, RankingPolicyPayload};
 pub use request::{RecommendationQueryPatchPayload, RecommendationQueryPayload};
-pub use sequences::{
-    CachedPostEntryPayload, ColumnarActionStepPayload, ServedHistoryEntryPayload,
-};
+pub use sequences::{CachedPostEntryPayload, ColumnarActionStepPayload, ServedHistoryEntryPayload};

@@ -38,7 +38,11 @@ impl TwoPhaseHydrator<(), DummyCandidate> for DummySidHydrator {
         "DummySidHydrator"
     }
 
-    async fn fetch(&self, query: &(), candidates: &[DummyCandidate]) -> Result<Self::Fetched, String> {
+    async fn fetch(
+        &self,
+        query: &(),
+        candidates: &[DummyCandidate],
+    ) -> Result<Self::Fetched, String> {
         self.fetch_cached(query, candidates).await
     }
 
@@ -74,7 +78,11 @@ impl CachedFetch<(), DummyCandidate> for DummySidHydrator {
         candidate.code
     }
 
-    async fn fetch_values(&self, _query: &(), misses: &[&DummyCandidate]) -> Vec<Option<Self::Value>> {
+    async fn fetch_values(
+        &self,
+        _query: &(),
+        misses: &[&DummyCandidate],
+    ) -> Vec<Option<Self::Value>> {
         self.fetch_calls.fetch_add(1, Ordering::SeqCst);
         misses
             .iter()

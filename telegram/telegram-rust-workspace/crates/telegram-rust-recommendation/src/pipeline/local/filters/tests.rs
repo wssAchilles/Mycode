@@ -408,7 +408,10 @@ fn seen_filter_never_reinjects_trusted_seen_posts_on_underfill() {
         detail.get("trustedUnderfillFallbackCount"),
         Some(&serde_json::Value::from(0_u64))
     );
-    assert_eq!(detail.get("failClosed"), Some(&serde_json::Value::Bool(true)));
+    assert_eq!(
+        detail.get("failClosed"),
+        Some(&serde_json::Value::Bool(true))
+    );
 }
 
 #[test]
@@ -473,7 +476,10 @@ fn vf_filter_enforces_fail_closed_without_trusted_underfill_fallback() {
         detail.get("trustedUnderfillFallbackCount"),
         Some(&serde_json::Value::from(0_u64))
     );
-    assert_eq!(detail.get("failClosed"), Some(&serde_json::Value::Bool(true)));
+    assert_eq!(
+        detail.get("failClosed"),
+        Some(&serde_json::Value::Bool(true))
+    );
 }
 
 #[test]

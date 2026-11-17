@@ -148,9 +148,7 @@ pub struct RecommendationQueryPatchPayload {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ColumnarActionStepPayload, RecommendationQueryPayload, UserFeaturesPayload,
-    };
+    use super::{ColumnarActionStepPayload, RecommendationQueryPayload, UserFeaturesPayload};
 
     fn query(seen_ids: Vec<String>, feature_seen_ids: Vec<String>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {

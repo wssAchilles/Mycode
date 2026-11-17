@@ -348,12 +348,16 @@ pub(super) fn negative_feedback_signal(
     }
 
     // 内容安全: 不安全、异步高危标签或 NSFW（对高信誉 >= 0.80 且仅含轻度 low_risk 文本标签予以豁免）
-    let cred_exempt = is_high_credibility_low_risk_exempt(candidate, HIGH_CREDIBILITY_EXEMPT_THRESHOLD);
+    let cred_exempt =
+        is_high_credibility_low_risk_exempt(candidate, HIGH_CREDIBILITY_EXEMPT_THRESHOLD);
     let label_unsafe = candidate
         .content_safety_labels
         .as_ref()
         .is_some_and(|labels| !labels.safe);
-    let vf_unsafe = candidate.vf_result.as_ref().is_some_and(|result| !result.safe);
+    let vf_unsafe = candidate
+        .vf_result
+        .as_ref()
+        .is_some_and(|result| !result.safe);
     if has_strict_non_exempt_risk(candidate) || (!cred_exempt && (vf_unsafe || label_unsafe)) {
         strength = strength.max(0.72);
     }

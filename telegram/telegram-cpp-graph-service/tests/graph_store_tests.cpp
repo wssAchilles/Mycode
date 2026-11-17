@@ -1151,7 +1151,8 @@ TEST(GraphStoreRealtimeDeltaTest, HttpRoutesServeDeltaAndAuthorCredEndpoints) {
       std::chrono::system_clock::now());
 
   telegram::graph::ops::GraphServiceMetrics metrics;
-  const auto handler = telegram::graph::http::make_graph_handler(test_config(), store, metrics);
+  const auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
 
   const auto delta_resp = handler(telegram::graph::http::HttpRequest{
       .method = "POST",

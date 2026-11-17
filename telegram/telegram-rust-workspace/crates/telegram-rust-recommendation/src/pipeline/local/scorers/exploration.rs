@@ -23,7 +23,11 @@ fn sample_bandit_beta(
 ) -> f64 {
     let alpha = 1.0 + finite_nonnegative(successes);
     let beta = 1.0 + finite_nonnegative(failures);
-    sample_beta_deterministic(alpha, beta, &[request_id, decision_id, post_id, "bandit_ts"])
+    sample_beta_deterministic(
+        alpha,
+        beta,
+        &[request_id, decision_id, post_id, "bandit_ts"],
+    )
 }
 
 fn finite_nonnegative(value: f64) -> f64 {
