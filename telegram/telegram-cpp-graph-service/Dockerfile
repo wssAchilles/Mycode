@@ -5,6 +5,7 @@ RUN apk add --no-cache \
   cmake \
   curl-dev \
   git \
+  hiredis-dev \
   nlohmann-json
 
 WORKDIR /app
@@ -20,6 +21,7 @@ FROM alpine:3.21
 RUN apk add --no-cache \
   ca-certificates \
   curl \
+  hiredis \
   libstdc++
 
 WORKDIR /app

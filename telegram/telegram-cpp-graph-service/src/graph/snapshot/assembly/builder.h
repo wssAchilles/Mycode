@@ -20,6 +20,18 @@
 
 namespace telegram::graph::core::snapshot {
 
+template <typename SnapshotData>
+inline void populate_author_in_stats(SnapshotData& snapshot_data) {
+  snapshot_data.author_in_stats.clear();
+  for (const auto& [_, neighbors] : snapshot_data.adjacency) {
+    for (const auto& neighbor : neighbors) {
+      auto& stat = snapshot_data.author_in_stats[neighbor.user_id];
+      stat.in_degree += 1;
+      stat.total_in_weight += std::max(0.0, neighbor.score);
+    }
+  }
+}
+
 template <typename SnapshotData, typename WeightedNeighbor>
 class SnapshotAssembler {
  public:
@@ -128,6 +140,7 @@ class SnapshotAssembler {
     {
       const auto started = std::chrono::steady_clock::now();
       rebuild_dense_layout(*next_snapshot_, adjacency);
+      populate_author_in_stats(*next_snapshot_);
       add_duration("csrLayout", started);
     }
     {
@@ -238,6 +251,7 @@ std::shared_ptr<SnapshotData> build_snapshot(
   {
     const auto started = std::chrono::steady_clock::now();
     rebuild_dense_layout(*next_snapshot, adjacency);
+    populate_author_in_stats(*next_snapshot);
     add_duration("csrLayout", started);
   }
   {

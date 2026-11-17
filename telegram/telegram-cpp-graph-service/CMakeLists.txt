@@ -31,9 +31,14 @@ find_package(nlohmann_json REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h HINTS /opt/homebrew/include /usr/local/include /usr/include)
+find_library(HIREDIS_LIBRARY hiredis HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+
 add_library(telegram-cpp-graph-core
   src/config/config.cpp
   src/graph/graph_store.cpp
+  src/graph/realtime/delta_edge_overlay.cpp
+  src/graph/realtime/redis_stream_consumer.cpp
   src/http/routes/graph_routes.cpp
   src/http/routes/request_validation.cpp
   src/http/runtime/http_server.cpp
@@ -47,6 +52,15 @@ add_library(telegram-cpp-graph-core
 )
 
 target_include_directories(telegram-cpp-graph-core PUBLIC src)
+
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+  message(STATUS "Found hiredis: ${HIREDIS_LIBRARY} (include: ${HIREDIS_INCLUDE_DIR})")
+  target_include_directories(telegram-cpp-graph-core PUBLIC "${HIREDIS_INCLUDE_DIR}")
+  target_link_libraries(telegram-cpp-graph-core PUBLIC "${HIREDIS_LIBRARY}")
+  target_compile_definitions(telegram-cpp-graph-core PUBLIC HAVE_HIREDIS=1)
+else()
+  message(WARNING "hiredis not found; RedisStreamConsumer will run in no-op stub mode")
+endif()
 
 target_link_libraries(telegram-cpp-graph-core
   PUBLIC
@@ -104,8 +118,8 @@ enable_testing()
 include(FetchContent)
 FetchContent_Declare(
   googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        v1.15.2
+  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 # Prevent GoogleTest from overriding our compiler/linker options
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)

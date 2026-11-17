@@ -11,8 +11,8 @@
 | 消息投递 | **Phase 13 / full_primary** | `DELIVERY_EXECUTION_MODE=go_primary`；private+group rollout 100% | Node 保留 fallback/replay |
 | 实时边界 | **Phase 23 / rust_edge_primary** | `GATEWAY_REALTIME_ROLLOUT_STAGE=rust_edge_primary` | socket terminator 仍为 `node`（2A） |
 | Socket 终结 | **Phase 26 / 2B rust** | `GATEWAY_REALTIME_SOCKET_TERMINATOR=rust`；`GATEWAY_REALTIME_SESSION_LEASE_TTL_SECS=100` | 修复 await 遗失并引入 100s 租约，40+4 测试全绿 |
-| 图数据面 | **Phase 20 / 只读快照** | `CPP_GRAPH_KERNEL_ENABLED=true` | 快照从 Node generation 协议拉取 |
-| 推荐管道 | **Phase 28C 完成 / 28D 待切流** | `RUST_RECOMMENDATION_STAGE=retrieval_ranking_v3`；`retrieval_mode=two_tower_mol_k4_sid`；`ranking_mode=phoenix_v3_student_int8` | 5台GPU并发消融实测完成（实耗46.13 CU，结余57.53 CU），48篇pytest全绿，serving_manifest_v3 11项工件SHA256 100%匹配 |
+| 图数据面 | **Phase 28D / 实时增量断边** | `CPP_GRAPH_KERNEL_ENABLED=true`；`GRAPH_KERNEL_REDIS_STREAM_ENABLED=true` | `hiredis` 消费 `recsys:events:v1` + `DeltaEdgeOverlay` 秒级断边 + `AuthorCredScore` |
+| 推荐管道 | **Phase 28D 完成 / 28E Rust 重构就绪** | `ML_SERVICE_URL` 100% 切流至纯 ONNXRT Revision (`telegram-ml-services-00046-lur`) | Cloud Run 实测 `516MB` RSS、`P95=9.03ms`，Node `426/426` 现有帖 `100% semantic_ready` |
 | Rust Workspace | **16A–16C 完成** | `workspace-transition.json`：`recommendation_service_migrated` | 15 shared crates |
 | Embedding 契约修复 | **Phase 0.5** | `reports/recommendation/embedding-contract-remediation/` | packet：`CODE_AND_DRY_RUN_READY` / 生产 **NOT GRANTED**；本地 18 文件 gate 已复验通过（2026-07-16）；Task 9 待 operator 授权 |
 | 推荐研究文档 | 至 phase155 | `docs/research/phase*.md` | 算法证据矩阵，非运行时 phase |

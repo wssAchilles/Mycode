@@ -8,6 +8,7 @@
 
 #include "config/config.h"
 #include "graph/graph_store.h"
+#include "graph/realtime/redis_stream_consumer.h"
 #include "http/graph_routes.h"
 #include "http/http_server.h"
 #include "http/runtime/runtime_metrics.h"
@@ -84,6 +85,20 @@ int main() {
       std::cerr << "[graph-kernel] bootstrap snapshot failed: " << error.what() << std::endl;
     }
 
+    tg_core::realtime::RedisStreamConsumer stream_consumer(
+        tg_core::realtime::RedisStreamConfig{
+            .enabled = config.redis_stream_enabled,
+            .url = config.redis_url,
+            .host = config.redis_host,
+            .port = config.redis_port,
+            .password = config.redis_password,
+            .stream_key = config.redis_stream_key,
+            .consumer_group = config.redis_consumer_group,
+            .consumer_name = config.redis_consumer_name,
+        },
+        store.delta_overlay());
+    stream_consumer.start();
+
     std::jthread refresh_thread([&loader, &config](std::stop_token stop_token) {
       while (!stop_token.stop_requested()) {
         std::this_thread::sleep_for(std::chrono::seconds(config.snapshot_refresh_secs));
@@ -112,6 +127,7 @@ int main() {
 
     std::cout << "[graph-kernel] listening on " << config.bind_host << ':' << config.bind_port << std::endl;
     server.serve_forever();
+    stream_consumer.stop();
 
     std::cout << "[graph-kernel] server exited cleanly" << std::endl;
   } catch (const std::exception& error) {

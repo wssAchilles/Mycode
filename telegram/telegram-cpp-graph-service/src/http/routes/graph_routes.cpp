@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "contracts/types.h"
+#include "graph/realtime/delta_edge_overlay.h"
 #include "telemetry/metrics.h"
 #include "http/routes/request_validation.h"
 
@@ -318,7 +319,8 @@ HttpResponse handle_graph_post(
     const tg_config::ServiceConfig& config,
     tg_core::GraphStore& store,
     tg_ops::GraphServiceMetrics& metrics) {
-  if (request.path != "/graph/batch") {
+  if (request.path != "/graph/batch" && request.path != "/graph/delta" &&
+      request.path != "/graph/author-cred") {
     const auto metadata = store.metadata();
     if (!metadata.loaded) {
       return error_response(503, "SNAPSHOT_UNAVAILABLE", "graph snapshot not loaded");
@@ -333,6 +335,53 @@ HttpResponse handle_graph_post(
   }
 
   try {
+    if (request.path == "/graph/delta") {
+      const auto source = body.value("sourceUserId", "");
+      const auto target = body.value("targetUserId", "");
+      const auto op = tg_core::realtime::parse_delta_edge_op(body.value("edgeOp", ""));
+      if (source.empty() || target.empty() || !op.has_value()) {
+        return invalid_request_response("sourceUserId, targetUserId, and valid edgeOp are required");
+      }
+      store.apply_edge_delta(tg_core::realtime::EdgeDeltaEvent{
+          .source_user_id = source,
+          .target_user_id = target,
+          .op = *op,
+          .weight_delta = body.value("weightDelta", 0.0),
+          .timestamp_ms = body.value("timestampMs", static_cast<std::int64_t>(0)),
+      });
+      const auto snap = store.delta_overlay()->metrics();
+      return json_response(
+          200,
+          tg_contracts::success_response(nlohmann::json{
+              {"applied", true},
+              {"appliedEvents", snap.applied_events},
+              {"blockedPairCount", snap.blocked_pair_count},
+              {"lastEventLagMs", snap.last_event_lag_ms},
+          }));
+    }
+    if (request.path == "/graph/author-cred") {
+      if (!body.contains("authorIds") || !body.at("authorIds").is_array()) {
+        return invalid_request_response("authorIds array is required");
+      }
+      std::vector<std::string> author_ids;
+      for (const auto& item : body.at("authorIds")) {
+        if (item.is_string() && !item.get<std::string>().empty()) {
+          author_ids.push_back(item.get<std::string>());
+        }
+      }
+      const auto results = store.author_cred_scores(author_ids);
+      nlohmann::json scores = nlohmann::json::array();
+      for (const auto& r : results) {
+        scores.push_back(nlohmann::json{
+            {"authorId", r.author_id},
+            {"authorCredScore", r.author_cred_score},
+            {"inDegree", r.in_degree},
+            {"totalInWeight", r.total_in_weight},
+            {"negativePenalty", r.negative_penalty},
+        });
+      }
+      return json_response(200, tg_contracts::success_response(nlohmann::json{{"scores", scores}}));
+    }
     if (request.path == "/graph/batch") {
       return handle_batch_query(body, store, config, metrics);
     }
@@ -419,9 +468,18 @@ HttpServer::Handler make_graph_handler(
             }));
       }
       if (request.path == "/ops/graph") {
-        return json_response(
-            200,
-            tg_contracts::success_response(metrics.ops_payload(config, store.metadata())));
+        auto payload = metrics.ops_payload(config, store.metadata());
+        if (const auto overlay = store.delta_overlay()) {
+          const auto snap = overlay->metrics();
+          payload["deltaOverlay"] = {
+              {"appliedEvents", snap.applied_events},
+              {"parseErrors", snap.parse_errors},
+              {"blockedPairCount", snap.blocked_pair_count},
+              {"boostedPairCount", snap.boosted_pair_count},
+              {"lastEventLagMs", snap.last_event_lag_ms},
+          };
+        }
+        return json_response(200, tg_contracts::success_response(payload));
       }
       // Prometheus metrics endpoint
       if (request.path == "/metrics") {

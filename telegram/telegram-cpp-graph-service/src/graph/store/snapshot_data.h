@@ -19,8 +19,14 @@ struct SnapshotData {
     const WeightedNeighbor* neighbor;
   };
 
+  struct AuthorInStat {
+    std::size_t in_degree{0};
+    double total_in_weight{0.0};
+  };
+
   std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency;
   std::unordered_map<std::string, std::vector<const WeightedNeighbor*>> neighbors_by_user_id;
+  std::unordered_map<std::string, AuthorInStat> author_in_stats;
   std::vector<std::size_t> dense_source_offsets;
   std::vector<DenseNeighborRef> dense_neighbors;
   std::vector<std::size_t> dense_ranked_source_offsets;

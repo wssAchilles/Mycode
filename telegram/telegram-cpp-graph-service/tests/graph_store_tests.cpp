@@ -19,6 +19,8 @@
 #include "config/config.h"
 #include "contracts/types.h"
 #include "graph/graph_store.h"
+#include "graph/realtime/delta_edge_overlay.h"
+#include "graph/realtime/redis_stream_consumer.h"
 #include "graph/query/budget.h"
 #include "graph/query/scoring.h"
 #include "graph/snapshot/csr_index.h"
@@ -1068,4 +1070,114 @@ TEST(OpsPayloadTest, ReportsHttpRuntimeMetrics) {
   EXPECT_EQ(social_summary.at("p99Ms"), 7);
   EXPECT_EQ(bridge_summary.at("budgetExhaustedCount"), 1);
   EXPECT_EQ(bridge_summary.at("emptyReasonCounts").at("budget_exhausted"), 1);
+}
+
+TEST(GraphStoreRealtimeDeltaTest, StreamDeltaUnfollowBlockAndFollowAffectQueriesImmediately) {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          SnapshotEdgeRecord{
+              .source_user_id = "alice",
+              .target_user_id = "bob",
+              .decayed_sum = 3.0,
+              .interaction_probability = 0.8,
+              .edge_kinds = {"follow"},
+          },
+          SnapshotEdgeRecord{
+              .source_user_id = "alice",
+              .target_user_id = "carol",
+              .decayed_sum = 2.0,
+              .interaction_probability = 0.6,
+              .edge_kinds = {"follow"},
+          },
+          SnapshotEdgeRecord{
+              .source_user_id = "bob",
+              .target_user_id = "dave",
+              .decayed_sum = 4.0,
+              .interaction_probability = 0.9,
+              .edge_kinds = {"follow"},
+          },
+      },
+      10,
+      "delta-test-v1",
+      std::chrono::system_clock::now());
+
+  // 初始查询命中 bob 与 carol
+  auto before = store.direct_neighbors("alice", 10, {});
+  ASSERT_EQ(before.candidates.size(), 2U);
+
+  // 通过 Stream 解析器实时注入 block bob 与 follow erin
+  const std::string block_payload =
+      R"({"sourceUserId":"alice","targetUserId":"bob","edgeOp":"block","weightDelta":-10.0,"timestampMs":1794888000000})";
+  ASSERT_TRUE(telegram::graph::core::realtime::apply_stream_record(
+      "graph.edge_delta", block_payload, *store.delta_overlay(), 1794888000015));
+
+  const std::string follow_payload =
+      R"({"sourceUserId":"alice","targetUserId":"erin","edgeOp":"follow","weightDelta":1.5,"timestampMs":1794888000010})";
+  ASSERT_TRUE(telegram::graph::core::realtime::apply_stream_record(
+      "graph.edge_delta", follow_payload, *store.delta_overlay(), 1794888000020));
+
+  auto after = store.direct_neighbors("alice", 10, {});
+  ASSERT_EQ(after.candidates.size(), 2U);
+  for (const auto& c : after.candidates) {
+    EXPECT_NE(c.user_id, "bob");
+  }
+  const auto social_after = store.social_neighbors("alice", 10, {});
+  for (const auto& c : social_after.candidates) {
+    EXPECT_NE(c.user_id, "bob");
+  }
+
+  // 验证 AuthorCredScore 对被拉黑作者 bob 实时扣减惩罚
+  const auto cred = store.author_cred_scores({"bob", "carol", "unknown_user"});
+  ASSERT_EQ(cred.size(), 3U);
+  EXPECT_LT(cred[0].author_cred_score, cred[1].author_cred_score);
+  EXPECT_DOUBLE_EQ(cred[2].author_cred_score, 0.5);
+}
+
+TEST(GraphStoreRealtimeDeltaTest, HttpRoutesServeDeltaAndAuthorCredEndpoints) {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          SnapshotEdgeRecord{
+              .source_user_id = "u1",
+              .target_user_id = "u2",
+              .decayed_sum = 5.0,
+              .interaction_probability = 0.85,
+              .edge_kinds = {"follow"},
+          },
+      },
+      10,
+      "http-delta-v1",
+      std::chrono::system_clock::now());
+
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  const auto handler = telegram::graph::http::make_graph_handler(test_config(), store, metrics);
+
+  const auto delta_resp = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/delta",
+      .body = R"({"sourceUserId":"u1","targetUserId":"u2","edgeOp":"unfollow"})",
+  });
+  EXPECT_EQ(delta_resp.status_code, 200);
+  const auto delta_json = nlohmann::json::parse(delta_resp.body);
+  EXPECT_TRUE(delta_json.at("data").at("applied").get<bool>());
+
+  const auto cred_resp = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/author-cred",
+      .body = R"({"authorIds":["u2","u3"]})",
+  });
+  EXPECT_EQ(cred_resp.status_code, 200);
+  const auto cred_json = nlohmann::json::parse(cred_resp.body);
+  ASSERT_EQ(cred_json.at("data").at("scores").size(), 2U);
+  EXPECT_GT(cred_json.at("data").at("scores")[0].at("negativePenalty").get<double>(), 0.0);
+
+  const auto ops_resp = handler(telegram::graph::http::HttpRequest{
+      .method = "GET",
+      .path = "/ops/graph",
+      .body = "",
+  });
+  EXPECT_EQ(ops_resp.status_code, 200);
+  const auto ops_json = nlohmann::json::parse(ops_resp.body);
+  EXPECT_EQ(ops_json.at("data").at("deltaOverlay").at("appliedEvents").get<std::uint64_t>(), 1U);
 }

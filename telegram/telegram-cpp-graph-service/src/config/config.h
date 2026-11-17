@@ -33,6 +33,15 @@ struct ServiceConfig {
   std::size_t http_queue_capacity;
   std::uint64_t http_request_timeout_secs;
   std::size_t http_max_body_bytes;
+  // Redis Stream 实时增量消费配置
+  bool redis_stream_enabled{false};
+  std::string redis_url;
+  std::string redis_host{"127.0.0.1"};
+  std::uint16_t redis_port{6379};
+  std::string redis_password;
+  std::string redis_stream_key{"recsys:events:v1"};
+  std::string redis_consumer_group{"cpp-graph-kernel"};
+  std::string redis_consumer_name{"cpp-graph-worker-1"};
 };
 
 ServiceConfig load_from_env();

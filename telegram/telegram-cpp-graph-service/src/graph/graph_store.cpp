@@ -109,7 +109,20 @@ GraphStore::GraphStore()
     : GraphStore([] { return std::chrono::steady_clock::now(); }) {}
 
 GraphStore::GraphStore(QueryClock query_clock)
-    : query_clock_(std::move(query_clock)) {}
+    : query_clock_(std::move(query_clock)),
+      delta_overlay_(std::make_shared<realtime::DeltaEdgeOverlay>()) {}
+
+std::shared_ptr<realtime::DeltaEdgeOverlay> GraphStore::delta_overlay() const noexcept {
+  return delta_overlay_;
+}
+
+void GraphStore::apply_edge_delta(
+    const realtime::EdgeDeltaEvent& event,
+    const std::int64_t now_ms) {
+  if (delta_overlay_ != nullptr) {
+    delta_overlay_->apply_edge_delta(event, now_ms);
+  }
+}
 
 void GraphStore::replace_snapshot(
     const std::vector<contracts::SnapshotEdgeRecord>& edges,
@@ -166,6 +179,22 @@ std::unordered_set<std::uint32_t> GraphStore::intern_excluded_ids(
   return result;
 }
 
+std::unordered_set<std::uint32_t> GraphStore::merged_excluded_ids(
+    const SnapshotData& snapshot,
+    const std::string& source_user_id,
+    const std::unordered_set<std::string>& explicit_excluded) const {
+  auto merged = intern_excluded_ids(snapshot, explicit_excluded);
+  if (delta_overlay_ != nullptr) {
+    const auto overlay_blocked = delta_overlay_->blocked_targets_for(source_user_id);
+    for (const auto& id : overlay_blocked) {
+      if (auto interned = snapshot.user_ids.find(id); interned.has_value()) {
+        merged.insert(interned.value());
+      }
+    }
+  }
+  return merged;
+}
+
 template <typename WeightFn>
 QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
     const std::span<const SnapshotData::DenseNeighborRef> neighbors,
@@ -186,12 +215,40 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
   const auto neighbors = store::read_ranked_dense_neighbor_index(*snapshot, query.user_id);
-  return with_snapshot_diagnostics(
-      query::direct_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
-          neighbors,
-          query.limit,
-          intern_excluded_ids(*snapshot, query.excluded_user_ids)),
-      *snapshot);
+  auto result = query::direct_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
+      neighbors,
+      query.limit,
+      merged_excluded_ids(*snapshot, query.user_id, query.excluded_user_ids));
+  // 注入快照刷新周期内来自 Redis Stream 的实时新关注增补边
+  if (delta_overlay_ != nullptr) {
+    const auto boosts = delta_overlay_->follow_boosts_for(query.user_id);
+    if (!boosts.empty()) {
+      const auto overlay_blocked = delta_overlay_->blocked_targets_for(query.user_id);
+      std::unordered_set<std::string> seen;
+      seen.reserve(result.candidates.size());
+      for (const auto& c : result.candidates) {
+        seen.insert(c.user_id);
+      }
+      for (const auto& [target_id, w] : boosts) {
+        if (seen.contains(target_id) || query.excluded_user_ids.contains(target_id) ||
+            overlay_blocked.contains(target_id)) {
+          continue;
+        }
+        result.candidates.push_back(contracts::NeighborCandidate{
+            .user_id = target_id,
+            .score = w,
+            .relation_kinds = {"realtime_follow"},
+        });
+        result.available_count += 1;
+      }
+      if (query.limit > 0 && result.candidates.size() > query.limit) {
+        std::sort(result.candidates.begin(), result.candidates.end(),
+                  [](const auto& a, const auto& b) { return a.score > b.score; });
+        result.candidates.resize(query.limit);
+      }
+    }
+  }
+  return with_snapshot_diagnostics(std::move(result), *snapshot);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
@@ -222,7 +279,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors_from_
       rank_dense_neighbors(
           store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
           query.limit,
-          intern_excluded_ids(snapshot, query.excluded_user_ids),
+          merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
           [now_ms](const WeightedNeighbor& neighbor) {
             return query::social_weight_at(neighbor, now_ms);
           }),
@@ -257,7 +314,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers_from_s
       rank_dense_neighbors(
           store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
           query.limit,
-          intern_excluded_ids(snapshot, query.excluded_user_ids),
+          merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
           [now_ms](const WeightedNeighbor& neighbor) {
             return query::recent_engager_weight_at(neighbor, now_ms);
           }),
@@ -292,7 +349,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers_from_snaps
       rank_dense_neighbors(
           store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
           query.limit,
-          intern_excluded_ids(snapshot, query.excluded_user_ids),
+          merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
           [now_ms](const WeightedNeighbor& neighbor) {
             return query::co_engager_weight_at(neighbor, now_ms);
           }),
@@ -327,7 +384,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neigh
       rank_dense_neighbors(
           store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
           query.limit,
-          intern_excluded_ids(snapshot, query.excluded_user_ids),
+          merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
           [now_ms](const WeightedNeighbor& neighbor) {
             return query::content_affinity_weight_at(neighbor, now_ms);
           }),
@@ -359,7 +416,7 @@ QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(*snapshot, source_id.value()),
-      intern_excluded_ids(*snapshot, query.excluded_user_ids),
+      merged_excluded_ids(*snapshot, query.user_id, query.excluded_user_ids),
       query::TraversalOptions{
           .max_depth = query.max_depth,
           .max_branching_factor = query.max_branching_factor,
@@ -429,7 +486,7 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users_from_snapsh
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(snapshot, source_id.value()),
-      intern_excluded_ids(snapshot, query.excluded_user_ids),
+      merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
       query::TraversalOptions{
           .max_depth = query.max_depth,
           .max_branching_factor = query.max_branching_factor,
@@ -581,6 +638,42 @@ std::optional<GraphStore::BatchQueryCandidates> GraphStore::batch(
           .content_affinity_neighbors = content_affinity_neighbors_duration,
       },
   };
+}
+
+std::vector<GraphStore::AuthorCredScore> GraphStore::author_cred_scores(
+    const std::vector<std::string>& author_ids) const {
+  const auto snapshot = read_snapshot();
+  std::vector<AuthorCredScore> out;
+  out.reserve(author_ids.size());
+
+  for (const auto& author_id : author_ids) {
+    std::size_t in_degree = 0;
+    double total_in_weight = 0.0;
+    if (snapshot != nullptr) {
+      if (auto it = snapshot->author_in_stats.find(author_id);
+          it != snapshot->author_in_stats.end()) {
+        in_degree = it->second.in_degree;
+        total_in_weight = it->second.total_in_weight;
+      }
+    }
+    const double penalty =
+        delta_overlay_ != nullptr ? delta_overlay_->penalty_for_author(author_id) : 0.0;
+    // 基于对数入度与入边累积权重的局部图谱先验分，并实时扣减取关/拉黑负反馈惩罚
+    const double raw_prior =
+        in_degree == 0 && total_in_weight <= 0.0
+            ? 0.5
+            : std::min(1.0, 0.35 + 0.15 * std::log1p(static_cast<double>(in_degree)) +
+                                0.12 * std::log1p(std::max(0.0, total_in_weight)));
+    const double cred = std::clamp(raw_prior - penalty, 0.0, 1.0);
+    out.push_back(AuthorCredScore{
+        .author_id = author_id,
+        .author_cred_score = cred,
+        .in_degree = in_degree,
+        .total_in_weight = total_in_weight,
+        .negative_penalty = penalty,
+    });
+  }
+  return out;
 }
 
 SnapshotMetadata GraphStore::metadata() const {

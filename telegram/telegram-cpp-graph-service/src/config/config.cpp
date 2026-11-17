@@ -127,6 +127,14 @@ ServiceConfig load_from_env() {
       .http_queue_capacity = read_size_env("GRAPH_KERNEL_HTTP_QUEUE_CAPACITY", 512),
       .http_request_timeout_secs = read_u64_env("GRAPH_KERNEL_HTTP_REQUEST_TIMEOUT_SECS", 5),
       .http_max_body_bytes = read_size_env("GRAPH_KERNEL_HTTP_MAX_BODY_BYTES", 1024 * 1024),
+      .redis_stream_enabled = read_bool_env("GRAPH_KERNEL_REDIS_STREAM_ENABLED", true),
+      .redis_url = read_env("GRAPH_KERNEL_REDIS_URL", read_env("REDIS_URL", "")),
+      .redis_host = read_env("REDIS_HOST", "redis"),
+      .redis_port = static_cast<std::uint16_t>(read_size_env("REDIS_PORT", 6379)),
+      .redis_password = read_env("REDIS_PASSWORD", ""),
+      .redis_stream_key = read_env("RECSYS_EVENT_STREAM_KEY", "recsys:events:v1"),
+      .redis_consumer_group = read_env("GRAPH_KERNEL_REDIS_GROUP", "cpp-graph-kernel"),
+      .redis_consumer_name = read_env("GRAPH_KERNEL_REDIS_CONSUMER", "cpp-graph-worker-1"),
   };
 }
 

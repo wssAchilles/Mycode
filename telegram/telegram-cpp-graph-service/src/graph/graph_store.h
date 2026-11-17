@@ -13,6 +13,7 @@
 
 #include "contracts/types.h"
 #include "graph/domain/weighted_neighbor.h"
+#include "graph/realtime/delta_edge_overlay.h"
 #include "graph/snapshot/metadata.h"
 #include "graph/store/snapshot_data.h"
 #include "graph/store/snapshot_handle.h"
@@ -184,12 +185,33 @@ class GraphStore {
 
   std::optional<BatchQueryCandidates> batch(const GraphBatchQuery& query) const;
 
+  struct AuthorCredScore {
+    std::string author_id;
+    double author_cred_score{0.5};
+    std::size_t in_degree{0};
+    double total_in_weight{0.0};
+    double negative_penalty{0.0};
+  };
+
+  std::vector<AuthorCredScore> author_cred_scores(
+      const std::vector<std::string>& author_ids) const;
+
+  void apply_edge_delta(
+      const realtime::EdgeDeltaEvent& event,
+      std::int64_t now_ms = 0);
+
+  std::shared_ptr<realtime::DeltaEdgeOverlay> delta_overlay() const noexcept;
+
   SnapshotMetadata metadata() const;
 
  private:
   using SnapshotData = store::SnapshotData;
 
   std::shared_ptr<const SnapshotData> read_snapshot() const;
+  std::unordered_set<std::uint32_t> merged_excluded_ids(
+      const SnapshotData& snapshot,
+      const std::string& source_user_id,
+      const std::unordered_set<std::string>& explicit_excluded) const;
   template <typename WeightFn>
   static QueryCandidates<contracts::NeighborCandidate> rank_dense_neighbors(
       std::span<const SnapshotData::DenseNeighborRef> neighbors,
@@ -221,6 +243,7 @@ class GraphStore {
       std::int64_t now_ms) const;
   QueryClock query_clock_;
   store::SnapshotHandle<SnapshotData> snapshot_;
+  std::shared_ptr<realtime::DeltaEdgeOverlay> delta_overlay_;
   bool traversal_best_first_enabled_{false};
   bool overlap_streaming_topk_enabled_{true};
 };
