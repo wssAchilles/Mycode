@@ -17,6 +17,10 @@ use crate::pipeline::local::clock::ranking_now;
 use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, related_post_ids,
 };
+use crate::pipeline::local::filters::visibility_rules::{
+    HIGH_CREDIBILITY_EXEMPT_THRESHOLD, has_strict_non_exempt_risk,
+    is_high_credibility_low_risk_exempt, visibility_downrank_factor,
+};
 
 use super::policy::ScoringPolicy;
 
@@ -177,9 +181,12 @@ pub(super) fn source_rank_signal(candidate: &RecommendationCandidatePayload) -> 
         .unwrap_or(0.0)
 }
 
-/// 可见性梯度: 利用 vf_result.level 和 vf_result.score 细化安全惩罚
-/// 比简单的 safe/unsafe 二元判断更精细
+/// 可见性梯度: 联合声明式可见性引擎，利用 `content_safety_labels`、`vf_result` 与 `author_cred_score` 细化安全惩罚
 pub(super) fn visibility_gradient_signal(candidate: &RecommendationCandidatePayload) -> f64 {
+    if candidate.content_safety_labels.is_some() || candidate.author_cred_score.is_some() {
+        return visibility_downrank_factor(candidate);
+    }
+
     let vf = match candidate.vf_result.as_ref() {
         Some(vf) => vf,
         None => return 1.0, // 无可见性信息 = 默认可见
@@ -340,13 +347,14 @@ pub(super) fn negative_feedback_signal(
         strength = strength.max(1.0);
     }
 
-    // 内容安全: 不安全或 NSFW
-    if candidate
-        .vf_result
+    // 内容安全: 不安全、异步高危标签或 NSFW（对高信誉 >= 0.80 且仅含轻度 low_risk 文本标签予以豁免）
+    let cred_exempt = is_high_credibility_low_risk_exempt(candidate, HIGH_CREDIBILITY_EXEMPT_THRESHOLD);
+    let label_unsafe = candidate
+        .content_safety_labels
         .as_ref()
-        .is_some_and(|result| !result.safe)
-        || candidate.is_nsfw == Some(true)
-    {
+        .is_some_and(|labels| !labels.safe);
+    let vf_unsafe = candidate.vf_result.as_ref().is_some_and(|result| !result.safe);
+    if has_strict_non_exempt_risk(candidate) || (!cred_exempt && (vf_unsafe || label_unsafe)) {
         strength = strength.max(0.72);
     }
 

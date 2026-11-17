@@ -10,6 +10,7 @@ use super::calibration::{
     content_quality_stage, recency_adjustment_plan, recency_stage, score_calibration_enabled,
     score_calibration_stage,
 };
+use super::cold_start_ts::apply_cold_start_ts_for_query;
 use super::exploration::{
     apply_bandit_exploration, apply_exploration, bandit_exploration_plan, bandit_exploration_stage,
     exploration_plan, exploration_stage,
@@ -123,6 +124,11 @@ pub(super) fn run_fused_interest_exploration_group(
         if let Some(plan) = &bandit_exploration_plan {
             apply_bandit_exploration(ctx, candidate, plan);
         }
+    }
+
+    // 与 unfused 路径的 bandit_exploration_scorer 保持一致，在分组末尾执行列表级冷启动 TS 提权
+    if bandit_exploration_plan.is_some() {
+        apply_cold_start_ts_for_query(ctx.query, &mut candidates);
     }
 
     FusedAdjustmentExecution {

@@ -1,5 +1,6 @@
 mod affinity;
 mod calibration;
+pub mod cold_start_ts;
 mod diversity;
 mod exploration;
 mod fused_adjustments;
@@ -31,6 +32,11 @@ use suppression::{fatigue_scorer, session_suppression_scorer};
 use trends::{news_trend_link_scorer, trend_affinity_scorer, trend_personalization_scorer};
 use weighted::weighted_scorer;
 
+#[allow(unused_imports)]
+pub use cold_start_ts::{
+    ColdStartTsConfig, ColdStartTsOutcome, DeterministicRng, apply_cold_start_ts,
+    positions_among_nonzero, sample_beta_deterministic, sample_beta_with_rng,
+};
 #[allow(unused_imports)]
 pub use runner::{
     LocalScoringExecution, local_ranking_adjustment_group_specs, local_ranking_ladder_plan,

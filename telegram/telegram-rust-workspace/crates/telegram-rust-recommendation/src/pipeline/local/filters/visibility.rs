@@ -1,8 +1,10 @@
-//! 可见性安全（Visibility Filtering）精选后过滤器：严格按 fail-closed 原则执行安全审查，无信任召回绕过后门。
+//! 可见性安全（Visibility Filtering）精选后过滤器：
+//! 基于声明式规则引擎 `visibility_rules` 执行 fail-closed 安全审查，
+//! 综合 `content_safety_labels`、`vf_result` 与 `author_cred_score`，无信任召回绕过后门。
 
 use std::collections::HashMap;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use telegram_component_primitives::filters::VF_FILTER;
 use telegram_filter_primitives::FILTER_DROP_REASON_VISIBILITY_UNSAFE;
 
@@ -12,8 +14,13 @@ use crate::contracts::{
 
 use super::super::context::{env_bool, space_feed_experiment_flag};
 use super::detail::build_stage;
+use super::visibility_rules::{
+    ActionKind, HIGH_CREDIBILITY_EXEMPT_THRESHOLD, SafetyLevel, VisibilityPolicyConfig,
+    evaluate_candidate_visibility,
+};
 
-/// 基于内容安全审查状态（VF）过滤候选：NSFW、未通过安全审查以及未授权域外未审核内容一律丢弃。
+/// 基于声明式可见性规则引擎过滤候选：
+/// NSFW/high/blocked 及未通过安全审查内容一律丢弃；`author_cred_score >= 0.80` 时对轻度 `low_risk` 文本标签免误伤放行。
 pub(super) fn vf_filter(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
@@ -45,49 +52,69 @@ pub(super) fn vf_filter(
         "vf_oon_allow_low_risk",
         env_bool("VF_OON_ALLOW_LOW_RISK", false),
     );
+    let drop_interstitial = space_feed_experiment_flag(
+        query,
+        "vf_drop_interstitial",
+        env_bool("VF_DROP_INTERSTITIAL", false),
+    );
+    let safety_level = if space_feed_experiment_flag(query, "vf_safety_level_filter_all", false) {
+        SafetyLevel::FilterAll
+    } else {
+        SafetyLevel::from_query(query, None)
+    };
+
+    let policy_cfg = VisibilityPolicyConfig {
+        safety_level,
+        is_cold_start,
+        allow_news_cold_start,
+        allow_in_network_low_risk,
+        allow_oon_low_risk,
+        drop_interstitial,
+        high_cred_threshold: HIGH_CREDIBILITY_EXEMPT_THRESHOLD,
+    };
 
     let mut kept = Vec::new();
     let mut removed = Vec::new();
+    let mut drop_count = 0_u64;
+    let mut tombstone_count = 0_u64;
+    let mut interstitial_count = 0_u64;
+    let mut downrank_count = 0_u64;
+    let mut allow_count = 0_u64;
+    let mut credibility_exempt_count = 0_u64;
+    let mut async_labels_evaluated_count = 0_u64;
 
     for candidate in candidates {
-        if candidate.is_nsfw == Some(true) {
+        let verdict = evaluate_candidate_visibility(&candidate, &policy_cfg);
+
+        if verdict.used_content_safety_labels {
+            async_labels_evaluated_count += 1;
+        }
+        if verdict.credibility_exempt {
+            credibility_exempt_count += 1;
+        }
+        match verdict.action {
+            ActionKind::Drop => drop_count += 1,
+            ActionKind::Tombstone => tombstone_count += 1,
+            ActionKind::Interstitial => interstitial_count += 1,
+            ActionKind::Downrank => downrank_count += 1,
+            ActionKind::Allow => allow_count += 1,
+        }
+
+        if verdict.should_drop() {
             removed.push(candidate);
-            continue;
+        } else {
+            kept.push(candidate);
         }
-
-        let Some(vf) = candidate.vf_result.as_ref() else {
-            // VF 结果缺失时 fail-closed 降级：仅允许已关注网络内或冷启动新闻语料通过，拒绝域外未知内容
-            let keep_unchecked_candidate = candidate.in_network == Some(true)
-                || (is_cold_start && allow_news_cold_start && candidate.is_news == Some(true));
-            if keep_unchecked_candidate {
-                kept.push(candidate);
-            } else {
-                removed.push(candidate);
-            }
-            continue;
-        };
-
-        if !vf.safe {
-            removed.push(candidate);
-            continue;
-        }
-
-        if vf.level.as_deref() == Some("low_risk") {
-            let allow_low_risk = if candidate.in_network == Some(true) {
-                allow_in_network_low_risk
-            } else {
-                allow_oon_low_risk
-            };
-            if !allow_low_risk {
-                removed.push(candidate);
-                continue;
-            }
-        }
-
-        kept.push(candidate);
     }
 
     let removed_count = input_count.saturating_sub(kept.len());
+
+    let mut action_counts = Map::new();
+    action_counts.insert("drop".to_string(), Value::from(drop_count));
+    action_counts.insert("tombstone".to_string(), Value::from(tombstone_count));
+    action_counts.insert("interstitial".to_string(), Value::from(interstitial_count));
+    action_counts.insert("downrank".to_string(), Value::from(downrank_count));
+    action_counts.insert("allow".to_string(), Value::from(allow_count));
 
     let mut detail = HashMap::new();
     detail.insert(
@@ -98,12 +125,28 @@ pub(super) fn vf_filter(
         "trustedUnderfillFallbackUsed".to_string(),
         Value::Bool(false),
     );
-    detail.insert("trustedUnderfillFallbackCount".to_string(), Value::from(0_u64));
+    detail.insert(
+        "trustedUnderfillFallbackCount".to_string(),
+        Value::from(0_u64),
+    );
     detail.insert("failClosed".to_string(), Value::Bool(true));
     detail.insert(
         "coldStartNewsFallbackEnabled".to_string(),
         Value::Bool(allow_news_cold_start),
     );
+    detail.insert(
+        "safetyLevel".to_string(),
+        Value::String(safety_level.as_str().to_string()),
+    );
+    detail.insert(
+        "credibilityExemptCount".to_string(),
+        Value::from(credibility_exempt_count),
+    );
+    detail.insert(
+        "contentSafetyLabelsEvaluatedCount".to_string(),
+        Value::from(async_labels_evaluated_count),
+    );
+    detail.insert("actionCounts".to_string(), Value::Object(action_counts));
 
     (
         kept,

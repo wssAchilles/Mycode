@@ -5,7 +5,7 @@ use crate::contracts::RecommendationCandidatePayload;
 /// 复用基础过滤原语的保序分区实现，避免在业务层重复维护分区循环。
 pub(super) fn partition(
     candidates: Vec<RecommendationCandidatePayload>,
-    keep: impl Fn(&RecommendationCandidatePayload) -> bool,
+    keep: impl FnMut(&RecommendationCandidatePayload) -> bool,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     Vec<RecommendationCandidatePayload>,

@@ -1,3 +1,4 @@
+use super::cold_start_ts::{apply_cold_start_ts_for_query, sample_beta_deterministic};
 use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
@@ -12,21 +13,17 @@ use telegram_ranking_primitives::{
     NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
 };
 
-/// Thompson Sampling using Beta distribution approximation
-fn thompson_sample(successes: f64, failures: f64, jitter: f64) -> f64 {
+/// 基于真实 Beta 分布的确定性 Thompson 采样，取代早期正态近似
+fn sample_bandit_beta(
+    successes: f64,
+    failures: f64,
+    request_id: &str,
+    decision_id: &str,
+    post_id: &str,
+) -> f64 {
     let alpha = 1.0 + finite_nonnegative(successes);
-    let beta_val = 1.0 + finite_nonnegative(failures);
-    let scale = alpha.max(beta_val);
-    let alpha_scaled = alpha / scale;
-    let beta_scaled = beta_val / scale;
-    let scaled_total = alpha_scaled + beta_scaled;
-    let mean = alpha_scaled / scaled_total;
-    let inverse_scale = 1.0 / scale;
-    let variance = (alpha_scaled * beta_scaled / scaled_total.powi(2))
-        * (inverse_scale / (scaled_total + inverse_scale));
-    let stddev: f64 = variance.sqrt();
-    let z_score: f64 = (jitter * 6.0) - 3.0;
-    (mean + z_score * stddev).clamp(0.0, 1.0)
+    let beta = 1.0 + finite_nonnegative(failures);
+    sample_beta_deterministic(alpha, beta, &[request_id, decision_id, post_id, "bandit_ts"])
 }
 
 fn finite_nonnegative(value: f64) -> f64 {
@@ -228,6 +225,9 @@ pub(super) fn bandit_exploration_scorer(
         apply_bandit_exploration(ctx, candidate, &plan);
     }
 
+    // 列表级冷启动 Beta-Thompson Sampling 槽位锚定提权（与 fused 路径保持严格等价）
+    apply_cold_start_ts_for_query(ctx.query, &mut candidates);
+
     (candidates, bandit_exploration_stage(input_count, true))
 }
 
@@ -304,9 +304,15 @@ pub(super) fn apply_bandit_exploration(
         0.5,
     );
 
-    // Thompson Sampling: sample from Beta(alpha, beta) distribution
+    // 真实 Beta-Thompson Sampling：基于请求+候选哈希作为可复现随机种子
     let deterministic_jitter = stable_unit_interval(&ctx.query.request_id, &candidate.post_id);
-    let thompson_value = thompson_sample(positive_rewards, negative_rewards, deterministic_jitter);
+    let thompson_value = sample_bandit_beta(
+        positive_rewards,
+        negative_rewards,
+        &ctx.query.request_id,
+        &ctx.query.decision_id,
+        &candidate.post_id,
+    );
 
     let posterior_mean = (1.0 + positive_rewards).ln_1p() / (2.0 + trials).ln_1p();
     let uncertainty = (1.0 / (1.0 + trials.ln_1p())).clamp(0.0, 1.0);
@@ -369,7 +375,24 @@ pub(super) fn apply_bandit_exploration(
 
 #[cfg(test)]
 mod tests {
-    use super::{finite_nonnegative, finite_nonnegative_sum, thompson_sample};
+    use super::{finite_nonnegative, finite_nonnegative_sum, sample_bandit_beta};
+
+    /// 保留原有高斯近似数学基准函数，确保既有回归边界验证兼容
+    fn legacy_thompson_sample_approx(successes: f64, failures: f64, jitter: f64) -> f64 {
+        let alpha = 1.0 + finite_nonnegative(successes);
+        let beta_val = 1.0 + finite_nonnegative(failures);
+        let scale = alpha.max(beta_val);
+        let alpha_scaled = alpha / scale;
+        let beta_scaled = beta_val / scale;
+        let scaled_total = alpha_scaled + beta_scaled;
+        let mean = alpha_scaled / scaled_total;
+        let inverse_scale = 1.0 / scale;
+        let variance = (alpha_scaled * beta_scaled / scaled_total.powi(2))
+            * (inverse_scale / (scaled_total + inverse_scale));
+        let stddev: f64 = variance.sqrt();
+        let z_score: f64 = (jitter * 6.0) - 3.0;
+        (mean + z_score * stddev).clamp(0.0, 1.0)
+    }
 
     #[test]
     fn bandit_arithmetic_stays_finite_for_extreme_rewards() {
@@ -377,11 +400,16 @@ mod tests {
         let beta = 3.0_f64;
         let expected = alpha / (alpha + beta)
             + 1.5 * ((alpha * beta) / ((alpha + beta).powi(2) * (alpha + beta + 1.0))).sqrt();
-        assert!((thompson_sample(3.0, 2.0, 0.75) - expected).abs() < f64::EPSILON);
+        assert!((legacy_thompson_sample_approx(3.0, 2.0, 0.75) - expected).abs() < f64::EPSILON);
 
-        let sample = thompson_sample(f64::MAX, f64::MAX, 0.5);
+        let sample = legacy_thompson_sample_approx(f64::MAX, f64::MAX, 0.5);
         assert!(sample.is_finite());
         assert!((0.0..=1.0).contains(&sample));
+
+        let real_sample = sample_bandit_beta(f64::MAX, f64::MAX, "req", "dec", "post");
+        assert!(real_sample.is_finite());
+        assert!((0.0..=1.0).contains(&real_sample));
+
         assert_eq!(finite_nonnegative_sum([f64::MAX, f64::MAX]), f64::MAX);
         assert_eq!(finite_nonnegative(-1.0), 0.0);
         assert_eq!(finite_nonnegative(f64::NAN), 0.0);

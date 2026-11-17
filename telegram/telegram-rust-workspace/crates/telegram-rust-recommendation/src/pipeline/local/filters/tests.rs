@@ -523,3 +523,168 @@ fn duplicate_filter_preserves_secondary_recall_provenance() {
     );
     assert_eq!(kept.in_network, Some(true));
 }
+
+#[test]
+fn pre_score_filters_apply_fair_share_when_exceeding_budget_and_keep_contract_below_budget() {
+    use crate::contracts::{ExperimentAssignmentPayload, ExperimentContextPayload};
+    use telegram_pipeline_primitives::PIPELINE_SPACE_FEED_EXPERIMENT_ID;
+
+    // 1. 候选数量未超过预算时，保持精确 15 个过滤阶段不变
+    let normal_query = query();
+    let normal_pool = vec![
+        candidate("p-1", "author-1"),
+        candidate("p-2", "author-2"),
+        candidate("p-3", "author-3"),
+    ];
+    let normal_result = run_pre_score_filters(&normal_query, normal_pool);
+    assert_eq!(normal_result.stages.len(), 15);
+    assert_eq!(normal_result.candidates.len(), 3);
+
+    // 2. 候选数量超出实验设定的精排预算时，自动触发 Fair-Share 等比分配并产出 16 阶段
+    let mut budget_query = query();
+    budget_query.experiment_context = Some(ExperimentContextPayload {
+        user_id: "viewer-1".to_string(),
+        assignments: vec![ExperimentAssignmentPayload {
+            experiment_id: PIPELINE_SPACE_FEED_EXPERIMENT_ID.to_string(),
+            experiment_name: "fair_share_budget_test".to_string(),
+            bucket: "treatment".to_string(),
+            config: HashMap::from([("fair_share_ranking_budget".to_string(), json!(4))]),
+            in_experiment: true,
+        }],
+    });
+
+    let mut large_pool = Vec::new();
+    for i in 0..4 {
+        let mut c = candidate(&format!("pop-{i}"), &format!("author-pop-{i}"));
+        c.recall_source = Some("PopularSource".to_string());
+        large_pool.push(c);
+    }
+    for i in 0..2 {
+        let mut c = candidate(&format!("graph-{i}"), &format!("author-graph-{i}"));
+        c.recall_source = Some("GraphSource".to_string());
+        large_pool.push(c);
+    }
+
+    let budgeted_result = run_pre_score_filters(&budget_query, large_pool);
+    assert_eq!(budgeted_result.candidates.len(), 4);
+    assert_eq!(
+        budgeted_result.drop_counts.get("FairShareRankingFilter"),
+        Some(&2)
+    );
+    assert_eq!(
+        budgeted_result
+            .candidates
+            .iter()
+            .filter(|c| c.recall_source.as_deref() == Some("PopularSource"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        budgeted_result
+            .candidates
+            .iter()
+            .filter(|c| c.recall_source.as_deref() == Some("GraphSource"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn post_selection_vf_filter_combines_async_safety_labels_and_high_cred_exemption() {
+    use crate::contracts::{CandidateVisibilityPayload, ContentSafetyLabelsPayload};
+
+    let mut cred_exempt = candidate("p-cred-exempt", "author-high-cred");
+    cred_exempt.author_cred_score = Some(0.86);
+    cred_exempt.content_safety_labels = Some(ContentSafetyLabelsPayload {
+        safe: false,
+        level: Some("low_risk".to_string()),
+        labels: vec!["mild_text_flag".to_string()],
+        score: Some(0.72),
+        source: Some("async_vf".to_string()),
+        assigned_at_ms: Some(1_700_000_000_000),
+    });
+
+    let mut low_cred_unsafe = candidate("p-low-cred", "author-low-cred");
+    low_cred_unsafe.author_cred_score = Some(0.50);
+    low_cred_unsafe.content_safety_labels = Some(ContentSafetyLabelsPayload {
+        safe: false,
+        level: Some("low_risk".to_string()),
+        labels: vec!["mild_text_flag".to_string()],
+        score: Some(0.72),
+        source: Some("async_vf".to_string()),
+        assigned_at_ms: Some(1_700_000_000_000),
+    });
+
+    let mut high_cred_blocked = candidate("p-high-cred-blocked", "author-high-cred-2");
+    high_cred_blocked.author_cred_score = Some(0.99);
+    high_cred_blocked.vf_result = Some(CandidateVisibilityPayload {
+        safe: false,
+        level: Some("blocked".to_string()),
+        ..Default::default()
+    });
+
+    let mut high_cred_nsfw = candidate("p-high-cred-nsfw", "author-high-cred-3");
+    high_cred_nsfw.author_cred_score = Some(0.95);
+    high_cred_nsfw.is_nsfw = Some(true);
+
+    let result = run_post_selection_filters(
+        &query(),
+        vec![
+            cred_exempt,
+            low_cred_unsafe,
+            high_cred_blocked,
+            high_cred_nsfw,
+        ],
+    );
+
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].post_id, "p-cred-exempt");
+    assert_filter_drop_detail(&result, "VFFilter", FILTER_DROP_REASON_VISIBILITY_UNSAFE, 3);
+    let vf_detail = result
+        .stages
+        .iter()
+        .find(|s| s.name == "VFFilter")
+        .and_then(|s| s.detail.as_ref())
+        .expect("VFFilter detail");
+    assert_eq!(vf_detail.get("credibilityExemptCount"), Some(&json!(1)));
+    assert_eq!(
+        vf_detail.get("contentSafetyLabelsEvaluatedCount"),
+        Some(&json!(2))
+    );
+}
+
+#[test]
+fn pre_score_socialgraph_filter_blocks_repost_and_quote_of_blocked_original_author() {
+    use crate::contracts::CachedPostEntryPayload;
+
+    let mut q = query();
+    // 原帖作者 `blocked-author` 在屏蔽列表中，通过缓存映射供转发帖查询
+    q.cached_posts.push(CachedPostEntryPayload {
+        post_id: "orig-blocked-post".to_string(),
+        author_id: "blocked-author".to_string(),
+        created_at_ms: 1_700_000_000_000,
+        semantic_ids: None,
+        recall_source: None,
+    });
+
+    let mut repost = candidate("repost-of-blocked", "safe-retweeter");
+    repost.is_repost = true;
+    repost.original_post_id = Some("orig-blocked-post".to_string());
+
+    let parent = candidate("parent-blocked-post", "blocked-author");
+    let mut reply_to_blocked = candidate("reply-to-blocked", "safe-replier");
+    reply_to_blocked.is_reply = true;
+    reply_to_blocked.reply_to_post_id = Some("parent-blocked-post".to_string());
+
+    let safe = candidate("clean-post", "safe-author");
+
+    let result = run_pre_score_filters(&q, vec![repost, parent, reply_to_blocked, safe]);
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].post_id, "clean-post");
+    assert_filter_drop_detail(
+        &result,
+        "AuthorSocialgraphFilter",
+        FILTER_DROP_REASON_BLOCKED_AUTHOR,
+        3,
+    );
+}

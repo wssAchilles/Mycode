@@ -1910,3 +1910,96 @@ fn intra_request_diversity_penalizes_repeated_topic_candidates() {
             < 1.0
     );
 }
+
+#[test]
+fn local_scorers_integrate_cold_start_ts_consistently_across_fused_and_unfused_paths() {
+    use crate::contracts::{ExperimentAssignmentPayload, ExperimentContextPayload};
+    use telegram_pipeline_primitives::PIPELINE_SPACE_FEED_EXPERIMENT_ID;
+
+    let mut q = query();
+    q.experiment_context = Some(ExperimentContextPayload {
+        user_id: q.user_id.clone(),
+        assignments: vec![ExperimentAssignmentPayload {
+            experiment_id: PIPELINE_SPACE_FEED_EXPERIMENT_ID.to_string(),
+            experiment_name: "cold_start_ts_integration".to_string(),
+            bucket: "treatment".to_string(),
+            config: HashMap::from([
+                ("cold_start_slot_min".to_string(), json!(0)),
+                ("cold_start_slot_max".to_string(), json!(2)),
+                ("low_impressions_max_boost_position_ratio".to_string(), json!(1.0)),
+            ]),
+            in_experiment: true,
+        }],
+    });
+
+    // 高分高曝光主帖 2 条 + 低曝光冷启动新帖 2 条
+    let mut high_0 = candidate("high-0", "author-high-0");
+    high_0.view_count = Some(600.0);
+    high_0.like_count = Some(120.0);
+    high_0.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.82),
+        click_score: Some(0.86),
+        dwell_score: Some(0.74),
+        ..Default::default()
+    });
+
+    let mut high_1 = candidate("high-1", "author-high-1");
+    high_1.view_count = Some(500.0);
+    high_1.like_count = Some(95.0);
+    high_1.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.75),
+        click_score: Some(0.80),
+        dwell_score: Some(0.68),
+        ..Default::default()
+    });
+
+    let mut cold_0 = candidate("cold-0", "author-cold-0");
+    cold_0.view_count = Some(12.0);
+    cold_0.like_count = Some(2.0);
+    cold_0.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.18),
+        click_score: Some(0.24),
+        ..Default::default()
+    });
+
+    let mut cold_1 = candidate("cold-1", "author-cold-1");
+    cold_1.view_count = Some(8.0);
+    cold_1.like_count = Some(1.0);
+    cold_1.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.22),
+        click_score: Some(0.28),
+        ..Default::default()
+    });
+
+    let pool = vec![high_0, high_1, cold_0, cold_1];
+    let fused = run_local_scorers(&q, pool.clone());
+    let unfused = run_local_scorers_without_fusion(&q, pool);
+
+    // 验证全 33 阶段契约顺序稳定，且至少有一条冷启动候选被 Beta-TS 选中并记录 breakdown
+    assert_eq!(fused.stages.len(), 33);
+    assert_eq!(
+        fused
+            .candidates
+            .iter()
+            .filter(|c| {
+                c.score_breakdown
+                    .as_ref()
+                    .and_then(|b| b.get("coldStartTsSelected"))
+                    == Some(&1.0)
+            })
+            .count(),
+        1
+    );
+
+    // 验证 fused 与 unfused 路径的 coldStartTsSelected 与 coldStartTsLiftedScore 完全一致
+    for (fc, uc) in fused.candidates.iter().zip(&unfused.candidates) {
+        let fb = fc.score_breakdown.as_ref().expect("fused breakdown");
+        let ub = uc.score_breakdown.as_ref().expect("unfused breakdown");
+        assert_eq!(fb.get("coldStartTsSelected"), ub.get("coldStartTsSelected"));
+        assert_eq!(fb.get("coldStartTsBetaSample"), ub.get("coldStartTsBetaSample"));
+        assert_eq!(
+            fb.get("coldStartTsLiftedScore"),
+            ub.get("coldStartTsLiftedScore")
+        );
+    }
+}
