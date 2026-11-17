@@ -54,6 +54,7 @@ target/
 # ML/runtime generated artifacts
 ml-services/data/
 ml-services/models/
+ml-services/artifacts/
 graphify-out
 .codebase-memory
 reports

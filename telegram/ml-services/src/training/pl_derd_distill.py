@@ -624,6 +624,11 @@ def train_phoenix_v3_teacher(
 
     cfg = init_model.config if init_model is not None else (config or PhoenixV3Config.teacher_preset())
     model = (init_model if init_model is not None else PhoenixV3Model(cfg, sid_artifact=sid_artifact)).to(target_device)
+    if init_model is not None:
+        # 防止传入此前作为蒸馏 teacher 被冻结过 requires_grad 的模型实例
+        model.train()
+        for p in model.parameters():
+            p.requires_grad_(True)
 
     optimizer: torch.optim.Optimizer
     if use_muon:
