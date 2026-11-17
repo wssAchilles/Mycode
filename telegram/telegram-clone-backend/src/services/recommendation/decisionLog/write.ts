@@ -59,7 +59,36 @@ export function buildRecommendationDecisionLogV1(
   const { candidates, totalCount, truncated, supportEvidence } = servingOwner === 'rust'
     ? buildRustCandidatePool(selectedCandidates, servedPositions, requestScopedRustTrace)
     : buildNodeCandidatePool(selectedCandidates, servedPositions);
-  const policyVersion = unavailableVersion('no_request_scoped_policy_version');
+  const pipelineVersionRaw = requestScopedRustTrace?.pipelineVersion?.trim();
+  const strategyVersionRaw = (
+    requestScopedRustTrace?.strategyVersion ?? input.query.rankingPolicy?.strategyVersion
+  )?.trim();
+  const servedCandidates = candidates
+    .filter((candidate) => candidate.selected && candidate.served)
+    .sort((left, right) => (left.servedPosition || 0) - (right.servedPosition || 0));
+  const actionProbabilities = servedCandidates.map((candidate) => {
+    const rawProb = selectedCandidates.get(candidate.candidateId)?.candidate.pageRlExplorationProb;
+    return typeof rawProb === 'number' && Number.isFinite(rawProb) && rawProb > 0 && rawProb <= 1
+      ? rawProb
+      : undefined;
+  });
+
+  // 仅当 Rust 返回完整无截断候选池、核心版本齐备且所有已投放动作具备合法探索概率时才解锁随机日志
+  const canEmitLoggedRandomized = servingOwner === 'rust'
+    && supportEvidence.status === 'complete'
+    && !truncated
+    && totalCount === candidates.length
+    && servedCandidates.length > 0
+    && Boolean(pipelineVersionRaw)
+    && Boolean(strategyVersionRaw)
+    && actionProbabilities.every((probability) => probability !== undefined);
+
+  const policyVersion = canEmitLoggedRandomized
+    ? versionEvidence(strategyVersionRaw, 'no_request_scoped_policy_version')
+    : unavailableVersion('no_request_scoped_policy_version');
+  const behaviorPolicyKind = canEmitLoggedRandomized
+    ? ('logged_randomized' as const)
+    : ('deterministic_top_k' as const);
   const decision = {
     contractVersion: RECOMMENDATION_DECISION_LOG_VERSION,
     positionContractVersion: SERVED_POSITION_CONTRACT_VERSION,
@@ -69,9 +98,11 @@ export function buildRecommendationDecisionLogV1(
     decisionAt: input.decisionAt.toISOString(),
     servingOwner,
     fallbackReason: input.debugInfo?.fallbackReason ?? null,
-    behaviorPolicyKind: 'deterministic_top_k' as const,
+    behaviorPolicyKind,
     behaviorPolicy: {
-      policyId: `${servingOwner}_deterministic_top_k`,
+      policyId: canEmitLoggedRandomized
+        ? 'rust_epsilon_plackett_luce_v2'
+        : `${servingOwner}_deterministic_top_k`,
       policyVersion,
     },
     versions: {
@@ -96,21 +127,23 @@ export function buildRecommendationDecisionLogV1(
       candidates,
       candidatePoolSha256: candidatePoolSha256(candidates),
     },
-    actions: candidates
-      .filter((candidate) => candidate.selected && candidate.served)
-      .sort((left, right) => (left.servedPosition || 0) - (right.servedPosition || 0))
-      .map((candidate) => ({
-        actionKey: {
-          candidateNamespace: 'serving_post_id' as const,
-          candidateId: candidate.candidateId,
-          servedPosition: candidate.servedPosition!,
-        },
-        selectionRank: candidate.selectionRank!,
-        behaviorPropensity: {
+    actions: servedCandidates.map((candidate, index) => ({
+      actionKey: {
+        candidateNamespace: 'serving_post_id' as const,
+        candidateId: candidate.candidateId,
+        servedPosition: candidate.servedPosition!,
+      },
+      selectionRank: candidate.selectionRank!,
+      behaviorPropensity: canEmitLoggedRandomized
+        ? {
+          status: 'logged_randomized' as const,
+          selectionProbability: actionProbabilities[index]!,
+        }
+        : {
           status: 'not_evaluable_deterministic' as const,
           reason: 'deterministic_top_k_no_logged_probability' as const,
         },
-      })),
+    })),
   };
 
   return recommendationDecisionLogSchema.parse(decision);

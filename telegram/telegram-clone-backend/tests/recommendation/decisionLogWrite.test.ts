@@ -481,4 +481,106 @@ describe('recommendation decision log writer', () => {
         process.env.RECOMMENDATION_DECISION_LOG_V1_ENABLED = 'true';
         expect(isRecommendationDecisionLogV1Enabled()).toBe(true);
     });
+
+    it('emits and persists logged_randomized decisions when Rust provides exploration propensities and complete support', async () => {
+        const query = createFeedQuery('viewer-1', 2, false, {
+            requestId: 'ce65f95a-c904-4c31-a28b-02bb61b14d75',
+            decisionId: '8d3dd5de-a2c1-47e2-bafb-91bf557cf4ab',
+        });
+        const selectedA = candidate('507f191e810c19729de8c001', {
+            score: 0.91,
+            pageRlExplorationProb: 0.78,
+        });
+        const selectedB = candidate('507f191e810c19729de8c002', {
+            score: 0.63,
+            pageRlExplorationProb: 0.22,
+        });
+        const completePool: RecommendationTraceReplayPoolPayload = {
+            poolKind: 'pre_selector_canonical_order_v2',
+            totalCount: 2,
+            truncated: false,
+            candidates: [replayCandidate(selectedA, 1), replayCandidate(selectedB, 2)],
+        };
+
+        const decision = buildRecommendationDecisionLogV1({
+            query,
+            policyCandidates: [selectedA, selectedB],
+            finalServedCandidates: [selectedA, selectedB],
+            debugInfo: debugInfo('rust'),
+            rustTrace: rustTrace(query.requestId, completePool),
+            decisionAt: new Date('2026-07-16T08:00:00.000Z'),
+        });
+
+        expect(decision.behaviorPolicyKind).toBe('logged_randomized');
+        expect(decision.behaviorPolicy).toEqual({
+            policyId: 'rust_epsilon_plackett_luce_v2',
+            policyVersion: { status: 'bound', version: 'weighted-v1' },
+        });
+        expect(decision.versions.policy).toEqual({ status: 'bound', version: 'weighted-v1' });
+        expect(decision.actions.map((action) => action.behaviorPropensity)).toEqual([
+            { status: 'logged_randomized', selectionProbability: 0.78 },
+            { status: 'logged_randomized', selectionProbability: 0.22 },
+        ]);
+
+        const updateOne = vi.spyOn(RecommendationTrace, 'updateOne').mockResolvedValue({
+            acknowledged: true,
+            matchedCount: 1,
+            modifiedCount: 1,
+        } as any);
+        await expect(persistRecommendationDecisionLogV1(decision)).resolves.toBeUndefined();
+        expect(updateOne).toHaveBeenCalledOnce();
+    });
+
+    it('falls back fail-closed to deterministic_top_k when any served candidate lacks a valid exploration probability or pool is incomplete', () => {
+        const query = createFeedQuery('viewer-1', 2, false, {
+            requestId: 'ce65f95a-c904-4c31-a28b-02bb61b14d75',
+            decisionId: '8d3dd5de-a2c1-47e2-bafb-91bf557cf4ab',
+        });
+        const validA = candidate('507f191e810c19729de8c001', {
+            score: 0.91,
+            pageRlExplorationProb: 0.85,
+        });
+        const missingProbB = candidate('507f191e810c19729de8c002', {
+            score: 0.63,
+        });
+        const completePool: RecommendationTraceReplayPoolPayload = {
+            poolKind: 'pre_selector_canonical_order_v2',
+            totalCount: 2,
+            truncated: false,
+            candidates: [replayCandidate(validA, 1), replayCandidate(missingProbB, 2)],
+        };
+
+        const missingProbDecision = buildRecommendationDecisionLogV1({
+            query,
+            policyCandidates: [validA, missingProbB],
+            finalServedCandidates: [validA, missingProbB],
+            debugInfo: debugInfo('rust'),
+            rustTrace: rustTrace(query.requestId, completePool),
+            decisionAt: new Date('2026-07-16T08:00:00.000Z'),
+        });
+        expect(missingProbDecision.behaviorPolicyKind).toBe('deterministic_top_k');
+        expect(missingProbDecision.versions.policy.status).toBe('unavailable');
+        expect(missingProbDecision.actions.every(
+            (action) => action.behaviorPropensity.status === 'not_evaluable_deterministic',
+        )).toBe(true);
+
+        const validB = candidate('507f191e810c19729de8c002', {
+            score: 0.63,
+            pageRlExplorationProb: 0.15,
+        });
+        const incompletePoolDecision = buildRecommendationDecisionLogV1({
+            query,
+            policyCandidates: [validA, validB],
+            finalServedCandidates: [validA, validB],
+            debugInfo: debugInfo('rust'),
+            rustTrace: rustTrace(query.requestId, {
+                ...completePool,
+                totalCount: 3,
+                truncated: true,
+            }),
+            decisionAt: new Date('2026-07-16T08:00:00.000Z'),
+        });
+        expect(incompletePoolDecision.behaviorPolicyKind).toBe('deterministic_top_k');
+        expect(incompletePoolDecision.versions.policy.status).toBe('unavailable');
+    });
 });

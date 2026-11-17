@@ -82,7 +82,7 @@ describe('FollowingTimelineCache', () => {
   });
 
   it('orders equal-timestamp posts by identity before returning the merged fallback', async () => {
-    const createdAt = new Date('2026-08-24T00:00:00.000Z');
+    const createdAt = new Date(Date.now() - 60_000);
     const findSpy = mockFindResults([[
       { _id: 'post-a', authorId: 'author-a', createdAt },
       { _id: 'post-c', authorId: 'author-b', createdAt },
