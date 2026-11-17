@@ -73,10 +73,14 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
     const loadMoreSearchResults = useSpaceStore((state) => state.loadMoreSearchResults);
     const clearSearch = useSpaceStore((state) => state.clearSearch);
-    const feedPosts = useSpaceStore((state) => state.posts);
-    const isLoadingFeed = useSpaceStore((state) => state.isLoadingFeed);
-    const fetchFeed = useSpaceStore((state) => state.fetchFeed);
-    const spaceError = useSpaceStore((state) => state.error);
+    // 探索推荐流只读取全站 Scope（inNetworkOnly: false），与首页“好友”视图完全隔离
+    const explorePosts = useSpaceStore((state) => state.allFeed?.posts ?? state.posts);
+    const isLoadingExplore = useSpaceStore((state) => state.allFeed?.isLoading ?? state.isLoadingFeed);
+    const exploreHasLoaded = useSpaceStore((state) => state.allFeed?.hasLoaded ?? false);
+    const exploreError = useSpaceStore((state) => state.allFeed?.error ?? state.error);
+    const searchError = useSpaceStore((state) => state.error);
+    const fetchExploreFeed = useSpaceStore((state) => state.fetchExploreFeed ?? state.fetchFeed);
+    const activeError = searchQuery ? searchError : exploreError;
 
     const loadTrends = useCallback(async () => {
         setTrendsLoading(true);
@@ -102,13 +106,13 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     }, [query, searchQuery]);
 
     useEffect(() => {
-        // 推荐页默认展示推荐内容：优先复用首页 feed；如果为空则主动拉取一次。
+        // 推荐页默认展示全站探索流：若全站缓存为空且未在加载，则主动拉取一次（不影响首页好友 Tab）。
         if (activeTab !== 'recommend') return;
         if (searchQuery) return;
         if (searchResults.length > 0) return;
-        if (feedPosts.length > 0 || isLoadingFeed) return;
-        fetchFeed(true);
-    }, [activeTab, searchQuery, searchResults.length, feedPosts.length, isLoadingFeed, fetchFeed]);
+        if (explorePosts.length > 0 || isLoadingExplore || exploreHasLoaded || exploreError) return;
+        fetchExploreFeed(true);
+    }, [activeTab, searchQuery, searchResults.length, explorePosts.length, isLoadingExplore, exploreHasLoaded, exploreError, fetchExploreFeed]);
 
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
@@ -133,18 +137,18 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const recommendedPosts = useMemo(() => {
         if (searchResults.length > 0) return searchResults;
         if (searchQuery) return [];
-        return feedPosts;
-    }, [searchResults, searchQuery, feedPosts]);
+        return explorePosts;
+    }, [searchResults, searchQuery, explorePosts]);
 
     const shouldShowFallbackNews = useMemo(() => {
         return (
             activeTab === 'recommend'
             && !isSearching
             && !searchQuery
-            && !isLoadingFeed
+            && !isLoadingExplore
             && recommendedPosts.length === 0
         );
-    }, [activeTab, isSearching, searchQuery, isLoadingFeed, recommendedPosts.length]);
+    }, [activeTab, isSearching, searchQuery, isLoadingExplore, recommendedPosts.length]);
 
     const searchResultLabel = searchMode === 'topic' && searchTopicTag
         ? `#${searchTopicTag}`
@@ -181,8 +185,8 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
             void searchPosts(searchQuery);
             return;
         }
-        void fetchFeed(true);
-    }, [fetchFeed, searchMode, searchPosts, searchQuery, searchTopicPosts, searchTopicTag]);
+        void fetchExploreFeed(true);
+    }, [fetchExploreFeed, searchMode, searchPosts, searchQuery, searchTopicPosts, searchTopicTag]);
 
     return (
         <section className="space-explore">
@@ -285,20 +289,20 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 )}
                             </>
                         )}
-                        {!isSearching && !searchQuery && isLoadingFeed && (
+                        {!isSearching && !searchQuery && isLoadingExplore && (
                             <ExploreSkeleton />
                         )}
-                        {!isSearching && spaceError && recommendedPosts.length === 0 && (
+                        {!isSearching && activeError && recommendedPosts.length === 0 && (
                             <StateBlock
                                 variant="error"
                                 title={searchQuery ? '搜索结果加载失败' : '推荐内容加载失败'}
-                                description={spaceError}
+                                description={activeError}
                                 actionLabel="重试"
                                 onAction={retryRecommendation}
                                 className="space-explore__state"
                             />
                         )}
-                        {!isSearching && !spaceError && !searchQuery && !isLoadingFeed && recommendedPosts.length === 0 && (
+                        {!isSearching && !activeError && !searchQuery && !isLoadingExplore && recommendedPosts.length === 0 && (
                             <>
                                 <div className="space-explore__empty">
                                     <div className="space-explore__empty-title">暂时没有推荐内容</div>
@@ -370,7 +374,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 </div>
                             </>
                         )}
-                        {!isSearching && !spaceError && searchQuery && searchResults.length === 0 && (
+                        {!isSearching && !activeError && searchQuery && searchResults.length === 0 && (
                             <div className="space-explore__empty">
                                 <div className="space-explore__empty-title">没有找到相关动态</div>
                                 <div className="space-explore__empty-text">换一个关键词试试吧。</div>

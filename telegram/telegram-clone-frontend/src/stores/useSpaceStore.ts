@@ -10,21 +10,34 @@ import { authStorage } from '../utils/authStorage';
 
 const FEED_STATE_WINDOW = 200;
 
+export type SpaceFeedScope = 'all' | 'friends';
+
+export interface SpaceFeedScopeState {
+    posts: PostData[];
+    isLoading: boolean;
+    hasMore: boolean;
+    nextCursor?: string;
+    error: string | null;
+    hasLoaded: boolean;
+    seenIds: string[];
+    servedIds: string[];
+}
+
 const getUserIdForFeedState = (): string => {
     if (typeof window === 'undefined') return 'anonymous';
     const user = authStorage.getUser();
     return user?.id ? String(user.id) : 'anonymous';
 };
 
-const feedStateKey = (name: 'seen' | 'served'): string => {
+const feedStateKey = (name: 'seen' | 'served', scope: SpaceFeedScope): string => {
     const uid = getUserIdForFeedState();
-    return `space_feed_${name}_ids:${uid}`;
+    return `space_feed_${name}_ids:${uid}:${scope}`;
 };
 
-const loadIdWindow = (name: 'seen' | 'served'): string[] => {
+const loadIdWindow = (name: 'seen' | 'served', scope: SpaceFeedScope): string[] => {
     if (typeof window === 'undefined') return [];
     try {
-        const raw = window.sessionStorage.getItem(feedStateKey(name));
+        const raw = window.sessionStorage.getItem(feedStateKey(name, scope));
         const parsed = raw ? JSON.parse(raw) : null;
         if (!Array.isArray(parsed)) return [];
         return parsed.map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
@@ -33,14 +46,25 @@ const loadIdWindow = (name: 'seen' | 'served'): string[] => {
     }
 };
 
-const saveIdWindow = (name: 'seen' | 'served', ids: string[]) => {
+const saveIdWindow = (name: 'seen' | 'served', ids: string[], scope: SpaceFeedScope) => {
     if (typeof window === 'undefined') return;
     try {
-        window.sessionStorage.setItem(feedStateKey(name), JSON.stringify(ids.slice(-FEED_STATE_WINDOW)));
+        window.sessionStorage.setItem(feedStateKey(name, scope), JSON.stringify(ids.slice(-FEED_STATE_WINDOW)));
     } catch {
-        // ignore
+        // 忽略存储异常
     }
 };
+
+const createInitialScopeState = (scope: SpaceFeedScope): SpaceFeedScopeState => ({
+    posts: [],
+    isLoading: false,
+    hasMore: true,
+    nextCursor: undefined,
+    error: null,
+    hasLoaded: false,
+    seenIds: loadIdWindow('seen', scope),
+    servedIds: loadIdWindow('served', scope),
+});
 
 const mergeIdWindow = (existing: string[], delta: string[], cap: number): string[] => {
     const all = [...(existing || []), ...(delta || [])].map(String).filter(Boolean);
@@ -60,7 +84,7 @@ const mergeIdWindow = (existing: string[], delta: string[], cap: number): string
 };
 
 interface SpaceState {
-    // Feed 数据
+    // 当前激活 Scope 的 Feed 视图数据（与 allFeed / friendsFeed 保持同步）
     posts: PostData[];
     isLoadingFeed: boolean;
     hasMore: boolean;
@@ -68,6 +92,10 @@ interface SpaceState {
     newPostsCount: number;
     isMLEnhanced: boolean; // 是否使用了 ML 推荐
     inNetworkOnly: boolean; // 工业级：只看好友/关注网内
+
+    // 按范围独立缓存的 Feed 状态，避免 Tab 切换丢失列表及首页/探索互相污染
+    allFeed: SpaceFeedScopeState;
+    friendsFeed: SpaceFeedScopeState;
 
     // 客户端携带状态 (工业级): seen_ids / served_ids 滑窗
     seenIds: string[];
@@ -91,6 +119,8 @@ interface SpaceState {
 
     // Feed 操作
     fetchFeed: (refresh?: boolean) => Promise<void>;
+    fetchExploreFeed: (refresh?: boolean) => Promise<void>;
+    fetchFeedForScope: (scope: SpaceFeedScope, refresh?: boolean) => Promise<void>;
     fetchSmartFeed: () => Promise<void>;
     loadMore: () => Promise<void>;
     refreshFeed: () => Promise<void>;
@@ -119,18 +149,57 @@ interface SpaceState {
     setError: (error: string | null) => void;
 }
 
+const getScopeKey = (inNetworkOnly: boolean): SpaceFeedScope =>
+    inNetworkOnly ? 'friends' : 'all';
+
+const getScopeFeed = (state: SpaceState, scope: SpaceFeedScope): SpaceFeedScopeState =>
+    scope === 'friends' ? state.friendsFeed : state.allFeed;
+
+const syncRootFromActiveScope = (s: SpaceState) => {
+    const active = getScopeFeed(s, getScopeKey(s.inNetworkOnly));
+    s.posts = active.posts;
+    s.isLoadingFeed = active.isLoading;
+    s.hasMore = active.hasMore;
+    s.nextCursor = active.nextCursor;
+    s.error = active.error;
+    s.seenIds = active.seenIds;
+    s.servedIds = active.servedIds;
+};
+
+const mutatePostAcrossLists = (
+    s: SpaceState,
+    postId: string,
+    updater: (post: PostData) => void
+) => {
+    const lists = [s.posts, s.allFeed.posts, s.friendsFeed.posts, s.searchResults];
+    const visited = new Set<PostData[]>();
+    for (const list of lists) {
+        if (visited.has(list)) continue;
+        visited.add(list);
+        const target = list.find((p) => p.id === postId);
+        if (target) {
+            updater(target);
+        }
+    }
+};
+
+const initialAllFeed = createInitialScopeState('all');
+const initialFriendsFeed = createInitialScopeState('friends');
+
 export const useSpaceStore = create<SpaceState>()(
     immer((set, get) => ({
         // 初始状态
-        posts: [],
-        isLoadingFeed: false,
-        hasMore: true,
-        nextCursor: undefined,
+        posts: initialAllFeed.posts,
+        isLoadingFeed: initialAllFeed.isLoading,
+        hasMore: initialAllFeed.hasMore,
+        nextCursor: initialAllFeed.nextCursor,
         newPostsCount: 0,
         isMLEnhanced: false,
         inNetworkOnly: false,
-        seenIds: loadIdWindow('seen'),
-        servedIds: loadIdWindow('served'),
+        allFeed: initialAllFeed,
+        friendsFeed: initialFriendsFeed,
+        seenIds: initialAllFeed.seenIds,
+        servedIds: initialAllFeed.servedIds,
         searchResults: [],
         isSearching: false,
         searchQuery: '',
@@ -143,55 +212,83 @@ export const useSpaceStore = create<SpaceState>()(
         error: null,
 
         // === Feed 操作 ===
-        fetchFeed: async (refresh = false) => {
-            const state = get();
-            if (state.isLoadingFeed) return;
+        fetchFeedForScope: async (scope: SpaceFeedScope, refresh = false) => {
+            const currentScopeFeed = getScopeFeed(get(), scope);
+            if (currentScopeFeed.isLoading) return;
+
+            const cursor = refresh ? undefined : currentScopeFeed.nextCursor;
+            const seenIds = currentScopeFeed.seenIds;
+            const servedIds = currentScopeFeed.servedIds;
 
             set((s) => {
-                s.isLoadingFeed = true;
-                s.error = null;
+                const target = getScopeFeed(s, scope);
+                target.isLoading = true;
+                target.error = null;
                 if (refresh) {
-                    s.posts = [];
-                    s.nextCursor = undefined;
-                    s.hasMore = true;
+                    target.posts = [];
+                    target.nextCursor = undefined;
+                    target.hasMore = true;
+                }
+                if (getScopeKey(s.inNetworkOnly) === scope) {
+                    syncRootFromActiveScope(s);
                 }
             });
 
             try {
-                const cursor = refresh ? undefined : state.nextCursor;
                 const result = await spaceAPI.getFeed(20, cursor, {
-                    seenIds: state.seenIds,
-                    servedIds: state.servedIds,
+                    seenIds,
+                    servedIds,
                     isBottomRequest: Boolean(cursor),
-                    inNetworkOnly: state.inNetworkOnly,
+                    inNetworkOnly: scope === 'friends',
                 });
 
                 const delta = result.servedIdsDelta || result.posts.map((p) => p.id);
-                const nextServed = mergeIdWindow(state.servedIds, delta, FEED_STATE_WINDOW);
+                const nextServed = mergeIdWindow(servedIds, delta, FEED_STATE_WINDOW);
 
                 set((s) => {
+                    const target = getScopeFeed(s, scope);
                     if (refresh) {
-                        s.posts = result.posts;
+                        target.posts = result.posts;
                     } else {
                         // 追加并去重
-                        const existingIds = new Set(s.posts.map((p) => p.id));
+                        const existingIds = new Set(target.posts.map((p) => p.id));
                         const newPosts = result.posts.filter((p) => !existingIds.has(p.id));
-                        s.posts.push(...newPosts);
+                        target.posts.push(...newPosts);
                     }
-                    s.hasMore = result.hasMore;
-                    s.nextCursor = result.nextCursor;
-                    s.servedIds = nextServed;
-                    s.isLoadingFeed = false;
+                    target.hasMore = result.hasMore;
+                    target.nextCursor = result.nextCursor;
+                    target.servedIds = nextServed;
+                    target.isLoading = false;
+                    target.hasLoaded = true;
+                    target.error = null;
+                    if (getScopeKey(s.inNetworkOnly) === scope) {
+                        syncRootFromActiveScope(s);
+                    }
                 });
 
-                // Persist best-effort
-                saveIdWindow('served', nextServed);
+                // 持久化已下发滑窗
+                saveIdWindow('served', nextServed, scope);
             } catch (error: unknown) {
                 set((s) => {
-                    s.error = error instanceof Error ? error.message : '加载动态失败';
-                    s.isLoadingFeed = false;
+                    const target = getScopeFeed(s, scope);
+                    target.error = error instanceof Error ? error.message : '加载动态失败';
+                    target.isLoading = false;
+                    target.hasLoaded = true;
+                    if (getScopeKey(s.inNetworkOnly) === scope) {
+                        syncRootFromActiveScope(s);
+                    }
                 });
             }
+        },
+
+        fetchFeed: async (refresh = false) => {
+            const scope = getScopeKey(get().inNetworkOnly);
+            await get().fetchFeedForScope(scope, refresh);
+        },
+
+        fetchExploreFeed: async (refresh = false) => {
+            // 探索页始终请求全站流（inNetworkOnly: false），与首页好友 Tab 隔离
+            await get().fetchFeedForScope('all', refresh);
         },
 
         loadMore: async () => {
@@ -209,45 +306,54 @@ export const useSpaceStore = create<SpaceState>()(
         setInNetworkOnly: async (value: boolean) => {
             const state = get();
             if (state.inNetworkOnly === value) return;
-            // 切换 feed 模式时，强制从第一页刷新（避免 cursor/served_ids 语义混乱）
+            const targetScope = getScopeKey(value);
+
             set((s) => {
                 s.inNetworkOnly = value;
-                s.posts = [];
-                s.nextCursor = undefined;
-                s.hasMore = true;
-                s.seenIds = [];
-                s.servedIds = [];
-                s.error = null;
+                syncRootFromActiveScope(s);
             });
-            // 模式切换后清空客户端滑窗，避免“全部/好友”之间状态污染。
-            saveIdWindow('seen', []);
-            saveIdWindow('served', []);
-            await get().fetchFeed(true);
+
+            // 若目标范围尚未加载或上次加载失败，则拉取首屏；否则直接复用缓存列表
+            const targetFeed = getScopeFeed(get(), targetScope);
+            if (!targetFeed.hasLoaded || targetFeed.error) {
+                await get().fetchFeedForScope(targetScope, true);
+            }
         },
 
         // 智能推荐 Feed (ML 增强)
         fetchSmartFeed: async () => {
             const state = get();
-            if (state.isLoadingFeed) return;
+            if (state.allFeed.isLoading) return;
 
             set((s) => {
-                s.isLoadingFeed = true;
-                s.error = null;
+                s.allFeed.isLoading = true;
+                s.allFeed.error = null;
+                if (!s.inNetworkOnly) {
+                    syncRootFromActiveScope(s);
+                }
             });
 
             try {
                 const result = await spaceAPI.getSmartFeed(20);
 
                 set((s) => {
-                    s.posts = result.posts;
-                    s.hasMore = result.hasMore;
+                    s.allFeed.posts = result.posts;
+                    s.allFeed.hasMore = result.hasMore;
+                    s.allFeed.hasLoaded = true;
+                    s.allFeed.isLoading = false;
                     s.isMLEnhanced = result.isMLEnhanced;
-                    s.isLoadingFeed = false;
+                    if (!s.inNetworkOnly) {
+                        syncRootFromActiveScope(s);
+                    }
                 });
             } catch (error: unknown) {
                 set((s) => {
-                    s.error = error instanceof Error ? error.message : '加载智能推荐失败';
-                    s.isLoadingFeed = false;
+                    s.allFeed.error = error instanceof Error ? error.message : '加载智能推荐失败';
+                    s.allFeed.isLoading = false;
+                    s.allFeed.hasLoaded = true;
+                    if (!s.inNetworkOnly) {
+                        syncRootFromActiveScope(s);
+                    }
                 });
             }
         },
@@ -408,7 +514,13 @@ export const useSpaceStore = create<SpaceState>()(
                 const newPost = await spaceAPI.createPost(content, media, options);
 
                 set((s) => {
-                    s.posts.unshift(newPost);
+                    if (!s.allFeed.posts.some((p) => p.id === newPost.id)) {
+                        s.allFeed.posts.unshift(newPost);
+                    }
+                    if (!s.friendsFeed.posts.some((p) => p.id === newPost.id)) {
+                        s.friendsFeed.posts.unshift(newPost);
+                    }
+                    syncRootFromActiveScope(s);
                     s.isCreatingPost = false;
                 });
 
@@ -425,14 +537,10 @@ export const useSpaceStore = create<SpaceState>()(
         likePost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const update = (post: PostData | undefined) => {
-                    if (post) {
-                        post.isLiked = true;
-                        post.likeCount += 1;
-                    }
-                };
-                update(s.posts.find((p) => p.id === postId));
-                update(s.searchResults.find((p) => p.id === postId));
+                mutatePostAcrossLists(s, postId, (post) => {
+                    post.isLiked = true;
+                    post.likeCount += 1;
+                });
             });
 
             try {
@@ -440,14 +548,10 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const rollback = (post: PostData | undefined) => {
-                        if (post) {
-                            post.isLiked = false;
-                            post.likeCount = Math.max(0, post.likeCount - 1);
-                        }
-                    };
-                    rollback(s.posts.find((p) => p.id === postId));
-                    rollback(s.searchResults.find((p) => p.id === postId));
+                    mutatePostAcrossLists(s, postId, (post) => {
+                        post.isLiked = false;
+                        post.likeCount = Math.max(0, post.likeCount - 1);
+                    });
                 });
             }
         },
@@ -455,14 +559,10 @@ export const useSpaceStore = create<SpaceState>()(
         unlikePost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const update = (post: PostData | undefined) => {
-                    if (post) {
-                        post.isLiked = false;
-                        post.likeCount = Math.max(0, post.likeCount - 1);
-                    }
-                };
-                update(s.posts.find((p) => p.id === postId));
-                update(s.searchResults.find((p) => p.id === postId));
+                mutatePostAcrossLists(s, postId, (post) => {
+                    post.isLiked = false;
+                    post.likeCount = Math.max(0, post.likeCount - 1);
+                });
             });
 
             try {
@@ -470,14 +570,10 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const rollback = (post: PostData | undefined) => {
-                        if (post) {
-                            post.isLiked = true;
-                            post.likeCount += 1;
-                        }
-                    };
-                    rollback(s.posts.find((p) => p.id === postId));
-                    rollback(s.searchResults.find((p) => p.id === postId));
+                    mutatePostAcrossLists(s, postId, (post) => {
+                        post.isLiked = true;
+                        post.likeCount += 1;
+                    });
                 });
             }
         },
@@ -485,14 +581,12 @@ export const useSpaceStore = create<SpaceState>()(
         repostPost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const update = (post: PostData | undefined) => {
-                    if (post && !post.isReposted) {
+                mutatePostAcrossLists(s, postId, (post) => {
+                    if (!post.isReposted) {
                         post.isReposted = true;
                         post.repostCount += 1;
                     }
-                };
-                update(s.posts.find((p) => p.id === postId));
-                update(s.searchResults.find((p) => p.id === postId));
+                });
             });
 
             try {
@@ -500,34 +594,29 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const rollback = (post: PostData | undefined) => {
-                        if (post) {
-                            post.isReposted = false;
-                            post.repostCount = Math.max(0, post.repostCount - 1);
-                        }
-                    };
-                    rollback(s.posts.find((p) => p.id === postId));
-                    rollback(s.searchResults.find((p) => p.id === postId));
+                    mutatePostAcrossLists(s, postId, (post) => {
+                        post.isReposted = false;
+                        post.repostCount = Math.max(0, post.repostCount - 1);
+                    });
                 });
             }
         },
 
         unrepostPost: async (postId) => {
-            const current = get().posts.find((p) => p.id === postId)
-                || get().searchResults.find((p) => p.id === postId);
+            const state = get();
+            const current = state.posts.find((p) => p.id === postId)
+                || state.allFeed.posts.find((p) => p.id === postId)
+                || state.friendsFeed.posts.find((p) => p.id === postId)
+                || state.searchResults.find((p) => p.id === postId);
             const wasReposted = Boolean(current?.isReposted);
             if (!wasReposted) return;
 
             // 乐观更新
             set((s) => {
-                const update = (post: PostData | undefined) => {
-                    if (post) {
-                        post.isReposted = false;
-                        post.repostCount = Math.max(0, post.repostCount - 1);
-                    }
-                };
-                update(s.posts.find((p) => p.id === postId));
-                update(s.searchResults.find((p) => p.id === postId));
+                mutatePostAcrossLists(s, postId, (post) => {
+                    post.isReposted = false;
+                    post.repostCount = Math.max(0, post.repostCount - 1);
+                });
             });
 
             try {
@@ -535,14 +624,10 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const rollback = (post: PostData | undefined) => {
-                        if (post) {
-                            post.isReposted = true;
-                            post.repostCount += 1;
-                        }
-                    };
-                    rollback(s.posts.find((p) => p.id === postId));
-                    rollback(s.searchResults.find((p) => p.id === postId));
+                    mutatePostAcrossLists(s, postId, (post) => {
+                        post.isReposted = true;
+                        post.repostCount += 1;
+                    });
                 });
             }
         },
@@ -550,27 +635,28 @@ export const useSpaceStore = create<SpaceState>()(
         // === 本地状态更新 ===
         addPostToTop: (post) =>
             set((s) => {
-                const exists = s.posts.some((p) => p.id === post.id);
-                if (!exists) {
-                    s.posts.unshift(post);
+                if (!s.allFeed.posts.some((p) => p.id === post.id)) {
+                    s.allFeed.posts.unshift(post);
                 }
+                if (!s.friendsFeed.posts.some((p) => p.id === post.id)) {
+                    s.friendsFeed.posts.unshift(post);
+                }
+                syncRootFromActiveScope(s);
             }),
 
         updatePost: (postId, updates) =>
             set((s) => {
-                const applyUpdates = (arr: PostData[]) => {
-                    const idx = arr.findIndex((p) => p.id === postId);
-                    if (idx !== -1) {
-                        Object.assign(arr[idx], updates);
-                    }
-                };
-                applyUpdates(s.posts);
-                applyUpdates(s.searchResults);
+                mutatePostAcrossLists(s, postId, (post) => {
+                    Object.assign(post, updates);
+                });
             }),
 
         removePost: (postId) =>
             set((s) => {
-                s.posts = s.posts.filter((p) => p.id !== postId);
+                s.allFeed.posts = s.allFeed.posts.filter((p) => p.id !== postId);
+                s.friendsFeed.posts = s.friendsFeed.posts.filter((p) => p.id !== postId);
+                s.searchResults = s.searchResults.filter((p) => p.id !== postId);
+                syncRootFromActiveScope(s);
             }),
 
         incrementNewPostsCount: () =>
@@ -586,15 +672,22 @@ export const useSpaceStore = create<SpaceState>()(
         markSeen: (postId) => {
             if (!postId) return;
             const state = get();
-            const nextSeen = mergeIdWindow(state.seenIds, [postId], FEED_STATE_WINDOW);
+            const scope = getScopeKey(state.inNetworkOnly);
+            const scopeFeed = getScopeFeed(state, scope);
+            const nextSeen = mergeIdWindow(scopeFeed.seenIds, [postId], FEED_STATE_WINDOW);
             set((s) => {
+                const target = getScopeFeed(s, scope);
+                target.seenIds = nextSeen;
                 s.seenIds = nextSeen;
             });
-            saveIdWindow('seen', nextSeen);
+            saveIdWindow('seen', nextSeen, scope);
         },
 
         setError: (error) =>
             set((s) => {
+                const scope = getScopeKey(s.inNetworkOnly);
+                const target = getScopeFeed(s, scope);
+                target.error = error;
                 s.error = error;
             }),
     }))

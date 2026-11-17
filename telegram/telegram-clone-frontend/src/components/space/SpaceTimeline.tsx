@@ -229,7 +229,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         </div>
     );
 
-    // 渲染加载状态
+    // 渲染底部加载更多状态
     const renderLoading = () => (
         <div className="space-timeline__loading" aria-label="动态加载中">
             <Skeleton className="space-timeline__loading-avatar" />
@@ -238,6 +238,22 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                 <Skeleton className="space-timeline__loading-line" />
                 <Skeleton className="space-timeline__loading-line" />
             </div>
+        </div>
+    );
+
+    // 渲染首屏或切换 Tab 时的多张帖子骨架屏，避免列表区空白闪烁
+    const renderSkeletonList = () => (
+        <div className="space-timeline__post-stack" aria-label="动态加载中" aria-busy="true">
+            {Array.from({ length: 4 }).map((_, index) => (
+                <div className="space-timeline__loading" key={`timeline-skeleton-${index}`}>
+                    <Skeleton className="space-timeline__loading-avatar" />
+                    <div className="space-timeline__loading-copy">
+                        <Skeleton className="space-timeline__loading-line is-short" />
+                        <Skeleton className="space-timeline__loading-line" />
+                        <Skeleton className="space-timeline__loading-line" />
+                    </div>
+                </div>
+            ))}
         </div>
     );
 
@@ -307,7 +323,9 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
             {/* 帖子列表 */}
             <div className="space-timeline__posts" id="space-posts">
-                {posts.length === 0 && !isLoading ? (
+                {posts.length === 0 && isLoading ? (
+                    renderSkeletonList()
+                ) : posts.length === 0 ? (
                     renderState()
                 ) : !shouldVirtualize ? (
                     <div className="space-timeline__post-stack">
@@ -378,7 +396,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
             {/* 加载更多触发器 */}
             <div ref={loadMoreRef} className="space-timeline__load-more">
-                {isLoading && renderLoading()}
+                {isLoading && posts.length > 0 && renderLoading()}
                 {!isLoading && hasMore && (
                     <button type="button" className="space-timeline__load-more-btn" onClick={onLoadMore}>
                         加载更多

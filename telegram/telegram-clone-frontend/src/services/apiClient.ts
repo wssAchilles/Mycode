@@ -43,6 +43,62 @@ const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
 });
 
+// 全局 Single-Flight Token 刷新并发锁，防止并发 401 触发 Refresh Storm 互踢登出
+let refreshTokenPromise: Promise<string> | null = null;
+// 共享完整刷新结果 Promise，供响应拦截器与 authAPI.refreshToken 复用
+let refreshTokenResultPromise: Promise<{ accessToken: string; refreshToken: string }> | null = null;
+
+function dispatchAuthTokensUpdated(accessToken: string, refreshToken: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('auth:tokens-updated', {
+      detail: { accessToken, refreshToken },
+    })
+  );
+}
+
+function getRequestAuthHeader(headers: unknown): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const record = headers as Record<string, unknown> & { get?: (name: string) => unknown };
+  if (typeof record.get === 'function') {
+    const val = record.get('Authorization');
+    if (typeof val === 'string') return val;
+  }
+  if (typeof record.Authorization === 'string') return record.Authorization;
+  if (typeof record.authorization === 'string') return record.authorization;
+  return undefined;
+}
+
+function requestTokensSingleFlight(): Promise<{ accessToken: string; refreshToken: string }> {
+  if (refreshTokenResultPromise) {
+    return refreshTokenResultPromise;
+  }
+
+  const refreshToken = authStorage.getRefreshToken();
+  if (!refreshToken) {
+    return Promise.reject(new Error('没有刷新令牌'));
+  }
+
+  // 使用原生 axios.post，避免刷新请求自身返回 401 时再次进入拦截器
+  refreshTokenResultPromise = axios
+    .post<{ success: boolean; data: { tokens: { accessToken: string; refreshToken: string } } }>(
+      `${API_BASE_URL}/api/auth/refresh`,
+      { refreshToken }
+    )
+    .then((response) => {
+      // 后端返回 { success: true, data: { tokens } }
+      const { accessToken, refreshToken: newRefreshToken } = response.data.data.tokens;
+      authStorage.setTokens(accessToken, newRefreshToken);
+      dispatchAuthTokensUpdated(accessToken, newRefreshToken);
+      return { accessToken, refreshToken: newRefreshToken };
+    })
+    .finally(() => {
+      refreshTokenResultPromise = null;
+    });
+
+  return refreshTokenResultPromise;
+}
+
 // 请求拦截器 - 自动添加认证头
 apiClient.interceptors.request.use(
   (config) => {
@@ -79,32 +135,55 @@ apiClient.interceptors.response.use(
   async (error: unknown) => {
     const axiosError = error as AxiosError;
     const originalRequest = axiosError.config;
+    const retryableRequest = originalRequest as (typeof originalRequest & { _retry?: boolean }) | undefined;
+    const isRefreshRequest = Boolean(originalRequest?.url && originalRequest.url.includes('/api/auth/refresh'));
 
     // 如果是 401 错误且不是刷新 token 请求
-    if (axiosError.response?.status === 401 && originalRequest && !(originalRequest as unknown as Record<string, boolean>)._retry) {
-      (originalRequest as unknown as Record<string, boolean>)._retry = true;
+    if (axiosError.response?.status === 401 && retryableRequest && !retryableRequest._retry && !isRefreshRequest) {
+      retryableRequest._retry = true;
+
+      // 若并发请求发送时的旧 token 已被刚刚完成的刷新替换，直接复用新 token 重试
+      const latestAccessToken = authStorage.getAccessToken();
+      const requestAuthHeader = getRequestAuthHeader(retryableRequest.headers);
+      if (
+        !refreshTokenPromise &&
+        latestAccessToken &&
+        requestAuthHeader &&
+        requestAuthHeader.startsWith('Bearer ') &&
+        requestAuthHeader !== `Bearer ${latestAccessToken}`
+      ) {
+        retryableRequest.headers = retryableRequest.headers ?? ({} as typeof retryableRequest.headers);
+        retryableRequest.headers.Authorization = `Bearer ${latestAccessToken}`;
+        return apiClient(retryableRequest);
+      }
+
+      if (!refreshTokenPromise) {
+        const refreshToken = authStorage.getRefreshToken();
+        if (!refreshToken) {
+          return Promise.reject(error);
+        }
+
+        // 所有并发 401 共用同一个 refreshTokenPromise，仅在确认刷新失败后统一清理并跳转
+        refreshTokenPromise = requestTokensSingleFlight()
+          .then((tokens) => tokens.accessToken)
+          .catch((refreshError) => {
+            authStorage.clear();
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login';
+            }
+            return Promise.reject(refreshError);
+          })
+          .finally(() => {
+            refreshTokenPromise = null;
+          });
+      }
 
       try {
-        const refreshToken = authStorage.getRefreshToken();
-        if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {
-            refreshToken,
-          });
-
-          // 后端返回 { success: true, data: { tokens } }
-          const { accessToken, refreshToken: newRefreshToken } = response.data.data.tokens;
-
-          // 更新存储的 token
-          authStorage.setTokens(accessToken, newRefreshToken);
-
-          // 重试原始请求
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-          return apiClient(originalRequest);
-        }
+        const nextAccessToken = await refreshTokenPromise;
+        retryableRequest.headers = retryableRequest.headers ?? ({} as typeof retryableRequest.headers);
+        retryableRequest.headers.Authorization = `Bearer ${nextAccessToken}`;
+        return apiClient(retryableRequest);
       } catch (refreshError) {
-        // 刷新 token 失败，清除存储并重定向到登录
-        authStorage.clear();
-        window.location.href = '/login';
         return Promise.reject(refreshError);
       }
     }
@@ -216,13 +295,7 @@ export const authAPI = {
     }
 
     try {
-      const response = await apiClient.post('/api/auth/refresh', { refreshToken });
-      // 后端返回 { success: true, data: { tokens } }
-      const tokens = response.data.data.tokens;
-
-      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
-
-      return tokens;
+      return await requestTokensSingleFlight();
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ message?: string }>)?.response?.data?.message || '刷新令牌失败';
       throw new Error(errorMessage);

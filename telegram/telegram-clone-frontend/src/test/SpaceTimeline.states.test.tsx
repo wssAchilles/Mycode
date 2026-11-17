@@ -72,4 +72,22 @@ describe('SpaceTimeline state handling', () => {
 
     expect(onInNetworkOnlyChange).toHaveBeenCalledWith(false);
   });
+
+  it('renders multiple skeleton cards inside #space-posts while loading an empty feed', () => {
+    const { container } = render(
+      <SpaceTimeline
+        {...baseProps({
+          posts: [],
+          isLoading: true,
+          inNetworkOnly: true,
+        })}
+      />
+    );
+
+    const postsContainer = container.querySelector('#space-posts');
+    expect(postsContainer).not.toBeNull();
+    const skeletonCards = postsContainer?.querySelectorAll('.space-timeline__loading');
+    expect(skeletonCards?.length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText('还没有好友动态')).toBeNull();
+  });
 });

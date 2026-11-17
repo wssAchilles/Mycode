@@ -7,6 +7,7 @@ import { spaceAPI, type NegativeFeedbackItem, type NegativeFeedbackSummary, type
 import { COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
 import NegativeFeedbackPanel from '../components/space/NegativeFeedbackPanel';
+import { StateBlock } from '@/components/design-system';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
 import { SHARE_BASE_URL } from '../config/share';
@@ -29,6 +30,7 @@ const SpaceProfilePage: React.FC = () => {
     const [likesCursor, setLikesCursor] = useState<string | undefined>(undefined);
     const [likesHasMore, setLikesHasMore] = useState(true);
     const [likesLoading, setLikesLoading] = useState(false);
+    const [likesError, setLikesError] = useState<string | null>(null);
     const [negativeFeedback, setNegativeFeedback] = useState<NegativeFeedbackItem[]>([]);
     const [negativeFeedbackSummary, setNegativeFeedbackSummary] = useState<NegativeFeedbackSummary | null>(null);
     const [negativeFeedbackCursor, setNegativeFeedbackCursor] = useState<string | undefined>(undefined);
@@ -80,14 +82,20 @@ const SpaceProfilePage: React.FC = () => {
         if (!id) return;
         if (!reset && (likesLoading || !likesHasMore)) return;
         setLikesLoading(true);
+        setLikesError(null);
         try {
             const result = await spaceAPI.getUserLikes(id, 20, reset ? undefined : likesCursor);
             setLikes((prev) => (reset ? result.posts : [...prev, ...result.posts]));
             setLikesHasMore(result.hasMore);
             setLikesCursor(result.nextCursor);
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('加载点赞列表失败:', err);
-            setLikesHasMore(false);
+            setLikesError(err instanceof Error ? err.message : '加载喜欢列表失败，请稍后重试');
+            if (reset) {
+                setLikes([]);
+                setLikesCursor(undefined);
+                setLikesHasMore(false);
+            }
         } finally {
             setLikesLoading(false);
         }
@@ -130,6 +138,7 @@ const SpaceProfilePage: React.FC = () => {
             setLikes([]);
             setLikesCursor(undefined);
             setLikesHasMore(true);
+            setLikesError(null);
             setNegativeFeedback([]);
             setNegativeFeedbackSummary(null);
             setNegativeFeedbackCursor(undefined);
@@ -385,7 +394,7 @@ const SpaceProfilePage: React.FC = () => {
 
     useEffect(() => {
         if (activeTab !== 'likes') return;
-        if (likesLoading || likes.length > 0) return;
+        if (likesLoading || likes.length > 0 || likesError) return;
         loadLikes(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab, id]);
@@ -676,7 +685,16 @@ const SpaceProfilePage: React.FC = () => {
                 <section className="space-profile__posts">
                     <h2>{activeTab === 'posts' ? '动态' : activeTab === 'media' ? '媒体' : activeTab === 'likes' ? '喜欢' : '不喜欢'}</h2>
                     <div className="space-profile__tab-panel" key={activeTab}>
-                        {isLikesTab && likes.length === 0 && !likesLoading && (
+                        {isLikesTab && likesError && likes.length === 0 && !likesLoading && (
+                            <StateBlock
+                                title="喜欢列表加载失败"
+                                description={likesError}
+                                variant="error"
+                                actionLabel="点击重试"
+                                onAction={() => loadLikes(true)}
+                            />
+                        )}
+                        {isLikesTab && !likesError && likes.length === 0 && !likesLoading && (
                             <div className="space-profile__empty space-profile__empty--likes">
                                 <div className="space-profile__empty-icon">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -791,7 +809,17 @@ const SpaceProfilePage: React.FC = () => {
                             {loadingPosts ? '加载中...' : '加载更多'}
                         </button>
                     )}
-                    {isLikesTab && likesHasMore && (
+                    {isLikesTab && likesError && likes.length > 0 && !likesLoading && (
+                        <StateBlock
+                            compact
+                            title="加载更多喜欢内容失败"
+                            description={likesError}
+                            variant="error"
+                            actionLabel="点击重试"
+                            onAction={() => loadLikes(false)}
+                        />
+                    )}
+                    {isLikesTab && likesHasMore && !likesError && (
                         <>
                             <button
                                 className="space-profile__more"
