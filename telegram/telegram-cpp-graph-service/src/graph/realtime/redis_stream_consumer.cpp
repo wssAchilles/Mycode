@@ -34,7 +34,7 @@ RedisConnectionSpec resolve_redis_connection_spec(const RedisStreamConfig& confi
 
   const auto slash_pos = rest.find('/');
   if (slash_pos != std::string::npos) {
-    rest = rest.substr(0, slash_pos);
+    rest.resize(slash_pos);
   }
 
   const auto at_pos = rest.rfind('@');

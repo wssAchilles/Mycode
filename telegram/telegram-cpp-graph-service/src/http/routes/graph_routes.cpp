@@ -371,15 +371,20 @@ HttpResponse handle_graph_post(
       }
       const auto results = store.author_cred_scores(author_ids);
       nlohmann::json scores = nlohmann::json::array();
-      for (const auto& r : results) {
-        scores.push_back(nlohmann::json{
-            {"authorId", r.author_id},
-            {"authorCredScore", r.author_cred_score},
-            {"inDegree", r.in_degree},
-            {"totalInWeight", r.total_in_weight},
-            {"negativePenalty", r.negative_penalty},
-        });
-      }
+      scores.get_ref<nlohmann::json::array_t&>().reserve(results.size());
+      std::transform(
+          results.begin(),
+          results.end(),
+          std::back_inserter(scores.get_ref<nlohmann::json::array_t&>()),
+          [](const auto& r) {
+            return nlohmann::json{
+                {"authorId", r.author_id},
+                {"authorCredScore", r.author_cred_score},
+                {"inDegree", r.in_degree},
+                {"totalInWeight", r.total_in_weight},
+                {"negativePenalty", r.negative_penalty},
+            };
+          });
       return json_response(200, tg_contracts::success_response(nlohmann::json{{"scores", scores}}));
     }
     if (request.path == "/graph/batch") {
