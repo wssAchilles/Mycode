@@ -6,9 +6,11 @@ dotenv.config({ quiet: true });
 
 const log = createChildLogger('config:sequelize');
 
+// 支持通过 PG_POOL_MAX 覆盖连接池上限，默认降至 8 以安全适配 Supabase PgBouncer Session Mode 上限 (15)
+const parsedPoolMax = Number.parseInt(String(process.env.PG_POOL_MAX || ''), 10);
 const poolConfig = {
-  max: 20,
-  min: 2,
+  max: Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? parsedPoolMax : 8,
+  min: 1,
   acquire: 30000,
   idle: 10000,
 };

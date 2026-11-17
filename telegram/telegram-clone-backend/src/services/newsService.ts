@@ -120,10 +120,12 @@ const NEWS_TOPICS_WINDOW_HOURS = parsePositiveInt(
   168
 );
 
-const getTimeZoneParts = (date: Date, timeZone: string) => {
+export const getTimeZoneParts = (date: Date, timeZone: string) => {
+  // 显式指定 hourCycle: 'h23'，避免午夜零点被 ICU 格式化为 "24" 导致 Date.UTC 进位多算一天
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour12: false,
+    hourCycle: 'h23',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -140,7 +142,7 @@ const getTimeZoneParts = (date: Date, timeZone: string) => {
     year: Number(out.year),
     month: Number(out.month),
     day: Number(out.day),
-    hour: Number(out.hour),
+    hour: Number(out.hour) % 24,
     minute: Number(out.minute),
     second: Number(out.second),
   };
@@ -164,7 +166,7 @@ const zonedTimeToUtcMs = (parts: { year: number; month: number; day: number; hou
   return utcMs;
 };
 
-const getZonedTodayRange = (now: Date, timeZone: string) => {
+export const getZonedTodayRange = (now: Date, timeZone: string) => {
   const parts = getTimeZoneParts(now, timeZone);
   const startMs = zonedTimeToUtcMs(
     { year: parts.year, month: parts.month, day: parts.day, hour: 0, minute: 0, second: 0 },

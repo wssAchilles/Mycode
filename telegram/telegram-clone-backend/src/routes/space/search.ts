@@ -7,7 +7,7 @@ import { spaceService } from '../../services/spaceService';
 import UserAction, { ActionType } from '../../models/UserAction';
 import {
     log,
-    transformPostToResponse,
+    transformPostsToResponse,
     buildTrendInteractionKeywords,
 } from './shared';
 
@@ -30,7 +30,7 @@ router.get('/search', async (req: Request, res: Response) => {
         }
 
         const result = await spaceService.searchPostsPage(query.trim(), limit, safeCursor);
-        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+        const transformed = await transformPostsToResponse(result.posts);
         return res.json({
             posts: transformed,
             totalCount: result.totalCount,
@@ -73,7 +73,7 @@ router.get('/topics/:tag/posts', async (req: Request, res: Response) => {
                 timestamp: new Date(),
             }]).catch(() => undefined);
         }
-        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+        const transformed = await transformPostsToResponse(result.posts);
         return res.json({
             tag: result.tag,
             query: result.query,

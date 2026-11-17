@@ -4,15 +4,17 @@
 
 import { Router, Request, Response } from 'express';
 import { spaceService } from '../../services/spaceService';
-import { log, transformPostToResponse } from './shared';
+import { requireCronOrOpsAuth } from '../../middleware/cronAuth';
+import { log, transformPostsToResponse } from './shared';
+
+/**
+ * 爬虫/运维批量导入新闻专用路由，仅接受 x-cron-secret 或 ops token，不依赖用户 JWT
+ */
+export const spaceNewsIngestRouter = Router();
 
 const router = Router();
 
-// ---------------------------------------------------------------------------
-// POST /posts/batch-news — bulk import news (crawler webhook)
-// ---------------------------------------------------------------------------
-
-router.post('/posts/batch-news', async (req: Request, res: Response) => {
+async function handleBatchNewsImport(req: Request, res: Response) {
     try {
         const { articles } = req.body;
         if (!Array.isArray(articles)) {
@@ -25,7 +27,14 @@ router.post('/posts/batch-news', async (req: Request, res: Response) => {
         log.error({ err: error }, '导入新闻失败');
         return res.status(500).json({ error: '导入新闻失败' });
     }
-});
+}
+
+// ---------------------------------------------------------------------------
+// POST /posts/batch-news — bulk import news (crawler webhook)
+// ---------------------------------------------------------------------------
+
+spaceNewsIngestRouter.post('/posts/batch-news', requireCronOrOpsAuth, handleBatchNewsImport);
+router.post('/posts/batch-news', requireCronOrOpsAuth, handleBatchNewsImport);
 
 // ---------------------------------------------------------------------------
 // GET /news/topics — hot news topics
@@ -54,7 +63,7 @@ router.get('/news/posts', async (req: Request, res: Response) => {
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
 
         const result = await spaceService.getNewsPosts(limit, safeCursor, days);
-        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+        const transformed = await transformPostsToResponse(result.posts);
 
         return res.json({
             posts: transformed,
@@ -76,7 +85,7 @@ router.get('/news/cluster/:clusterId', async (req: Request, res: Response) => {
         const clusterId = parseInt(req.params.clusterId, 10);
         const limit = parseInt(req.query.limit as string) || 20;
         const posts = await spaceService.getNewsClusterPosts(clusterId, limit);
-        const transformed = await Promise.all(posts.map(transformPostToResponse));
+        const transformed = await transformPostsToResponse(posts);
         return res.json({ posts: transformed });
     } catch (error) {
         log.error({ err: error }, '获取话题新闻失败');

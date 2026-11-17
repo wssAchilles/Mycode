@@ -4,6 +4,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import type { Express } from 'express';
+import { Op } from 'sequelize';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../../controllers/uploadController';
 import {
     transformFeedCandidateToResponse,
@@ -141,7 +142,19 @@ type PostResponseInput = {
     newsMetadata?: IPost['newsMetadata'];
 };
 
-export async function transformPostToResponse(post: PostResponseInput) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(value?: string | null): value is string {
+    return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+type PostAuthorSummary = {
+    username?: string | null;
+    avatarUrl?: string | null;
+};
+
+// 单条帖子响应组装（复用作者解析逻辑，避免批/单路径重复）
+function formatPostResponse(post: PostResponseInput, author: PostAuthorSummary | null) {
     const postId =
         typeof post.id === 'string' && post.id
             ? post.id
@@ -149,13 +162,6 @@ export async function transformPostToResponse(post: PostResponseInput) {
                 ? String(post._id)
                 : undefined;
 
-    const isUuid = (value: string) =>
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-    const author = post?.authorId && isUuid(post.authorId)
-        ? await User.findByPk(post.authorId, {
-            attributes: ['id', 'username', 'avatarUrl'],
-        })
-        : null;
     const isNews = post?.isNews || post?.authorId === 'news_bot_official';
     const fallbackAuthor = isNews
         ? { username: 'NewsBot', avatarUrl: NEWS_BOT_AVATAR_URL }
@@ -189,6 +195,55 @@ export async function transformPostToResponse(post: PostResponseInput) {
         isNews: post.isNews ?? false,
         newsMetadata: post.newsMetadata ?? undefined,
     };
+}
+
+/**
+ * 批量转换帖子响应，去重 authorId 后执行单次 IN 查询消除 N+1 连接池风暴
+ */
+export async function transformPostsToResponse(posts: PostResponseInput[]) {
+    if (!Array.isArray(posts) || posts.length === 0) {
+        return [];
+    }
+
+    const authorIds = Array.from(
+        new Set(
+            posts
+                .map((post) => post?.authorId)
+                .filter((authorId): authorId is string => isValidUuid(authorId)),
+        ),
+    );
+
+    const authorMap = new Map<string, PostAuthorSummary>();
+    if (authorIds.length > 0) {
+        const authors = await User.findAll({
+            where: { id: { [Op.in]: authorIds } },
+            attributes: ['id', 'username', 'avatarUrl'],
+        });
+        for (const author of authors) {
+            if (author?.id) {
+                authorMap.set(author.id, {
+                    username: author.username,
+                    avatarUrl: author.avatarUrl,
+                });
+            }
+        }
+    }
+
+    return posts.map((post) => {
+        const author = post?.authorId && isValidUuid(post.authorId)
+            ? (authorMap.get(post.authorId) ?? null)
+            : null;
+        return formatPostResponse(post, author);
+    });
+}
+
+export async function transformPostToResponse(post: PostResponseInput) {
+    const author = isValidUuid(post?.authorId)
+        ? await User.findByPk(post.authorId, {
+            attributes: ['id', 'username', 'avatarUrl'],
+        })
+        : null;
+    return formatPostResponse(post, author);
 }
 
 // ---------------------------------------------------------------------------
