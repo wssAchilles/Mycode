@@ -1,9 +1,4 @@
-/**
- * ReactionPicker 组件样式
- * 消息表情回复选择器
- */
-
-/* 反应容器 */
+/* 消息表情回应选择器 - 淡色高对比 */
 .tg-reactions {
     display: inline-flex;
     align-items: center;
@@ -11,35 +6,32 @@
     position: relative;
 }
 
-/* 已有反应列表 */
 .tg-reactions__existing {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
 }
 
-/* 反应徽章 */
 .tg-reactions__badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    background: rgba(47, 62, 76, 0.6);
-    border: 1px solid rgba(85, 104, 192, 0.2);
-    border-radius: 12px;
+    padding: 3px 8px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 9999px;
     cursor: pointer;
-    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
-    font-size: 14px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    font-size: 13.5px;
 }
 
 .tg-reactions__badge:hover:not(:disabled) {
-    background: rgba(85, 104, 192, 0.25);
-    transform: scale(1.05);
+    background: #EFF3F4;
 }
 
 .tg-reactions__badge--active {
-    background: rgba(85, 104, 192, 0.3);
-    border-color: var(--tg-blue, #5568c0);
+    background: rgba(29, 155, 240, 0.12);
+    border-color: #1D9BF0;
 }
 
 .tg-reactions__badge:disabled {
@@ -48,30 +40,34 @@
 }
 
 .tg-reactions__badge-emoji {
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1;
 }
 
 .tg-reactions__badge-count {
-    color: var(--tg-text-secondary, #8596a8);
+    color: #536471;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
-/* 添加反应按钮 */
+.tg-reactions__badge--active .tg-reactions__badge-count {
+    color: #0369A1;
+}
+
 .tg-reactions__add-btn {
-    width: 28px;
-    height: 28px;
-    border: none;
-    background: rgba(47, 62, 76, 0.4);
+    width: 26px;
+    height: 26px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
     border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--tg-text-secondary, #8596a8);
-    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    color: #536471;
     opacity: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 
 .tg-reactions:hover .tg-reactions__add-btn,
@@ -80,33 +76,20 @@
 }
 
 .tg-reactions__add-btn:hover:not(:disabled) {
-    background: rgba(85, 104, 192, 0.3);
-    color: var(--tg-blue, #5568c0);
-    transform: scale(1.1);
+    background: #EFF3F4;
+    color: #0F1419;
 }
 
-.tg-reactions__add-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-}
-
-/* 反应选择器弹窗 */
 .tg-reactions__picker {
     position: absolute;
     left: 0;
-    background: linear-gradient(135deg,
-            rgba(23, 33, 43, 0.98) 0%,
-            rgba(15, 20, 25, 0.99) 100%);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(85, 104, 192, 0.25);
+    background: #FFFFFF;
+    border: 1px solid #EFF3F4;
     border-radius: 16px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.45),
-        0 0 30px rgba(85, 104, 192, 0.1);
+    box-shadow: 0 12px 32px rgba(15, 20, 25, 0.14);
     z-index: 100;
     overflow: hidden;
-    animation: reactionPickerSlide 0.2s ease-out;
+    animation: reactionPickerSlide 0.16s ease-out;
 }
 
 .tg-reactions__picker--top {
@@ -120,71 +103,60 @@
 @keyframes reactionPickerSlide {
     from {
         opacity: 0;
-        transform: translateY(8px) scale(0.95);
+        transform: translateY(6px) scale(0.96);
     }
-
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
     }
 }
 
-/* 快速反应区域 */
 .tg-reactions__quick {
     display: flex;
     align-items: center;
     padding: 8px;
     gap: 4px;
-    border-bottom: 1px solid rgba(47, 62, 76, 0.5);
+    border-bottom: 1px solid #EFF3F4;
 }
 
 .tg-reactions__quick-item {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     border: none;
     background: transparent;
     border-radius: 10px;
     cursor: pointer;
-    font-size: 24px;
+    font-size: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
 }
 
 .tg-reactions__quick-item:hover {
-    background: rgba(85, 104, 192, 0.2);
-    transform: scale(1.2);
+    background: #EFF3F4;
 }
 
-.tg-reactions__quick-item:active {
-    transform: scale(0.9);
-}
-
-/* 展开按钮 */
 .tg-reactions__expand-btn {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     border: none;
-    background: rgba(47, 62, 76, 0.4);
+    background: #F7F9F9;
     border-radius: 50%;
     cursor: pointer;
     font-size: 18px;
     font-weight: bold;
-    color: var(--tg-text-secondary, #8596a8);
+    color: #536471;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
     margin-left: 4px;
 }
 
 .tg-reactions__expand-btn:hover {
-    background: rgba(85, 104, 192, 0.3);
-    color: #ffffff;
+    background: #EFF3F4;
+    color: #0F1419;
 }
 
-/* 扩展表情区域 */
 .tg-reactions__extended {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
@@ -192,17 +164,6 @@
     padding: 10px;
     max-height: 200px;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(85, 104, 192, 0.3) transparent;
-}
-
-.tg-reactions__extended::-webkit-scrollbar {
-    width: 5px;
-}
-
-.tg-reactions__extended::-webkit-scrollbar-thumb {
-    background: rgba(85, 104, 192, 0.3);
-    border-radius: 3px;
 }
 
 .tg-reactions__extended-item {
@@ -216,52 +177,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
 }
 
 .tg-reactions__extended-item:hover {
-    background: rgba(85, 104, 192, 0.2);
-    transform: scale(1.15);
-}
-
-/* 响应式 */
-@media (max-width: 480px) {
-    .tg-reactions__picker {
-        left: auto;
-        right: 0;
-    }
-
-    .tg-reactions__quick-item {
-        width: 36px;
-        height: 36px;
-        font-size: 20px;
-    }
-
-    .tg-reactions__extended {
-        grid-template-columns: repeat(7, 1fr);
-    }
-
-    .tg-reactions__extended-item {
-        width: 32px;
-        height: 32px;
-        font-size: 18px;
-    }
-}
-
-/* 减少动效 */
-@media (prefers-reduced-motion: reduce) {
-
-    .tg-reactions__picker,
-    .tg-reactions__quick-item,
-    .tg-reactions__extended-item,
-    .tg-reactions__badge {
-        animation: none;
-        transition: none;
-    }
-
-    .tg-reactions__quick-item:hover,
-    .tg-reactions__extended-item:hover,
-    .tg-reactions__badge:hover {
-        transform: none;
-    }
+    background: #EFF3F4;
 }

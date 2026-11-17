@@ -1,3 +1,4 @@
+/* 聊天历史列表 - 淡色高对比极简风 */
 .chat-history {
     flex: 1;
     overflow-y: auto;
@@ -8,24 +9,25 @@
 
 .chat-history__loading {
     text-align: center;
-    color: var(--tg-text-secondary);
-    padding: 12px;
+    color: #536471;
+    padding: 10px;
     font-size: 13px;
 }
 
 .chat-history__loading--overlay {
     position: absolute;
-    top: 10px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 2;
     pointer-events: none;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.22);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: rgba(255, 255, 255, 0.92);
+    padding: 6px 14px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #EFF3F4;
+    box-shadow: var(--shadow-sm);
+    color: #0F1419;
+    font-weight: 600;
 }
 
 .chat-history__inner {
@@ -35,7 +37,7 @@
 
 .chat-history__media {
     max-width: 100%;
-    border-radius: var(--tg-radius-md);
+    border-radius: 12px;
     display: block;
 }
 
@@ -57,24 +59,22 @@
 }
 
 .chat-history__item.is-clickable:hover .tg-message-bubble {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 3px 10px rgba(15, 20, 25, 0.08);
 }
 
 .chat-history__item.is-clickable:focus-visible {
-    outline: 2px solid rgba(129, 140, 248, 0.6);
+    outline: 2px solid var(--tg-blue);
     outline-offset: 4px;
     border-radius: 12px;
 }
 
 .tg-highlight {
-    background: rgba(16, 185, 129, 0.3);
-    color: inherit;
-    padding: 0 2px;
+    background: #FEF08A;
+    color: #0F1419;
+    padding: 0 3px;
     border-radius: 4px;
 }
 
-/* 空状态 */
 .chat-history--empty {
     display: flex;
     align-items: center;
@@ -88,22 +88,22 @@
     align-items: center;
     gap: 6px;
     text-align: center;
-    color: var(--tg-text-secondary);
+    color: #536471;
     padding: 0 20px;
 }
 
 .chat-history__empty-title {
-    color: rgba(226, 232, 240, 0.82);
-    font-size: 15px;
-    font-weight: 600;
+    color: #0F1419;
+    font-size: 15.5px;
+    font-weight: 700;
 }
 
 .chat-history__empty-description {
-    color: var(--tg-text-secondary);
-    font-size: 13px;
+    color: #536471;
+    font-size: 13.5px;
     line-height: 1.5;
 }
 
 .chat-history__empty-state--error .chat-history__empty-title {
-    color: var(--color-error, #f87171);
+    color: #DC2626;
 }

@@ -1,14 +1,10 @@
-/**
- * ChatWindow 组件样式
- * Glassmorphism 风格消息窗口
- */
-
+/* ChatWindow 样式 - Telegram Light 淡色高对比（限定 .chat-window 作用域，不覆盖全局 .chat-header） */
 .chat-window {
     flex: 1;
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: rgba(15, 20, 25, 0.8);
+    background: #F4F6F8;
     min-width: 0;
 }
 
@@ -17,211 +13,124 @@
     justify-content: center;
 }
 
-/* 空状态 */
-.empty-state {
+.chat-window .empty-state {
     text-align: center;
-    color: var(--color-text-muted);
-    padding: var(--space-8);
+    color: #536471;
+    padding: 32px;
 }
 
-.empty-state .empty-icon {
-    font-size: 64px;
-    margin-bottom: var(--space-4);
+.chat-window .empty-state .empty-icon {
+    font-size: 56px;
+    margin-bottom: 14px;
 }
 
-.empty-state h3 {
-    color: var(--color-text-primary);
-    font-size: var(--text-xl);
-    font-weight: 500;
-    margin-bottom: var(--space-2);
+.chat-window .empty-state h3 {
+    color: #0F1419;
+    font-size: 19px;
+    font-weight: 700;
+    margin-bottom: 6px;
 }
 
-.empty-state p {
-    font-size: var(--text-sm);
+.chat-window .empty-state p {
+    font-size: 14px;
+    color: #536471;
 }
 
-/* 聊天头部 */
-.chat-header {
+.chat-window .chat-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-4) var(--space-5);
-    background: var(--glass-background);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border-bottom: var(--glass-border);
+    padding: 12px 18px;
+    background: #FFFFFF;
+    border-bottom: 1px solid #EFF3F4;
     flex-shrink: 0;
 }
 
-.chat-contact-info {
+.chat-window .chat-contact-info {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: 12px;
 }
 
-.chat-contact-avatar {
-    width: 42px;
-    height: 42px;
+.chat-window .chat-contact-avatar {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    font-weight: 600;
-    font-size: var(--text-lg);
+    color: #FFFFFF;
+    font-weight: 700;
 }
 
-.chat-contact-details h2 {
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    font-weight: 500;
-    margin: 0 0 var(--space-1) 0;
+.chat-window .chat-contact-details h2 {
+    color: #0F1419;
+    font-size: 15.5px;
+    font-weight: 700;
+    margin: 0 0 2px 0;
 }
 
-.chat-contact-status {
-    font-size: var(--text-xs);
+.chat-window .chat-contact-status {
+    font-size: 12.5px;
 }
 
-.chat-contact-status.online {
-    color: #50a803;
-}
+.chat-window .chat-contact-status.online { color: #00BA7C; }
+.chat-window .chat-contact-status.offline { color: #536471; }
 
-.chat-contact-status.offline {
-    color: var(--color-text-muted);
-}
-
-.chat-header-actions {
+.chat-window .chat-header-actions {
     display: flex;
-    gap: var(--space-2);
+    gap: 8px;
 }
 
-.header-action-btn {
-    width: 36px;
-    height: 36px;
+.chat-window .header-action-btn {
+    width: 34px;
+    height: 34px;
     border: none;
     background: transparent;
-    border-radius: var(--radius-md);
+    border-radius: 9999px;
     cursor: pointer;
-    font-size: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-text-muted);
-    transition: background var(--duration-fast);
+    color: #536471;
 }
 
-.header-action-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+.chat-window .header-action-btn:hover {
+    background: #EFF3F4;
+    color: #0F1419;
 }
 
-/* 消息容器 */
-.messages-container {
+.chat-window .messages-container {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: var(--space-4) var(--space-5);
+    padding: 16px 20px;
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: 4px;
 }
 
-/* 加载更多 */
-.loading-more {
+.chat-window .loading-more {
     text-align: center;
-    padding: var(--space-4);
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    padding: 14px;
+    color: #536471;
+    font-size: 13.5px;
 }
 
-/* 无消息状态 */
-.no-messages {
+.chat-window .no-messages {
     flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    color: var(--color-text-muted);
+    color: #536471;
 }
 
-.wave-emoji {
-    font-size: 48px;
-    margin-bottom: var(--space-4);
-    animation: wave 1.5s ease-in-out infinite;
+.chat-window .no-messages p {
+    font-size: 14px;
 }
 
-@keyframes wave {
-
-    0%,
-    100% {
-        transform: rotate(0deg);
-    }
-
-    25% {
-        transform: rotate(20deg);
-    }
-
-    75% {
-        transform: rotate(-20deg);
-    }
-}
-
-.no-messages p {
-    font-size: var(--text-sm);
-}
-
-.no-messages strong {
-    color: var(--color-text-primary);
-}
-
-/* 响应式 */
-@media (max-width: 768px) {
-    .chat-header {
-        padding: var(--space-3) var(--space-4);
-    }
-
-    .chat-contact-avatar {
-        width: 38px;
-        height: 38px;
-    }
-
-    .chat-contact-details h2 {
-        font-size: var(--text-sm);
-    }
-
-    .messages-container {
-        padding: var(--space-3) var(--space-4);
-    }
-}
-
-@media (max-width: 480px) {
-    .chat-header {
-        padding: var(--space-2) var(--space-3);
-    }
-
-    .chat-contact-avatar {
-        width: 34px;
-        height: 34px;
-        font-size: var(--text-base);
-    }
-
-    .messages-container {
-        padding: var(--space-2) var(--space-3);
-    }
-
-    .header-action-btn {
-        width: 32px;
-        height: 32px;
-    }
-}
-
-/* 减少动效 */
-@media (prefers-reduced-motion: reduce) {
-    .wave-emoji {
-        animation: none;
-    }
-
-    .header-action-btn {
-        transition: none;
-    }
+.chat-window .no-messages strong {
+    color: #0F1419;
 }

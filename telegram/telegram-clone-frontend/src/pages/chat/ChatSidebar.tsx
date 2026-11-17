@@ -121,15 +121,36 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </button>
             </div>
 
-            {/* New Group Button */}
-            <div className="chat-list-header chat-list-header--padded">
+            {/* 快捷操作栏（新建群组 + 添加联系人） */}
+            <div className="chat-list-header chat-list-header--padded chat-sidebar-actions">
                 <button
                     type="button"
                     className="new-group-btn"
                     onClick={onOpenGroupModal}
                     aria-label="新建群组"
                 >
-                    <span className="new-group-icon">+</span> 新建群组
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                    </svg>
+                    <span>新建群组</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={onOpenAddContactModal}
+                    className="add-contact-btn"
+                    title="添加联系人"
+                    aria-label="添加联系人"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                    </svg>
+                    <span>添加联系人</span>
                 </button>
             </div>
 
@@ -199,24 +220,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* Contact List */}
             <div className="contact-list-container">
                 <ChatListContainer onChatSelected={handleChatSelected} />
-            </div>
-
-            {/* Footer */}
-            <div className="sidebar-footer">
-                <button
-                    type="button"
-                    onClick={onOpenAddContactModal}
-                    className="add-contact-btn"
-                    title="添加联系人"
-                    aria-label="添加联系人"
-                >
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="8.5" cy="7" r="4"></circle>
-                        <line x1="20" y1="8" x2="20" y2="14"></line>
-                        <line x1="23" y1="11" x2="17" y2="11"></line>
-                    </svg>
-                </button>
             </div>
         </Sidebar>
     );

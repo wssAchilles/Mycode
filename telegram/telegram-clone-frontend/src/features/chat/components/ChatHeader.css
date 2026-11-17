@@ -1,28 +1,26 @@
 /**
- * ChatHeader Styles v6.0 (Soft UI Evolution)
+ * ChatHeader Styles v6.0 (Telegram Light)
+ * 全宽无缝顶栏，消除黑色矩形断层
  */
 
 .chat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
-    background: rgba(12, 14, 18, 0.65);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border-bottom: 1px solid var(--glass-border);
-    min-height: 64px;
+    width: 100%;
+    padding: 10px 18px;
+    background: transparent;
+    border-bottom: none;
+    min-height: 60px;
     z-index: 50;
-    position: sticky;
-    top: 0;
 }
 
 .chat-header__info {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     cursor: pointer;
-    transition: opacity 0.2s;
+    transition: opacity 0.15s ease;
 }
 
 .chat-header__info:hover {
@@ -42,15 +40,15 @@
     flex: 0 0 34px;
     width: 34px;
     height: 34px;
-    border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    background: rgba(15, 23, 42, 0.45);
-    color: rgba(226, 232, 240, 0.9);
+    border-radius: 9999px;
+    border: 1px solid #EFF3F4;
+    background: #F7F9F9;
+    color: #0F1419;
     align-items: center;
     justify-content: center;
     margin-right: 8px;
     cursor: pointer;
-    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    transition: background-color 0.15s ease;
     position: relative;
     z-index: 3;
     pointer-events: auto;
@@ -59,90 +57,91 @@
 }
 
 .chat-header__mobile-back:hover {
-    background: rgba(51, 144, 236, 0.2);
-    border-color: rgba(51, 144, 236, 0.4);
+    background: #EFF3F4;
 }
 
 .chat-header__mobile-back:focus-visible,
 .chat-header__info-btn:focus-visible {
-    outline: 2px solid rgba(51, 144, 236, 0.7);
+    outline: 2px solid var(--tg-blue);
     outline-offset: 2px;
 }
 
 .chat-header__avatar--ai {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #0F1419;
+    color: #FFFFFF;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    box-shadow: 0 8px 18px rgba(118, 75, 162, 0.35);
+    font-size: 18px;
 }
 
 .chat-header__details {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
 }
 
 .chat-header__name {
     font-size: 16px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-    letter-spacing: 0.2px;
+    font-weight: 700;
+    color: #0F1419;
 }
 
 .chat-header__status {
     font-size: 12.5px;
-    color: var(--color-text-secondary);
+    color: #536471;
 }
 
 .chat-header__status--online {
-    color: var(--tg-blue);
-    text-shadow: 0 0 12px rgba(51, 144, 236, 0.35);
+    color: #00BA7C;
+    font-weight: 600;
+    text-shadow: none;
 }
 
 .chat-header__actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
 }
 
 .chat-header__search {
     display: flex;
     align-items: center;
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-    padding: 8px 14px;
-    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    background-color: #EFF3F4;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    padding: 7px 14px;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .chat-header__search:focus-within {
-    background-color: rgba(0, 0, 0, 0.45);
-    border-color: rgba(51, 144, 236, 0.45);
-    box-shadow: 0 0 0 3px rgba(51, 144, 236, 0.18);
+    background-color: #FFFFFF;
+    border-color: #1D9BF0;
+    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.14);
 }
 
 .chat-header__search-icon {
     margin-right: 8px;
-    font-size: 16px;
-    color: var(--color-text-secondary);
+    font-size: 15px;
+    color: #536471;
+    display: inline-flex;
+    align-items: center;
 }
 
 .chat-header__search-input {
     background: transparent;
     border: none;
-    color: var(--color-text-primary);
+    color: #0F1419;
     outline: none;
     width: 180px;
     font-size: 14px;
 }
 
 .chat-header__search-input::placeholder {
-    color: var(--color-text-muted);
+    color: #536471;
 }
 
 @media (max-width: 820px) {

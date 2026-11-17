@@ -34,19 +34,18 @@ export const Avatar: React.FC<AvatarProps> = ({
         return name.slice(0, 2).toUpperCase();
     };
 
-    // 根据名字生成渐变色
+    // 根据名字生成克制沉稳的头像色板
     const getGradient = (name: string): string => {
-        if (!name) return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        if (!name) return 'linear-gradient(135deg, #1D9BF0 0%, #2563EB 100%)';
 
         const gradients = [
-            'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-            'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-            'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-            'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-            'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
-            'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
-            'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+            'linear-gradient(135deg, #E11D48 0%, #F43F5E 100%)',
+            'linear-gradient(135deg, #D97706 0%, #F59E0B 100%)',
+            'linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%)',
+            'linear-gradient(135deg, #2563EB 0%, #3B82F6 100%)',
+            'linear-gradient(135deg, #059669 0%, #10B981 100%)',
+            'linear-gradient(135deg, #0891B2 0%, #06B6D4 100%)',
+            'linear-gradient(135deg, #1D9BF0 0%, #38BDF8 100%)',
         ];
 
         // 根据名字的 hash 选择渐变

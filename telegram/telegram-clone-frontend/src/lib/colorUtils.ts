@@ -1,23 +1,19 @@
 /**
- * Telegram-like color generation for avatars.
- * Uses a predefined set of gradients and selects one based on the user ID/peer ID.
+ * 头像颜色与首字母工具：采用高雅沉稳的中低饱和度色板（适配纯白淡色画布与白字对比）
  */
 
-// Basic telegram peer colors (top, bottom)
 const AVATAR_COLORS: [string, string][] = [
-    ['#FF516A', '#FF885E'], // Red
-    ['#FF8E3C', '#FFBF2F'], // Orange
-    ['#C649F0', '#9D4BF6'], // Purple
-    ['#665FFF', '#82B1FF'], // Blue
-    ['#54CB68', '#A0DE7E'], // Green
-    ['#28C9B7', '#53EDD6'], // Cyan
-    ['#2A9EF1', '#72D5FD'], // Light Blue
+    ['#E11D48', '#F43F5E'], // 玫瑰红
+    ['#D97706', '#F59E0B'], // 琥珀金
+    ['#7C3AED', '#8B5CF6'], // 紫罗兰
+    ['#2563EB', '#3B82F6'], // 学院蓝
+    ['#059669', '#10B981'], // 翡翠绿
+    ['#0891B2', '#06B6D4'], // 湖青色
+    ['#1D9BF0', '#38BDF8'], // 天空蓝
 ];
 
 /**
- * Gets the gradient colors for a given peer ID.
- * @param peerId - The unique identifier for the user or chat (string or number).
- * @returns An array [colorTop, colorBottom].
+ * 获取给定用户或群组 ID 的头像渐变色对。
  */
 export function getAvatarColors(peerId: string | number): [string, string] {
     if (!peerId) return AVATAR_COLORS[0];
@@ -31,7 +27,7 @@ export function getAvatarColors(peerId: string | number): [string, string] {
 }
 
 /**
- * Returns a CSS linear-gradient string for the given peer ID.
+ * 返回给定 ID 的 CSS 线性渐变背景。
  */
 export function getAvatarGradient(peerId: string | number): string {
     const [c1, c2] = getAvatarColors(peerId);
@@ -39,8 +35,7 @@ export function getAvatarGradient(peerId: string | number): string {
 }
 
 /**
- * Helper to extract initials from a name.
- * e.g., "John Doe" -> "JD", "Telegram" -> "T"
+ * 提取名称首字母。
  */
 export function getInitials(name: string): string {
     if (!name) return '';
@@ -54,16 +49,13 @@ export function getInitials(name: string): string {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/**
- * Simple hash function for strings
- */
 function stringToHash(str: string): number {
     let hash = 0;
     if (str.length === 0) return hash;
     for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
         hash = (hash << 5) - hash + char;
-        hash = hash & hash; // Convert to 32bit integer
+        hash = hash & hash;
     }
     return hash;
 }
