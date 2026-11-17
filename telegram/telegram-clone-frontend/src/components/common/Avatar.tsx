@@ -74,6 +74,8 @@ const Avatar: React.FC<AvatarProps> = ({
                     src={src}
                     alt={name || 'Avatar'}
                     className="tg-avatar-img"
+                    loading="lazy"
+                    decoding="async"
                     onError={() => setImgFailed(true)}
                 />
             ) : (

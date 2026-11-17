@@ -17,6 +17,7 @@ import type { SocketRealtimeEvent } from '../chat/realtime';
 import { getChatCoreApi, getChatCoreWorkerGeneration, pingChatCoreWorker, terminateChatCoreWorker } from './workerBridge';
 import { markWorkerRecoverEnd, markWorkerRecoverStart } from '../../perf/marks';
 import { runtimeFlags } from '../chat/runtimeFlags';
+import { AUTH_TOKENS_UPDATED_EVENT, type AuthTokensUpdatedDetail } from '../../utils/authStorage';
 
 type SubscribeFn = (patches: ChatPatch[]) => void;
 const CHAT_CORE_CLIENT_BUILD_ID = import.meta.env.VITE_APP_BUILD_ID || '';
@@ -30,6 +31,38 @@ class ChatCoreClient {
   private socketConnectedHint = true;
   private activeChatHint: { chatId: string; isGroup: boolean; loadSeq: LoadSeq } | null = null;
   private recoveryPromise: Promise<void> | null = null;
+  private authTokensListenerBound = false;
+
+  // 监听主线程 apiClient 刷新令牌后的全局事件，实时同步到 Worker 内存与 Socket 鉴权
+  private handleAuthTokensUpdated = (event: Event): void => {
+    const detail = (event as CustomEvent<AuthTokensUpdatedDetail> | undefined)?.detail;
+    const nextAccessToken = typeof detail?.accessToken === 'string' ? detail.accessToken : '';
+    const nextRefreshToken = typeof detail?.refreshToken === 'string' ? detail.refreshToken : null;
+    if (!nextAccessToken) return;
+    if (!this.initedUserId || !this.initParams) return;
+
+    const currentRefreshToken = this.initParams.refreshToken ?? null;
+    if (
+      this.initParams.accessToken === nextAccessToken
+      && (nextRefreshToken ?? currentRefreshToken) === currentRefreshToken
+    ) {
+      return;
+    }
+
+    void this.updateTokens(nextAccessToken, nextRefreshToken).catch(() => undefined);
+  };
+
+  private bindAuthTokensListener(): void {
+    if (this.authTokensListenerBound || typeof window === 'undefined') return;
+    window.addEventListener(AUTH_TOKENS_UPDATED_EVENT, this.handleAuthTokensUpdated);
+    this.authTokensListenerBound = true;
+  }
+
+  private unbindAuthTokensListener(): void {
+    if (!this.authTokensListenerBound || typeof window === 'undefined') return;
+    window.removeEventListener(AUTH_TOKENS_UPDATED_EVENT, this.handleAuthTokensUpdated);
+    this.authTokensListenerBound = false;
+  }
 
   private shouldReinitializeWorker(next: ChatCoreInit, current: ChatCoreInit | null): boolean {
     if (!current) return true;
@@ -210,9 +243,11 @@ class ChatCoreClient {
       await this.initAndValidate(api, params);
       this.initedUserId = params.userId;
       this.subscribed = false;
+      this.bindAuthTokensListener();
       return;
     }
 
+    this.bindAuthTokensListener();
     // Same-user re-entry keeps the worker hot, but must still validate runtime compatibility
     // and refresh bearer state so the worker never keeps using stale tokens.
     await this.assertRuntimeCompatibility(api);
@@ -223,6 +258,16 @@ class ChatCoreClient {
 
   async updateTokens(accessToken: string, refreshToken?: string | null): Promise<void> {
     if (this.initParams) {
+      const currentRefreshToken = this.initParams.refreshToken ?? null;
+      const nextRefreshToken = refreshToken ?? this.initParams.refreshToken ?? null;
+      // 避免与主线程其他监听器重复发送相同令牌的 RPC
+      if (
+        this.initedUserId
+        && this.initParams.accessToken === accessToken
+        && nextRefreshToken === currentRefreshToken
+      ) {
+        return;
+      }
       this.initParams = {
         ...this.initParams,
         accessToken,
@@ -358,6 +403,7 @@ class ChatCoreClient {
         await this.api.shutdown();
       }
     } finally {
+      this.unbindAuthTokensListener();
       terminateChatCoreWorker();
       this.resetLocalStateForRestart();
       this.initParams = null;

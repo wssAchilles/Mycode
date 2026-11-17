@@ -229,6 +229,9 @@ interface ChatState {
     }) => void;
 }
 
+// loadContacts 并发去重锁，避免多组件挂载同时触发重复请求
+let loadContactsInFlight: Promise<void> | null = null;
+
 export const useChatStore = create<ChatState>((set, get) => ({
     chats: [],
     contacts: [],
@@ -398,27 +401,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 加载联系人列表（完整 Contact 对象）
     loadContacts: async () => {
-        set({ isLoadingContacts: true, error: null });
-        try {
-            const response = await contactAPI.getContacts('accepted');
-            const contacts: Contact[] = response.contacts.map((contact: ContactApiResponse) => ({
-                id: contact.id,
-                userId: contact.contactId,
-                username: contact.contact?.username || '未知用户',
-                email: contact.contact?.email,
-                avatarUrl: withApiBase(contact.contact?.avatarUrl || contact.avatarUrl) ?? undefined,
-                alias: contact.alias,
-                status: contact.status,
-                isOnline: !!contact.isOnline,
-                lastSeen: contact.contact?.lastSeen,
-                lastMessage: contact.lastMessage || undefined,
-                unreadCount: typeof contact.unreadCount === 'number' ? contact.unreadCount : 0,
-            }));
-
-            set({ contacts, isLoadingContacts: false });
-        } catch (error: unknown) {
-            set({ error: getErrorDetail(error), isLoadingContacts: false });
+        if (loadContactsInFlight) {
+            return loadContactsInFlight;
         }
+
+        const task = (async () => {
+            set({ isLoadingContacts: true, error: null });
+            try {
+                const response = await contactAPI.getContacts('accepted');
+                const contacts: Contact[] = response.contacts.map((contact: ContactApiResponse) => ({
+                    id: contact.id,
+                    userId: contact.contactId,
+                    username: contact.contact?.username || '未知用户',
+                    email: contact.contact?.email,
+                    avatarUrl: withApiBase(contact.contact?.avatarUrl || contact.avatarUrl) ?? undefined,
+                    alias: contact.alias,
+                    status: contact.status,
+                    isOnline: !!contact.isOnline,
+                    lastSeen: contact.contact?.lastSeen,
+                    lastMessage: contact.lastMessage || undefined,
+                    unreadCount: typeof contact.unreadCount === 'number' ? contact.unreadCount : 0,
+                }));
+
+                set({ contacts, isLoadingContacts: false });
+            } catch (error: unknown) {
+                set({ error: getErrorDetail(error), isLoadingContacts: false });
+            } finally {
+                if (loadContactsInFlight === task) {
+                    loadContactsInFlight = null;
+                }
+            }
+        })();
+
+        loadContactsInFlight = task;
+        return task;
     },
 
     // 加载待处理请求

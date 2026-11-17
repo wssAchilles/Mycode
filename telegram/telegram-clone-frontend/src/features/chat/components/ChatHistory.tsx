@@ -160,6 +160,10 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const visibleRangeLastSentRef = useRef<{ start: number; end: number }>({ start: -1, end: -1 });
   const visibleRangePendingRef = useRef<{ start: number; end: number } | null>(null);
   const visibleRangeRafRef = useRef<number | null>(null);
+  const latestCountRef = useRef(count);
+  latestCountRef.current = count;
+  const scrollRafRef = useRef<number | null>(null);
+  const loadMoreAnchorRafRef = useRef<number | null>(null);
 
   const timeFormatter = useMemo(
     () => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }),
@@ -312,10 +316,71 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     [isStoreMode, onVisibleRangeChange],
   );
 
+  const cancelPendingScrollToIndex = useCallback(() => {
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+    // 清理 virtualizer 内部滞留的滚动目标索引，避免会话切换导致 count 缩减后 verify 回调误报警告
+    const v = virtualizer as unknown as { currentScrollToIndex?: number | null };
+    if (v && 'currentScrollToIndex' in v) {
+      v.currentScrollToIndex = null;
+    }
+  }, [virtualizer]);
+
+  const safeScrollToIndex = useCallback(
+    (
+      targetIndex: number,
+      options: { align?: 'start' | 'center' | 'end' | 'auto'; behavior?: 'auto' | 'smooth' } = {},
+    ) => {
+      const currentCount = latestCountRef.current;
+      if (currentCount <= 0 || targetIndex < 0 || targetIndex >= currentCount) return;
+
+      cancelPendingScrollToIndex();
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        const el = containerRef.current;
+        const latestCount = latestCountRef.current;
+        if (!el || el.clientHeight <= 0) return;
+        if (latestCount <= 0 || targetIndex < 0 || targetIndex >= latestCount) return;
+
+        const measurements = virtualizer.getMeasurements();
+        if (!measurements || targetIndex >= measurements.length || !measurements[targetIndex]) {
+          return;
+        }
+
+        virtualizer.scrollToIndex(targetIndex, options);
+      });
+    },
+    [cancelPendingScrollToIndex, virtualizer],
+  );
+
+  useEffect(() => {
+    if (count <= 0) {
+      cancelPendingScrollToIndex();
+      return;
+    }
+    const v = virtualizer as unknown as { currentScrollToIndex?: number | null };
+    if (v && typeof v.currentScrollToIndex === 'number' && v.currentScrollToIndex >= count) {
+      v.currentScrollToIndex = null;
+    }
+  }, [cancelPendingScrollToIndex, count, virtualizer]);
+
+  useEffect(
+    () => () => {
+      cancelPendingScrollToIndex();
+      if (loadMoreAnchorRafRef.current !== null) {
+        cancelAnimationFrame(loadMoreAnchorRafRef.current);
+        loadMoreAnchorRafRef.current = null;
+      }
+    },
+    [cancelPendingScrollToIndex],
+  );
+
   const scrollToBottom = useCallback(() => {
-    if (!count) return;
-    virtualizer.scrollToIndex(count - 1, { align: 'end', behavior: 'auto' });
-  }, [virtualizer, count]);
+    if (count <= 0) return;
+    safeScrollToIndex(count - 1, { align: 'end', behavior: 'auto' });
+  }, [count, safeScrollToIndex]);
 
   useEffect(() => {
     if (!isLoading) loadMoreLockRef.current = false;
@@ -339,12 +404,29 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       idx = (messages || []).findIndex((m) => m.id === anchor.id);
     }
 
-    if (idx < 0) {
+    if (idx < 0 || idx >= count) {
       loadMoreAnchorRef.current = null;
       return;
     }
 
-    requestAnimationFrame(() => {
+    if (loadMoreAnchorRafRef.current !== null) {
+      cancelAnimationFrame(loadMoreAnchorRafRef.current);
+    }
+    loadMoreAnchorRafRef.current = requestAnimationFrame(() => {
+      loadMoreAnchorRafRef.current = null;
+      const el = containerRef.current;
+      const latestCount = latestCountRef.current;
+      if (!el || el.clientHeight <= 0 || latestCount <= 0 || idx < 0 || idx >= latestCount) {
+        loadMoreAnchorRef.current = null;
+        return;
+      }
+
+      const measurements = virtualizer.getMeasurements();
+      if (!measurements || idx >= measurements.length || !measurements[idx]) {
+        loadMoreAnchorRef.current = null;
+        return;
+      }
+
       const offsetInfo = virtualizer.getOffsetForIndex(idx, 'start');
       if (offsetInfo) {
         const [toOffset] = offsetInfo;
@@ -354,7 +436,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       }
       loadMoreAnchorRef.current = null;
     });
-  }, [isStoreMode, listVersion, messageIds, messages, virtualizer]);
+  }, [count, isStoreMode, listVersion, messageIds, messages, virtualizer]);
 
   // Auto-scroll only when the user is already at (or near) bottom.
   useEffect(() => {
@@ -383,9 +465,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     if (typeof highlightSeq !== 'number') return;
     if (isStoreMode) return;
     const idx = (messages || []).findIndex((m) => m.seq === highlightSeq);
-    if (idx < 0) return;
-    virtualizer.scrollToIndex(idx, { align: 'center', behavior: 'auto' });
-  }, [highlightSeq, isStoreMode, messages, virtualizer]);
+    if (idx < 0 || idx >= count) return;
+    safeScrollToIndex(idx, { align: 'center', behavior: 'auto' });
+  }, [count, highlightSeq, isStoreMode, messages, safeScrollToIndex]);
 
   const processScroll = useCallback(
     (scrollTop: number) => {

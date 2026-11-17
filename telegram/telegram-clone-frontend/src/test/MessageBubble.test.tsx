@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MessageBubble } from '../components/chat/MessageBubble';
+import CommonMessageBubble from '../components/common/MessageBubble';
 import type { Message } from '../types/store';
 
 describe('MessageBubble', () => {
@@ -72,5 +73,16 @@ describe('MessageBubble', () => {
             />
         );
         expect(container.querySelector('.message-avatar')).not.toBeInTheDocument();
+    });
+
+    it('renders readCount badge with safe row spacing class on outgoing common MessageBubble', () => {
+        const { container } = render(
+            <CommonMessageBubble isOut={true} time="12:00" readCount={5}>
+                群聊消息
+            </CommonMessageBubble>
+        );
+        const row = container.querySelector('.tg-message-row.is-out.has-readcount');
+        expect(row).toBeInTheDocument();
+        expect(screen.getByText('已读 5')).toBeInTheDocument();
     });
 });

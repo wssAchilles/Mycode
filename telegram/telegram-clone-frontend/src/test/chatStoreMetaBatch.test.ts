@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { formatChatListTimestamp, useChatStore } from '../features/chat/store/chatStore';
+import { contactAPI } from '../services/apiClient';
 import type { Contact } from '../features/chat/store/chatStore';
 import type { ChatSummary } from '../features/chat/types';
 import type { Message } from '../types/chat';
@@ -320,5 +321,38 @@ describe('chatStore applyChatMetaBatch', () => {
     // Cancels any in-flight group details request.
     expect(st.isLoadingGroupDetails).toBe(false);
     expect(st.groupDetailsSeq).toBe(1);
+  });
+
+  it('deduplicates concurrent loadContacts requests with an in-flight lock', async () => {
+    type GetContactsResult = Awaited<ReturnType<typeof contactAPI.getContacts>>;
+    let resolveContacts!: (val: GetContactsResult) => void;
+    const pendingPromise = new Promise<GetContactsResult>((resolve) => {
+      resolveContacts = resolve;
+    });
+    const spy = vi.spyOn(contactAPI, 'getContacts').mockReturnValue(pendingPromise);
+
+    const p1 = useChatStore.getState().loadContacts();
+    const p2 = useChatStore.getState().loadContacts();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith('accepted');
+
+    resolveContacts({
+      contacts: [
+        {
+          id: 'c1',
+          contactId: 'u-1',
+          userId: 'me',
+          status: 'accepted',
+          contact: { username: 'Alice' },
+        },
+      ],
+    } as unknown as GetContactsResult);
+    await Promise.all([p1, p2]);
+
+    expect(useChatStore.getState().contacts).toHaveLength(1);
+    expect(useChatStore.getState().isLoadingContacts).toBe(false);
+
+    spy.mockRestore();
   });
 });

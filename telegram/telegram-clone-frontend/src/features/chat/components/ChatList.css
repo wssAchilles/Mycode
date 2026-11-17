@@ -1,0 +1,12 @@
+.tg-chat-list {
+  width: 100%;
+}
+
+.tg-chat-list__inner {
+  position: relative;
+  width: 100%;
+}
+
+.tg-chat-list__item {
+  width: 100%;
+}

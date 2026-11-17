@@ -99,6 +99,7 @@ let apiBaseUrl = '';
 let accessToken: string | null = null;
 let currentUserId: string | null = null;
 let isInited = false;
+let isShuttingDown = false;
 
 let socketConnected = true;
 let workerSocketEnabled = runtimeFlags.workerSocketEnabled;
@@ -201,6 +202,8 @@ const READ_SYNC_PENDING_MAX = 600;
 const READ_SYNC_RETRY_MS = 1_200;
 
 let syncGapRecoverInFlight = false;
+let gapRecoverInFlightPromise: Promise<boolean> | null = null;
+let fetchSyncStateInFlight: Promise<number | null> | null = null;
 let syncGapRecoverLastStartedAt = 0;
 let reconnectGapRecoverAbort: AbortController | null = null;
 let reconnectGapRecoverLastStartedAt = 0;
@@ -1622,6 +1625,10 @@ function cancelSyncStartGraceTimer() {
 
 function scheduleSyncLoopStart(reason: string) {
   cancelSyncStartGraceTimer();
+  // 未初始化或正在关闭期间禁止调度 HTTP Sync 回退轮询
+  if (!isInited || isShuttingDown) {
+    return;
+  }
   if (!workerSyncFallbackEnabled) {
     setSyncPhase(socketConnected ? 'live' : 'idle', `${reason}_fallback_disabled`);
     return;
@@ -1634,7 +1641,7 @@ function scheduleSyncLoopStart(reason: string) {
 
   syncStartGraceTimer = setTimeout(() => {
     syncStartGraceTimer = null;
-    if (!isInited || socketConnected || syncAuthError) return;
+    if (!isInited || isShuttingDown || socketConnected || syncAuthError) return;
     startSyncLoop();
   }, delayMs);
 }
@@ -1757,6 +1764,15 @@ async function setConnectivityFromSocket(next: boolean, reason: string) {
 
   if (prev) {
     socketDisconnectedAt = Date.now();
+  }
+
+  // 主动断连、组件卸载或 Worker 正在停止/未初始化时，严禁反向拉起 HTTP Sync 轮询
+  if (reason === 'worker_socket_manual_disconnect' || isShuttingDown || !isInited) {
+    cancelSyncStartGraceTimer();
+    stopReconnectGapRecover();
+    stopSyncLoop();
+    setSyncPhase('disconnected', reason);
+    return;
   }
 
   if (!prev && syncTask) {
@@ -2179,20 +2195,41 @@ function canStartGapRecover(opts: { force?: boolean; reason?: string } = {}): bo
 }
 
 async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
-  const url = `${apiBaseUrl}/api/sync/state`;
-  const { res, json } = await fetchJson(url, { signal });
-  if (res.status === 404) return null;
-  if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
-  if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
-  const data = unwrapSuccessData(json);
-  assertSyncContract(res, data);
-  const headerServerPts = readSyncPts(res.headers.get(SYNC_HEADER_SERVER_PTS));
-  const headerStatePts = readSyncPts(res.headers.get(SYNC_HEADER_STATE_PTS));
-  const bodyPts = readSyncPts(data?.pts ?? data?.updateId);
-  const serverPts = headerServerPts ?? bodyPts ?? headerStatePts ?? 0;
-  const statePts = headerStatePts ?? bodyPts ?? serverPts;
-  assertSyncPtsContract('state', statePts, null, serverPts);
-  return statePts;
+  if (signal.aborted) {
+    const abortError = new Error('Aborted');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+  // 去重并发的 /api/sync/state 请求，避免初始化阶段连发导致旧请求被中止
+  if (fetchSyncStateInFlight) {
+    return fetchSyncStateInFlight;
+  }
+
+  const task = (async (): Promise<number | null> => {
+    const url = `${apiBaseUrl}/api/sync/state`;
+    const { res, json } = await fetchJson(url, { signal });
+    if (res.status === 404) return null;
+    if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+    if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+    const data = unwrapSuccessData(json);
+    assertSyncContract(res, data);
+    const headerServerPts = readSyncPts(res.headers.get(SYNC_HEADER_SERVER_PTS));
+    const headerStatePts = readSyncPts(res.headers.get(SYNC_HEADER_STATE_PTS));
+    const bodyPts = readSyncPts(data?.pts ?? data?.updateId);
+    const serverPts = headerServerPts ?? bodyPts ?? headerStatePts ?? 0;
+    const statePts = headerStatePts ?? bodyPts ?? serverPts;
+    assertSyncPtsContract('state', statePts, null, serverPts);
+    return statePts;
+  })();
+
+  fetchSyncStateInFlight = task;
+  try {
+    return await task;
+  } finally {
+    if (fetchSyncStateInFlight === task) {
+      fetchSyncStateInFlight = null;
+    }
+  }
 }
 
 async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promise<{
@@ -2736,7 +2773,7 @@ async function prefetchChatsInternal(targets: ChatPrefetchTarget[]): Promise<voi
 }
 
 async function preloadSqliteHotData(): Promise<void> {
-  if (!isInited) return;
+  if (!isInited || isShuttingDown) return;
   try {
     const driver = chatPersistence();
     if (!driver || typeof driver.preloadHotData !== 'function') return;
@@ -2755,7 +2792,7 @@ async function preloadSqliteHotData(): Promise<void> {
 }
 
 async function bootstrapHotChatPrefetch(): Promise<void> {
-  if (!isInited) return;
+  if (!isInited || isShuttingDown) return;
 
   await preloadSqliteHotData();
 
@@ -3024,12 +3061,19 @@ async function gapRecoverUntilLatest(
   signal: AbortSignal,
   opts: { force?: boolean; allowWhenSocketConnected?: boolean; reason?: string } = {},
 ): Promise<boolean> {
-  if (!currentUserId) return false;
+  if (!currentUserId || !isInited || isShuttingDown) return false;
   if (syncAuthError) return false;
+  if (signal.aborted) return false;
   if (!opts.allowWhenSocketConnected && socketConnected) {
     telemetry.gapRecoverSkippedSocketConnected += 1;
     markTelemetryUpdate();
     return false;
+  }
+  // 若已有在途 gapRecover，直接复用同一 Promise，避免并发拉取 /api/sync/state
+  if (gapRecoverInFlightPromise) {
+    telemetry.gapRecoverSkippedInFlight += 1;
+    markTelemetryUpdate();
+    return gapRecoverInFlightPromise;
   }
   if (!canStartGapRecover({ force: !!opts.force, reason: opts.reason })) return false;
 
@@ -3042,48 +3086,56 @@ async function gapRecoverUntilLatest(
   markTelemetryUpdate();
   setSyncPhase('catching_up', opts.reason || 'difference');
 
-  try {
-    const serverPts = await fetchSyncState(signal);
-    if (serverPts === null) return false; // sync API not deployed
-    if (serverPts <= syncPts) {
-      // Keep local pts monotonic.
-      await commitSyncPts(serverPts);
-      return false;
-    }
-
-    let hadProgress = false;
-    let steps = 0;
-    let stalledRounds = 0;
-
-    // Fetch in bounded batches until latest.
-    while (!signal.aborted && steps < SYNC_GAP_RECOVER_MAX_STEPS) {
-      const from = syncPts;
-      const diff = await fetchSyncDifference(from, signal);
-      if (!diff) return hadProgress;
-
-      await processSyncPayload(diff.updates, diff.messages, diff.statePts);
-
-      const progressed = syncPts > from || diff.statePts > from || diff.updates.length > 0 || diff.messages.length > 0;
-      if (progressed) {
-        hadProgress = true;
-        stalledRounds = 0;
-      } else {
-        stalledRounds += 1;
+  const task = (async (): Promise<boolean> => {
+    try {
+      const serverPts = await fetchSyncState(signal);
+      if (serverPts === null) return false; // sync API not deployed
+      if (serverPts <= syncPts) {
+        // Keep local pts monotonic.
+        await commitSyncPts(serverPts);
+        return false;
       }
 
-      if (diff.isLatest) break;
-      if (stalledRounds >= SYNC_GAP_RECOVER_STALL_LIMIT) break;
+      let hadProgress = false;
+      let steps = 0;
+      let stalledRounds = 0;
 
-      steps += 1;
-      if (SYNC_GAP_RECOVER_STEP_DELAY_MS > 0) {
-        await sleepMs(SYNC_GAP_RECOVER_STEP_DELAY_MS, signal);
+      // Fetch in bounded batches until latest.
+      while (!signal.aborted && steps < SYNC_GAP_RECOVER_MAX_STEPS) {
+        const from = syncPts;
+        const diff = await fetchSyncDifference(from, signal);
+        if (!diff) return hadProgress;
+
+        await processSyncPayload(diff.updates, diff.messages, diff.statePts);
+
+        const progressed = syncPts > from || diff.statePts > from || diff.updates.length > 0 || diff.messages.length > 0;
+        if (progressed) {
+          hadProgress = true;
+          stalledRounds = 0;
+        } else {
+          stalledRounds += 1;
+        }
+
+        if (diff.isLatest) break;
+        if (stalledRounds >= SYNC_GAP_RECOVER_STALL_LIMIT) break;
+
+        steps += 1;
+        if (SYNC_GAP_RECOVER_STEP_DELAY_MS > 0) {
+          await sleepMs(SYNC_GAP_RECOVER_STEP_DELAY_MS, signal);
+        }
+      }
+
+      return hadProgress;
+    } finally {
+      syncGapRecoverInFlight = false;
+      if (gapRecoverInFlightPromise === task) {
+        gapRecoverInFlightPromise = null;
       }
     }
+  })();
 
-    return hadProgress;
-  } finally {
-    syncGapRecoverInFlight = false;
-  }
+  gapRecoverInFlightPromise = task;
+  return task;
 }
 
 async function pollUpdatesOnce(signal: AbortSignal): Promise<'progress' | 'idle'> {
@@ -3122,7 +3174,6 @@ function stopSyncLoop() {
   }
   syncAbort = null;
   syncTask = null;
-  syncGapRecoverInFlight = false;
 }
 
 function stopChatFetches() {
@@ -3146,7 +3197,7 @@ function startSyncLoop() {
     setSyncPhase(socketConnected ? 'live' : 'idle', 'sync_fallback_disabled');
     return;
   }
-  if (!isInited) return;
+  if (!isInited || isShuttingDown) return;
   if (socketConnected) {
     setSyncPhase('live', 'socket');
     return;
@@ -3440,7 +3491,10 @@ const apiImpl: ChatCoreApi = {
     }
 
     socketUrl = (params.socketUrl || deriveSocketUrl(apiBaseUrl)).replace(/\/$/, '');
+    isShuttingDown = false;
     isInited = true;
+    fetchSyncStateInFlight = null;
+    gapRecoverInFlightPromise = null;
     workerInitCount += 1;
     resetTelemetryCounters();
     reconnectGapRecoverLastStartedAt = 0;
@@ -3625,7 +3679,8 @@ const apiImpl: ChatCoreApi = {
       socketConnected = false;
       setSyncPhase('disconnected', 'worker_socket_boot');
       await connectWorkerSocketInternal(true);
-      startSyncLoop();
+      // 给予 Socket 握手宽限期，避免刚发起 /api/sync/state 就在建连后被立刻 abort
+      scheduleSyncLoopStart('worker_socket_boot');
     } else {
       setSyncPhase(socketConnected ? 'live' : 'disconnected', 'init');
       // If the main thread already marked socket as disconnected before init, start sync now.
@@ -3690,7 +3745,7 @@ const apiImpl: ChatCoreApi = {
     }
     socketConnected = nextSocketConnected;
     if (prevConnected === nextSocketConnected) {
-      if (!socketConnected) {
+      if (!socketConnected && isInited && !isShuttingDown) {
         scheduleSyncLoopStart('socket_state_repeat');
       }
       return;
@@ -3714,7 +3769,9 @@ const apiImpl: ChatCoreApi = {
     }
     stopReconnectGapRecover();
     setSyncPhase('disconnected', 'socket_disconnected');
-    scheduleSyncLoopStart('socket_disconnected');
+    if (isInited && !isShuttingDown) {
+      scheduleSyncLoopStart('socket_disconnected');
+    }
   },
 
   async connectRealtime() {
@@ -4301,6 +4358,8 @@ const apiImpl: ChatCoreApi = {
   },
 
   async shutdown() {
+    isShuttingDown = true;
+    isInited = false;
     detachWorkerSocket();
     desiredJoinedRooms.clear();
     desiredPresenceUserIds.clear();
@@ -4359,6 +4418,8 @@ const apiImpl: ChatCoreApi = {
     syncAuthError = false;
     syncPhase = 'idle';
     syncGapRecoverInFlight = false;
+    gapRecoverInFlightPromise = null;
+    fetchSyncStateInFlight = null;
     syncGapRecoverLastStartedAt = 0;
     reconnectGapRecoverLastStartedAt = 0;
     reconnectGapRecoverPendingReason = null;
@@ -4401,6 +4462,7 @@ const apiImpl: ChatCoreApi = {
     }
     remoteSearchAbortByChat.clear();
     resetTelemetryCounters();
+    isShuttingDown = false;
   },
 };
 

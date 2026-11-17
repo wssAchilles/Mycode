@@ -104,4 +104,32 @@ describe('chatCoreClient', () => {
     expect(bridgeMocks.api.init).toHaveBeenCalledTimes(2);
     expect(bridgeMocks.api.updateTokens).not.toHaveBeenCalled();
   });
+
+  it('syncs refreshed tokens on auth:tokens-updated without duplicate RPCs and unbinds on shutdown', async () => {
+    const client = await loadClient();
+    await client.init(createInitParams());
+
+    window.dispatchEvent(new CustomEvent('auth:tokens-updated', {
+      detail: { accessToken: 'access-token-b', refreshToken: 'refresh-token-b' },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bridgeMocks.api.updateTokens).toHaveBeenCalledTimes(1);
+    expect(bridgeMocks.api.updateTokens).toHaveBeenCalledWith('access-token-b', 'refresh-token-b');
+
+    // 重复派发相同令牌不应再次触发 RPC
+    window.dispatchEvent(new CustomEvent('auth:tokens-updated', {
+      detail: { accessToken: 'access-token-b', refreshToken: 'refresh-token-b' },
+    }));
+    await client.updateTokens('access-token-b', 'refresh-token-b');
+    expect(bridgeMocks.api.updateTokens).toHaveBeenCalledTimes(1);
+
+    await client.shutdown();
+    window.dispatchEvent(new CustomEvent('auth:tokens-updated', {
+      detail: { accessToken: 'access-token-c', refreshToken: 'refresh-token-c' },
+    }));
+    await Promise.resolve();
+    expect(bridgeMocks.api.updateTokens).toHaveBeenCalledTimes(1);
+  });
 });

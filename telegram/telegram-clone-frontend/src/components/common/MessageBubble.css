@@ -174,11 +174,17 @@
     color: rgba(255, 255, 255, 0.7);
 }
 
+/* 为顶部悬浮的“已读 N”徽章预留安全顶部间距，避免被 contain: content 边界裁切 */
+.tg-message-row.has-readcount:not(.is-media-row) {
+    padding-top: 16px;
+}
+
 .tg-message-readcount-badge {
     position: absolute;
     top: -10px;
     right: 8px;
     font-size: 10px;
+    line-height: 1.2;
     padding: 3px 6px;
     border-radius: 999px;
     background: rgba(16, 185, 129, 0.2);
@@ -187,11 +193,15 @@
     letter-spacing: 0.2px;
     transform: translateY(-2px);
     backdrop-filter: blur(6px);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 2;
 }
 
 .tg-message-bubble.is-media .tg-message-readcount-badge {
     top: 8px;
     right: 10px;
+    transform: none;
 }
 
 .tg-message-bubble.is-highlighted {

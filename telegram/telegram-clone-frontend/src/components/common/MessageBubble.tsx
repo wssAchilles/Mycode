@@ -34,6 +34,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     attentionKey,
 }) => {
     const showIncomingMeta = !isOut && showSenderMeta;
+    const hasReadCountBadge = isOut && typeof readCount === 'number' && readCount > 0;
     const senderInitial = (senderName || '?').trim().charAt(0).toUpperCase() || '?';
     const bubbleMotion = useAnimeScope<HTMLDivElement, { attention: () => void }>(
         ({ root, reducedMotion, duration }) => ({
@@ -61,7 +62,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     }, [attentionKey, bubbleMotion]);
 
     return (
-        <div className={`tg-message-row ${isOut ? 'is-out' : 'is-in'} ${showIncomingMeta ? 'has-sender-meta' : ''}`}>
+        <div className={`tg-message-row ${isOut ? 'is-out' : 'is-in'} ${showIncomingMeta ? 'has-sender-meta' : ''} ${hasReadCountBadge ? 'has-readcount' : ''} ${isMedia ? 'is-media-row' : ''}`}>
             {showIncomingMeta && (
                 <div className="tg-message-avatar" aria-hidden="true">
                     {senderAvatarUrl ? (
@@ -74,7 +75,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
             <div
                 ref={bubbleMotion.rootRef}
-                className={`tg-message-bubble ${isOut ? 'is-out' : 'is-in'} ${withTail ? 'has-tail' : ''} ${isMedia ? 'is-media' : ''} ${className}`}
+                className={`tg-message-bubble ${isOut ? 'is-out' : 'is-in'} ${withTail ? 'has-tail' : ''} ${isMedia ? 'is-media' : ''} ${hasReadCountBadge ? 'has-readcount' : ''} ${className}`}
             >
                 <div className="tg-message-content">
                     {showIncomingMeta && senderName && (

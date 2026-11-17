@@ -221,4 +221,46 @@ describe('ChatHistory group switching', () => {
     expect(screen.getByText('加载消息失败')).toBeInTheDocument();
     expect(screen.queryByText('暂无消息')).not.toBeInTheDocument();
   });
+
+  it('does not emit Failed to get offset warnings when switching from 38 messages to empty/shorter chat', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const messages38 = Array.from({ length: 38 }, (_, idx) =>
+      makeMessage(`msg-${idx}`, idx + 1, idx % 2 === 0 ? 'u1' : 'u2', `msg-${idx}`),
+    );
+
+    useMessageStore.setState({
+      messageIds: messages38.map((m) => m.id),
+      messageIdsVersion: 10,
+      entities: new Map(messages38.map((m) => [m.id, m])),
+    });
+
+    const view = render(
+      <ChatHistory
+        currentUserId="u1"
+        messageIds={useMessageStore.getState().messageIds.slice()}
+        messageIdsVersion={10}
+        isLoading={false}
+      />,
+    );
+
+    await act(async () => {
+      useMessageStore.setState({
+        messageIds: [],
+        messageIdsVersion: 11,
+        entities: new Map(),
+      });
+      view.rerender(
+        <ChatHistory
+          currentUserId="u1"
+          messageIds={[]}
+          messageIdsVersion={11}
+          isLoading={false}
+        />,
+      );
+    });
+
+    const warnings = consoleWarnSpy.mock.calls.flat().join('\n');
+    expect(warnings).not.toContain('Failed to get offset for index');
+    consoleWarnSpy.mockRestore();
+  });
 });

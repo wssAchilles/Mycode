@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import ChatList from '../features/chat/components/ChatList';
 import type { ChatSummary } from '../features/chat/types';
 
-const makeChat = (id: string): ChatSummary => ({
+const makeChat = (id: string, avatarUrl?: string): ChatSummary => ({
   id,
   title: `chat-${id}`,
+  avatarUrl,
   lastMessage: 'Done. The latest line now hints...',
   time: '08:13',
   unreadCount: 1,
@@ -39,5 +40,28 @@ describe('ChatList initial render motion boundary', () => {
     const newItems = view.container.querySelectorAll('.tg-chat-item.is-new');
     expect(newItems).toHaveLength(1);
     expect(newItems[0]).toHaveAccessibleName('打开会话 chat-u4');
+  });
+
+  it('virtualizes large 192-chat lists and marks avatars with lazy loading', () => {
+    const chats = Array.from({ length: 192 }, (_, idx) =>
+      makeChat(`u-${idx}`, `https://example.com/avatar-${idx}.png`),
+    );
+
+    const view = render(
+      <ChatList
+        chats={chats}
+        onSelectChat={() => undefined}
+        isLoading={false}
+      />,
+    );
+
+    const renderedItems = view.container.querySelectorAll('.tg-chat-item');
+    expect(renderedItems.length).toBeGreaterThan(0);
+    expect(renderedItems.length).toBeLessThan(30);
+
+    const firstAvatarImg = view.container.querySelector('.tg-avatar-img') as HTMLImageElement | null;
+    expect(firstAvatarImg).not.toBeNull();
+    expect(firstAvatarImg?.getAttribute('loading')).toBe('lazy');
+    expect(firstAvatarImg?.getAttribute('decoding')).toBe('async');
   });
 });
