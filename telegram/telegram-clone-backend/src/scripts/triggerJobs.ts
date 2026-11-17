@@ -13,6 +13,7 @@ import { SimClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { RealGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
 import { featureExportJob } from '../services/jobs/FeatureExportJob';
 import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
+import { postSemanticBackfillJob } from '../services/jobs/PostSemanticBackfillJob';
 import { sequelize } from '../config/sequelize';
 
 // 加载环境变量
@@ -51,7 +52,7 @@ epoch = epoch?.trim() || '';
 console.log('🛠️  Received args:', args);
 console.log('🛠️  Parsed jobName:', jobName);
 
-const validJobs = ['simclusters', 'realgraph', 'feature-export', 'daily-recommendation-refresh'];
+const validJobs = ['simclusters', 'realgraph', 'feature-export', 'daily-recommendation-refresh', 'semantic-backfill'];
 const skipFeatureExport = args.includes('--skip-feature-export');
 
 async function runJob() {
@@ -103,6 +104,12 @@ async function runJob() {
                 skipFeatureExport,
             });
             console.log('✅ DailyRecommendationRefreshJob 完成');
+            console.log(JSON.stringify(result, null, 2));
+        } else if (jobName === 'semantic-backfill') {
+            console.log('🔄 开始 PostSemanticBackfillJob...');
+            const onlyMissing = !args.includes('--force-all');
+            const result = await postSemanticBackfillJob.run({ onlyMissing });
+            console.log('✅ PostSemanticBackfillJob 完成');
             console.log(JSON.stringify(result, null, 2));
         }
 

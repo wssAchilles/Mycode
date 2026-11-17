@@ -57,6 +57,12 @@ export interface IPost extends Document {
     isNsfw: boolean;
     isPinned: boolean;
 
+    // 推荐 V3 语义离散编码与异步安全标签
+    semanticIds?: number[];
+    semanticIdsU64?: string;
+    contentSafetyLabels?: string[];
+    semanticStatus?: 'pending' | 'semantic_ready' | 'failed';
+
     // 推荐评分 (借鉴 Phoenix)
     engagementScore?: number; // 聚合参与度分数
     phoenixScores?: {
@@ -188,6 +194,16 @@ const PostSchema = new Schema<IPost>(
         isNsfw: { type: Boolean, default: false },
         isPinned: { type: Boolean, default: false },
 
+        // 推荐 V3 语义离散编码与异步安全标签
+        semanticIds: { type: [Number], default: undefined },
+        semanticIdsU64: String,
+        contentSafetyLabels: { type: [String], default: undefined },
+        semanticStatus: {
+            type: String,
+            enum: ['pending', 'semantic_ready', 'failed'],
+            default: 'pending',
+        },
+
         // 推荐评分
         engagementScore: { type: Number, default: 0 },
         phoenixScores: PhoenixScoresSchema,
@@ -226,6 +242,11 @@ PostSchema.index({ isNews: 1, createdAt: -1 });
 PostSchema.index(
     { isNews: 1, deletedAt: 1, engagementScore: -1, createdAt: -1 },
     { name: 'rec_popular_active_engagement_v1' },
+);
+// V3 语义回刷扫描索引
+PostSchema.index(
+    { semanticStatus: 1, deletedAt: 1 },
+    { name: 'rec_semantic_backfill_v3' },
 );
 PostSchema.index({ 'newsMetadata.url': 1 }, { unique: true, sparse: true });
 // 外部语料索引: 用于将模型输出的 externalId 映射回 Post._id（例如 MIND 的 news_id）

@@ -1,0 +1,22 @@
+# Cloud Build 上传忽略清单（保持百 KB 级极速上传，大模型由构建步骤从 GCS 内网拉取）
+.git/
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/
+models/
+artifacts/
+tests/
+crawler/
+scripts/
+agent_plane/
+*.ipynb
+*.md
+.env
+.env.*

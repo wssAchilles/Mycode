@@ -10,6 +10,7 @@ import { createChildLogger } from '../../../utils/logger';
 import type { CreatePostParams } from '../types';
 import { extractKeywords } from '../internal/pureHelpers';
 import { refreshPostFeatureSnapshots } from '../internal/postFeatureSnapshots';
+import { recsysStreamPublisher } from '../../recommendation/realtime';
 
 const log = createChildLogger('services:spaceService');
 
@@ -65,6 +66,9 @@ export async function createPost(params: CreatePostParams): Promise<IPost> {
         replyToPostId,
         quotePostId,
     ]);
+
+    // 异步非阻塞推送新帖事件至内网 Stream 并触发 Cloud Run /sid/encode 实时打标
+    recsysStreamPublisher.publishPostCreatedAndEncodeSid(post);
 
     return post;
 }
@@ -154,6 +158,7 @@ export async function deletePost(postId: string, userId: string): Promise<boolea
 
     // Best-effort removal from Redis in-network timeline.
     InNetworkTimelineService.removePost(post.authorId, String(post._id)).catch(() => undefined);
+    recsysStreamPublisher.publishPostDeleted(String(post._id), post.authorId);
     return true;
 }
 

@@ -18,9 +18,13 @@ env/
 .vscode/
 .idea/
 
-# Large local-only data & model artifacts (downloaded at runtime from GCS)
+# Large local-only data & model artifacts (downloaded at runtime or in Cloud Build)
 data/
 models/
+artifacts/
+tests/
+crawler/
+scripts/
 
 # Docs & notebooks (not needed in production image)
 *.md

@@ -1,0 +1,43 @@
+# Cloud Build 纯在线 ONNXRT 推理镜像构建流水线（内置 V3 工业级 INT8 模型与 FAISS 索引）
+substitutions:
+  _IMAGE_TAG: "v3-industrial-v2"
+  _BUNDLE_GCS_URI: "gs://telegram-467705-recsys/runs/v3_full_industrial/stage3_5_v2/v3_serving_bundle_v2_phoenix.tar.gz"
+
+steps:
+  - name: "gcr.io/cloud-builders/gsutil"
+    id: "fetch-and-unpack-bundle"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        mkdir -p _bundled_artifacts
+        gsutil cp "${_BUNDLE_GCS_URI}" /tmp/v3_bundle.tar.gz
+        tar -xzf /tmp/v3_bundle.tar.gz -C _bundled_artifacts
+        rm -f /tmp/v3_bundle.tar.gz _bundled_artifacts/models/phoenix_v3_student_fp32.onnx
+        ls -lh _bundled_artifacts/models _bundled_artifacts/data
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-serving-base"
+    args:
+      - "build"
+      - "-f"
+      - "docker/Dockerfile.serving"
+      - "-t"
+      - "ml-serving-base:latest"
+      - "."
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-bundled-image"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        cat <<'EOF' > Dockerfile.bundled
+        FROM ml-serving-base:latest
+        COPY _bundled_artifacts/models/ /app/models/
+        COPY _bundled_artifacts/data/ /app/data/
+        EOF
+        docker build -f Dockerfile.bundled -t "us-central1-docker.pkg.dev/${PROJECT_ID}/telegram-ml-repo/ml-services:${_IMAGE_TAG}" .
+
+images:
+  - "us-central1-docker.pkg.dev/${PROJECT_ID}/telegram-ml-repo/ml-services:${_IMAGE_TAG}"

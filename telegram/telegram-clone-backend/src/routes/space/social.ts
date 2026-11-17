@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import User from '../../models/User';
 import Contact, { ContactStatus } from '../../models/Contact';
+import { recsysStreamPublisher } from '../../services/recommendation/realtime';
 import {
     log,
     logSignal,
@@ -38,6 +39,7 @@ router.post('/users/:id/follow', async (req: Request, res: Response) => {
         }
 
         logSignal({ userId, signalType: SignalType.FOLLOW, targetId, targetType: TargetType.USER });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'follow' });
         return res.json({ success: true, followed: true });
     } catch (error) {
         log.error({ err: error }, '关注失败');
@@ -63,6 +65,7 @@ router.delete('/users/:id/follow', async (req: Request, res: Response) => {
             targetType: TargetType.USER,
             metadata: { negativeWeight: -3 },
         });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'unfollow' });
         return res.json({ success: true, followed: false });
     } catch (error) {
         log.error({ err: error }, '取消关注失败');
@@ -97,6 +100,7 @@ router.post('/users/:id/block', async (req: Request, res: Response) => {
             targetType: TargetType.USER,
             metadata: { negativeWeight: -10 },
         });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'block' });
         return res.json({ success: true, blocked: true });
     } catch (error) {
         log.error({ err: error }, '拉黑失败');
@@ -116,6 +120,7 @@ router.delete('/users/:id/block', async (req: Request, res: Response) => {
 
         await Contact.destroy({ where: { userId, contactId: targetId } });
         logSignal({ userId, signalType: SignalType.UNBLOCK, targetId, targetType: TargetType.USER });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'unblock' });
         return res.json({ success: true, blocked: false });
     } catch (error) {
         log.error({ err: error }, '取消拉黑失败');
@@ -143,6 +148,7 @@ router.post('/users/:id/mute', async (req: Request, res: Response) => {
             targetType: TargetType.USER,
             metadata: { negativeWeight: -5 },
         });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'mute' });
         return res.json({ success: true, muted: true });
     } catch (error) {
         log.error({ err: error }, '静音失败');
@@ -163,6 +169,7 @@ router.delete('/users/:id/mute', async (req: Request, res: Response) => {
         const UserSettings = (await import('../../models/UserSettings')).default;
         await UserSettings.removeMutedUser(userId, targetId);
         logSignal({ userId, signalType: SignalType.UNMUTE, targetId, targetType: TargetType.USER });
+        recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'unmute' });
         return res.json({ success: true, muted: false });
     } catch (error) {
         log.error({ err: error }, '取消静音失败');
