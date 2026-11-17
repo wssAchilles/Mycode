@@ -17,20 +17,32 @@ const Dashboard = React.lazy(() => import('../components/admin/Dashboard'));
 const ExperimentManager = React.lazy(() => import('../components/admin/ExperimentManager'));
 const ChatRuntimeDashboard = React.lazy(() => import('../components/admin/ChatRuntimeDashboard'));
 
-// 加载中占位组件
+// 加载中占位组件（纯净淡色与 SVG 指示器）
 const LoadingFallback = () => (
   <div style={{
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     height: '100vh',
-    background: 'var(--tg-bg-primary, #212121)',
-    color: 'var(--tg-text-secondary, #aaa)',
-    fontSize: '16px',
+    background: '#FFFFFF',
+    color: '#536471',
+    fontSize: '15px',
   }}>
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
-      <div>加载中...</div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#1D9BF0"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        aria-hidden="true"
+        style={{ animation: 'tg-spin 0.8s linear infinite' }}
+      >
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+      <div style={{ fontWeight: 500, color: '#0F1419' }}>正在加载页面...</div>
     </div>
   </div>
 );
@@ -139,7 +151,7 @@ const AppRoutes: React.FC = () => {
             }
           />
 
-          {/* 404 页面 */}
+          {/* 404 页面（极简淡色高对比） */}
           <Route
             path="*"
             element={
@@ -149,31 +161,33 @@ const AppRoutes: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: '100vh',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif',
+                background: '#FFFFFF',
+                fontFamily: 'var(--font-family)',
                 textAlign: 'center',
-                color: '#718096'
+                color: '#536471',
+                padding: '24px'
               }}>
-                <h1 style={{ fontSize: '48px', margin: '0 0 16px 0' }}>404</h1>
-                <h2 style={{ fontSize: '24px', margin: '0 0 8px 0', color: '#2d3748' }}>页面未找到</h2>
-                <p style={{ margin: '0 0 24px 0' }}>抱歉，您访问的页面不存在。</p>
+                <h1 style={{ fontSize: '56px', fontWeight: 800, letterSpacing: '-0.03em', margin: '0 0 12px 0', color: '#0F1419' }}>404</h1>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px 0', color: '#0F1419' }}>页面未找到</h2>
+                <p style={{ margin: '0 0 24px 0', fontSize: '15px', color: '#536471' }}>抱歉，您访问的页面不存在或已被移动。</p>
                 <button
                   onClick={() => window.location.href = '/'}
                   style={{
-                    padding: '12px 24px',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white',
+                    padding: '11px 26px',
+                    background: '#0F1419',
+                    color: '#FFFFFF',
                     border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    fontWeight: '600',
+                    borderRadius: '9999px',
+                    fontSize: '15px',
+                    fontWeight: 700,
                     cursor: 'pointer',
-                    transition: 'transform 0.2s ease'
+                    transition: 'background-color 0.15s ease'
                   }}
                   onMouseOver={(e) => {
-                    (e.target as HTMLElement).style.transform = 'translateY(-1px)';
+                    (e.currentTarget as HTMLElement).style.backgroundColor = '#272C30';
                   }}
                   onMouseOut={(e) => {
-                    (e.target as HTMLElement).style.transform = 'translateY(0)';
+                    (e.currentTarget as HTMLElement).style.backgroundColor = '#0F1419';
                   }}
                 >
                   返回首页

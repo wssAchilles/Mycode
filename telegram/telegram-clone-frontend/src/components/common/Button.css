@@ -1,6 +1,6 @@
+/* 通用按钮样式 - 淡色高对比极简风 */
 .tg-btn {
     position: relative;
-    /* For ripple centering */
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9,19 +9,21 @@
     cursor: pointer;
     user-select: none;
     overflow: hidden;
-    /* Encapsulate ripple */
     font-family: inherit;
-    font-weight: 500;
+    font-weight: 600;
     transition: background-color var(--tg-duration-fast) var(--tg-ease-standard),
         transform var(--tg-duration-fast) var(--tg-ease-standard),
         opacity var(--tg-duration-fast) var(--tg-ease-standard);
-
-    /* Disable highlight on mobile */
     -webkit-tap-highlight-color: transparent;
 }
 
 .tg-btn:active:not(:disabled) {
     transform: scale(0.98);
+}
+
+.tg-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .tg-btn-full {
@@ -31,35 +33,25 @@
 .tg-btn-content {
     position: relative;
     z-index: 1;
-    /* Above ripple */
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
 }
 
-/* === Variants === */
+/* === 按钮变体 === */
 .tg-btn-primary {
-    background-color: var(--tg-blue);
-    color: #ffffff;
-    /* Glow Effect */
-    box-shadow: 0 4px 12px rgba(51, 144, 236, 0.4),
-        inset 0 1px 1px rgba(255, 255, 255, 0.2);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+    background-color: var(--color-cta-solid, #0F1419);
+    color: #FFFFFF;
+    box-shadow: none;
 }
 
 .tg-btn-primary:hover:not(:disabled) {
-    background-color: var(--tg-blue-hover);
-    box-shadow: 0 6px 16px rgba(51, 144, 236, 0.5),
-        inset 0 1px 1px rgba(255, 255, 255, 0.3);
-    transform: translateY(-1px);
+    background-color: var(--color-cta-solid-hover, #272C30);
 }
 
 .tg-btn-primary:active:not(:disabled) {
-    background-color: var(--tg-blue-active);
-    box-shadow: 0 2px 8px rgba(51, 144, 236, 0.3),
-        inset 0 2px 4px rgba(0, 0, 0, 0.1);
-    transform: translateY(1px);
+    background-color: #363C42;
 }
 
 .tg-btn-secondary {
@@ -87,42 +79,45 @@
 }
 
 .tg-btn-danger:hover:not(:disabled) {
-    background-color: rgba(223, 63, 64, 0.1);
+    background-color: rgba(225, 29, 72, 0.08);
 }
 
 .tg-btn-translucent {
-    background-color: rgba(0, 0, 0, 0.2);
-    color: #ffffff;
-    backdrop-filter: blur(10px);
+    background-color: rgba(15, 20, 25, 0.06);
+    color: #0F1419;
+    backdrop-filter: blur(8px);
 }
 
-/* === Sizes === */
+.tg-btn-translucent:hover:not(:disabled) {
+    background-color: rgba(15, 20, 25, 0.12);
+}
+
+/* === 尺寸规格 === */
 .tg-btn-sm {
     height: 36px;
-    border-radius: var(--tg-radius-sm);
-    padding: 0 14px;
+    border-radius: 9999px;
+    padding: 0 16px;
     font-size: 14px;
 }
 
 .tg-btn-md {
-    height: 48px;
-    /* Telegram Standard */
-    border-radius: var(--tg-radius-md);
+    height: 44px;
+    border-radius: 9999px;
     padding: 0 20px;
-    font-size: 16px;
+    font-size: 15px;
 }
 
 .tg-btn-lg {
-    height: 56px;
-    border-radius: var(--tg-radius-lg);
+    height: 50px;
+    border-radius: 9999px;
     padding: 0 24px;
-    font-size: 18px;
+    font-size: 16px;
 }
 
-/* === Loading Spinner === */
+/* === 加载旋转器 === */
 .tg-spinner {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border: 2px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
@@ -133,7 +128,6 @@
     from {
         transform: rotate(0deg);
     }
-
     to {
         transform: rotate(360deg);
     }

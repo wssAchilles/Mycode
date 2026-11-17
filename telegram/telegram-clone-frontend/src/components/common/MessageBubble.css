@@ -1,5 +1,5 @@
 /**
- * MessageBubble Styles v5.0 (Liquid Glass)
+ * 通用消息气泡样式 v6.0 (Telegram Light 清透高对比)
  */
 
 .tg-message-row {
@@ -23,9 +23,8 @@
     overflow: hidden;
     flex-shrink: 0;
     margin-bottom: 2px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: linear-gradient(135deg, rgba(52, 140, 235, 0.88), rgba(88, 180, 255, 0.78));
-    box-shadow: 0 4px 12px rgba(10, 20, 38, 0.28);
+    border: 1px solid #E2E8F0;
+    background: #E2E8F0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -38,7 +37,7 @@
 }
 
 .tg-message-avatar span {
-    color: #f8fbff;
+    color: #0F1419;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -48,47 +47,37 @@
     position: relative;
     max-width: 480px;
     width: fit-content;
-    padding: 8px 12px;
+    padding: 9px 13px;
     border-radius: 16px;
     font-size: 15px;
-    line-height: 1.4;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    line-height: 1.45;
     margin-bottom: 6px;
     word-break: break-word;
     white-space: pre-wrap;
     transition:
-        border-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
-        background 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
-        box-shadow 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+        border-color 0.15s ease,
+        background-color 0.15s ease,
+        box-shadow 0.15s ease;
     border: 1px solid transparent;
 }
 
-/* In (Received) Bubble */
+/* 接收消息气泡（纯白底 + 深炭黑高对比文字） */
 .tg-message-bubble.is-in {
-    background: rgba(33, 33, 33, 0.85);
-    /* Dark Glass */
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--color-text-primary);
+    background: #FFFFFF;
+    border: 1px solid #E6ECF0;
+    color: #0F1419;
     border-bottom-left-radius: 4px;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.05);
 }
 
-/* Out (Sent) Bubble */
+/* 发送消息气泡（经典天蓝底 + 纯白高对比文字） */
 .tg-message-bubble.is-out {
-    background: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-blue-dark) 100%);
-    color: white;
+    background: #1D9BF0;
+    color: #FFFFFF;
     border-bottom-right-radius: 4px;
     margin-left: auto;
-    /* Push right */
-    box-shadow: 0 4px 12px rgba(51, 144, 236, 0.3);
-    /* Glow */
+    box-shadow: 0 1px 3px rgba(29, 155, 240, 0.22);
     border: none;
-}
-
-/* Tail Positioning */
-.tg-message-bubble.has-tail {
-    /* Tail handled by SVG or pseudo elements */
 }
 
 .tg-message-tail {
@@ -102,24 +91,23 @@
 
 .tg-message-bubble.is-in .tg-message-tail {
     left: -8px;
-    fill: rgba(33, 33, 33, 0.85);
+    fill: #FFFFFF;
 }
 
-/* Remove border radius for perfect tail fit */
 .tg-message-bubble.is-in.has-tail {
     border-bottom-left-radius: 0;
 }
 
 .tg-message-bubble.is-out .tg-message-tail {
     right: -8px;
-    fill: var(--tg-blue-dark);
+    fill: #1D9BF0;
 }
 
 .tg-message-bubble.is-out.has-tail {
     border-bottom-right-radius: 0;
 }
 
-/* Content Layout */
+/* 内容排版 */
 .tg-message-content {
     display: flex;
     flex-wrap: wrap;
@@ -130,10 +118,10 @@
 .tg-message-sender {
     width: 100%;
     margin: -2px 0 2px;
-    color: rgba(142, 210, 255, 0.95);
-    font-size: 12px;
+    color: #0969DA;
+    font-size: 12.5px;
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.25;
 }
 
 .tg-message-bubble.is-media .tg-message-sender {
@@ -150,15 +138,15 @@
     height: 14px;
     line-height: 1;
     user-select: none;
-    opacity: 0.7;
+    font-variant-numeric: tabular-nums;
 }
 
 .tg-message-bubble.is-in .tg-message-meta {
-    color: var(--color-text-secondary);
+    color: #536471;
 }
 
 .tg-message-bubble.is-out .tg-message-meta {
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.88);
 }
 
 .tg-message-status svg {
@@ -166,12 +154,11 @@
 }
 
 .is-read {
-    color: white;
-    /* On blue background */
+    color: #FFFFFF;
 }
 
 .icon-sent {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.78);
 }
 
 /* 为顶部悬浮的“已读 N”徽章预留安全顶部间距，避免被 contain: content 边界裁切 */
@@ -183,19 +170,20 @@
     position: absolute;
     top: -10px;
     right: 8px;
-    font-size: 10px;
+    font-size: 10.5px;
+    font-weight: 600;
     line-height: 1.2;
-    padding: 3px 6px;
+    padding: 2px 7px;
     border-radius: 999px;
-    background: rgba(16, 185, 129, 0.2);
-    color: #e8fff5;
-    border: 1px solid rgba(16, 185, 129, 0.35);
+    background: #ECFDF5;
+    color: #047857;
+    border: 1px solid #A7F3D0;
     letter-spacing: 0.2px;
     transform: translateY(-2px);
-    backdrop-filter: blur(6px);
     white-space: nowrap;
     pointer-events: none;
     z-index: 2;
+    box-shadow: 0 1px 3px rgba(15, 20, 25, 0.06);
 }
 
 .tg-message-bubble.is-media .tg-message-readcount-badge {
@@ -205,10 +193,10 @@
 }
 
 .tg-message-bubble.is-highlighted {
-    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35), 0 8px 24px rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.4), 0 4px 14px rgba(29, 155, 240, 0.16);
 }
 
-/* Media Bubble Enhancements */
+/* 媒体消息 */
 .tg-message-bubble.is-media {
     background: transparent !important;
     padding: 0;
@@ -219,26 +207,25 @@
 
 .tg-message-bubble.is-media img {
     display: block;
-    border-radius: 16px;
+    border-radius: 14px;
     max-width: 100%;
     height: auto;
     box-shadow: var(--shadow-md);
-    transition: transform 0.2s;
+    transition: transform 0.2s ease;
 }
 
 .tg-message-bubble.is-media img:hover {
-    transform: scale(1.02);
+    transform: scale(1.015);
 }
 
-/* Meta overlay for media */
 .tg-message-meta.is-media-meta {
     position: absolute;
     bottom: 8px;
     right: 8px;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+    background: rgba(15, 20, 25, 0.65);
+    backdrop-filter: blur(6px);
     padding: 4px 8px;
     border-radius: 12px;
-    color: white !important;
+    color: #FFFFFF !important;
     opacity: 1;
 }
