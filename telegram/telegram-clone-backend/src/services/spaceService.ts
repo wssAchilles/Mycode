@@ -4,7 +4,9 @@
  */
 
 import mongoose from 'mongoose';
+import { Op } from 'sequelize';
 import Post, { IPost, MediaType } from '../models/Post';
+import NewsArticle from '../models/NewsArticle';
 import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
@@ -369,7 +371,7 @@ class SpaceService {
         const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
         const poolSize = Math.max(limit * 6, 30);
 
-        const candidates = await Post.find({
+        const mongoCandidates = await Post.find({
             isNews: true,
             deletedAt: null,
             createdAt: { $gte: since },
@@ -378,39 +380,116 @@ class SpaceService {
             .limit(poolSize)
             .lean();
 
-        if (candidates.length === 0) return [];
+        interface UnifiedBriefCandidate {
+            postId: string;
+            title: string;
+            summary: string;
+            source: string;
+            url?: string;
+            coverUrl?: string;
+            clusterId?: number | null;
+            createdAt: Date;
+            keywords: string[];
+        }
+
+        const seenUrls = new Set<string>();
+        const unifiedCandidates: UnifiedBriefCandidate[] = mongoCandidates.map((post: any) => {
+            const url = post.newsMetadata?.url ? String(post.newsMetadata.url).trim() : undefined;
+            if (url) seenUrls.add(url);
+            const title = post.newsMetadata?.title || (post.content || '').split('\n')[0] || '新闻速递';
+            const summary = post.newsMetadata?.summary || this.buildNewsSummary(post.content || '');
+            const keywords = (post.keywords as string[])?.length
+                ? (post.keywords as string[])
+                : this.extractNewsKeywords(`${title}\n${summary}`);
+            const createdAt = post.createdAt instanceof Date ? post.createdAt : new Date(post.createdAt);
+            return {
+                postId: String(post._id),
+                title,
+                summary,
+                source: post.newsMetadata?.source || 'news',
+                url,
+                coverUrl: post.media?.[0]?.url,
+                clusterId: post.newsMetadata?.clusterId,
+                createdAt,
+                keywords,
+            };
+        });
+
+        // 当 MongoDB 新闻流候选不足时，自动从 PostgreSQL NewsArticle 近窗口抓取结果兜底合并
+        if (unifiedCandidates.length < limit) {
+            try {
+                const pgArticles = await NewsArticle.findAll({
+                    where: {
+                        isActive: true,
+                        deletedAt: null,
+                        fetchedAt: { [Op.gte]: since },
+                    },
+                    order: [
+                        ['fetchedAt', 'DESC'],
+                        ['publishedAt', 'DESC'],
+                    ],
+                    limit: poolSize,
+                });
+
+                for (const article of pgArticles) {
+                    const url = (article.canonicalUrl || article.sourceUrl || '').trim() || undefined;
+                    if (url && seenUrls.has(url)) continue;
+                    if (url) seenUrls.add(url);
+
+                    const title = article.title || '新闻速递';
+                    const summary = article.summary || article.lead || '';
+                    const keywords = Array.isArray(article.keywords) && article.keywords.length > 0
+                        ? article.keywords
+                        : this.extractNewsKeywords(`${title}\n${summary}`);
+                    const createdAt = article.fetchedAt || article.publishedAt || article.createdAt || new Date();
+
+                    unifiedCandidates.push({
+                        postId: String(article.id),
+                        title,
+                        summary,
+                        source: article.source || 'news',
+                        url: article.sourceUrl || url,
+                        coverUrl: article.coverImageUrl || undefined,
+                        clusterId: article.clusterId,
+                        createdAt: createdAt instanceof Date ? createdAt : new Date(createdAt),
+                        keywords,
+                    });
+                }
+            } catch (err) {
+                log.warn({ err }, '从 PostgreSQL NewsArticle 回退读取今日时事速递失败');
+            }
+        }
+
+        if (unifiedCandidates.length === 0) return [];
 
         const interest = await this.buildUserInterestKeywords(userId, 200);
 
-        const scored = candidates.map((post: any) => {
-            const keywords = (post.keywords as string[])?.length
-                ? (post.keywords as string[])
-                : this.extractNewsKeywords(`${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || post.content || ''}`);
-            const similarity = this.computeSimilarity(interest, keywords);
-            const recency = this.computeRecencyScore(post.createdAt);
-            const sourceBoost = this.sourceWeight(post.newsMetadata?.source);
+        const scored = unifiedCandidates.map((candidate) => {
+            const similarity = this.computeSimilarity(interest, candidate.keywords);
+            const recency = this.computeRecencyScore(candidate.createdAt);
+            const sourceBoost = this.sourceWeight(candidate.source);
             const score = similarity * 0.5 + recency * 0.4 + sourceBoost * 0.1;
-            return { post, score };
+            return { candidate, score };
         });
 
         const ranked = scored.sort((a, b) => b.score - a.score);
-        const mediaRanked = ranked.filter(({ post }) => {
-            const coverUrl = String(post.media?.[0]?.url || '').trim();
+        const mediaRanked = ranked.filter(({ candidate }) => {
+            const coverUrl = String(candidate.coverUrl || '').trim();
             return /^https?:\/\//i.test(coverUrl) || coverUrl.startsWith('/api/');
         });
         const selected = mediaRanked.length >= limit ? mediaRanked : ranked;
 
         return selected
             .slice(0, limit)
-            .map(({ post }) => ({
-                postId: post._id?.toString(),
-                title: post.newsMetadata?.title || (post.content || '').split('\n')[0] || '新闻速递',
-                summary: post.newsMetadata?.summary || this.buildNewsSummary(post.content || ''),
-                source: post.newsMetadata?.source || 'news',
-                url: post.newsMetadata?.url,
-                coverUrl: post.media?.[0]?.url,
-                clusterId: post.newsMetadata?.clusterId,
-                createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
+            .map(({ candidate }) => ({
+                postId: candidate.postId,
+                title: candidate.title,
+                summary: candidate.summary,
+                source: candidate.source,
+                url: candidate.url,
+                coverUrl: candidate.coverUrl,
+                clusterId: candidate.clusterId,
+                createdAt: candidate.createdAt.toISOString(),
             }));
     }
 

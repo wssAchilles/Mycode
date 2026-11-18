@@ -1,9 +1,11 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { Op } from 'sequelize';
 import NewsArticle from '../models/NewsArticle';
 import NewsSource from '../models/NewsSource';
 import NewsUserEvent, { NewsEventType } from '../models/NewsUserEvent';
 import NewsUserVector from '../models/NewsUserVector';
+import { createChildLogger } from '../utils/logger';
 import { recordRecommendationEvent } from './recommendation/events';
 import {
   normalizeServedPosition,
@@ -11,9 +13,12 @@ import {
 } from './recommendation/events/positionContract';
 import { getNewsTrendsRustMode, newsTrendService, type NewsTrendTopicResult } from './newsTrends';
 import { newsStorageService } from './newsStorageService';
+import { createNewsPosts } from './space/news/newsQueries';
 import {
   type EmbeddingContract,
 } from './recommendation/contracts/embeddingContract';
+
+const log = createChildLogger('services:news');
 
 type NewsWindow = 'today' | '72h';
 type NewsRankMode = 'time' | 'personalized';
@@ -343,6 +348,7 @@ const computeSimilarity = (vector: Record<string, number> | null | undefined, ke
 export const newsService = {
   async ingestArticles(items: NewsIngestItem[]): Promise<number> {
     let createdOrUpdated = 0;
+    const spaceNewsSyncItems: Array<Record<string, unknown>> = [];
 
     const baseMs = Date.now();
     for (const [idx, item] of items.entries()) {
@@ -359,6 +365,7 @@ export const newsService = {
 
       const safePublishedAt = publishedAt && !isNaN(publishedAt.getTime()) ? publishedAt : null;
       const fetchedAt = new Date(baseMs + idx);
+      const imageCandidates = buildImageCandidates(item);
 
       const existing = await NewsArticle.findOne({ where: { hashUrl: hash } });
       const article =
@@ -385,16 +392,19 @@ export const newsService = {
       // Save readable markdown and image. Content is stored with a hash in the key, so we delete the old blob on update.
       const readableContent = buildReadableContent(item.title, summary, contentText, item.source_url || normalizedUrl);
       const contentResult = contentText ? await newsStorageService.saveContent(article.id, readableContent) : { path: article.contentPath || null, url: article.contentPath || null };
-      const imageResult = await newsStorageService.saveImageFromUrls(article.id, buildImageCandidates(item));
+      const imageResult = await newsStorageService.saveImageFromUrls(article.id, imageCandidates);
 
       const oldContentPath = article.contentPath || null;
       const oldCover = article.coverImageUrl || null;
+      const resolvedCoverUrl = imageResult.url || oldCover || imageCandidates[0] || null;
+      const resolvedSource = item.source || article.source || 'news';
+      const resolvedClusterId = item.cluster_id ?? article.clusterId ?? null;
 
       await article.update({
         title: item.title,
         summary,
         lead,
-        source: item.source || article.source || 'news',
+        source: resolvedSource,
         sourceUrl: item.source_url || normalizedUrl,
         canonicalUrl: item.canonical_url || normalizedUrl,
         publishedAt: safePublishedAt,
@@ -402,11 +412,11 @@ export const newsService = {
         language: item.language || null,
         country: item.country || null,
         category: item.category || null,
-        clusterId: item.cluster_id || null,
+        clusterId: resolvedClusterId,
         keywords,
         embedding,
         contentPath: contentResult.path || oldContentPath,
-        coverImageUrl: imageResult.url || oldCover,
+        coverImageUrl: resolvedCoverUrl,
         isActive: true,
       });
 
@@ -417,7 +427,28 @@ export const newsService = {
         await newsStorageService.deleteImage(oldCover);
       }
 
+      spaceNewsSyncItems.push({
+        title: item.title,
+        content: contentText,
+        summary,
+        url: normalizedUrl,
+        source: resolvedSource,
+        cluster_id: resolvedClusterId ?? undefined,
+        top_image: resolvedCoverUrl || '',
+        published: safePublishedAt ? safePublishedAt.toISOString() : undefined,
+        fetchedAt: fetchedAt.toISOString(),
+      });
+
       createdOrUpdated += 1;
+    }
+
+    // 同步幂等投影至 MongoDB Space 新闻流，消除 PostgreSQL NewsArticle 与首页今日时事速递的数据脑裂
+    if (spaceNewsSyncItems.length > 0 && mongoose.connection.readyState === 1) {
+      try {
+        await createNewsPosts(spaceNewsSyncItems);
+      } catch (err) {
+        log.warn({ err, count: spaceNewsSyncItems.length }, '同步新闻至 Space Post 集合失败');
+      }
     }
 
     return createdOrUpdated;
