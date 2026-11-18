@@ -1,6 +1,5 @@
 /**
- * Avatar Component Styles v3.0
- * 头像组件样式 - Telegram Style
+ * 聊天头像组件样式 - Telegram Light 淡色风格
  */
 
 .tg-avatar {
@@ -60,7 +59,7 @@
     border-radius: 50%;
 }
 
-/* 首字母展示 */
+/* 首字母展示（确保实心底色与白色首字母高对比可读） */
 .tg-avatar__initials {
     width: 100%;
     height: 100%;
@@ -72,7 +71,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: -0.5px;
-    background: var(--gradient-purple);
+    background: linear-gradient(135deg, #1D9BF0, #1A8CD8);
 }
 
 /* 在线状态指示器 */

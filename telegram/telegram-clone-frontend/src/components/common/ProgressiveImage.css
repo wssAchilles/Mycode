@@ -1,7 +1,9 @@
+/* 渐进式图片加载容器：淡灰柔和占位底色 */
 .progressive-image {
   position: relative;
   overflow: hidden;
   line-height: 0;
+  background-color: var(--color-surface, #F7F9F9);
 }
 
 .progressive-image__thumbnail {

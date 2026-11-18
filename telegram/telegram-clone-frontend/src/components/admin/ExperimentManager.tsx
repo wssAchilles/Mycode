@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { FlaskConical, Sprout, AlertTriangle } from 'lucide-react';
 import { analyticsAPI } from '../../services/analyticsApi';
 import type { ExperimentConfig } from '../../types/analytics';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
@@ -370,7 +371,7 @@ export const ExperimentManager: React.FC = () => {
             const data = await analyticsAPI.getExperiments();
             setExperiments(data);
         } catch (err: unknown) {
-            setError(err.message || '加载实验列表失败');
+            setError(err instanceof Error ? err.message : '加载实验列表失败');
         } finally {
             setIsLoading(false);
         }
@@ -401,7 +402,7 @@ export const ExperimentManager: React.FC = () => {
     const handleDelete = (id: string) => {
         if (window.confirm('确定要删除此实验吗？此操作无法撤销。')) {
             setExperiments((prev) => prev.filter((exp) => exp.id !== id));
-            // TODO: Call API to delete
+            // 待接入后端删除实验接口
         }
     };
 
@@ -415,7 +416,7 @@ export const ExperimentManager: React.FC = () => {
             alert(`种子实验初始化完成：${created} 个新建，${skipped} 个已存在`);
             fetchExperiments();
         } catch (err: unknown) {
-            alert('初始化失败：' + (err.message || '未知错误'));
+            alert('初始化失败：' + (err instanceof Error ? err.message : '未知错误'));
         } finally {
             setIsSeeding(false);
         }
@@ -434,19 +435,21 @@ export const ExperimentManager: React.FC = () => {
         <div className="experiment-manager">
             <header className="manager-header">
                 <div>
-                    <h1>🧪 实验管理</h1>
+                    <h1><FlaskConical size={22} /> 实验管理</h1>
                     <p>管理 A/B 测试实验，调整流量分配</p>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="manager-header-actions">
                     <button
-                        className="create-btn"
-                        style={{ background: 'rgba(255,255,255,0.08)' }}
+                        type="button"
+                        className="create-btn create-btn--secondary"
                         onClick={handleSeed}
                         disabled={isSeeding}
                     >
-                        {isSeeding ? '⏳ 初始化中...' : '🌱 初始化种子实验'}
+                        <Sprout size={16} />
+                        {isSeeding ? '初始化中...' : '初始化种子实验'}
                     </button>
                     <button
+                        type="button"
                         className="create-btn"
                         onClick={() => setShowCreateModal(true)}
                     >
@@ -458,17 +461,20 @@ export const ExperimentManager: React.FC = () => {
 
             {error && (
                 <div className="error-banner">
-                    ⚠️ {error}
-                    <button onClick={fetchExperiments}>重试</button>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                        <AlertTriangle size={16} />
+                        {error}
+                    </span>
+                    <button type="button" onClick={fetchExperiments}>重试</button>
                 </div>
             )}
 
             <div className="experiments-list">
                 {experiments.length === 0 ? (
                     <div className="empty-state">
-                        <span className="empty-icon">🧪</span>
+                        <span className="empty-icon"><FlaskConical size={26} /></span>
                         <h3>暂无实验</h3>
-                        <p>点击"创建实验"开始您的第一个 A/B 测试</p>
+                        <p>点击“创建实验”开始您的第一个 A/B 测试</p>
                     </div>
                 ) : (
                     experiments.map((exp) => (
@@ -483,13 +489,13 @@ export const ExperimentManager: React.FC = () => {
                 )}
             </div>
 
-            {/* TODO: Create Modal */}
+            {/* 创建新实验弹窗 */}
             {showCreateModal && (
                 <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
                     <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                         <h2>创建新实验</h2>
                         <p>即将推出...</p>
-                        <button onClick={() => setShowCreateModal(false)}>关闭</button>
+                        <button type="button" onClick={() => setShowCreateModal(false)}>关闭</button>
                     </div>
                 </div>
             )}

@@ -1,7 +1,6 @@
 /**
- * Analytics Dashboard - 监控看板页面 (Premium UI)
- * Bento Grid 风格布局，展示核心指标、实验对比、召回分布
- * 使用 Recharts 提供专业图表可视化
+ * Analytics Dashboard - 推荐系统监控看板（淡色高对比版）
+ * 采用 Bento Grid 布局展示核心指标、延迟趋势、召回分布与实验安全观测
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -14,16 +13,37 @@ import {
 import {
     TrendingUp, TrendingDown, RefreshCw, Settings,
     Users, FileText, Activity, Shield, AlertTriangle,
-    Zap, BarChart3
+    Zap, BarChart3, Award
 } from 'lucide-react';
 import { analyticsAPI } from '../../services/analyticsApi';
 import type { DashboardData, ExperimentMetrics, RecallSourceDistribution } from '../../types/analytics';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './Dashboard.css';
 
+// 统一淡色图表浮层与坐标轴令牌，确保白底高对比度可读性
+const CHART_GRID_STROKE = '#EFF3F4';
+const CHART_AXIS_STROKE = '#CFD9DE';
+const CHART_AXIS_TICK = { fill: '#536471', fontSize: 11 };
+const CHART_TOOLTIP_CONTENT_STYLE: React.CSSProperties = {
+    backgroundColor: '#FFFFFF',
+    border: '1px solid #EFF3F4',
+    borderRadius: '10px',
+    color: '#0F1419',
+    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.08)',
+};
+const CHART_TOOLTIP_LABEL_STYLE: React.CSSProperties = {
+    color: '#0F1419',
+    fontWeight: 600,
+};
+const CHART_TOOLTIP_ITEM_STYLE: React.CSSProperties = {
+    color: '#0F1419',
+};
+
+const RECALL_LIGHT_PALETTE = ['#1D9BF0', '#0284C7', '#00BA7C', '#D97706', '#64748B'];
+
 // ===== 子组件 =====
 
-// KPI 卡片 (Premium Glass Design)
+// 核心 KPI 指标卡片
 interface KPICardProps {
     title: string;
     value: number | string;
@@ -85,7 +105,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, change, trend, icon: Ic
     );
 };
 
-// 延迟趋势图 (Recharts AreaChart)
+// 推荐延迟趋势图
 interface LatencyChartCardProps {
     latency: {
         p50: number;
@@ -97,7 +117,7 @@ interface LatencyChartCardProps {
 }
 
 const LatencyChartCard: React.FC<LatencyChartCardProps> = ({ latency, trend }) => {
-    // 模拟趋势数据 (实际应从 API 获取)
+    // 兜底模拟趋势数据（当后端尚未返回时间序列时使用）
     const mockTrend = trend || [
         { time: '10:00', p50: 42, p99: 250 },
         { time: '10:05', p50: 45, p99: 280 },
@@ -122,26 +142,24 @@ const LatencyChartCard: React.FC<LatencyChartCardProps> = ({ latency, trend }) =
                     <AreaChart data={mockTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
                             <linearGradient id="colorP50" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#3390ec" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="#3390ec" stopOpacity={0} />
+                                <stop offset="5%" stopColor="#1D9BF0" stopOpacity={0.22} />
+                                <stop offset="95%" stopColor="#1D9BF0" stopOpacity={0} />
                             </linearGradient>
                             <linearGradient id="colorP99" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#ff5252" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="#ff5252" stopOpacity={0} />
+                                <stop offset="5%" stopColor="#E11D48" stopOpacity={0.18} />
+                                <stop offset="95%" stopColor="#E11D48" stopOpacity={0} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="time" stroke="rgba(255,255,255,0.5)" fontSize={11} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" fontSize={11} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} />
+                        <XAxis dataKey="time" stroke={CHART_AXIS_STROKE} tick={CHART_AXIS_TICK} />
+                        <YAxis stroke={CHART_AXIS_STROKE} tick={CHART_AXIS_TICK} />
                         <Tooltip
-                            contentStyle={{
-                                background: 'rgba(30,30,30,0.9)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '8px'
-                            }}
+                            contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
+                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                         />
-                        <Area type="monotone" dataKey="p50" stroke="#3390ec" fillOpacity={1} fill="url(#colorP50)" />
-                        <Area type="monotone" dataKey="p99" stroke="#ff5252" fillOpacity={1} fill="url(#colorP99)" />
+                        <Area type="monotone" dataKey="p50" stroke="#1D9BF0" strokeWidth={2} fillOpacity={1} fill="url(#colorP50)" name="P50 (ms)" />
+                        <Area type="monotone" dataKey="p99" stroke="#E11D48" strokeWidth={2} fillOpacity={1} fill="url(#colorP99)" name="P99 (ms)" />
                     </AreaChart>
                 </ResponsiveContainer>
             </div>
@@ -149,23 +167,16 @@ const LatencyChartCard: React.FC<LatencyChartCardProps> = ({ latency, trend }) =
     );
 };
 
-// 召回源分布 (Recharts PieChart)
+// 召回源分布图
 interface RecallDistributionCardProps {
     distribution: RecallSourceDistribution[];
 }
 
 const RecallDistributionCard: React.FC<RecallDistributionCardProps> = ({ distribution }) => {
-    const RADIAN = Math.PI / 180;
-    const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
-        const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-        const x = cx + radius * Math.cos(-midAngle * RADIAN);
-        const y = cy + radius * Math.sin(-midAngle * RADIAN);
-        return percent > 0.08 ? (
-            <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11}>
-                {`${(percent * 100).toFixed(0)}%`}
-            </text>
-        ) : null;
-    };
+    const coloredDistribution = distribution.map((item, index) => ({
+        ...item,
+        resolvedColor: item.color || RECALL_LIGHT_PALETTE[index % RECALL_LIGHT_PALETTE.length],
+    }));
 
     return (
         <div className="recall-chart-card glass-card">
@@ -176,35 +187,36 @@ const RecallDistributionCard: React.FC<RecallDistributionCardProps> = ({ distrib
                 <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
                         <Pie
-                            data={distribution}
+                            data={coloredDistribution}
                             cx="50%"
                             cy="50%"
                             labelLine={false}
-                            label={renderCustomizedLabel}
-                            outerRadius={80}
-                            innerRadius={40}
+                            outerRadius={78}
+                            innerRadius={44}
+                            paddingAngle={2}
                             dataKey="percentage"
                             nameKey="label"
                         >
-                            {distribution.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
+                            {coloredDistribution.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.resolvedColor} stroke="#FFFFFF" strokeWidth={2} />
                             ))}
                         </Pie>
                         <Tooltip
                             formatter={(value) => value !== undefined ? `${Number(value).toFixed(1)}%` : ''}
-                            contentStyle={{
-                                background: 'rgba(30,30,30,0.9)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '8px'
-                            }}
+                            contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
+                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                         />
                     </PieChart>
                 </ResponsiveContainer>
                 <div className="pie-legend">
-                    {distribution.map((item) => (
+                    {coloredDistribution.map((item) => (
                         <div key={item.source} className="legend-item">
-                            <span className="legend-dot" style={{ backgroundColor: item.color }} />
-                            <span className="legend-label">{item.label}</span>
+                            <span className="legend-item-left">
+                                <span className="legend-dot" style={{ backgroundColor: item.resolvedColor }} />
+                                <span className="legend-label">{item.label}</span>
+                            </span>
+                            <span className="legend-value">{item.percentage.toFixed(1)}%</span>
                         </div>
                     ))}
                 </div>
@@ -213,7 +225,7 @@ const RecallDistributionCard: React.FC<RecallDistributionCardProps> = ({ distrib
     );
 };
 
-// 实验对比卡片 (Premium Design)
+// 实验指标对比卡片
 interface ExperimentCardProps {
     experiment: ExperimentMetrics;
     onManage?: () => void;
@@ -239,7 +251,7 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({ experiment, onManage })
                     </span>
                 </div>
                 {onManage && (
-                    <button className="icon-btn" onClick={onManage}>
+                    <button type="button" className="icon-btn" onClick={onManage} aria-label="管理实验">
                         <Settings size={16} />
                     </button>
                 )}
@@ -248,18 +260,17 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({ experiment, onManage })
             <div className="experiment-chart">
                 <ResponsiveContainer width="100%" height={120}>
                     <BarChart data={chartData} layout="vertical" margin={{ left: 60, right: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" horizontal={false} />
-                        <XAxis type="number" stroke="rgba(255,255,255,0.5)" fontSize={11} />
-                        <YAxis dataKey="name" type="category" stroke="rgba(255,255,255,0.5)" fontSize={11} width={50} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
+                        <XAxis type="number" stroke={CHART_AXIS_STROKE} tick={CHART_AXIS_TICK} />
+                        <YAxis dataKey="name" type="category" stroke={CHART_AXIS_STROKE} tick={CHART_AXIS_TICK} width={64} />
                         <Tooltip
                             formatter={(value) => value !== undefined ? `${Number(value).toFixed(2)}%` : ''}
-                            contentStyle={{
-                                background: 'rgba(30,30,30,0.9)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '8px'
-                            }}
+                            contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
+                            labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                            itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                            cursor={{ fill: 'rgba(15, 20, 25, 0.04)' }}
                         />
-                        <Bar dataKey="ctr" fill="#3390ec" radius={[0, 4, 4, 0]} name="CTR" />
+                        <Bar dataKey="ctr" fill="#1D9BF0" radius={[0, 4, 4, 0]} name="CTR" />
                     </BarChart>
                 </ResponsiveContainer>
             </div>
@@ -267,13 +278,19 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({ experiment, onManage })
             <div className="experiment-summary">
                 {experiment.buckets.map((bucket) => {
                     const isWinner = bucket.ctr === maxCTR && bucket.bucketId !== 'control';
-                    const ctrLift = controlBucket ? ((bucket.ctr - controlBucket.ctr) / controlBucket.ctr * 100) : 0;
+                    const ctrLift = controlBucket && controlBucket.ctr > 0
+                        ? ((bucket.ctr - controlBucket.ctr) / controlBucket.ctr * 100)
+                        : 0;
 
                     return (
                         <div key={bucket.bucketId} className={`bucket-summary ${isWinner ? 'winner' : ''}`}>
                             <span className="bucket-name">
                                 {bucket.bucketName}
-                                {isWinner && <span className="winner-icon">🏆</span>}
+                                {isWinner && (
+                                    <span className="winner-icon" aria-label="领先分桶">
+                                        <Award size={14} />
+                                    </span>
+                                )}
                             </span>
                             {bucket.bucketId !== 'control' && ctrLift !== 0 && (
                                 <span className={`lift ${ctrLift > 0 ? 'positive' : 'negative'}`}>
@@ -288,7 +305,7 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({ experiment, onManage })
     );
 };
 
-// 安全指标卡片
+// 内容安全指标卡片
 interface SafetyCardProps {
     safety: {
         totalChecked: number;
@@ -301,9 +318,9 @@ interface SafetyCardProps {
 
 const SafetyCard: React.FC<SafetyCardProps> = ({ safety }) => {
     const levelData = [
-        { name: '高风险', value: safety.byLevel.high, color: '#f44336' },
-        { name: '中风险', value: safety.byLevel.medium, color: '#ff9800' },
-        { name: '低风险', value: safety.byLevel.low, color: '#ffeb3b' },
+        { name: '高风险', value: safety.byLevel.high, color: '#E11D48' },
+        { name: '中风险', value: safety.byLevel.medium, color: '#D97706' },
+        { name: '低风险', value: safety.byLevel.low, color: '#1D9BF0' },
     ].filter(d => d.value > 0);
 
     return (
@@ -337,15 +354,21 @@ const SafetyCard: React.FC<SafetyCardProps> = ({ safety }) => {
                                 cy="50%"
                                 innerRadius={25}
                                 outerRadius={40}
+                                paddingAngle={2}
                             >
                                 {levelData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                    <Cell key={`cell-${index}`} fill={entry.color} stroke="#FFFFFF" strokeWidth={2} />
                                 ))}
                             </Pie>
+                            <Tooltip
+                                contentStyle={CHART_TOOLTIP_CONTENT_STYLE}
+                                labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                                itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                            />
                             <Legend
                                 iconType="circle"
                                 iconSize={8}
-                                wrapperStyle={{ fontSize: '11px' }}
+                                wrapperStyle={{ fontSize: '11px', color: '#536471' }}
                             />
                         </PieChart>
                     </ResponsiveContainer>
@@ -355,7 +378,7 @@ const SafetyCard: React.FC<SafetyCardProps> = ({ safety }) => {
     );
 };
 
-// ===== 主 Dashboard 组件 =====
+// ===== 主监控看板组件 =====
 export const Dashboard: React.FC = () => {
     const [data, setData] = useState<DashboardData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -370,7 +393,7 @@ export const Dashboard: React.FC = () => {
             setData(dashboardData);
             setLastUpdated(new Date());
         } catch (err: unknown) {
-            setError(err.message || '加载数据失败');
+            setError(err instanceof Error ? err.message : '加载数据失败');
         } finally {
             setIsLoading(false);
         }
@@ -378,7 +401,7 @@ export const Dashboard: React.FC = () => {
 
     useEffect(() => {
         fetchData();
-        // 每 30 秒自动刷新
+        // 每 30 秒自动刷新实时监控指标
         const interval = setInterval(fetchData, 30000);
         return () => clearInterval(interval);
     }, [fetchData]);
@@ -397,7 +420,7 @@ export const Dashboard: React.FC = () => {
             <div className="dashboard-error">
                 <AlertTriangle size={32} />
                 <span>{error}</span>
-                <button onClick={fetchData}>重试</button>
+                <button type="button" onClick={fetchData}>重试</button>
             </div>
         );
     }
@@ -406,7 +429,7 @@ export const Dashboard: React.FC = () => {
 
     return (
         <div className="dashboard">
-            {/* 顶部导航 */}
+            {/* 顶部导航栏 */}
             <header className="dashboard-header">
                 <div className="header-title">
                     <Activity size={24} />
@@ -425,13 +448,20 @@ export const Dashboard: React.FC = () => {
                         <Activity size={16} />
                         Chat Runtime
                     </Link>
-                    <button className="refresh-btn" onClick={fetchData} disabled={isLoading}>
+                    <button
+                        type="button"
+                        className="refresh-btn"
+                        onClick={fetchData}
+                        disabled={isLoading}
+                        aria-label="刷新监控数据"
+                        title="刷新监控数据"
+                    >
                         <RefreshCw size={18} className={isLoading ? 'spinning' : ''} />
                     </button>
                 </div>
             </header>
 
-            {/* Bento Grid 布局 */}
+            {/* Bento Grid 数据布局 */}
             <div className="bento-grid">
                 {/* 第一行：核心 KPI */}
                 <div className="bento-row kpi-row">
@@ -441,7 +471,7 @@ export const Dashboard: React.FC = () => {
                         change={data.overview.totalUsers.change}
                         trend={data.overview.totalUsers.trend}
                         icon={Users}
-                        color="#3390ec"
+                        color="#1D9BF0"
                     />
                     <KPICard
                         title="日活跃用户"
@@ -449,7 +479,7 @@ export const Dashboard: React.FC = () => {
                         change={data.overview.dau.change}
                         trend={data.overview.dau.trend}
                         icon={Activity}
-                        color="#8774e1"
+                        color="#0284C7"
                     />
                     <KPICard
                         title="总帖子数"
@@ -457,7 +487,7 @@ export const Dashboard: React.FC = () => {
                         change={data.overview.totalPosts.change}
                         trend={data.overview.totalPosts.trend}
                         icon={FileText}
-                        color="#4fae4e"
+                        color="#00BA7C"
                     />
                     <KPICard
                         title="推荐请求"
@@ -465,11 +495,11 @@ export const Dashboard: React.FC = () => {
                         change={data.overview.recommendationsServed.change}
                         trend={data.overview.recommendationsServed.trend}
                         icon={Zap}
-                        color="#f5a623"
+                        color="#D97706"
                     />
                 </div>
 
-                {/* 第二行：延迟 + 召回分布 */}
+                {/* 第二行：延迟趋势 + 召回分布 */}
                 <div className="bento-row metrics-row">
                     <LatencyChartCard latency={data.recommendation.requestMetrics.latency} />
                     <RecallDistributionCard distribution={data.recommendation.recallDistribution} />

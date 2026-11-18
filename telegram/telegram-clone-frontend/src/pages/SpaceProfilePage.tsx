@@ -943,7 +943,7 @@ const SpaceProfilePage: React.FC = () => {
                                     onChange={(e) => setEditBirthDate(e.target.value)}
                                     max={new Date(new Date().setFullYear(new Date().getFullYear() - 13)).toISOString().split('T')[0]}
                                 />
-                                <small style={{ fontSize: '12px', color: 'var(--text-secondary, #888)', marginTop: '4px' }}>
+                                <small style={{ fontSize: '12px', color: 'var(--color-text-secondary, #536471)', marginTop: '4px' }}>
                                     用于个性化推荐，需年满13岁
                                 </small>
                             </label>

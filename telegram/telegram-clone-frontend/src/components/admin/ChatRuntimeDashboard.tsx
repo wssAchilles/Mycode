@@ -180,7 +180,7 @@ const ChatRuntimeDashboard: React.FC = () => {
       setSnapshot(ops);
       if (runtime) setRuntimeInfo(runtime);
     } catch (err: unknown) {
-      setError(err?.message || '加载运行时指标失败');
+      setError(err instanceof Error ? err.message : '加载运行时指标失败');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -196,7 +196,7 @@ const ChatRuntimeDashboard: React.FC = () => {
       await opsAPI.resetChatRuntimeSnapshot();
       await fetchAll(false);
     } catch (err: unknown) {
-      setError(err?.message || '重置指标失败');
+      setError(err instanceof Error ? err.message : '重置指标失败');
     } finally {
       setResetting(false);
     }
@@ -333,18 +333,22 @@ const ChatRuntimeDashboard: React.FC = () => {
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={trendSeries}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                <XAxis dataKey="slot" stroke="rgba(255,255,255,0.5)" />
-                <YAxis stroke="rgba(255,255,255,0.5)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#EFF3F4" />
+                <XAxis dataKey="slot" stroke="#CFD9DE" tick={{ fill: '#536471', fontSize: 11 }} />
+                <YAxis stroke="#CFD9DE" tick={{ fill: '#536471', fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{
-                    background: 'rgba(12, 18, 32, 0.95)',
-                    border: '1px solid rgba(127, 151, 191, 0.35)',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #EFF3F4',
                     borderRadius: 10,
+                    color: '#0F1419',
+                    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.08)',
                   }}
+                  labelStyle={{ color: '#0F1419', fontWeight: 600 }}
+                  itemStyle={{ color: '#0F1419' }}
                 />
-                <Line type="monotone" dataKey="p95" stroke="#f9b233" strokeWidth={2} dot={false} name="P95(ms)" />
-                <Line type="monotone" dataKey="avg" stroke="#3db2ff" strokeWidth={2} dot={false} name="AVG(ms)" />
+                <Line type="monotone" dataKey="p95" stroke="#D97706" strokeWidth={2} dot={false} name="P95(ms)" />
+                <Line type="monotone" dataKey="avg" stroke="#1D9BF0" strokeWidth={2} dot={false} name="AVG(ms)" />
               </LineChart>
             </ResponsiveContainer>
           </div>
