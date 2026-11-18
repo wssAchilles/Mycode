@@ -34,11 +34,16 @@
     height: 74px;
     flex-shrink: 0;
     border-radius: 10px;
-    background-size: cover;
-    background-position: center;
     position: relative;
-    overflow: hidden;
-    background-color: #E2E8F0;
+    overflow: clip;
+    background: linear-gradient(120deg, rgba(51, 144, 236, 0.25), rgba(134, 88, 214, 0.25));
+}
+
+.news-topic-cover__img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .news-topic-overlay {

@@ -38,10 +38,20 @@ const NewsBriefCard: React.FC<NewsBriefCardProps> = ({ item, onOpen }) => {
                 if (dwellRef.current !== el) (dwellRef as any).current = el;
             }}
         >
-            <div
-                className="news-brief__cover"
-                style={{ backgroundImage: item.coverUrl ? `url(${item.coverUrl})` : undefined }}
-            >
+            <div className="news-brief__cover">
+                {item.coverUrl && (
+                    <img
+                        className="news-brief__cover-img"
+                        src={item.coverUrl}
+                        alt=""
+                        crossOrigin="anonymous"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                        }}
+                    />
+                )}
                 <span className="news-brief__badge">NEWS</span>
             </div>
             <div className="news-brief__content">

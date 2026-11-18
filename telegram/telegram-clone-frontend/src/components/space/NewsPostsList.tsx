@@ -77,10 +77,21 @@ const NewsCard: React.FC<NewsCardProps> = ({ item, onOpen }) => {
                 <h3 className="news-post-card__title">{item.title}</h3>
                 {item.summary && <p className="news-post-card__summary">{trimText(item.summary, 160)}</p>}
             </div>
-            <div
-                className="news-post-card__cover"
-                style={{ backgroundImage: item.coverImageUrl ? `url(${item.coverImageUrl})` : undefined }}
-            />
+            <div className="news-post-card__cover">
+                {item.coverImageUrl && (
+                    <img
+                        className="news-post-card__cover-img"
+                        src={item.coverImageUrl}
+                        alt=""
+                        crossOrigin="anonymous"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                        }}
+                    />
+                )}
+            </div>
         </button>
     );
 };

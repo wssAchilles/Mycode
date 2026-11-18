@@ -8,10 +8,6 @@ interface NewsTopicCardProps {
 }
 
 export const NewsTopicCard: React.FC<NewsTopicCardProps> = ({ cluster, onClick }) => {
-    const coverStyle = cluster.coverImageUrl
-        ? { backgroundImage: `url(${cluster.coverImageUrl})` }
-        : { backgroundImage: 'linear-gradient(120deg, rgba(51, 144, 236, 0.35), rgba(134, 88, 214, 0.35))' };
-
     return (
         <button
             type="button"
@@ -19,7 +15,20 @@ export const NewsTopicCard: React.FC<NewsTopicCardProps> = ({ cluster, onClick }
             onClick={onClick}
             aria-label={`查看新闻话题：${cluster.title}`}
         >
-            <div className="news-topic-cover" style={coverStyle}>
+            <div className="news-topic-cover">
+                {cluster.coverImageUrl && (
+                    <img
+                        className="news-topic-cover__img"
+                        src={cluster.coverImageUrl}
+                        alt=""
+                        crossOrigin="anonymous"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                        }}
+                    />
+                )}
                 <div className="news-topic-overlay">
                     <span className="news-topic-badge">Trending News</span>
                 </div>

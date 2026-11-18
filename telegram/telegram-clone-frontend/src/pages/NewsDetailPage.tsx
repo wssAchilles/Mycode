@@ -92,10 +92,20 @@ const NewsDetailPage: React.FC = () => {
         返回 Space
       </button>
       <div className="news-detail__hero">
-        <div
-          className="news-detail__hero-image"
-          style={{ backgroundImage: article.coverImageUrl ? `url(${article.coverImageUrl})` : undefined }}
-        />
+        <div className="news-detail__hero-image">
+          {article.coverImageUrl && (
+            <img
+              className="news-detail__hero-img"
+              src={article.coverImageUrl}
+              alt=""
+              crossOrigin="anonymous"
+              decoding="async"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          )}
+        </div>
         <div className="news-detail__hero-content">
           <p className="news-detail__source">{article.source}</p>
           <h1 className="news-detail__title">{article.title}</h1>

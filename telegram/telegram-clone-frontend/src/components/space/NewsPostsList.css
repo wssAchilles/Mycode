@@ -28,9 +28,9 @@
 
 .news-post-card {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 150px;
-    gap: 12px;
-    padding: 12px;
+    grid-template-columns: minmax(0, 1fr) clamp(140px, 18vw, 180px);
+    gap: 14px;
+    padding: 14px 16px;
     border-radius: 14px;
     border: 1px solid #EFF3F4;
     background: #F7F9F9;
@@ -84,12 +84,18 @@
 }
 
 .news-post-card__cover {
-    width: 150px;
-    height: 104px;
+    width: 100%;
+    aspect-ratio: 16 / 10;
     border-radius: 10px;
+    overflow: clip;
     background: #E2E8F0;
-    background-size: cover;
-    background-position: center;
+}
+
+.news-post-card__cover-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .news-posts__empty {
