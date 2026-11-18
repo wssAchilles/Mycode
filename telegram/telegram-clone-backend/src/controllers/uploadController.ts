@@ -642,6 +642,7 @@ export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Re
       const buf = coerceMongoBinaryToBuffer(doc?.data);
       if (buf) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
         return res.status(200).send(buf);
       }
@@ -656,6 +657,7 @@ export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Re
   }
 
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(existing);
 });
 
@@ -676,6 +678,7 @@ export const handlePublicNewsDownload = catchAsync(async (req: Request, res: Res
   }
 
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(existing);
 });
 
@@ -701,6 +704,7 @@ export const handlePublicSpaceThumbnailDownload = catchAsync(async (req: Request
       const buf = coerceMongoBinaryToBuffer(doc?.data);
       if (buf) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
         return res.status(200).send(buf);
       }
@@ -715,6 +719,7 @@ export const handlePublicSpaceThumbnailDownload = catchAsync(async (req: Request
   }
 
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(existing);
 });
 
@@ -728,6 +733,7 @@ export const handleFileDownload = catchAsync(async (req: Request, res: Response)
     return errors.notFound(res, '文件');
   }
 
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(safePath);
 });
 
@@ -741,5 +747,6 @@ export const handleThumbnailDownload = catchAsync(async (req: Request, res: Resp
     return errors.notFound(res, '缩略图');
   }
 
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(safePath);
 });

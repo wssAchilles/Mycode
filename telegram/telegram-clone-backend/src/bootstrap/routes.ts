@@ -44,6 +44,7 @@ export function registerRoutes(app: Express): void {
         res.setHeader('Content-Type', `video/${ext.substring(1)}`);
       }
       res.setHeader('Cache-Control', 'public, max-age=31536000');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     }
   }));
 

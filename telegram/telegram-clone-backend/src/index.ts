@@ -64,8 +64,10 @@ httpServer.keepAliveTimeout = 65_000;
 httpServer.headersTimeout = 66_000;
 const PORT = process.env.PORT || 5000;
 
-// 安全头 + 基础配置
-app.use(helmet());
+// 安全头 + 基础配置（前后端异源部署，允许跨站页面嵌入公开静态媒体资源）
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(compression({ threshold: 1024, level: 6 }));
 app.set('etag', false);
 app.set('trust proxy', 1);
