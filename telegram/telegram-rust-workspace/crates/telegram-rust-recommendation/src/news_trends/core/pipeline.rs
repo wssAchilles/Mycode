@@ -188,6 +188,93 @@ mod tests {
         assert!(!response.trends.iter().any(|trend| trend.tag == "recsys"));
     }
 
+    #[test]
+    fn splits_coarse_kmeans_bucket_and_eliminates_cross_article_chimeric_titles() {
+        let mut congo = news_doc(
+            "congo",
+            "Congo Ebola Outbreak: How Fear and Mistrust Drive Community Spread",
+            vec![
+                "congo",
+                "ebola",
+                "outbreak",
+                "fear",
+                "mistrust",
+                "drive",
+                "community",
+                "spread",
+                "eastern",
+                "health",
+            ],
+            12,
+            1,
+        );
+        congo.source = Some("nytimes_world".to_string());
+        congo.canonical_url = Some("https://nytimes.example/congo-ebola".to_string());
+        congo.cluster_id = Some(0);
+
+        let mut peltola = news_doc(
+            "peltola",
+            "Democrat Mary Peltola unseats Republican in Alaska House race",
+            vec![
+                "democrat",
+                "mary",
+                "peltola",
+                "unseats",
+                "republican",
+                "alaska",
+                "house",
+                "race",
+            ],
+            10,
+            1,
+        );
+        peltola.source = Some("bbc_world".to_string());
+        peltola.canonical_url = Some("https://bbc.example/mary-peltola".to_string());
+        peltola.cluster_id = Some(0);
+
+        let mut hostage = news_doc(
+            "release-story",
+            "Negotiators secure prisoner release agreement in Geneva talks",
+            vec![
+                "negotiators",
+                "secure",
+                "prisoner",
+                "release",
+                "agreement",
+                "geneva",
+                "talks",
+            ],
+            8,
+            2,
+        );
+        hostage.source = Some("reuters_world".to_string());
+        hostage.canonical_url = Some("https://reuters.example/geneva-release".to_string());
+        hostage.cluster_id = Some(0);
+
+        let response = run_news_trends_pipeline(request(vec![congo, peltola, hostage]));
+
+        assert_eq!(response.trends.len(), 3);
+        let cluster_ids = response
+            .trends
+            .iter()
+            .map(|trend| trend.numeric_cluster_id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(cluster_ids.len(), 3);
+        assert!(
+            response
+                .trends
+                .iter()
+                .all(|trend| trend.display_name != "Congo Release"
+                    && trend.display_name != "Democrat Release")
+        );
+        assert!(
+            response
+                .trends
+                .iter()
+                .any(|trend| trend.display_name == "Congo Ebola Outbreak" && trend.count == 1)
+        );
+    }
+
     fn request(
         documents: Vec<TrendDocumentPayload>,
     ) -> crate::news_trends::contracts::NewsTrendRequestPayload {

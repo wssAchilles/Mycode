@@ -6,10 +6,11 @@ use crate::news_trends::contracts::{
     NewsTrendRequestPayload, TrendDocumentPayload, TrendSourceType,
 };
 
-use super::normalizer::{canonical_keywords, extract_keywords};
+use super::normalizer::{canonical_keywords, extract_keywords, is_weak_keyword, tokenize};
 use super::util::stable_numeric_cluster_id;
 
 const KEYWORD_JACCARD_THRESHOLD: f64 = 0.35;
+const HINT_CLUSTER_JACCARD_THRESHOLD: f64 = 0.16;
 const EMBEDDING_COSINE_THRESHOLD: f64 = 0.82;
 
 #[derive(Debug, Clone)]
@@ -43,28 +44,38 @@ pub fn normalize_documents(request: &NewsTrendRequestPayload) -> Vec<NormalizedD
 
 pub fn cluster_documents(documents: Vec<NormalizedDocument>) -> Vec<TrendCluster> {
     let mut clusters: Vec<TrendCluster> = Vec::new();
-    let mut cluster_id_index: HashMap<i64, usize> = HashMap::new();
+    let mut cluster_id_index: HashMap<i64, Vec<usize>> = HashMap::new();
     let mut url_index: HashMap<String, usize> = HashMap::new();
 
     for document in documents {
-        let target_index = if let Some(cluster_id) = document.payload.cluster_id {
-            cluster_id_index.get(&cluster_id).copied()
-        } else {
-            document
-                .url_key
-                .as_ref()
-                .and_then(|url_key| url_index.get(url_key).copied())
-                .or_else(|| find_best_cluster_index(&document, &clusters))
-        };
+        // 将上游批处理 KMeans cluster_id 视为候选提示而非强制合并指令，必须通过主题一致性阈值校验
+        let target_index = document
+            .url_key
+            .as_ref()
+            .and_then(|url_key| url_index.get(url_key).copied())
+            .or_else(|| {
+                document.payload.cluster_id.and_then(|cluster_id| {
+                    find_matching_hint_cluster(
+                        &document,
+                        &clusters,
+                        cluster_id_index.get(&cluster_id).map(Vec::as_slice),
+                    )
+                })
+            })
+            .or_else(|| find_best_cluster_index(&document, &clusters));
 
         let index = match target_index {
             Some(index) => index,
             None => {
                 let cluster_key = build_cluster_key(&document);
-                let numeric_cluster_id = document
-                    .payload
-                    .cluster_id
-                    .unwrap_or_else(|| stable_numeric_cluster_id(&cluster_key));
+                let numeric_cluster_id = match document.payload.cluster_id {
+                    Some(cluster_id) if !cluster_id_index.contains_key(&cluster_id) => cluster_id,
+                    Some(cluster_id) => stable_numeric_cluster_id(&format!(
+                        "split:{cluster_id}:{}",
+                        build_semantic_cluster_key(&document)
+                    )),
+                    None => stable_numeric_cluster_id(&cluster_key),
+                };
                 clusters.push(TrendCluster {
                     numeric_cluster_id,
                     documents: Vec::new(),
@@ -74,7 +85,10 @@ pub fn cluster_documents(documents: Vec<NormalizedDocument>) -> Vec<TrendCluster
         };
 
         if let Some(cluster_id) = document.payload.cluster_id {
-            cluster_id_index.entry(cluster_id).or_insert(index);
+            let indices = cluster_id_index.entry(cluster_id).or_default();
+            if !indices.contains(&index) {
+                indices.push(index);
+            }
         }
         if let Some(url_key) = &document.url_key {
             url_index.entry(url_key.clone()).or_insert(index);
@@ -119,6 +133,80 @@ fn normalize_document(
             .or(payload.source_url.as_deref())
             .and_then(normalize_url_key),
         source_key: source_key(payload),
+    })
+}
+
+fn find_matching_hint_cluster(
+    document: &NormalizedDocument,
+    clusters: &[TrendCluster],
+    candidate_indices: Option<&[usize]>,
+) -> Option<usize> {
+    let indices = candidate_indices?;
+    let mut best: Option<(usize, f64)> = None;
+    for &index in indices {
+        let Some(cluster) = clusters.get(index) else {
+            continue;
+        };
+        let affinity = hint_cluster_affinity(document, cluster);
+        if affinity <= 0.0 {
+            continue;
+        }
+        match best {
+            Some((_, best_score)) if best_score >= affinity => {}
+            _ => best = Some(index).map(|idx| (idx, affinity)),
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
+fn hint_cluster_affinity(document: &NormalizedDocument, cluster: &TrendCluster) -> f64 {
+    let keyword_score = jaccard_keywords(
+        &document.canonical_keywords,
+        &cluster_keywords(&cluster.documents),
+    );
+    if keyword_score >= HINT_CLUSTER_JACCARD_THRESHOLD {
+        return keyword_score;
+    }
+
+    if title_entity_overlap(document, cluster) {
+        return 0.25;
+    }
+
+    if embedding_match(document, cluster) {
+        return 0.38;
+    }
+
+    0.0
+}
+
+fn title_entity_overlap(document: &NormalizedDocument, cluster: &TrendCluster) -> bool {
+    let doc_entities = document
+        .title_keywords
+        .iter()
+        .filter(|kw| !is_weak_keyword(kw))
+        .collect::<HashSet<_>>();
+    if doc_entities.is_empty() {
+        return false;
+    }
+    cluster.documents.iter().any(|candidate| {
+        let mut overlap_count = 0usize;
+        for kw in candidate
+            .title_keywords
+            .iter()
+            .filter(|kw| !is_weak_keyword(kw))
+        {
+            if doc_entities.contains(kw) {
+                // 多词实体短语或别名命中即可确认同一主体；普通单字需至少两个非弱标题词同时共现
+                if kw.contains('_') {
+                    return true;
+                }
+                overlap_count += 1;
+                if overlap_count >= 2 {
+                    return true;
+                }
+            }
+        }
+        false
     })
 }
 
@@ -239,6 +327,25 @@ fn cosine_similarity(left: &[f64], right: &[f64]) -> f64 {
     dot / (left_norm.sqrt() * right_norm.sqrt())
 }
 
+fn build_semantic_cluster_key(document: &NormalizedDocument) -> String {
+    if !document.canonical_keywords.is_empty() {
+        return format!(
+            "kw:{}",
+            document
+                .canonical_keywords
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+    }
+    if let Some(url_key) = &document.url_key {
+        return format!("url:{url_key}");
+    }
+    format!("doc:{}", document.payload.id)
+}
+
 fn build_cluster_key(document: &NormalizedDocument) -> String {
     if let Some(cluster_id) = document.payload.cluster_id {
         return format!("cluster:{cluster_id}");
@@ -339,10 +446,11 @@ fn extract_action_tokens(title: &str) -> Vec<String> {
         "case", "claim", "collide", "collides", "court", "dies", "died", "killed", "launch",
         "lawsuit", "release", "ruling", "sued", "sues",
     ];
-    let lower = title.to_lowercase();
+    // 严格按词边界匹配事件动作词，防止 released / suitcase 等子串误触发
+    let token_set = tokenize(title).into_iter().collect::<HashSet<_>>();
     ACTIONS
         .iter()
-        .filter(|action| lower.contains(**action))
+        .filter(|action| token_set.contains(**action))
         .map(|action| (*action).to_string())
         .collect()
 }

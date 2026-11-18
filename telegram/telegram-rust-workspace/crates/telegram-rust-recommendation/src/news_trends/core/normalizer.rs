@@ -7,12 +7,16 @@ const STOPWORDS: &[&str] = &[
     "again",
     "all",
     "also",
+    "am",
     "an",
     "and",
     "are",
     "as",
     "at",
+    "be",
+    "been",
     "before",
+    "being",
     "but",
     "by",
     "can",
@@ -21,45 +25,79 @@ const STOPWORDS: &[&str] = &[
     "company",
     "could",
     "day",
+    "did",
+    "do",
+    "does",
     "during",
     "for",
     "from",
+    "had",
     "has",
     "have",
+    "he",
+    "her",
+    "here",
+    "him",
+    "his",
+    "how",
+    "if",
+    "in",
     "into",
+    "is",
+    "it",
     "its",
     "less",
+    "me",
     "more",
+    "my",
     "new",
     "news",
+    "no",
     "not",
     "of",
+    "off",
     "old",
     "on",
     "one",
+    "or",
+    "our",
+    "out",
     "over",
     "report",
     "said",
     "says",
+    "she",
     "should",
+    "so",
     "south",
     "summary",
+    "than",
     "that",
     "the",
     "their",
     "them",
+    "there",
     "they",
     "this",
-    "than",
+    "to",
     "today",
     "tomorrow",
     "two",
     "under",
+    "up",
     "update",
     "very",
     "was",
+    "we",
     "were",
+    "what",
+    "when",
+    "where",
+    "which",
     "while",
+    "who",
+    "whom",
+    "why",
     "will",
     "with",
     "world",
@@ -154,17 +192,29 @@ pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
 pub fn canonical_keywords(explicit: &[String], text: &str, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
+    // 限制单字显式词的前置高优槽位，确保标题与正文抽取的 2-4 元实体短语能进入核心加权词池
+    let initial_explicit_cap = limit.min(4);
 
     for keyword in explicit {
-        push_keyword(&mut out, &mut seen, keyword, limit);
+        if out.len() >= initial_explicit_cap {
+            break;
+        }
+        push_keyword(&mut out, &mut seen, keyword, initial_explicit_cap);
     }
 
     if out.len() < limit {
         for keyword in extract_keywords(text, limit) {
             push_keyword(&mut out, &mut seen, &keyword, limit);
             if out.len() >= limit {
-                break;
+                return out;
             }
+        }
+    }
+
+    for keyword in explicit {
+        push_keyword(&mut out, &mut seen, keyword, limit);
+        if out.len() >= limit {
+            break;
         }
     }
 
@@ -243,7 +293,7 @@ fn normalize_phrase(raw: &str) -> String {
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn tokenize(text: &str) -> Vec<String> {
+pub(super) fn tokenize(text: &str) -> Vec<String> {
     normalize_phrase(text)
         .split_whitespace()
         .map(ToOwned::to_owned)
@@ -252,7 +302,7 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn is_stopword(token: &str) -> bool {
+pub(super) fn is_stopword(token: &str) -> bool {
     STOPWORDS.contains(&token)
 }
 
