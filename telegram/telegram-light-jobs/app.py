@@ -1,7 +1,7 @@
 import time
 from threading import Lock
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 from jobs.archive.user_actions import archive_user_actions_to_gcs
 from jobs.crawler.news_fetcher import run_crawler_job
@@ -35,6 +35,11 @@ def crawl_job(request: Request):
     try:
         result = run_crawler_job()
         return {"status": "ok", "durationMs": int((time.time() - started) * 1000), **result}
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        # 上游 RSS 全灭或后端入库失败时显式返回 502，避免静默 200 欺骗 Cloud Scheduler 并激活自动重试
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         with _job_lock:
             _job_state["crawl"] = False

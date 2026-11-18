@@ -1,7 +1,8 @@
+import calendar
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import feedparser
@@ -13,10 +14,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from urllib3.util.retry import Retry
 
 
+# 使用对云端出口友好的高可用 HTTPS 国际新闻源（替换对 Cloud Run IP 返回 403 的 NPR 源）
 RSS_FEEDS = {
     "bbc_world": "https://feeds.bbci.co.uk/news/world/rss.xml",
     "guardian_world": "https://www.theguardian.com/world/rss",
-    "npr_world": "https://feeds.npr.org/1004/rss.xml",
+    "nytimes_world": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
 }
 
 DEFAULT_UA = os.getenv(
@@ -40,11 +42,12 @@ def _trim_summary(text: str, max_len: int = 180) -> str:
 
 
 def _parse_published(entry) -> str:
+    # feedparser 的 *_parsed 字段固定为 UTC struct_time，显式输出带时区偏移的 ISO-8601
     for key in ("published_parsed", "updated_parsed"):
         value = entry.get(key)
         if value:
-            return datetime.fromtimestamp(time.mktime(value)).isoformat()
-    return datetime.now().isoformat()
+            return datetime.fromtimestamp(calendar.timegm(value), tz=timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _extract_rss_images(entry) -> List[str]:
@@ -213,15 +216,15 @@ class NewsCrawler:
     def push_to_backend(self, articles: List[dict]) -> int:
         backend_url = os.getenv("BACKEND_URL", "").strip()
         if not backend_url:
-            print("  ! BACKEND_URL is not configured")
-            return 0
+            raise RuntimeError("BACKEND_URL is not configured")
 
         cron_secret = os.getenv("CRON_SECRET", "").strip()
+        if not cron_secret:
+            raise RuntimeError("CRON_SECRET is not configured")
+
         endpoint = f"{backend_url.rstrip('/')}/api/news/ingest"
         print(f"  > Pushing to: {endpoint}")
-        headers = {}
-        if cron_secret:
-            headers["x-cron-secret"] = cron_secret
+        headers = {"x-cron-secret": cron_secret}
         try:
             response = self.session.post(
                 endpoint,
@@ -229,22 +232,25 @@ class NewsCrawler:
                 headers=headers,
                 timeout=PUSH_TIMEOUT,
             )
-            if response.status_code == 200:
-                print("  > Successfully pushed news to backend.")
-                try:
-                    return int(response.json().get("count", 0))
-                except Exception:
-                    return len(articles)
-            print(f"  ! Backend returned error: {response.status_code} - {response.text}")
-            return 0
         except Exception as exc:
             print(f"  ! Error pushing to backend: {exc}")
-            return 0
+            raise RuntimeError(f"Error pushing news to backend: {exc}") from exc
+
+        if response.status_code == 200:
+            print("  > Successfully pushed news to backend.")
+            try:
+                return int(response.json().get("count", 0))
+            except Exception:
+                return len(articles)
+
+        error_snippet = (response.text or "")[:300]
+        print(f"  ! Backend returned error: {response.status_code} - {error_snippet}")
+        raise RuntimeError(f"Backend news ingest failed ({response.status_code}): {error_snippet}")
 
     def run_job(self) -> dict:
         articles = self.fetch_rss()
         if not articles:
-            return {"fetched_count": 0, "clustered_count": 0, "pushed_count": 0}
+            raise RuntimeError("All RSS feeds returned zero valid articles")
 
         clustered = self.process_and_cluster(articles)
         pushed = self.push_to_backend(clustered)
