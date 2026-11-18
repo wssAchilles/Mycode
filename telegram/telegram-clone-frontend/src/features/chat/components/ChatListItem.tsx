@@ -17,28 +17,16 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
     const prevUnreadPulseSeqRef = useRef(chat.unreadPulseSeq || 0);
     const itemMotion = useAnimeScope<HTMLButtonElement, {
         unread: () => void;
-        selected: () => void;
     }>(
         ({ root, reducedMotion, duration }) => ({
             unread: () => {
                 if (reducedMotion || !root) return;
-                const badge = root.querySelector('.tg-chat-item-badge');
+                const badge = root.querySelector<HTMLElement>('.tg-chat-item-badge');
                 if (!badge) return;
                 waapi.animate(badge, {
                     scale: [1, 1.16, 1],
                     y: ['0px', '-2px', '0px'],
                     duration: duration(motionDurations.normal),
-                    ease: 'out(4)',
-                });
-            },
-            selected: () => {
-                if (reducedMotion || !root) return;
-                const indicator = root.querySelector('.tg-chat-item-selected-indicator');
-                if (!indicator) return;
-                waapi.animate(indicator, {
-                    opacity: [0, 1],
-                    scaleY: [0.45, 1],
-                    duration: duration(motionDurations.fast),
                     ease: 'out(4)',
                 });
             },
@@ -54,12 +42,6 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
         prevUnreadPulseSeqRef.current = nextPulseSeq;
     }, [chat.unreadPulseSeq, itemMotion]);
 
-    useEffect(() => {
-        if (isSelected) {
-            itemMotion.run('selected');
-        }
-    }, [isSelected, itemMotion]);
-
     return (
         <button
             ref={itemMotion.rootRef}
@@ -69,6 +51,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
             onMouseEnter={() => prefetchChat(chat.id, !!chat.isGroup)}
             onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}
             aria-label={`打开会话 ${chat.title}`}
+            aria-current={isSelected ? 'true' : undefined}
         >
             <span className="tg-chat-item-selected-indicator" aria-hidden="true" />
             <div className="tg-chat-item-avatar">

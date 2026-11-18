@@ -64,4 +64,38 @@ describe('ChatList initial render motion boundary', () => {
     expect(firstAvatarImg?.getAttribute('loading')).toBe('lazy');
     expect(firstAvatarImg?.getAttribute('decoding')).toBe('async');
   });
+
+  it('切换选中会话时仅唯一激活当前项指示条且不残留内联样式', () => {
+    const chats = [makeChat('u1'), makeChat('u2'), makeChat('u3')];
+    const view = render(
+      <ChatList
+        chats={chats}
+        selectedChatId="u1"
+        onSelectChat={() => undefined}
+        isLoading={false}
+      />,
+    );
+
+    const getItems = () => Array.from(view.container.querySelectorAll<HTMLButtonElement>('.tg-chat-item'));
+    expect(view.container.querySelectorAll('.tg-chat-item.is-selected')).toHaveLength(1);
+    expect(getItems()[0]).toHaveAttribute('aria-current', 'true');
+
+    // 从 u1 切换至 u3，验证 u1 不残留 inline style，且全局仅有 u3 处于选中态
+    view.rerender(
+      <ChatList
+        chats={chats}
+        selectedChatId="u3"
+        onSelectChat={() => undefined}
+        isLoading={false}
+      />,
+    );
+
+    const itemsAfter = getItems();
+    expect(view.container.querySelectorAll('.tg-chat-item.is-selected')).toHaveLength(1);
+    expect(itemsAfter[0].classList.contains('is-selected')).toBe(false);
+    expect(itemsAfter[0]).not.toHaveAttribute('aria-current');
+    expect(itemsAfter[0].querySelector('.tg-chat-item-selected-indicator')?.getAttribute('style')).toBeNull();
+    expect(itemsAfter[2].classList.contains('is-selected')).toBe(true);
+    expect(itemsAfter[2]).toHaveAttribute('aria-current', 'true');
+  });
 });

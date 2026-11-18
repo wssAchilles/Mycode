@@ -16,7 +16,7 @@
     padding: 10px 12px;
     cursor: pointer;
     position: relative;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, transform 0.1s ease;
     width: 100%;
     box-sizing: border-box;
     border-radius: 12px;
@@ -32,6 +32,10 @@
     background: #F7F9F9;
 }
 
+.tg-chat-item:active {
+    transform: scale(0.99);
+}
+
 .tg-chat-item.is-selected {
     background: rgba(29, 155, 240, 0.10);
 }
@@ -45,11 +49,16 @@
     border-radius: 9999px;
     background: #1D9BF0;
     opacity: 0;
+    transform: scaleY(0.45);
     transform-origin: center;
+    pointer-events: none;
+    /* 由纯 CSS 过渡控制选中条显隐，避免 WAAPI commitStyles 在失焦后残留内联 opacity */
+    transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .tg-chat-item.is-selected .tg-chat-item-selected-indicator {
     opacity: 1;
+    transform: scaleY(1);
 }
 
 .tg-chat-item-avatar {
@@ -160,4 +169,17 @@
 
 .tg-chat-item.is-new {
     animation: chatListItemEnter 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tg-chat-item,
+    .tg-chat-item-selected-indicator,
+    .tg-chat-item.is-new {
+        transition: none;
+        animation: none;
+    }
+
+    .tg-chat-item:active {
+        transform: none;
+    }
 }
