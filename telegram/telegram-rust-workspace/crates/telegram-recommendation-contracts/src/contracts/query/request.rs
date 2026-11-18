@@ -74,7 +74,11 @@ pub struct RecommendationQueryPayload {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub columnar_scoring_sequence: Vec<ColumnarActionStepPayload>,
     /// V3 客户端/服务端布隆过滤器 64-bit 槽位数组，支撑零分配高速曝光去重。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "super::numeric_serde::deserialize_flexible_u64_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub bloom_filter_entries: Vec<u64>,
     /// V3 近期已下发历史明细（支撑会话疲劳惩罚与 DPP served-context 校验）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -7,6 +7,10 @@ pub use telegram_rust_http_types::ProviderResponse;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
+use crate::clients::deadline::{
+    RECOMMENDATION_DEADLINE_HEADER, RequestDeadline, current_request_deadline,
+    resolve_single_stage_cap_ms,
+};
 use crate::clients::response_body::{
     ResponseBodyError, error_body_preview, read_response_body_bounded,
 };
@@ -47,12 +51,15 @@ pub struct BackendRecommendationClient {
     client: reqwest::Client,
     base_url: String,
     token: Option<String>,
+    single_stage_cap_ms: u64,
+    deadline_override: Option<RequestDeadline>,
 }
 
 impl BackendRecommendationClient {
     pub fn new(config: &RecommendationConfig) -> Result<Self> {
+        let single_stage_cap_ms = resolve_single_stage_cap_ms(config.timeout_ms);
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(config.timeout_ms))
+            .timeout(std::time::Duration::from_millis(single_stage_cap_ms))
             .build()
             .context("build backend recommendation reqwest client")?;
 
@@ -60,7 +67,32 @@ impl BackendRecommendationClient {
             client,
             base_url: config.backend_url.trim_end_matches('/').to_string(),
             token: config.internal_token.clone(),
+            single_stage_cap_ms,
+            deadline_override: None,
         })
+    }
+
+    /// 绑定显式请求级截止预算，支撑跨 `tokio::spawn` / `JoinSet` 子任务传播。
+    pub fn with_deadline(&self, deadline: Option<RequestDeadline>) -> Self {
+        let mut cloned = self.clone();
+        cloned.deadline_override = deadline;
+        cloned
+    }
+
+    /// 捕获当前异步任务上下文的 `RequestDeadline` 并固化到克隆客户端实例上。
+    pub fn with_current_deadline(&self) -> Self {
+        self.with_deadline(self.active_deadline())
+    }
+
+    /// 获取当前生效的请求截止上下文（优先使用显式绑定值，其次读取 task-local）。
+    pub fn active_deadline(&self) -> Option<RequestDeadline> {
+        self.deadline_override.or_else(current_request_deadline)
+    }
+
+    /// 判断当前请求剩余预算是否已耗尽（`< 150ms`），用于跳过拆单重试与低优回退调用。
+    pub fn is_deadline_exhausted(&self) -> bool {
+        self.active_deadline()
+            .is_some_and(|deadline| deadline.is_exhausted())
     }
 
     pub async fn hydrate_query(
@@ -308,13 +340,35 @@ impl BackendRecommendationClient {
         TRequest: Serialize + ?Sized,
         TResponse: DeserializeOwned,
     {
+        let active_deadline = self.active_deadline();
+        let per_call_timeout_ms = if let Some(deadline) = active_deadline {
+            let Some(timeout_ms) = deadline.per_call_timeout_ms() else {
+                return Err(anyhow!(
+                    "backend_recommendation_deadline_exceeded path={} remaining_ms={}",
+                    path,
+                    deadline.remaining_ms()
+                ));
+            };
+            timeout_ms.min(self.single_stage_cap_ms)
+        } else {
+            self.single_stage_cap_ms
+        };
+
         let url = format!("{}{}", self.base_url, path);
         let request_started_at = Instant::now();
         let mut request = self
             .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
+            .timeout(std::time::Duration::from_millis(per_call_timeout_ms))
             .json(payload);
+
+        if let Some(deadline) = active_deadline {
+            request = request.header(
+                RECOMMENDATION_DEADLINE_HEADER,
+                deadline.deadline_epoch_ms().to_string(),
+            );
+        }
 
         if let Some(token) = self.token.as_ref().filter(|value| !value.trim().is_empty()) {
             request = request

@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 
+use crate::clients::graph_kernel_client::GRAPH_KERNEL_INTERNAL_TOKEN_HEADER;
 use crate::clients::response_body::{
     ResponseBodyError, error_body_preview, read_response_body_bounded,
 };
@@ -15,19 +16,27 @@ use super::types::{
     NeighborCandidate, NeighborRequest,
 };
 
-/// HTTP-based graph client implementation
+fn read_graph_kernel_internal_token() -> Option<String> {
+    std::env::var("GRAPH_KERNEL_INTERNAL_TOKEN")
+        .ok()
+        .map(|val| val.trim().to_string())
+        .filter(|val| !val.is_empty())
+}
+
+/// 基于 HTTP 的 C++ 图内核查询客户端（支持内部鉴权头注入）。
 #[derive(Debug, Clone)]
 pub struct HttpGraphClient {
     client: reqwest::Client,
     base_url: String,
     timeout_ms: u64,
+    internal_token: Option<String>,
 }
 
 impl HttpGraphClient {
     pub fn new(base_url: String, timeout_ms: u64) -> Self {
         let client = reqwest::Client::builder()
             .pool_max_idle_per_host(8)
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .pool_idle_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_millis(timeout_ms))
             .build()
             .expect("failed to build HTTP client");
@@ -35,7 +44,16 @@ impl HttpGraphClient {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
             timeout_ms,
+            internal_token: read_graph_kernel_internal_token(),
         }
+    }
+
+    /// 显式设置 C++ 图内核内部鉴权 Token。
+    pub fn with_internal_token(mut self, token: Option<String>) -> Self {
+        self.internal_token = token
+            .map(|val| val.trim().to_string())
+            .filter(|val| !val.is_empty());
+        self
     }
 
     async fn post_candidates<TResponse, TRequest>(
@@ -48,13 +66,17 @@ impl HttpGraphClient {
         TRequest: Serialize + ?Sized,
     {
         let url = format!("{}{}", self.base_url, path);
-        let response = self
+        let mut request = self
             .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .header("x-internal-ops-client", "rust-recommendation")
             .timeout(std::time::Duration::from_millis(self.timeout_ms))
-            .json(payload)
+            .json(payload);
+        if let Some(token) = self.internal_token.as_deref() {
+            request = request.header(GRAPH_KERNEL_INTERNAL_TOKEN_HEADER, token);
+        }
+        let response = request
             .send()
             .await
             .with_context(|| format!("request graph kernel {url}"))?;

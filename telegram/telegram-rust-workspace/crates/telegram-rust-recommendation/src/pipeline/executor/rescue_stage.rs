@@ -23,6 +23,21 @@ impl RecommendationPipeline {
             return final_candidates;
         }
 
+        if self.backend_client.is_deadline_exhausted() {
+            telemetry.add_stage(build_self_post_rescue_stage(
+                0,
+                0,
+                Some("recommendation_deadline_exceeded"),
+                hydrated_query.limit,
+                SELF_POST_RESCUE_LOOKBACK_DAYS,
+            ));
+            telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, 0);
+            telemetry
+                .degraded_reasons
+                .push(SELF_POST_RESCUE_FAILED_DEGRADED_REASON.to_string());
+            return final_candidates;
+        }
+
         let rescue_timer = StageTimer::start();
         match self
             .backend_client

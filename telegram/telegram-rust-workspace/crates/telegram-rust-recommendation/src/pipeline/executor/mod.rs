@@ -2,9 +2,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use chrono::Utc;
+use telegram_thunder_store::ThunderStore;
 use tokio::sync::Mutex;
 
 use crate::clients::backend_client::BackendRecommendationClient;
+use crate::clients::deadline::{MIN_REMAINING_BUDGET_MS, RequestDeadline, with_request_deadline};
 use crate::config::RecommendationConfig;
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 use crate::metrics::RecommendationMetrics;
@@ -14,6 +17,7 @@ use crate::serving::cache::ServeCacheSnapshot;
 use crate::serving::cursor::ranked_cursor_requires_abstention;
 use crate::serving::policy::build_query_fingerprint;
 use crate::serving::singleflight::{CacheSingleflight, CacheSingleflightSnapshot};
+use crate::sources::cached_posts::SourceCache;
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::state::recent_store::RecentHotStore;
 
@@ -49,6 +53,8 @@ pub struct RecommendationPipeline {
     config: RecommendationConfig,
     definition: RecommendationPipelineDefinition,
     recent_store: Arc<RecentHotStore>,
+    thunder_store: Arc<ThunderStore>,
+    source_cache: SourceCache,
     metrics: Arc<Mutex<RecommendationMetrics>>,
     source_orchestrator: RecommendationSourceOrchestrator,
     serve_cache: ServeCache,
@@ -56,6 +62,7 @@ pub struct RecommendationPipeline {
 }
 
 impl RecommendationPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
@@ -63,14 +70,20 @@ impl RecommendationPipeline {
         metrics: Arc<Mutex<RecommendationMetrics>>,
         definition: RecommendationPipelineDefinition,
         source_orchestrator: RecommendationSourceOrchestrator,
+        thunder_store: Arc<ThunderStore>,
+        source_cache: SourceCache,
     ) -> Self {
+        let serve_cache =
+            ServeCache::from_config(&config).with_thunder_store(Arc::clone(&thunder_store));
         Self {
-            serve_cache: ServeCache::from_config(&config),
+            serve_cache,
             cache_singleflight: CacheSingleflight::new(config.cache_singleflight_enabled),
             backend_client,
             config,
             definition,
             recent_store,
+            thunder_store,
+            source_cache,
             metrics,
             source_orchestrator,
         }
@@ -80,6 +93,33 @@ impl RecommendationPipeline {
         &self.definition
     }
 
+    pub fn thunder_store(&self) -> &Arc<ThunderStore> {
+        &self.thunder_store
+    }
+
+    pub fn serve_cache(&self) -> &ServeCache {
+        &self.serve_cache
+    }
+
+    pub fn source_cache(&self) -> &SourceCache {
+        &self.source_cache
+    }
+
+    /// 标记指定帖子为已删除并同步从 `ThunderStore`、`RecentHotStore`、`ServeCache` 与 `SourceCache` 剔除。
+    pub async fn evict_deleted_post(&self, post_id: &str, author_id: Option<&str>) {
+        if post_id.trim().is_empty() {
+            return;
+        }
+        let post_id = post_id.trim();
+        self.thunder_store
+            .mark_deleted(post_id, author_id, Utc::now().timestamp_millis());
+        self.recent_store.evict_post(post_id);
+        let _ = tokio::join!(
+            self.serve_cache.evict_post(post_id),
+            self.source_cache.evict_post(post_id),
+        );
+    }
+
     pub fn cache_control_plane_snapshot(&self) -> CacheControlPlaneSnapshot {
         CacheControlPlaneSnapshot {
             serve_cache: self.serve_cache.snapshot(),
@@ -87,7 +127,28 @@ impl RecommendationPipeline {
         }
     }
 
+    /// 在显式请求级 `RequestDeadline` 预算上下文中运行推荐主流水线。
+    pub async fn run_with_deadline(
+        &self,
+        query: RecommendationQueryPayload,
+        deadline: RequestDeadline,
+    ) -> Result<RecommendationResultPayload> {
+        with_request_deadline(deadline, self.run_inner(query)).await
+    }
+
     pub async fn run(
+        &self,
+        query: RecommendationQueryPayload,
+    ) -> Result<RecommendationResultPayload> {
+        if self.config.timeout_ms >= MIN_REMAINING_BUDGET_MS {
+            let deadline =
+                RequestDeadline::from_remaining_ms(self.config.timeout_ms, self.config.timeout_ms);
+            return self.run_with_deadline(query, deadline).await;
+        }
+        self.run_inner(query).await
+    }
+
+    async fn run_inner(
         &self,
         query: RecommendationQueryPayload,
     ) -> Result<RecommendationResultPayload> {

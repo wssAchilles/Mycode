@@ -114,3 +114,189 @@ fn test_golden_v3_candidate_and_query_roundtrip() {
     assert_eq!(query.prediction_id.as_deref(), Some("pred_v3_0001"));
     assert!(query.feature_switch("enable_v3_dpp", false));
 }
+
+#[test]
+fn test_node_partial_user_features_64bit_overflow_media_alias_and_nan_sanitization() {
+    use serde_json::json;
+    use telegram_recommendation_contracts::contracts::candidate::PhoenixScoresPayload;
+    use telegram_recommendation_contracts::contracts::pipeline::{
+        RecommendationOnlineEvaluationPayload, RecommendationRankingSummaryPayload,
+        RecommendationResultPayload, RecommendationRetrievalSummaryPayload,
+        RecommendationSelectorPayload, RecommendationServingSummaryPayload,
+        RecommendationSummaryPayload,
+    };
+
+    // 1. 验证 Node createFeedQuery 发送缺失 videoPreference / isSubscriber 的 userFeatures
+    //    以及 JS Number 64-bit 浮点进位溢出值与字符串槽位不会触发 422
+    let raw_query = json!({
+        "requestId": "req-node-compat-01",
+        "decisionId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "userId": "viewer-node-1",
+        "limit": 10,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "userFeatures": {
+            "followedUserIds": ["author-1", "author-2"],
+            "blockedUserIds": [],
+            "mutedUserIds": []
+        },
+        "bloomFilterEntries": [
+            18446744073709552000.0_f64,
+            "18446744073709551615",
+            "0x10"
+        ],
+        "columnarRetrievalSequence": [
+            {
+                "postIdHash": "9223372036854775807",
+                "authorHash": "-42"
+            }
+        ]
+    });
+
+    let parsed_query: RecommendationQueryPayload =
+        serde_json::from_value(raw_query).expect("Node 缺省 userFeatures 与 64-bit 边界应平滑解析");
+    let features = parsed_query.user_features.expect("user_features 存在");
+    assert_eq!(features.followed_user_ids, vec!["author-1", "author-2"]);
+    assert!(!features.is_subscriber);
+    assert_eq!(
+        parsed_query.bloom_filter_entries,
+        vec![u64::MAX, u64::MAX, 16]
+    );
+    assert_eq!(
+        parsed_query.columnar_retrieval_sequence[0].post_id_hash,
+        i64::MAX
+    );
+    assert_eq!(parsed_query.columnar_retrieval_sequence[0].author_hash, -42);
+
+    // 2. 验证 MediaType 兼容 "image" -> Photo 且未知值 "audio" 安全兜底为 None
+    let image_media: MediaType = serde_json::from_value(json!("image")).expect("image 别名");
+    assert_eq!(image_media, MediaType::Photo);
+    let audio_media: MediaType = serde_json::from_value(json!("audio")).expect("audio 未知兜底");
+    assert_eq!(audio_media, MediaType::None);
+    assert_eq!(
+        serde_json::to_value(MediaType::None).unwrap(),
+        json!("none")
+    );
+
+    // 3. 验证 NaN / Infinity 在序列化前被清洗为有限值 0.0，杜绝输出 null
+    let mut candidate = RecommendationCandidatePayload {
+        post_id: "post-nan-1".to_string(),
+        author_id: "author-1".to_string(),
+        content: "nan check".to_string(),
+        score: Some(f64::NAN),
+        weighted_score: Some(f64::INFINITY),
+        phoenix_scores: Some(PhoenixScoresPayload {
+            like_score: Some(f64::NEG_INFINITY),
+            dwell_probs: Some(vec![0.2, f64::NAN, f64::INFINITY]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    candidate.sanitize_non_finite_floats();
+
+    let mut result = RecommendationResultPayload {
+        request_id: "req-nan".to_string(),
+        serving_version: "v1".to_string(),
+        cursor: None,
+        next_cursor: None,
+        has_more: false,
+        served_state_version: "v1".to_string(),
+        stable_order_key: "key".to_string(),
+        candidates: vec![candidate],
+        summary: RecommendationSummaryPayload {
+            request_id: "req-nan".to_string(),
+            stage: "stage".to_string(),
+            pipeline_version: "v1".to_string(),
+            owner: "rust".to_string(),
+            fallback_mode: "none".to_string(),
+            provider_calls: Default::default(),
+            provider_latency_ms: Default::default(),
+            retrieved_count: 1,
+            selected_count: 1,
+            source_counts: Default::default(),
+            filter_drop_counts: Default::default(),
+            stage_timings: Default::default(),
+            stage_latency_ms: Default::default(),
+            degraded_reasons: Vec::new(),
+            recent_hot_applied: false,
+            online_eval: RecommendationOnlineEvaluationPayload {
+                selected_count: 1,
+                average_score: f64::NAN,
+                score_stddev: f64::INFINITY,
+                ..Default::default()
+            },
+            selector: RecommendationSelectorPayload {
+                oversample_factor: 1,
+                max_size: 10,
+                final_limit: 10,
+                truncated: false,
+                selector_report: None,
+                selector_report_unavailable_reason: None,
+            },
+            serving: RecommendationServingSummaryPayload {
+                serving_version: "v1".to_string(),
+                cursor_mode: "v1".to_string(),
+                cursor: None,
+                next_cursor: None,
+                has_more: false,
+                served_state_version: "v1".to_string(),
+                stable_order_key: "key".to_string(),
+                duplicate_suppressed_count: 0,
+                cross_page_duplicate_count: 0,
+                suppression_reasons: Default::default(),
+                serve_cache_hit: false,
+                stable_order_drifted: false,
+                cache_key_mode: "v1".to_string(),
+                cache_policy: "v1".to_string(),
+                cache_policy_reason: "ok".to_string(),
+                page_remaining_count: 0,
+                page_underfilled: false,
+                page_underfill_reason: None,
+            },
+            retrieval: RecommendationRetrievalSummaryPayload {
+                stage: "v1".to_string(),
+                total_candidates: 1,
+                in_network_candidates: 1,
+                out_of_network_candidates: 0,
+                ml_retrieved_candidates: 0,
+                recent_hot_candidates: 0,
+                source_counts: Default::default(),
+                source_outcome_counts: Default::default(),
+                source_failure_counts: Default::default(),
+                source_disabled_counts: Default::default(),
+                lane_counts: Default::default(),
+                ml_source_counts: Default::default(),
+                stage_timings: Default::default(),
+                degraded_reasons: Vec::new(),
+                graph: Default::default(),
+            },
+            ranking: RecommendationRankingSummaryPayload {
+                stage: "v1".to_string(),
+                input_candidates: 1,
+                hydrated_candidates: 1,
+                filtered_candidates: 1,
+                scored_candidates: 1,
+                ml_eligible_candidates: 0,
+                ml_ranked_candidates: 0,
+                weighted_candidates: 1,
+                stage_timings: Default::default(),
+                filter_drop_counts: Default::default(),
+                degraded_reasons: Vec::new(),
+            },
+            stages: Vec::new(),
+            trace: None,
+        },
+    };
+    result.sanitize_non_finite_floats();
+
+    let wire = serde_json::to_value(&result).expect("序列化清洗后的结果");
+    assert_eq!(wire["summary"]["onlineEval"]["averageScore"], json!(0.0));
+    assert_eq!(wire["summary"]["onlineEval"]["scoreStddev"], json!(0.0));
+    assert_eq!(wire["candidates"][0]["score"], json!(0.0));
+    assert_eq!(
+        wire["candidates"][0]["phoenixScores"]["dwellProbs"],
+        json!([0.2, 0.0, 0.0])
+    );
+}

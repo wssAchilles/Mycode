@@ -2,16 +2,21 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 候选媒体类型枚举。
+/// 候选媒体类型枚举（兼容上游 `"image"` 别名并安全兜底未知枚举如 `"audio"`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum MediaType {
-    #[default]
-    None,
+    #[serde(alias = "image", alias = "IMAGE", alias = "Photo", alias = "PHOTO")]
     Photo,
+    #[serde(alias = "VIDEO", alias = "Video")]
     Video,
+    #[serde(alias = "GIF", alias = "Gif")]
     Gif,
+    #[serde(alias = "MIXED", alias = "Mixed")]
     Mixed,
+    #[default]
+    #[serde(other)]
+    None,
 }
 
 /// 单条媒体附件描述。

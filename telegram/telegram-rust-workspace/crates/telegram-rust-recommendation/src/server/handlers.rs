@@ -1,8 +1,10 @@
 use axum::Json;
 use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::http::{HeaderMap, StatusCode};
-use tracing::error;
+use tracing::{error, warn};
 
+use crate::clients::deadline::RequestDeadline;
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 
 use super::auth::require_internal_token;
@@ -24,11 +26,42 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 pub async fn recommendation_candidates(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(query): Json<RecommendationQueryPayload>,
+    payload: Result<Json<RecommendationQueryPayload>, JsonRejection>,
 ) -> Result<Json<RecommendationResultPayload>, (StatusCode, String)> {
     require_internal_token(&state.config, &headers)?;
 
-    match state.pipeline.run(query.clone()).await {
+    let Json(query) = match payload {
+        Ok(json) => json,
+        Err(rejection) => {
+            let header_request_id = headers
+                .get("x-request-id")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let status = rejection.status();
+            let reason = format!(
+                "recommendation_payload_rejected status={}: {}",
+                status.as_u16(),
+                rejection.body_text()
+            );
+            warn!(
+                request_id = ?header_request_id,
+                status = status.as_u16(),
+                "recommendation query payload rejected before pipeline execution"
+            );
+            let mut metrics = state.metrics.lock().await;
+            metrics.record_failure(header_request_id, &reason);
+            return Err((status, rejection.body_text()));
+        }
+    };
+
+    let deadline = RequestDeadline::from_headers_or_timeout(&headers, state.config.timeout_ms);
+
+    match state
+        .pipeline
+        .run_with_deadline(query.clone(), deadline)
+        .await
+    {
         Ok(result) => {
             let mut metrics = state.metrics.lock().await;
             metrics.record_success(&result.summary);

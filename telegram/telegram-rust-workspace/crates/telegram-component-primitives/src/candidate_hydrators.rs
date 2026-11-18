@@ -26,6 +26,43 @@ pub const CANDIDATE_HYDRATOR_NAMES: &[&str] = &[
     FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR,
 ];
 
+/// Node 侧 `/internal/recommendation/hydrate` 支持的远端水合器集合。
+pub const REMOTE_CANDIDATE_HYDRATOR_NAMES: &[&str] = &[
+    AUTHOR_INFO_HYDRATOR,
+    USER_INTERACTION_HYDRATOR,
+    VIDEO_INFO_HYDRATOR,
+];
+
+/// Rust 进程内直接执行的纯本地候选水合器集合（严禁转发至 Node `/hydrate`）。
+pub const LOCAL_CANDIDATE_HYDRATOR_NAMES: &[&str] = &[
+    HAS_MEDIA_CANDIDATE_HYDRATOR,
+    VIDEO_DURATION_CANDIDATE_HYDRATOR,
+    ENGAGEMENT_COUNTS_CANDIDATE_HYDRATOR,
+    QUOTE_CANDIDATE_HYDRATOR,
+    MUTUAL_FOLLOW_JACCARD_CANDIDATE_HYDRATOR,
+    TWEET_TYPE_METRICS_CANDIDATE_HYDRATOR,
+    FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR,
+];
+
+/// 判断指定水合器是否为纯 Rust 本地候选水合器。
+pub fn is_local_candidate_hydrator(name: &str) -> bool {
+    LOCAL_CANDIDATE_HYDRATOR_NAMES.contains(&name)
+}
+
+/// 将激活的候选水合器列表按执行归属拆分为 `(remote_hydrators, local_hydrators)`。
+pub fn partition_candidate_hydrators(components: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut remote = Vec::new();
+    let mut local = Vec::new();
+    for name in components {
+        if is_local_candidate_hydrator(name) {
+            local.push(name.clone());
+        } else {
+            remote.push(name.clone());
+        }
+    }
+    (remote, local)
+}
+
 pub const POST_SELECTION_HYDRATOR_NAMES: &[&str] = &[VF_CANDIDATE_HYDRATOR];
 
 pub fn configured_candidate_hydrators() -> Vec<String> {

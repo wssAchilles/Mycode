@@ -109,6 +109,16 @@ pub struct ThunderStore {
     pub(crate) stats: Arc<ThunderStats>,
 }
 
+impl std::fmt::Debug for ThunderStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ThunderStore")
+            .field("posts_len", &self.posts.len())
+            .field("deleted_tombstones_len", &self.deleted_posts.len())
+            .finish()
+    }
+}
+
 impl ThunderStore {
     /// 创建新的 Thunder 内存帖子存储实例
     pub fn new(config: ThunderConfig) -> Self {

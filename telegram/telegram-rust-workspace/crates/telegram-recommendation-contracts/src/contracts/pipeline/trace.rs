@@ -168,3 +168,66 @@ pub struct RecommendationResultPayload {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub summary: RecommendationSummaryPayload,
 }
+
+impl RecommendationTraceCandidatePayload {
+    /// 清洗追踪候选中任何非有限浮点值。
+    pub fn sanitize_non_finite_floats(&mut self) {
+        use crate::contracts::candidate::sanitize::{sanitize_f64_map, sanitize_opt_f64};
+        sanitize_opt_f64(&mut self.score);
+        sanitize_opt_f64(&mut self.weighted_score);
+        sanitize_opt_f64(&mut self.pipeline_score);
+        if let Some(breakdown) = self.score_breakdown.as_mut() {
+            sanitize_f64_map(breakdown);
+        }
+    }
+}
+
+impl RecommendationTracePayload {
+    /// 清洗链路追踪汇总与回放池中的非有限浮点值。
+    pub fn sanitize_non_finite_floats(&mut self) {
+        use crate::contracts::candidate::sanitize::{sanitize_f64, sanitize_opt_f64};
+        sanitize_f64(&mut self.author_diversity);
+        sanitize_f64(&mut self.reply_ratio);
+        sanitize_f64(&mut self.average_score);
+        sanitize_opt_f64(&mut self.top_score);
+        sanitize_opt_f64(&mut self.bottom_score);
+        sanitize_opt_f64(&mut self.embedding_quality_score);
+        for candidate in &mut self.candidates {
+            candidate.sanitize_non_finite_floats();
+        }
+        if let Some(pool) = self.replay_pool.as_mut() {
+            for candidate in &mut pool.candidates {
+                candidate.sanitize_non_finite_floats();
+            }
+        }
+    }
+}
+
+impl RecommendationOnlineEvaluationPayload {
+    /// 清洗 `onlineEval` 评估指标中的 `NaN` / `Infinity` 为有限值 `0.0`。
+    pub fn sanitize_non_finite_floats(&mut self) {
+        use crate::contracts::candidate::sanitize::sanitize_f64;
+        sanitize_f64(&mut self.average_score);
+        sanitize_f64(&mut self.score_stddev);
+        sanitize_f64(&mut self.unique_author_ratio);
+        sanitize_f64(&mut self.source_entropy);
+        sanitize_f64(&mut self.lane_entropy);
+        sanitize_f64(&mut self.pool_entropy);
+        sanitize_f64(&mut self.negative_pressure_average);
+    }
+}
+
+impl RecommendationResultPayload {
+    /// 序列化出站前全量清洗候选列表、`onlineEval`、`trace` 与图指标中的非有限浮点数。
+    pub fn sanitize_non_finite_floats(&mut self) {
+        use crate::contracts::candidate::sanitize::sanitize_opt_f64;
+        for candidate in &mut self.candidates {
+            candidate.sanitize_non_finite_floats();
+        }
+        self.summary.online_eval.sanitize_non_finite_floats();
+        sanitize_opt_f64(&mut self.summary.retrieval.graph.dominance_share);
+        if let Some(trace) = self.summary.trace.as_mut() {
+            trace.sanitize_non_finite_floats();
+        }
+    }
+}

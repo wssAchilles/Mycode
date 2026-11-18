@@ -23,6 +23,28 @@ pub(crate) async fn hydrate_query_parallel_bounded_fallback(
     concurrency: usize,
     query: &RecommendationQueryPayload,
 ) -> QueryHydrationOutput {
+    let backend_client = backend_client.with_current_deadline();
+    if backend_client.is_deadline_exhausted() {
+        let short_circuit_results = hydrator_names
+            .iter()
+            .map(|name| {
+                Some((
+                    build_query_error_stage(name, "recommendation_deadline_exceeded"),
+                    RecommendationQueryPatchPayload::default(),
+                    HashMap::new(),
+                    Some("deadline_exceeded".to_string()),
+                ))
+            })
+            .collect();
+        return merge_query_hydrator_results(
+            query,
+            hydrator_names,
+            short_circuit_results,
+            HashMap::new(),
+            HashMap::new(),
+        );
+    }
+
     let concurrency = concurrency.max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut ordered_results = vec![None::<QueryHydratorResult>; hydrator_names.len()];

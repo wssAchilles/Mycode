@@ -23,7 +23,8 @@ pub(super) fn video_filter(
         .map(|f| f.video_preference.as_str())
         .unwrap_or("allow");
 
-    if preference == "allow" {
+    // 兼容空值、allow 与 Node 默认 standard，仅当显式要求 block 或 only 时激活过滤
+    if !matches!(preference, "block" | "only") {
         return (
             candidates,
             Vec::new(),

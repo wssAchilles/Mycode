@@ -6,10 +6,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ColumnarActionStepPayload {
+    #[serde(
+        default,
+        deserialize_with = "super::numeric_serde::deserialize_flexible_i64"
+    )]
     pub post_id_hash: i64,
     /// 6 级 RQ-VAE Semantic ID，缺失为 None。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_ids: Option<[i32; 6]>,
+    #[serde(
+        default,
+        deserialize_with = "super::numeric_serde::deserialize_flexible_i64"
+    )]
     pub author_hash: i64,
     pub action_type: i32,
     /// Multi-hot 行为掩码向量（对标 13 路动作可观测空间）。

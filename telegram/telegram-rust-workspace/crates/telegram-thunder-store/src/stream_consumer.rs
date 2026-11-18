@@ -22,6 +22,9 @@ pub const DEFAULT_STREAM_KEY: &str = "recsys:events:v1";
 /// 默认 Rust 推荐消费组名称
 pub const DEFAULT_CONSUMER_GROUP: &str = "cg:rust-recsys";
 
+/// 删帖事件联动回调钩子：参数为 `(post_id, author_id)`，用于同步驱逐外部缓存层。
+pub type DeletedPostHook = Arc<dyn Fn(&str, Option<&str>) + Send + Sync>;
+
 /// Redis Stream 监听器配置
 #[derive(Debug, Clone)]
 pub struct StreamConsumerConfig {
@@ -158,6 +161,16 @@ pub fn apply_recsys_stream_event(
     event_type: &str,
     payload_json: &str,
 ) -> bool {
+    apply_recsys_stream_event_with_hook(store, event_type, payload_json, None)
+}
+
+/// 解析并应用来自 `recsys:events:v1` 的单条事件，并在命中 `post.deleted` 时触发联动驱逐钩子。
+pub fn apply_recsys_stream_event_with_hook(
+    store: &ThunderStore,
+    event_type: &str,
+    payload_json: &str,
+    on_post_deleted: Option<&DeletedPostHook>,
+) -> bool {
     match event_type {
         "post.created" => {
             let Ok(payload) = serde_json::from_str::<PostCreatedPayload>(payload_json) else {
@@ -187,17 +200,18 @@ pub fn apply_recsys_stream_event(
             let Ok(payload) = serde_json::from_str::<PostDeletedPayload>(payload_json) else {
                 return false;
             };
-            if payload.post_id.trim().is_empty() {
+            let post_id = payload.post_id.trim();
+            if post_id.is_empty() {
                 return false;
             }
             let deleted_at_ms = payload
                 .deleted_at_ms
                 .unwrap_or_else(|| Utc::now().timestamp_millis());
-            store.mark_deleted(
-                &payload.post_id,
-                payload.author_id.as_deref(),
-                deleted_at_ms,
-            )
+            let applied = store.mark_deleted(post_id, payload.author_id.as_deref(), deleted_at_ms);
+            if let Some(hook) = on_post_deleted {
+                hook(post_id, payload.author_id.as_deref());
+            }
+            applied
         }
         "post.sid_assigned" => {
             let Ok(payload) = serde_json::from_str::<PostSidAssignedPayload>(payload_json) else {
@@ -216,15 +230,27 @@ pub fn apply_recsys_stream_event(
 }
 
 /// 从 Redis Stream 条目字段字典提取 `(event_type, payload_json)` 并应用至存储
+#[cfg(test)]
 pub(crate) fn apply_stream_fields_map(
     store: &ThunderStore,
     fields: &HashMap<String, redis::Value>,
+) -> bool {
+    apply_stream_fields_map_with_hook(store, fields, None)
+}
+
+/// 从 Redis Stream 条目字段字典提取事件并携带删帖回调钩子应用至存储。
+pub(crate) fn apply_stream_fields_map_with_hook(
+    store: &ThunderStore,
+    fields: &HashMap<String, redis::Value>,
+    on_post_deleted: Option<&DeletedPostHook>,
 ) -> bool {
     let event_type = extract_field_string(fields, &["eventType", "event_type", "topic"]);
     let payload_json = extract_field_string(fields, &["payload", "data"]);
 
     match (event_type, payload_json) {
-        (Some(evt), Some(payload)) => apply_recsys_stream_event(store, &evt, &payload),
+        (Some(evt), Some(payload)) => {
+            apply_recsys_stream_event_with_hook(store, &evt, &payload, on_post_deleted)
+        }
         _ => false,
     }
 }
@@ -257,7 +283,17 @@ pub fn spawn_stream_listener(
 pub fn spawn_stream_listener_with_shutdown(
     store: Arc<ThunderStore>,
     config: StreamConsumerConfig,
+    shutdown: watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    spawn_stream_listener_with_hooks(store, config, shutdown, None)
+}
+
+/// 启动支持删帖联动回调钩子与优雅关闭信号的后台 Redis Stream 消费者任务。
+pub fn spawn_stream_listener_with_hooks(
+    store: Arc<ThunderStore>,
+    config: StreamConsumerConfig,
     mut shutdown: watch::Receiver<bool>,
+    on_post_deleted: Option<DeletedPostHook>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let client = match redis::Client::open(config.redis_url.as_str()) {
@@ -335,7 +371,11 @@ pub fn spawn_stream_listener_with_shutdown(
                     Ok(Some(stream_reply)) => {
                         for stream_key in stream_reply.keys {
                             for entry in stream_key.ids {
-                                let _ = apply_stream_fields_map(&store, &entry.map);
+                                let _ = apply_stream_fields_map_with_hook(
+                                    &store,
+                                    &entry.map,
+                                    on_post_deleted.as_ref(),
+                                );
                                 // 即使事件属于其他消费者（如 graph.edge_delta）或解析跳过，也需 XACK 避免 PEL 积压
                                 let _: redis::RedisResult<i64> = redis::cmd("XACK")
                                     .arg(&config.stream_key)

@@ -26,7 +26,17 @@ pub use subscribed_user_ids::subscribed_user_ids_hydrator;
 pub use tweet_type_metrics::tweet_type_metrics_hydrator;
 pub use video_duration::video_duration_hydrator;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use telegram_component_primitives::candidate_hydrators::{
+    ENGAGEMENT_COUNTS_CANDIDATE_HYDRATOR, FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR,
+    HAS_MEDIA_CANDIDATE_HYDRATOR, MUTUAL_FOLLOW_JACCARD_CANDIDATE_HYDRATOR,
+    QUOTE_CANDIDATE_HYDRATOR, TWEET_TYPE_METRICS_CANDIDATE_HYDRATOR,
+    VIDEO_DURATION_CANDIDATE_HYDRATOR,
+};
+use telegram_pipeline_primitives::{
+    PIPELINE_STAGE_KIND_HYDRATOR, annotate_rust_owned_stage_detail, annotate_stage_contract_detail,
+};
 
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
@@ -82,36 +92,67 @@ pub fn run_local_candidate_hydrators(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
 ) -> LocalCandidateHydratorExecution {
+    run_selected_local_candidate_hydrators(query, candidates, None)
+}
+
+/// 按给定激活列表有序执行纯 Rust 本地候选水合器（`enabled_names == None` 时执行全部 7 个本地水合器）。
+pub fn run_selected_local_candidate_hydrators(
+    query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+    enabled_names: Option<&[String]>,
+) -> LocalCandidateHydratorExecution {
+    let enabled_set =
+        enabled_names.map(|names| names.iter().map(String::as_str).collect::<HashSet<&str>>());
+    let should_run = |name: &str| {
+        enabled_set
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(name))
+    };
+
     let mut current = candidates;
     let mut stages = Vec::new();
 
-    let (hydrated, stage) = has_media_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(HAS_MEDIA_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = has_media_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = video_duration_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(VIDEO_DURATION_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = video_duration_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = engagement_counts_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(ENGAGEMENT_COUNTS_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = engagement_counts_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = quote_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(QUOTE_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = quote_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = mutual_follow_jaccard_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(MUTUAL_FOLLOW_JACCARD_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = mutual_follow_jaccard_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = tweet_type_metrics_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(TWEET_TYPE_METRICS_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = tweet_type_metrics_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
-    let (hydrated, stage) = following_replied_users_hydrator(query, current);
-    current = hydrated;
-    stages.push(stage);
+    if should_run(FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR) {
+        let (hydrated, stage) = following_replied_users_hydrator(query, current);
+        current = hydrated;
+        stages.push(stage);
+    }
 
     LocalCandidateHydratorExecution {
         candidates: current,
@@ -125,6 +166,9 @@ fn build_hydrator_stage(
     output_count: usize,
     detail: Option<HashMap<String, serde_json::Value>>,
 ) -> RecommendationStagePayload {
+    let mut stage_detail = detail.unwrap_or_default();
+    annotate_stage_contract_detail(&mut stage_detail, name, PIPELINE_STAGE_KIND_HYDRATOR);
+    annotate_rust_owned_stage_detail(&mut stage_detail, "in_process");
     RecommendationStagePayload {
         name: name.to_string(),
         enabled: true,
@@ -132,7 +176,7 @@ fn build_hydrator_stage(
         input_count,
         output_count,
         removed_count: None,
-        detail,
+        detail: Some(stage_detail),
     }
 }
 

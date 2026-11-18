@@ -325,12 +325,36 @@ impl RecommendationSourceOrchestrator {
         source_entries: Vec<(usize, String)>,
         disabled_results: Vec<(usize, SourceExecution)>,
     ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
+        let client_with_deadline = self.backend_client.with_current_deadline();
+        if client_with_deadline.is_deadline_exhausted() {
+            let mut ordered_results = source_entries
+                .into_iter()
+                .map(|(index, source_name)| {
+                    let mut execution = build_failed_source_execution(
+                        &source_name,
+                        "recommendation_deadline_exceeded",
+                        0,
+                    );
+                    apply_source_policy(
+                        query,
+                        &source_name,
+                        &mut execution.stage,
+                        &mut execution.candidates,
+                    );
+                    (index, execution)
+                })
+                .collect::<Vec<_>>();
+            ordered_results.extend(disabled_results);
+            ordered_results.sort_by_key(|(index, _)| *index);
+            return Ok((ordered_results, HashMap::new()));
+        }
+
         let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
         let query_shared = Arc::new(query.clone());
         let mut join_set = JoinSet::new();
 
         for (index, source_name) in source_entries {
-            let backend_client = self.backend_client.clone();
+            let backend_client = client_with_deadline.clone();
             let query = Arc::clone(&query_shared);
             let semaphore = semaphore.clone();
             join_set.spawn(async move {

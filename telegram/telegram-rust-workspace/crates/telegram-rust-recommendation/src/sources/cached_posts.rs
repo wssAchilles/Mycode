@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use moka::sync::Cache;
 use redis::AsyncCommands;
+use telegram_thunder_store::ThunderStore;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::serving::policy::build_query_fingerprint;
@@ -22,6 +24,7 @@ pub struct SourceCache {
     prefix: String,
     redis_client: Option<redis::Client>,
     memory: Cache<String, SourceCacheEntry>,
+    thunder_store: Option<Arc<ThunderStore>>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +52,58 @@ impl SourceCache {
             prefix: prefix.to_string(),
             redis_client,
             memory: Cache::new(SOURCE_CACHE_LOCAL_CAPACITY),
+            thunder_store: None,
         }
+    }
+
+    /// 挂载共享 `ThunderStore` 墓碑视图，读取时自动过滤已删除帖子。
+    pub fn with_thunder_store(mut self, thunder_store: Arc<ThunderStore>) -> Self {
+        self.thunder_store = Some(thunder_store);
+        self
+    }
+
+    fn filter_deleted(
+        &self,
+        mut candidates: Vec<RecommendationCandidatePayload>,
+    ) -> Vec<RecommendationCandidatePayload> {
+        if let Some(store) = self.thunder_store.as_ref() {
+            candidates.retain(|candidate| !store.is_deleted(&candidate.post_id));
+        }
+        candidates
+    }
+
+    /// 收到删帖事件时，从本地 Moka 与 Redis 中剔除包含该 `post_id` 的召回源缓存条目。
+    pub async fn evict_post(&self, post_id: &str) -> usize {
+        if post_id.is_empty() {
+            return 0;
+        }
+        let affected_keys = self
+            .memory
+            .iter()
+            .filter_map(|(key, entry)| {
+                entry
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.post_id == post_id)
+                    .then(|| key.as_ref().clone())
+            })
+            .collect::<Vec<_>>();
+
+        for key in &affected_keys {
+            self.memory.invalidate(key);
+        }
+        self.memory.run_pending_tasks();
+
+        if !affected_keys.is_empty()
+            && let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+        {
+            for key in &affected_keys {
+                let _: redis::RedisResult<usize> = connection.del(key).await;
+            }
+        }
+
+        affected_keys.len()
     }
 
     pub fn enabled(&self) -> bool {
@@ -79,7 +133,7 @@ impl SourceCache {
     }
 
     async fn get_by_key(&self, key: &str) -> SourceCacheHit {
-        // Try Redis first.
+        // 优先查询 Redis 共享缓存，并按墓碑集过滤已删帖
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
             && let Ok(value) = connection.get::<_, Option<String>>(key).await
@@ -87,17 +141,32 @@ impl SourceCache {
             && let Ok(candidates) =
                 serde_json::from_str::<Vec<RecommendationCandidatePayload>>(&value)
         {
-            return SourceCacheHit {
-                candidates: Some(candidates),
-            };
+            let original_len = candidates.len();
+            let filtered = self.filter_deleted(candidates);
+            if filtered.len() != original_len {
+                let _: redis::RedisResult<usize> = connection.del(key).await;
+            }
+            if !filtered.is_empty() || original_len == 0 {
+                return SourceCacheHit {
+                    candidates: Some(filtered),
+                };
+            }
         }
 
-        // Fallback to in-memory cache.
+        // 回退至本地内存缓存，并按墓碑集过滤已删帖
         if let Some(entry) = self.memory.get(key) {
             if entry.expires_at > Utc::now() {
-                return SourceCacheHit {
-                    candidates: Some(entry.candidates.clone()),
-                };
+                let original_len = entry.candidates.len();
+                let filtered = self.filter_deleted(entry.candidates.clone());
+                if filtered.len() != original_len {
+                    self.memory.invalidate(key);
+                }
+                if !filtered.is_empty() || original_len == 0 {
+                    return SourceCacheHit {
+                        candidates: Some(filtered),
+                    };
+                }
+                return SourceCacheHit::default();
             }
             self.memory.invalidate(key);
         }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::Router;
 use axum::routing::{get, post};
+use telegram_thunder_store::{ThunderConfig, ThunderStore};
 use tokio::sync::Mutex;
 
 use crate::backend_client::BackendRecommendationClient;
@@ -12,6 +13,7 @@ use crate::news_trends::http::news_trends;
 use crate::news_trends::state::NewsTrendsCache;
 use crate::pipeline::builder::RecommendationPipelineBuilder;
 use crate::recent_store::RecentHotStore;
+use crate::state::event_sync::start_recsys_event_sync;
 
 use super::handlers::{
     health, recommendation_candidates, recommendation_ops, recommendation_ops_summary,
@@ -25,6 +27,7 @@ pub fn build_app_state(config: RecommendationConfig) -> Result<AppState> {
         config.recent_global_capacity,
         config.recent_hot_shard_count,
     ));
+    let thunder_store = Arc::new(ThunderStore::new(ThunderConfig::default()));
     let metrics = Arc::new(Mutex::new(RecommendationMetrics::default()));
     let news_trends_cache = NewsTrendsCache::from_config(&config);
     let backend_client = BackendRecommendationClient::new(&config)?;
@@ -35,13 +38,23 @@ pub fn build_app_state(config: RecommendationConfig) -> Result<AppState> {
             Arc::clone(&recent_store),
             Arc::clone(&metrics),
         )
+        .with_thunder_store(Arc::clone(&thunder_store))
         .build(),
+    );
+    let event_sync_guard = start_recsys_event_sync(
+        &config.redis_url,
+        Arc::clone(&thunder_store),
+        Arc::clone(&recent_store),
+        pipeline.serve_cache().clone(),
+        pipeline.source_cache().clone(),
     );
 
     Ok(AppState {
         config,
         pipeline,
         recent_store,
+        thunder_store,
+        event_sync_guard,
         metrics,
         news_trends_cache,
     })

@@ -3,6 +3,7 @@
 pub mod core;
 pub mod media;
 pub mod safety;
+pub mod sanitize;
 pub mod scores;
 pub mod v3;
 

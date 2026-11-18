@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use telegram_component_primitives::candidate_hydrators::partition_candidate_hydrators;
 use telegram_pipeline_primitives::{
     EXECUTOR_LATENCY_FILTER, EXECUTOR_LATENCY_HYDRATE, EXECUTOR_LATENCY_SCORE,
     PIPELINE_STAGE_KIND_HYDRATOR, PROVIDER_KEY_HYDRATE, PROVIDER_KEY_SCORE,
@@ -11,6 +12,7 @@ use crate::contracts::{
     RecommendationRankingSummaryPayload, RecommendationStagePayload,
 };
 use crate::pipeline::local::filters::run_pre_score_filters;
+use crate::pipeline::local::hydrators::run_selected_local_candidate_hydrators;
 use crate::pipeline::local::scorers::run_local_scorers;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 
@@ -33,10 +35,15 @@ impl RecommendationPipeline {
         circuit_open_hydrators: &[String],
         telemetry: &mut RunTelemetry,
     ) -> Result<RankingStageOutput> {
+        let non_deleted_retrieved = retrieved
+            .iter()
+            .filter(|candidate| !self.thunder_store.is_deleted(&candidate.post_id))
+            .cloned()
+            .collect::<Vec<_>>();
         let (hydrated_candidates, hydrate_stages) = self
             .execute_candidate_hydration_stage(
                 hydrated_query,
-                retrieved,
+                &non_deleted_retrieved,
                 circuit_open_hydrators,
                 telemetry,
             )
@@ -85,22 +92,50 @@ impl RecommendationPipeline {
                 retrieved.len(),
             );
         telemetry.append_stages(std::mem::take(&mut skipped_candidate_hydrator_stages));
-        let mut hydrate_response = self
-            .backend_client
-            .hydrate_candidates_with_components(
+
+        // 将候选水合器拆分为远端 Node 集合与纯 Rust 本地集合，仅向 Node 请求已注册的远端组件
+        let (remote_components, local_components) = match candidate_hydrator_components {
+            Some(components) => {
+                let (remote, local) = partition_candidate_hydrators(&components);
+                (Some(remote), Some(local))
+            }
+            None => (None, None),
+        };
+
+        let mut hydrate_stages = Vec::new();
+        let mut current_candidates = match remote_components {
+            Some(remote) if remote.is_empty() => retrieved.to_vec(),
+            other => {
+                let mut hydrate_response = self
+                    .backend_client
+                    .hydrate_candidates_with_components(hydrated_query, retrieved, other)
+                    .await?;
+                telemetry.record_provider_call(PROVIDER_KEY_HYDRATE);
+                telemetry
+                    .record_provider_latency(PROVIDER_KEY_HYDRATE, hydrate_response.latency_ms);
+                telemetry.merge_provider_calls(&hydrate_response.payload.provider_calls);
+                hydrate_stages.extend(hydrate_response.payload.stages.iter().cloned());
+                telemetry.append_stages(std::mem::take(&mut hydrate_response.payload.stages));
+                hydrate_response.payload.candidates
+            }
+        };
+
+        let should_run_local = local_components
+            .as_ref()
+            .is_none_or(|local| !local.is_empty());
+        if should_run_local {
+            let local_execution = run_selected_local_candidate_hydrators(
                 hydrated_query,
-                retrieved,
-                candidate_hydrator_components,
-            )
-            .await?;
-        telemetry.record_provider_call(PROVIDER_KEY_HYDRATE);
-        telemetry.record_provider_latency(PROVIDER_KEY_HYDRATE, hydrate_response.latency_ms);
-        telemetry.merge_provider_calls(&hydrate_response.payload.provider_calls);
-        let hydrate_stages = hydrate_response.payload.stages.clone();
-        let hydrated_candidates = hydrate_response.payload.candidates;
-        telemetry.append_stages(std::mem::take(&mut hydrate_response.payload.stages));
+                current_candidates,
+                local_components.as_deref(),
+            );
+            current_candidates = local_execution.candidates;
+            telemetry.append_stages(local_execution.stages.clone());
+            hydrate_stages.extend(local_execution.stages);
+        }
+
         telemetry.record_latency(EXECUTOR_LATENCY_HYDRATE, hydrate_timer.elapsed_ms());
-        Ok((hydrated_candidates, hydrate_stages))
+        Ok((current_candidates, hydrate_stages))
     }
 
     fn execute_pre_score_filter_stage(

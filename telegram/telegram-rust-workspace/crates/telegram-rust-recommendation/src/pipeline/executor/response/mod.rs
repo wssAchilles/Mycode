@@ -156,7 +156,7 @@ pub(super) fn build_live_recommendation_result(
         trace: Some(trace),
     };
 
-    RecommendationResultPayload {
+    let mut result = RecommendationResultPayload {
         request_id: input.hydrated_query.request_id.clone(),
         serving_version: SERVING_VERSION.to_string(),
         cursor: input.hydrated_query.cursor,
@@ -166,7 +166,9 @@ pub(super) fn build_live_recommendation_result(
         stable_order_key,
         candidates: final_candidates,
         summary,
-    }
+    };
+    result.sanitize_non_finite_floats();
+    result
 }
 
 pub(super) const SAFETY_CONTEXT_ABSTENTION_MODE: &str = "safety_context_abstention_v1";
@@ -311,7 +313,7 @@ fn build_terminal_abstention_result(
         trace: Some(trace),
     };
 
-    RecommendationResultPayload {
+    let mut result = RecommendationResultPayload {
         request_id: input.query.request_id.clone(),
         serving_version: SERVING_VERSION.to_string(),
         cursor: input.query.cursor,
@@ -321,7 +323,9 @@ fn build_terminal_abstention_result(
         stable_order_key,
         candidates: Vec::new(),
         summary,
-    }
+    };
+    result.sanitize_non_finite_floats();
+    result
 }
 
 struct SelectorReportContract {

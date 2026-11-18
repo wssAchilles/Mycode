@@ -16,6 +16,7 @@ pub use model::{
 };
 pub use post_store::{InNetworkStore, PostEventProcessor, ThunderStore};
 pub use stream_consumer::{
-    DEFAULT_CONSUMER_GROUP, DEFAULT_STREAM_KEY, StreamConsumerConfig, apply_recsys_stream_event,
-    spawn_stream_listener, spawn_stream_listener_with_shutdown,
+    DEFAULT_CONSUMER_GROUP, DEFAULT_STREAM_KEY, DeletedPostHook, StreamConsumerConfig,
+    apply_recsys_stream_event, apply_recsys_stream_event_with_hook, spawn_stream_listener,
+    spawn_stream_listener_with_hooks, spawn_stream_listener_with_shutdown,
 };

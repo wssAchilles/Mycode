@@ -131,6 +131,7 @@ impl RecommendationPipeline {
             .summary
             .stage_latency_ms
             .insert(PAGE_BUILD_LATENCY_KEY.to_string(), page_build_duration_ms);
+        cached_result.sanitize_non_finite_floats();
         cached_result
     }
 }

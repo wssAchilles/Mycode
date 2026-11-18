@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// 用户社交关系、屏蔽词与过滤偏好汇总。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct UserFeaturesPayload {
     pub followed_user_ids: Vec<String>,
     pub blocked_user_ids: Vec<String>,

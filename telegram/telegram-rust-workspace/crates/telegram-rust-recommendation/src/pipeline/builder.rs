@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use telegram_thunder_store::{ThunderConfig, ThunderStore};
+
 use crate::candidate_pipeline::definition::build_pipeline_definition;
 use crate::metrics::RecommendationMetrics;
 use crate::{
@@ -21,6 +23,7 @@ pub struct RecommendationPipelineBuilder {
     config: RecommendationConfig,
     recent_store: Arc<RecentHotStore>,
     metrics: Arc<tokio::sync::Mutex<RecommendationMetrics>>,
+    thunder_store: Option<Arc<ThunderStore>>,
 }
 
 impl RecommendationPipelineBuilder {
@@ -35,11 +38,21 @@ impl RecommendationPipelineBuilder {
             config,
             recent_store,
             metrics,
+            thunder_store: None,
         }
+    }
+
+    /// 注入共享 `ThunderStore` 内存帖子与删帖墓碑实例。
+    pub fn with_thunder_store(mut self, thunder_store: Arc<ThunderStore>) -> Self {
+        self.thunder_store = Some(thunder_store);
+        self
     }
 
     /// Build the inner recommendation pipeline.
     pub fn build(self) -> RecommendationPipeline {
+        let thunder_store = self
+            .thunder_store
+            .unwrap_or_else(|| Arc::new(ThunderStore::new(ThunderConfig::default())));
         let definition = build_pipeline_definition(&self.config);
         let graph_source_runtime = GraphSourceRuntime::new(
             self.backend_client.clone(),
@@ -55,14 +68,15 @@ impl RecommendationPipelineBuilder {
             self.config.source_cache_enabled,
             self.config.source_cache_ttl_secs,
             &self.config.source_cache_prefix,
-        );
+        )
+        .with_thunder_store(Arc::clone(&thunder_store));
         let source_orchestrator = RecommendationSourceOrchestrator::new(
             self.backend_client.clone(),
             graph_source_runtime,
             definition.sources.clone(),
             self.config.graph_source_enabled,
             definition.source_concurrency,
-            source_cache,
+            source_cache.clone(),
         );
 
         RecommendationPipeline::new(
@@ -72,6 +86,8 @@ impl RecommendationPipelineBuilder {
             self.metrics,
             definition,
             source_orchestrator,
+            thunder_store,
+            source_cache,
         )
     }
 

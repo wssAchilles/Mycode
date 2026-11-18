@@ -39,6 +39,7 @@ impl RecommendationPipeline {
         telemetry: &mut RunTelemetry,
     ) -> ServingStageOutput {
         let serving_timer = StageTimer::start();
+        final_candidates.retain(|candidate| !self.thunder_store.is_deleted(&candidate.post_id));
         sort_candidates_stably(&mut final_candidates, hydrated_query.in_network_only);
         let serving_result = dedup_for_serving(
             hydrated_query,

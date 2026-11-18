@@ -59,6 +59,26 @@ impl RecentHotStore {
         self.record_candidates(user_id, candidates);
     }
 
+    /// 收到删帖事件时，从全部分片的全局热池与单用户近期桶中同步剔除指定 `post_id`。
+    pub fn evict_post(&self, post_id: &str) -> usize {
+        if post_id.is_empty() {
+            return 0;
+        }
+        let mut removed = 0;
+        for shard in &self.shards {
+            let mut state = shard.inner.lock().expect("recent hot shard mutex poisoned");
+            if state.global.remove_post(post_id) {
+                removed += 1;
+            }
+            for bucket in state.per_user.values_mut() {
+                if bucket.remove_post(post_id) {
+                    removed += 1;
+                }
+            }
+        }
+        removed
+    }
+
     fn record_candidates(&self, user_id: &str, candidates: &[RecommendationCandidatePayload]) {
         let shard = self.shard_for(user_id);
         let mut state = shard.inner.lock().expect("recent hot shard mutex poisoned");
@@ -170,6 +190,14 @@ impl RecentBucket {
                 self.post_ids.remove(&removed.post_id);
             }
         }
+    }
+
+    fn remove_post(&mut self, post_id: &str) -> bool {
+        if !self.post_ids.remove(post_id) {
+            return false;
+        }
+        self.entries.retain(|existing| existing.post_id != post_id);
+        true
     }
 }
 

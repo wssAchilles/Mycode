@@ -81,6 +81,9 @@ pub fn run_local_scorers(
 
     let ctx = ScoringContext::new(query);
     let mut current = candidates;
+    for candidate in &mut current {
+        candidate.sanitize_non_finite_floats();
+    }
     let mut stages = Vec::new();
     let mut fused_adjustment_stages = Vec::new();
 
@@ -125,6 +128,10 @@ pub fn run_local_scorers(
         attach_ranking_stage_detail(&mut stage, step.spec);
         current = next;
         stages.push(stage);
+    }
+
+    for candidate in &mut current {
+        candidate.sanitize_non_finite_floats();
     }
 
     LocalScoringExecution {
@@ -423,6 +430,9 @@ pub(super) fn run_local_scorers_without_fusion(
 ) -> LocalScoringExecution {
     let ctx = ScoringContext::new(query);
     let mut current = candidates;
+    for candidate in &mut current {
+        candidate.sanitize_non_finite_floats();
+    }
     let mut stages = Vec::new();
 
     for step in local_scorer_steps() {
@@ -430,6 +440,10 @@ pub(super) fn run_local_scorers_without_fusion(
         attach_ranking_stage_detail(&mut stage, step.spec);
         current = next;
         stages.push(stage);
+    }
+
+    for candidate in &mut current {
+        candidate.sanitize_non_finite_floats();
     }
 
     LocalScoringExecution {

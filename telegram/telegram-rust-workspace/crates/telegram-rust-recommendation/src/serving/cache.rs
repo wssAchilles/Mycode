@@ -10,6 +10,7 @@ use telegram_serving_primitives::{
     CACHE_KEY_MODE, CACHE_POLICY_MODE, CURSOR_MODE, RANKED_CURSOR_ABSTENTION_MODE,
     SERVED_STATE_VERSION, SERVING_VERSION,
 };
+use telegram_thunder_store::ThunderStore;
 
 use crate::contracts::RecommendationResultPayload;
 
@@ -24,6 +25,7 @@ pub struct ServeCache {
     redis_client: Option<redis::Client>,
     memory: Cache<String, RecommendationResultPayload>,
     stats: Arc<ServeCacheStats>,
+    thunder_store: Option<Arc<ThunderStore>>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,7 +107,58 @@ impl ServeCache {
             redis_client,
             memory,
             stats: Arc::new(ServeCacheStats::default()),
+            thunder_store: None,
         }
+    }
+
+    /// 挂载共享 `ThunderStore` 墓碑视图，确保缓存读取与删帖事件自动过滤已删帖。
+    pub fn with_thunder_store(mut self, thunder_store: Arc<ThunderStore>) -> Self {
+        self.thunder_store = Some(thunder_store);
+        self
+    }
+
+    fn contains_deleted_post(&self, result: &RecommendationResultPayload) -> bool {
+        let Some(store) = self.thunder_store.as_ref() else {
+            return false;
+        };
+        result
+            .candidates
+            .iter()
+            .any(|candidate| store.is_deleted(&candidate.post_id))
+    }
+
+    /// 收到删帖事件时，从本地 Moka 与远端 Redis 中精准驱逐包含该 `post_id` 的缓存页。
+    pub async fn evict_post(&self, post_id: &str) -> usize {
+        if post_id.is_empty() {
+            return 0;
+        }
+        let affected_keys = self
+            .memory
+            .iter()
+            .filter_map(|(key, result)| {
+                result
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.post_id == post_id)
+                    .then(|| key.as_ref().clone())
+            })
+            .collect::<Vec<_>>();
+
+        for key in &affected_keys {
+            self.memory.invalidate(key);
+        }
+        self.memory.run_pending_tasks();
+
+        if !affected_keys.is_empty()
+            && let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+        {
+            for key in &affected_keys {
+                let _: redis::RedisResult<usize> = connection.del(key).await;
+            }
+        }
+
+        affected_keys.len()
     }
 
     pub fn enabled(&self) -> bool {
@@ -127,7 +180,7 @@ impl ServeCache {
 
         let key = self.redis_key(fingerprint);
         if let Some(result) = self.memory.get(&key) {
-            if cache_result_matches_contract(&result) {
+            if cache_result_matches_contract(&result) && !self.contains_deleted_post(&result) {
                 self.stats.local_hit_count.fetch_add(1, Ordering::Relaxed);
                 return ServeCacheGetResult {
                     result: Some(result),
@@ -143,14 +196,17 @@ impl ServeCache {
             && let Ok(value) = connection.get::<_, Option<String>>(&key).await
             && let Some(value) = value
             && let Ok(result) = serde_json::from_str::<RecommendationResultPayload>(&value)
-            && cache_result_matches_contract(&result)
         {
-            self.memory.insert(key, result.clone());
-            self.stats.shared_hit_count.fetch_add(1, Ordering::Relaxed);
-            return ServeCacheGetResult {
-                result: Some(result),
-                tier: ServeCacheHitTier::Shared,
-            };
+            if self.contains_deleted_post(&result) {
+                let _: redis::RedisResult<usize> = connection.del(&key).await;
+            } else if cache_result_matches_contract(&result) {
+                self.memory.insert(key, result.clone());
+                self.stats.shared_hit_count.fetch_add(1, Ordering::Relaxed);
+                return ServeCacheGetResult {
+                    result: Some(result),
+                    tier: ServeCacheHitTier::Shared,
+                };
+            }
         }
 
         self.stats.shared_miss_count.fetch_add(1, Ordering::Relaxed);

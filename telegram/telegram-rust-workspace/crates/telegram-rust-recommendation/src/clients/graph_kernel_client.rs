@@ -107,11 +107,22 @@ impl Display for GraphKernelError {
 
 impl Error for GraphKernelError {}
 
+/// C++ 图内核内部服务鉴权请求头名称。
+pub const GRAPH_KERNEL_INTERNAL_TOKEN_HEADER: &str = "x-graph-kernel-internal-token";
+
+fn read_graph_kernel_internal_token() -> Option<String> {
+    std::env::var("GRAPH_KERNEL_INTERNAL_TOKEN")
+        .ok()
+        .map(|val| val.trim().to_string())
+        .filter(|val| !val.is_empty())
+}
+
 #[derive(Debug, Clone)]
 pub struct GraphKernelClient {
     client: reqwest::Client,
     base_url: String,
     timeout_ms: u64,
+    internal_token: Option<String>,
     batch_mode: GraphKernelBatchMode,
     batch_shadow_admission: Option<Arc<Semaphore>>,
 }
@@ -134,13 +145,26 @@ impl GraphKernelClient {
     }
 
     pub(crate) fn new(base_url: String, timeout_ms: u64) -> Self {
+        let client = reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url,
             timeout_ms,
+            internal_token: read_graph_kernel_internal_token(),
             batch_mode: GraphKernelBatchMode::Disabled,
             batch_shadow_admission: None,
         }
+    }
+
+    /// 显式覆盖 C++ 图内核内部鉴权 Token（用于测试或定制注入）。
+    pub fn with_internal_token(mut self, token: Option<String>) -> Self {
+        self.internal_token = token
+            .map(|val| val.trim().to_string())
+            .filter(|val| !val.is_empty());
+        self
     }
 
     pub(crate) fn with_batch_mode(mut self, batch_mode: GraphKernelBatchMode) -> Self {
@@ -328,27 +352,28 @@ impl GraphKernelClient {
         TResponse: DeserializeOwned,
     {
         let url = format!("{}{}", self.base_url, path);
-        let response = self
+        let mut request = self
             .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .header("x-internal-ops-client", "rust-recommendation")
             .timeout(std::time::Duration::from_millis(self.timeout_ms))
-            .json(payload)
-            .send()
-            .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    GraphKernelError::Timeout {
-                        path: path.to_string(),
-                    }
-                } else {
-                    GraphKernelError::Unavailable {
-                        path: path.to_string(),
-                        source: format!("request {url}: {error}"),
-                    }
+            .json(payload);
+        if let Some(token) = self.internal_token.as_deref() {
+            request = request.header(GRAPH_KERNEL_INTERNAL_TOKEN_HEADER, token);
+        }
+        let response = request.send().await.map_err(|error| {
+            if error.is_timeout() {
+                GraphKernelError::Timeout {
+                    path: path.to_string(),
                 }
-            })?;
+            } else {
+                GraphKernelError::Unavailable {
+                    path: path.to_string(),
+                    source: format!("request {url}: {error}"),
+                }
+            }
+        })?;
         let status = response.status();
         let body = match read_response_body_bounded(response).await {
             Ok(body) => body,
