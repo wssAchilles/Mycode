@@ -10,6 +10,7 @@ pub enum TrafficClass {
     InternalOps,
     Auth,
     PublicRead,
+    CronWebhook,
     RealtimeBootstrap,
     SyncLongPoll,
     SocketIoCompat,
@@ -30,6 +31,8 @@ impl TrafficClass {
             || normalized.starts_with("/api/auth/refresh")
         {
             Self::Auth
+        } else if normalized == "/api/news/ingest" || normalized == "/api/space/posts/batch-news" {
+            Self::CronWebhook
         } else if normalized.starts_with("/api/realtime/health") {
             Self::PublicRead
         } else if normalized.starts_with("/api/realtime/") {
@@ -67,8 +70,17 @@ impl TrafficClass {
     pub fn bypass_jwt_prevalidation(self) -> bool {
         matches!(
             self,
-            Self::InternalOps | Self::Auth | Self::PublicRead | Self::SocketIoCompat
+            Self::InternalOps
+                | Self::Auth
+                | Self::PublicRead
+                | Self::CronWebhook
+                | Self::SocketIoCompat
         )
+    }
+
+    /// 仅在明确的云端定时入库 Webhook 路由透传 `x-cron-secret`，其余路由一律剥离
+    pub fn allow_cron_secret_passthrough(self) -> bool {
+        matches!(self, Self::CronWebhook)
     }
 
     pub fn bucket_key(self, client_ip: &IpAddr) -> String {
@@ -78,6 +90,7 @@ impl TrafficClass {
     pub fn request_timeout_secs(self, default_secs: u64, sync_long_poll_secs: u64) -> u64 {
         match self {
             Self::SyncLongPoll => sync_long_poll_secs,
+            Self::CronWebhook => default_secs.max(90),
             _ => default_secs,
         }
     }
@@ -87,6 +100,7 @@ impl TrafficClass {
             Self::InternalOps => "internal_ops",
             Self::Auth => "auth",
             Self::PublicRead => "public_read",
+            Self::CronWebhook => "cron_webhook",
             Self::RealtimeBootstrap => "realtime_bootstrap",
             Self::SyncLongPoll => "sync_long_poll",
             Self::SocketIoCompat => "socket_io_compat",
@@ -99,6 +113,7 @@ impl TrafficClass {
             "internal_ops" => Some(Self::InternalOps),
             "auth" => Some(Self::Auth),
             "public_read" => Some(Self::PublicRead),
+            "cron_webhook" => Some(Self::CronWebhook),
             "realtime_bootstrap" => Some(Self::RealtimeBootstrap),
             "sync_long_poll" => Some(Self::SyncLongPoll),
             "socket_io_compat" => Some(Self::SocketIoCompat),
@@ -142,6 +157,11 @@ pub fn policy_catalog(default_secs: u64, sync_long_poll_secs: u64) -> Vec<Traffi
             TrafficClass::PublicRead,
             "/api/public/* | /api/realtime/health",
             "无需 JWT 的公共读接口与 realtime 健康探针",
+        ),
+        (
+            TrafficClass::CronWebhook,
+            "/api/news/ingest | /api/space/posts/batch-news",
+            "云端定时入库 Webhook，豁免用户 JWT 预校验并允许透传 x-cron-secret 交由后端恒定时间验签",
         ),
         (
             TrafficClass::RealtimeBootstrap,

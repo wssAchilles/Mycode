@@ -4,7 +4,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, header};
 
 use crate::{error::GatewayError, rate_limit::RateLimitDecision, request_context::RequestContext};
 
-/// 转发至上游前必须剥离的内部服务鉴权头（保留 `/api/ops/*` 所需的 `x-ops-token`）
+/// 转发至上游前默认必须剥离的内部服务鉴权头（仅 `CronWebhook` 路由豁免透传 `x-cron-secret`）
 pub const STRIPPED_INTERNAL_HEADERS: [&str; 5] = [
     "x-recommendation-internal-token",
     "x-graph-kernel-internal-token",
@@ -93,8 +93,11 @@ pub fn build_upstream_request_headers(
     let mut sanitized = HeaderMap::with_capacity(client_headers.len() + 8);
 
     for (name, value) in client_headers.iter() {
+        let is_allowed_cron_header = name.as_str().eq_ignore_ascii_case("x-cron-secret")
+            && request_context.route_class.allow_cron_secret_passthrough();
+
         if name == header::HOST
-            || is_stripped_internal_header(name)
+            || (!is_allowed_cron_header && is_stripped_internal_header(name))
             || is_gateway_controlled_request_header(name)
         {
             continue;
@@ -301,7 +304,8 @@ mod tests {
     }
 
     #[test]
-    fn strips_internal_headers_and_dynamic_connection_tokens_while_preserving_ops_token() {
+    fn strips_internal_headers_and_dynamic_connection_tokens_while_preserving_ops_and_cron_tokens()
+    {
         let mut client_headers = HeaderMap::new();
         client_headers.insert(
             "x-recommendation-internal-token",
@@ -311,10 +315,17 @@ mod tests {
             "x-graph-kernel-internal-token",
             HeaderValue::from_static("forged-graph"),
         );
-        client_headers.insert("x-cron-secret", HeaderValue::from_static("forged-cron"));
+        client_headers.insert(
+            "x-cron-secret",
+            HeaderValue::from_static("valid-cron-token"),
+        );
         client_headers.insert(
             "x-internal-token",
             HeaderValue::from_static("forged-internal"),
+        );
+        client_headers.insert(
+            "x-ml-internal-token",
+            HeaderValue::from_static("forged-ml-internal"),
         );
         client_headers.insert("x-ops-token", HeaderValue::from_static("valid-ops-token"));
         client_headers.insert(
@@ -329,7 +340,7 @@ mod tests {
             &test_config(),
             &client_headers,
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-            "/api/ops/status",
+            "/api/news/ingest",
         );
         let sanitized =
             build_upstream_request_headers(&client_headers, &ctx, &HOP_BY_HOP_HEADERS, false)
@@ -337,15 +348,35 @@ mod tests {
 
         assert!(!sanitized.contains_key("x-recommendation-internal-token"));
         assert!(!sanitized.contains_key("x-graph-kernel-internal-token"));
-        assert!(!sanitized.contains_key("x-cron-secret"));
         assert!(!sanitized.contains_key("x-internal-token"));
+        assert!(!sanitized.contains_key("x-ml-internal-token"));
         assert!(!sanitized.contains_key("x-dynamic-hop"));
+        assert_eq!(
+            sanitized.get("x-cron-secret").and_then(|v| v.to_str().ok()),
+            Some("valid-cron-token")
+        );
         assert_eq!(
             sanitized.get("x-ops-token").and_then(|v| v.to_str().ok()),
             Some("valid-ops-token")
         );
         assert_eq!(sanitized.get_all("x-request-id").iter().count(), 1);
         assert_eq!(sanitized.get_all("x-chat-trace-id").iter().count(), 1);
+
+        // 非定时入库路由必须继续强制剥离 x-cron-secret，防止伪造扩散
+        let non_cron_ctx = RequestContext::from_headers(
+            &test_config(),
+            &client_headers,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            "/api/ops/status",
+        );
+        let non_cron_sanitized = build_upstream_request_headers(
+            &client_headers,
+            &non_cron_ctx,
+            &HOP_BY_HOP_HEADERS,
+            false,
+        )
+        .expect("sanitize non-cron request headers");
+        assert!(!non_cron_sanitized.contains_key("x-cron-secret"));
     }
 
     #[test]
