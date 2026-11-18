@@ -21,12 +21,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements/serving.txt /app/requirements/serving.txt
 RUN pip install --no-cache-dir -r /app/requirements/serving.txt
 
-# 仅复制精简后的推理运行域模块，不打包训练数据、爬虫与离线笔记本
+# 仅复制精简后的在线推理、安全过滤与智能助手编排模块
 COPY src/contracts /app/src/contracts
 COPY src/feature_adapters /app/src/feature_adapters
 COPY src/onnx_runtime /app/src/onnx_runtime
+COPY src/safety /app/src/safety
 COPY src/serving /app/src/serving
 COPY src/__init__.py /app/src/__init__.py
+COPY agent_plane /app/agent_plane
 
 RUN mkdir -p /app/models /app/data
 

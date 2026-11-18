@@ -12,6 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(GRAPH_ENABLE_ASAN  "Enable AddressSanitizer"  OFF)
 option(GRAPH_ENABLE_TSAN  "Enable ThreadSanitizer"   OFF)
 option(GRAPH_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+# 默认关闭 -march=native，避免 CI 异构构建镜像在受限 VPS 上触发 SIGILL
+option(GRAPH_ENABLE_NATIVE_ARCH "Enable -march=native for local benchmarking" OFF)
 
 # ---------------------------------------------------------------------------
 # Link-Time Optimization for Release builds
@@ -103,7 +105,10 @@ if(_sanitizer_compile_flags)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  target_compile_options(telegram-cpp-graph-core PRIVATE -O3 -march=native)
+  target_compile_options(telegram-cpp-graph-core PRIVATE -O3)
+  if(GRAPH_ENABLE_NATIVE_ARCH)
+    target_compile_options(telegram-cpp-graph-core PRIVATE -march=native)
+  endif()
 endif()
 
 add_executable(telegram-cpp-graph-service

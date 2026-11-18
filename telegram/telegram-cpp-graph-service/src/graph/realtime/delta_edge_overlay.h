@@ -63,10 +63,16 @@ class DeltaEdgeOverlay {
     std::int64_t timestamp_ms{0};
   };
 
+  struct PenaltyEntry {
+    double penalty{0.0};
+    std::int64_t updated_at_ms{0};
+  };
+
   mutable std::shared_mutex mutex_;
-  std::unordered_map<std::string, std::unordered_set<std::string>> blocked_targets_;
+  // 记录屏蔽目标及其事件时间戳，供快照刷新后按水位淘汰已吸收状态
+  std::unordered_map<std::string, std::unordered_map<std::string, std::int64_t>> blocked_targets_;
   std::unordered_map<std::string, std::unordered_map<std::string, BoostEntry>> follow_boosts_;
-  std::unordered_map<std::string, double> negative_penalty_;
+  std::unordered_map<std::string, PenaltyEntry> negative_penalty_;
   std::uint64_t applied_events_{0};
   std::uint64_t parse_errors_{0};
   std::int64_t last_event_lag_ms_{0};

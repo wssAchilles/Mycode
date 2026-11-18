@@ -41,7 +41,7 @@ def crawl_job(request: Request):
 
 
 @app.post("/jobs/archive-user-actions")
-def archive_user_actions_job(request: Request, days: int = 7, dry_run: bool = False):
+def archive_user_actions_job(request: Request, days: int = 1, dry_run: bool = False):
     require_cron_auth(request)
 
     with _job_lock:

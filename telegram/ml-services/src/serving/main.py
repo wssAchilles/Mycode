@@ -8,12 +8,14 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from agent_plane.http import router as agent_plane_router
 from src.serving.config import ServingConfig
 from src.serving.routes import (
     encode_sid_router,
     health_router,
     rank_router,
     retrieve_router,
+    vf_router,
 )
 from src.serving.state import ServingState
 
@@ -53,6 +55,8 @@ def create_serving_app(config: Optional[ServingConfig] = None) -> FastAPI:
     fastapi_app.include_router(retrieve_router)
     fastapi_app.include_router(rank_router)
     fastapi_app.include_router(encode_sid_router)
+    fastapi_app.include_router(vf_router)
+    fastapi_app.include_router(agent_plane_router, prefix="/agent")
     return fastapi_app
 
 

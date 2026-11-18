@@ -9,6 +9,7 @@ Phoenix 推荐系统 FastAPI 推理服务
 import json
 import os
 import pickle
+import sys
 import threading
 import time
 import uuid
@@ -16,16 +17,30 @@ from pathlib import Path
 from typing import List, Optional, Literal, Callable, Any, Dict
 from datetime import datetime, timezone, timedelta
 
+_ML_ROOT_DIR = Path(__file__).resolve().parent
+if str(_ML_ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(_ML_ROOT_DIR))
+
 import numpy as np
 import torch
 import faiss
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pymongo import MongoClient
 from pymongo.uri_parser import parse_uri
 from bson import ObjectId
 from agent_plane.http import router as agent_plane_router
+from src.serving.routes.encode_sid import (
+    EncodeSidItem,
+    EncodeSidRequest,
+    EncodeSidResponse,
+    EncodeSidResult,
+)
+from src.serving.security import (
+    constant_time_equals,
+    require_ml_mutation_auth,
+)
 
 from recsys_dedup import (
     related_post_ids_from_doc as _related_post_ids_from_doc,
@@ -196,7 +211,7 @@ class PhoenixCandidatePayload(BaseModel):
 class PhoenixRequest(BaseModel):
     userId: str
     userActionSequence: Optional[List[dict]] = None
-    candidates: List[PhoenixCandidatePayload]
+    candidates: List[PhoenixCandidatePayload] = Field(default_factory=list, max_length=500)
 
 class PhoenixPrediction(BaseModel):
     postId: str # Backend expects matched structure, usually implicit, but we return a list of predictions
@@ -272,7 +287,7 @@ class VFItem(BaseModel):
     userId: str
 
 class VFRequest(BaseModel):
-    items: List[VFItem]
+    items: List[VFItem] = Field(default_factory=list, max_length=500)
 
 class VFResult(BaseModel):
     postId: str
@@ -622,13 +637,33 @@ def _fetch_external_news_ids_for_post_ids(post_ids: List[str]) -> dict:
 
 
 def _require_cron_auth(request: Request):
-    if not CRON_SECRET:
+    """使用恒定时间比对校验后台作业密钥，同时兼容 CRON_SECRET 与 ML_INTERNAL_TOKEN。"""
+    expected_tokens: List[str] = []
+    for candidate in (
+        CRON_SECRET,
+        os.getenv("CRON_SECRET", ""),
+        os.getenv("ML_INTERNAL_TOKEN", ""),
+    ):
+        cleaned = (candidate or "").strip()
+        if cleaned and cleaned not in expected_tokens:
+            expected_tokens.append(cleaned)
+
+    if not expected_tokens:
         raise HTTPException(status_code=403, detail="CRON_SECRET not configured")
-    auth = request.headers.get("authorization", "")
-    alt = request.headers.get("x-cron-secret", "")
-    if auth == f"Bearer {CRON_SECRET}" or alt == CRON_SECRET:
-        return
-    raise HTTPException(status_code=401, detail="Unauthorized")
+
+    incoming = (
+        (request.headers.get("x-cron-secret") or "").strip()
+        or (request.headers.get("x-ml-internal-token") or "").strip()
+    )
+    if not incoming:
+        auth = (request.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            incoming = auth[7:].strip()
+
+    if not incoming:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not any(constant_time_equals(incoming, exp) for exp in expected_tokens):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _start_job(job_key: str, target):
@@ -1001,17 +1036,61 @@ from recsys.serving.phoenix_adapter import (
 )
 
 
-def _load_optional_weighted_calibrator() -> Optional[dict]:
-    cal_path = MODELS_DIR / "weighted_calibrator.json"
-    if not cal_path.exists():
-        return None
-    try:
-        import json
+_calibrator_cache_lock = threading.RLock()
+_calibrator_cache_state: Dict[str, Any] = {
+    "path": "",
+    "mtime_ns": -1,
+    "size": -1,
+    "checked_at": 0.0,
+    "value": None,
+}
+_CALIBRATOR_STAT_TTL_SEC = 5.0
 
-        data = json.loads(cal_path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+
+def _load_optional_weighted_calibrator() -> Optional[dict]:
+    """基于文件路径与 mtime/TTL 懒加载内存缓存，消除每请求同步读盘开销。"""
+    cal_path = MODELS_DIR / "weighted_calibrator.json"
+    path_str = str(cal_path)
+    now = time.monotonic()
+
+    with _calibrator_cache_lock:
+        if (
+            _calibrator_cache_state["path"] == path_str
+            and (now - float(_calibrator_cache_state["checked_at"])) < _CALIBRATOR_STAT_TTL_SEC
+        ):
+            return _calibrator_cache_state["value"]
+
+        _calibrator_cache_state["checked_at"] = now
+        try:
+            st = cal_path.stat()
+        except OSError:
+            _calibrator_cache_state.update(
+                {"path": path_str, "mtime_ns": -1, "size": -1, "value": None}
+            )
+            return None
+
+        if (
+            _calibrator_cache_state["path"] == path_str
+            and _calibrator_cache_state["mtime_ns"] == st.st_mtime_ns
+            and _calibrator_cache_state["size"] == st.st_size
+        ):
+            return _calibrator_cache_state["value"]
+
+        try:
+            data = json.loads(cal_path.read_text(encoding="utf-8"))
+            parsed = data if isinstance(data, dict) else None
+        except Exception:
+            parsed = None
+
+        _calibrator_cache_state.update(
+            {
+                "path": path_str,
+                "mtime_ns": st.st_mtime_ns,
+                "size": st.st_size,
+                "value": parsed,
+            }
+        )
+        return parsed
 
 
 def load_phoenix_sync(allow_download: bool = False):
@@ -1104,7 +1183,7 @@ def _current_ann_evidence() -> Dict[str, Any]:
 
 
 @app.get("/health")
-async def health_check():
+def health_check():
     evidence = _current_ann_evidence() if (two_tower_model is not None or faiss_index is not None) else None
     return {
         "status": "ok", 
@@ -1128,8 +1207,109 @@ async def health_check():
         "news_mapping_loaded_at": _news_mapping_loaded_at,
     }
 
+
+@app.get("/ready")
+def ready_check():
+    """就绪探针：对齐 V3 契约，校验产物清单与在线模型加载状态。"""
+    snap = health_check()
+    if VERIFY_ARTIFACT_CHECKSUMS and snap.get("manifest_verified") is False:
+        raise HTTPException(status_code=503, detail="manifest_verification_failed")
+    if not snap.get("models_loaded") and not snap.get("phoenix_loaded") and not snap.get("two_tower_loaded"):
+        raise HTTPException(status_code=503, detail="models_not_loaded")
+    return {"ready": True, **snap}
+
+
+_v3_sid_lock = threading.RLock()
+_v3_sid_runner_cache: Dict[str, Any] = {"models_dir": "", "runner": None}
+
+
+def _get_optional_v3_text_encoder():
+    """按需懒加载本地 V3 TextEncoder ONNX 与 6x256 SID 量化器，做到双入口完全对等兼容。"""
+    models_dir_str = str(MODELS_DIR)
+    with _v3_sid_lock:
+        cached = _v3_sid_runner_cache.get("runner")
+        if _v3_sid_runner_cache.get("models_dir") == models_dir_str and cached is not None:
+            return cached
+
+        onnx_path = MODELS_DIR / "text_encoder_int8.onnx"
+        if not onnx_path.exists():
+            return None
+
+        from src.onnx_runtime.session_pool import OnnxSessionPool
+        from src.onnx_runtime.text_encoder_ort import SidCodebookQuantizer, TextEncoderOrtRunner
+
+        pool = OnnxSessionPool()
+        pool.load_session("text_encoder", onnx_path)
+        quantizer = None
+        for cb_name in ("sid_codebook.safetensors", "sid_codebook.npz", "sid_codebook.npy", "sid_codebook.json"):
+            cb_path = MODELS_DIR / cb_name
+            if cb_path.exists():
+                quantizer = SidCodebookQuantizer.from_npz_or_json(cb_path)
+                break
+
+        runner = TextEncoderOrtRunner(pool, quantizer=quantizer, embedding_dim=256)
+        _v3_sid_runner_cache["models_dir"] = models_dir_str
+        _v3_sid_runner_cache["runner"] = runner
+        return runner
+
+
+def _handle_compat_sid_encode(payload: EncodeSidRequest) -> EncodeSidResponse:
+    """复用 V3 语义编码协议处理 /sid/encode 与 /v3/sid/encode 请求。"""
+    from src.contracts.ann import build_v3_post_embedding_contract
+    from src.contracts.sid import pack_sids_u64
+
+    runner = _get_optional_v3_text_encoder()
+    if runner is None or not runner.is_ready:
+        raise HTTPException(status_code=503, detail="TextEncoder ONNX session not loaded")
+
+    if not payload.items:
+        return EncodeSidResponse(results=[])
+
+    texts = [
+        " ".join(
+            part
+            for part in [
+                str(item.title or "").strip(),
+                str(item.content or "").strip(),
+                " ".join(item.keywords or []),
+            ]
+            if part
+        )
+        for item in payload.items
+    ]
+    embs, sids_list = runner.encode_texts(texts)
+    artifact_ver = ARTIFACT_VERSION or (serving_manifest or {}).get("version") or "post_semantic_v3_artifact_v1"
+    contract = build_v3_post_embedding_contract(
+        artifact_version=str(artifact_ver),
+        producer="ml-services",
+    )
+    out: List[EncodeSidResult] = []
+    for idx, item in enumerate(payload.items):
+        wire_sids = sids_list[idx]
+        out.append(
+            EncodeSidResult(
+                postId=item.postId,
+                semanticIds=wire_sids,
+                semanticIdsU64=pack_sids_u64(wire_sids),
+                embedding256d=[round(float(x), 6) for x in embs[idx].tolist()],
+                embeddingContract=contract,
+            )
+        )
+    return EncodeSidResponse(results=out)
+
+
+@app.post("/sid/encode", response_model=EncodeSidResponse)
+def encode_sid_compat(payload: EncodeSidRequest) -> EncodeSidResponse:
+    return _handle_compat_sid_encode(payload)
+
+
+@app.post("/v3/sid/encode", response_model=EncodeSidResponse)
+def v3_encode_sid_compat(payload: EncodeSidRequest) -> EncodeSidResponse:
+    return _handle_compat_sid_encode(payload)
+
+
 @app.post("/ann/retrieve", response_model=ANNResponse)
-async def ann_retrieve(request: ANNRequest):
+def ann_retrieve(request: ANNRequest):
     """Two-Tower ANN 召回 (FAISS 加速版)"""
     load_retrieval_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
     
@@ -1193,7 +1373,7 @@ async def ann_retrieve(request: ANNRequest):
     return ANNResponse(candidates=candidates, evidence=evidence)
 
 @app.post("/phoenix/predict", response_model=PhoenixResponse)
-async def phoenix_predict(request: PhoenixRequest):
+def phoenix_predict(request: PhoenixRequest):
     """Phoenix Ranking 排序 (兼容 V1 与 V2 多任务排序模型)"""
     load_phoenix_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
 
@@ -1322,7 +1502,7 @@ def _vf_allowed_for_surface(vf_res, in_network: bool) -> bool:
 
 
 @app.post("/feed/recommend", response_model=FeedRecommendResponse)
-async def feed_recommend(request: FeedRecommendRequest):
+def feed_recommend(request: FeedRecommendRequest):
     """
     Single-call endpoint to reduce cross-region round trips:
     - ANN retrieval (OON) via Two-Tower + FAISS
@@ -1388,7 +1568,7 @@ async def feed_recommend(request: FeedRecommendRequest):
             # Phoenix positional embeddings (512) won't overflow.
             ann_topk = max(200, int(request.limit) * 10)
             ann_topk = min(ann_topk, max(200, int(ANN_TOPK_CAP)))
-            ann_resp = await ann_retrieve(
+            ann_resp = ann_retrieve(
                 ANNRequest(
                     userId=request.userId,
                     historyPostIds=history_post_ids,
@@ -1496,7 +1676,7 @@ async def feed_recommend(request: FeedRecommendRequest):
                 userActionSequence=model_action_sequence,
                 candidates=phoenix_candidates,
             )
-            phx_resp = await phoenix_predict(phx_req)
+            phx_resp = phoenix_predict(phx_req)
             pred_map = {p.postId: p.model_dump() for p in phx_resp.predictions}
             phoenix_ok = True
         except Exception as e:
@@ -1615,7 +1795,7 @@ class VFItemExtended(BaseModel):
     content: Optional[str] = None  # 新增：帖子内容
 
 class VFRequestExtended(BaseModel):
-    items: List[VFItemExtended]
+    items: List[VFItemExtended] = Field(default_factory=list, max_length=500)
     skipML: bool = False  # 是否跳过 ML 检测
 
 class VFResultExtended(BaseModel):
@@ -1631,13 +1811,12 @@ class VFResponseExtended(BaseModel):
     results: List[VFResultExtended]
 
 @app.post("/vf/check", response_model=VFResponse)
-async def vf_check(request: VFRequest):
-    """VF 安全内容过滤 (兼容旧版 API)"""
+def vf_check(request: VFRequest):
+    """VF 安全内容过滤（线程池同步执行）"""
     safety_service = get_safety_service()
     
     results = []
     for item in request.items:
-        # 如果没有内容，使用 postId 作为简单检测 (兼容旧版)
         content = getattr(item, 'content', None) or item.postId
         
         result = safety_service.check(
@@ -1654,8 +1833,8 @@ async def vf_check(request: VFRequest):
     return VFResponse(results=results)
 
 @app.post("/vf/check/v2", response_model=VFResponseExtended)
-async def vf_check_v2(request: VFRequestExtended):
-    """VF 安全内容过滤 v2 (增强版 - 支持完整内容检测)"""
+def vf_check_v2(request: VFRequestExtended):
+    """VF 安全内容过滤 v2（增强版，线程池同步执行）"""
     safety_service = get_safety_service()
     
     results = []
@@ -1681,22 +1860,25 @@ async def vf_check_v2(request: VFRequestExtended):
     return VFResponseExtended(results=results)
 
 @app.post("/vf/blacklist/add")
-async def vf_add_blacklist(user_id: str):
-    """添加用户到黑名单"""
+def vf_add_blacklist(request: Request, user_id: str):
+    """受内部密钥保护的黑名单添加接口"""
+    require_ml_mutation_auth(request)
     safety_service = get_safety_service()
     safety_service.rule_engine.add_user_to_blacklist(user_id)
     return {"status": "ok", "user_id": user_id}
 
 @app.post("/vf/blacklist/remove")
-async def vf_remove_blacklist(user_id: str):
-    """从黑名单移除用户"""
+def vf_remove_blacklist(request: Request, user_id: str):
+    """受内部密钥保护的黑名单移除接口"""
+    require_ml_mutation_auth(request)
     safety_service = get_safety_service()
     safety_service.rule_engine.remove_user_from_blacklist(user_id)
     return {"status": "ok", "user_id": user_id}
 
 @app.post("/vf/rules/add")
-async def vf_add_rule(keyword: str, violation_type: str, high_risk: bool = True):
-    """动态添加关键词规则"""
+def vf_add_rule(request: Request, keyword: str, violation_type: str, high_risk: bool = True):
+    """受内部密钥保护的动态关键词规则添加接口"""
+    require_ml_mutation_auth(request)
     from safety_module import ViolationType
     
     safety_service = get_safety_service()
@@ -1710,7 +1892,7 @@ async def vf_add_rule(keyword: str, violation_type: str, high_risk: bool = True)
 # ========== 外部调度 Jobs ==========
 
 @app.post("/jobs/refresh-features")
-async def refresh_features_job(
+def refresh_features_job(
     request: Request,
     days: int = 1,
     max_users: Optional[int] = None,
@@ -1821,70 +2003,75 @@ def _archive_user_actions_to_gcs(days: int = 7, dry_run: bool = False) -> dict:
     import gzip
     import tempfile
 
-    writers = {}  # (y, m, d) -> (file_path, gzip_file, count)
-
-    total = 0
-    for doc in cursor:
-        ts = doc.get("timestamp")
-        if isinstance(ts, datetime) and ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        if not isinstance(ts, datetime):
-            continue
-
-        y, m, d = ts.year, ts.month, ts.day
-        key = (y, m, d)
-        if key not in writers:
-            tmp = tempfile.NamedTemporaryFile(prefix=f"user_actions_{y}{m:02d}{d:02d}_", suffix=".jsonl.gz", delete=False)
-            tmp_path = Path(tmp.name)
-            tmp.close()
-            gz = gzip.open(tmp_path, "wt", encoding="utf-8")
-            writers[key] = [tmp_path, gz, 0]
-
-        tmp_path, gz, cnt = writers[key]
-
-        line = {
-            "id": str(doc.get("_id")) if doc.get("_id") is not None else None,
-            "userId": doc.get("userId"),
-            "action": doc.get("action"),
-            "targetPostId": str(doc.get("targetPostId")) if doc.get("targetPostId") is not None else None,
-            "targetAuthorId": doc.get("targetAuthorId"),
-            "timestamp": ts.isoformat(),
-            "productSurface": doc.get("productSurface"),
-            "requestId": doc.get("requestId"),
-        }
-
-        gz.write(json.dumps(line, ensure_ascii=False) + "\n")
-        writers[key][2] = cnt + 1
-        total += 1
-
+    writers = {}  # (y, m, d) -> [file_path, gzip_file, count]
     objects = []
     by_day = {}
+    total = 0
 
-    for (y, m, d), (tmp_path, gz, cnt) in writers.items():
-        try:
+    try:
+        for doc in cursor:
+            ts = doc.get("timestamp")
+            if isinstance(ts, datetime) and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if not isinstance(ts, datetime):
+                continue
+
+            y, m, d = ts.year, ts.month, ts.day
+            key = (y, m, d)
+            if key not in writers:
+                tmp = tempfile.NamedTemporaryFile(
+                    prefix=f"user_actions_{y}{m:02d}{d:02d}_",
+                    suffix=".jsonl.gz",
+                    delete=False,
+                )
+                tmp_path = Path(tmp.name)
+                tmp.close()
+                gz = gzip.open(tmp_path, "wt", encoding="utf-8")
+                writers[key] = [tmp_path, gz, 0]
+
+            tmp_path, gz, cnt = writers[key]
+
+            line = {
+                "id": str(doc.get("_id")) if doc.get("_id") is not None else None,
+                "userId": doc.get("userId"),
+                "action": doc.get("action"),
+                "targetPostId": str(doc.get("targetPostId")) if doc.get("targetPostId") is not None else None,
+                "targetAuthorId": doc.get("targetAuthorId"),
+                "timestamp": ts.isoformat(),
+                "productSurface": doc.get("productSurface"),
+                "requestId": doc.get("requestId"),
+            }
+
+            gz.write(json.dumps(line, ensure_ascii=False) + "\n")
+            writers[key][2] = cnt + 1
+            total += 1
+
+        for (y, m, d), (tmp_path, gz, cnt) in writers.items():
             gz.close()
-        except Exception:
-            pass
+            by_day[f"{y:04d}-{m:02d}-{d:02d}"] = int(cnt)
 
-        by_day[f"{y:04d}-{m:02d}-{d:02d}"] = int(cnt)
+            object_name = (
+                f"{ARCHIVE_GCS_PREFIX}/yyyy={y:04d}/mm={m:02d}/dd={d:02d}/"
+                f"user_actions_{y:04d}{m:02d}{d:02d}_{int(time.time())}_{uuid.uuid4().hex}.jsonl.gz"
+            )
 
-        object_name = (
-            f"{ARCHIVE_GCS_PREFIX}/yyyy={y:04d}/mm={m:02d}/dd={d:02d}/"
-            f"user_actions_{y:04d}{m:02d}{d:02d}_{int(time.time())}_{uuid.uuid4().hex}.jsonl.gz"
-        )
+            if dry_run:
+                objects.append({"object": object_name, "count": int(cnt), "dry_run": True})
+                continue
 
-        if dry_run:
-            objects.append({"object": object_name, "count": int(cnt), "dry_run": True})
-            continue
-
-        blob = bucket.blob(object_name)
-        blob.upload_from_filename(str(tmp_path), content_type="application/gzip")
-        objects.append({"object": object_name, "count": int(cnt)})
-
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+            blob = bucket.blob(object_name)
+            blob.upload_from_filename(str(tmp_path), content_type="application/gzip")
+            objects.append({"object": object_name, "count": int(cnt)})
+    finally:
+        for tmp_path, gz, _ in writers.values():
+            try:
+                gz.close()
+            except Exception:
+                pass
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     return {"archived": total, "objects": objects, "by_day": by_day, "since": since.isoformat(), "dry_run": bool(dry_run)}
 

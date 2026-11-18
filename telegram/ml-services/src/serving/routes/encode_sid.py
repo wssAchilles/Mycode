@@ -21,7 +21,7 @@ class EncodeSidItem(BaseModel):
 
 
 class EncodeSidRequest(BaseModel):
-    items: List[EncodeSidItem]
+    items: List[EncodeSidItem] = Field(default_factory=list, max_length=500)
 
 
 class EncodeSidResult(BaseModel):
@@ -36,7 +36,7 @@ class EncodeSidResponse(BaseModel):
     results: List[EncodeSidResult]
 
 
-async def _handle_encode(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
+def _handle_encode(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
     state = request.app.state.serving_state
     if not state.text_encoder.is_ready:
         raise HTTPException(status_code=503, detail="TextEncoder ONNX session not loaded")
@@ -83,10 +83,10 @@ async def _handle_encode(payload: EncodeSidRequest, request: Request) -> EncodeS
 
 
 @router.post("/sid/encode", response_model=EncodeSidResponse)
-async def encode_sid(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
-    return await _handle_encode(payload, request)
+def encode_sid(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
+    return _handle_encode(payload, request)
 
 
 @router.post("/v3/sid/encode", response_model=EncodeSidResponse)
-async def v3_encode_sid(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
-    return await _handle_encode(payload, request)
+def v3_encode_sid(payload: EncodeSidRequest, request: Request) -> EncodeSidResponse:
+    return _handle_encode(payload, request)

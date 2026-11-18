@@ -33,6 +33,7 @@ void DeltaEdgeOverlay::apply_edge_delta(
   }
 
   const auto effective_now = now_ms > 0 ? now_ms : steady_epoch_ms();
+  const auto event_ts = event.timestamp_ms > 0 ? event.timestamp_ms : effective_now;
   std::unique_lock lock(mutex_);
   applied_events_ += 1;
   if (event.timestamp_ms > 0 && effective_now >= event.timestamp_ms) {
@@ -43,7 +44,7 @@ void DeltaEdgeOverlay::apply_edge_delta(
     case DeltaEdgeOp::Unfollow:
     case DeltaEdgeOp::Block:
     case DeltaEdgeOp::Mute: {
-      blocked_targets_[event.source_user_id].insert(event.target_user_id);
+      blocked_targets_[event.source_user_id][event.target_user_id] = event_ts;
       if (auto it = follow_boosts_.find(event.source_user_id); it != follow_boosts_.end()) {
         it->second.erase(event.target_user_id);
         if (it->second.empty()) {
@@ -53,9 +54,9 @@ void DeltaEdgeOverlay::apply_edge_delta(
       const double penalty_step =
           event.op == DeltaEdgeOp::Block ? 0.35 :
           (event.op == DeltaEdgeOp::Mute ? 0.20 : 0.10);
-      negative_penalty_[event.target_user_id] = std::min(
-          1.0,
-          negative_penalty_[event.target_user_id] + penalty_step);
+      auto& entry = negative_penalty_[event.target_user_id];
+      entry.penalty = std::min(1.0, entry.penalty + penalty_step);
+      entry.updated_at_ms = std::max(entry.updated_at_ms, event_ts);
       break;
     }
     case DeltaEdgeOp::Follow: {
@@ -70,7 +71,7 @@ void DeltaEdgeOverlay::apply_edge_delta(
           : 1.0;
       follow_boosts_[event.source_user_id][event.target_user_id] = BoostEntry{
           .weight = w,
-          .timestamp_ms = event.timestamp_ms > 0 ? event.timestamp_ms : effective_now,
+          .timestamp_ms = event_ts,
       };
       break;
     }
@@ -99,7 +100,12 @@ std::unordered_set<std::string> DeltaEdgeOverlay::blocked_targets_for(
   if (it == blocked_targets_.end()) {
     return {};
   }
-  return it->second;
+  std::unordered_set<std::string> out;
+  out.reserve(it->second.size());
+  for (const auto& [target_id, _] : it->second) {
+    out.insert(target_id);
+  }
+  return out;
 }
 
 std::unordered_map<std::string, double> DeltaEdgeOverlay::follow_boosts_for(
@@ -120,15 +126,18 @@ std::unordered_map<std::string, double> DeltaEdgeOverlay::follow_boosts_for(
 double DeltaEdgeOverlay::penalty_for_author(const std::string& author_id) const {
   std::shared_lock lock(mutex_);
   auto it = negative_penalty_.find(author_id);
-  return it != negative_penalty_.end() ? it->second : 0.0;
+  return it != negative_penalty_.end() ? it->second.penalty : 0.0;
 }
 
 void DeltaEdgeOverlay::prune_expired(const std::int64_t now_ms, const std::int64_t ttl_ms) {
-  if (ttl_ms <= 0) return;
+  if (ttl_ms <= 0 || now_ms <= 0) return;
   std::unique_lock lock(mutex_);
+
+  // 裁剪已被新快照覆盖周期吸收的实时关注增补边
   for (auto it = follow_boosts_.begin(); it != follow_boosts_.end();) {
     for (auto inner = it->second.begin(); inner != it->second.end();) {
-      if (now_ms - inner->second.timestamp_ms > ttl_ms) {
+      if (inner->second.timestamp_ms > 0 && now_ms > inner->second.timestamp_ms &&
+          now_ms - inner->second.timestamp_ms > ttl_ms) {
         inner = it->second.erase(inner);
       } else {
         ++inner;
@@ -139,6 +148,36 @@ void DeltaEdgeOverlay::prune_expired(const std::int64_t now_ms, const std::int64
     } else {
       ++it;
     }
+  }
+
+  // 裁剪过期的断边屏蔽记录
+  for (auto it = blocked_targets_.begin(); it != blocked_targets_.end();) {
+    for (auto inner = it->second.begin(); inner != it->second.end();) {
+      if (inner->second > 0 && now_ms > inner->second && now_ms - inner->second > ttl_ms) {
+        inner = it->second.erase(inner);
+      } else {
+        ++inner;
+      }
+    }
+    if (it->second.empty()) {
+      it = blocked_targets_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  // 对超过 TTL 的历史负反馈惩罚执行半衰期衰减，低于阈值直接清除
+  for (auto it = negative_penalty_.begin(); it != negative_penalty_.end();) {
+    if (it->second.updated_at_ms > 0 && now_ms > it->second.updated_at_ms &&
+        now_ms - it->second.updated_at_ms > ttl_ms) {
+      it->second.penalty *= 0.5;
+      it->second.updated_at_ms = now_ms;
+      if (it->second.penalty < 0.01) {
+        it = negative_penalty_.erase(it);
+        continue;
+      }
+    }
+    ++it;
   }
 }
 

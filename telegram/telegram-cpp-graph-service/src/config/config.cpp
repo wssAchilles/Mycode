@@ -102,13 +102,18 @@ ServiceConfig load_from_env() {
       .backend_snapshot_url = read_env(
           "GRAPH_KERNEL_BACKEND_SNAPSHOT_URL",
           "http://backend:5000/internal/graph-kernel/snapshot"),
-      .internal_token = read_env("GRAPH_KERNEL_INTERNAL_TOKEN", read_env("RECOMMENDATION_INTERNAL_TOKEN", "")),
+      // 入站鉴权仅绑定 GRAPH_KERNEL_INTERNAL_TOKEN，与 Rust/Node 客户端注入策略保持严格对称
+      .internal_token = read_env("GRAPH_KERNEL_INTERNAL_TOKEN", ""),
+      // 出站拉取快照优先使用 GRAPH_KERNEL_INTERNAL_TOKEN，未设置时兼容回退 RECOMMENDATION_INTERNAL_TOKEN
+      .snapshot_internal_token = read_env(
+          "GRAPH_KERNEL_INTERNAL_TOKEN",
+          read_env("RECOMMENDATION_INTERNAL_TOKEN", "")),
       .backend_timeout_ms = read_u64_env("GRAPH_KERNEL_BACKEND_TIMEOUT_MS", 4000),
       .snapshot_refresh_secs = read_u64_env("GRAPH_KERNEL_SNAPSHOT_REFRESH_SECS", 300),
       .snapshot_page_size = read_size_env("GRAPH_KERNEL_SNAPSHOT_PAGE_SIZE", 1000),
       .snapshot_generation_v2_enabled = read_bool_env(
           "GRAPH_KERNEL_SNAPSHOT_GENERATION_V2_ENABLED",
-          false),
+          true),
       .min_edge_score = read_double_env("GRAPH_KERNEL_MIN_EDGE_SCORE", 0.05),
       .max_neighbors_per_user = read_size_env("GRAPH_KERNEL_MAX_NEIGHBORS_PER_USER", 128),
       .max_branching_factor = read_size_env("GRAPH_KERNEL_MAX_BRANCHING_FACTOR", 32),

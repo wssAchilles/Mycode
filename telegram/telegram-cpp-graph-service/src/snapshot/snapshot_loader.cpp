@@ -1,6 +1,7 @@
 #include "snapshot/snapshot_loader.h"
 
 #include <algorithm>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -103,37 +104,67 @@ SnapshotLoader::SnapshotLoader(
 void SnapshotLoader::refresh_once() {
   const auto started_at = std::chrono::system_clock::now();
   try {
-    core::snapshot::SnapshotAssembler<core::store::SnapshotData, core::domain::WeightedNeighbor>
-        assembler(config_.snapshot_page_size);
-    std::size_t offset = 0;
-    std::string snapshot_version;
+    constexpr std::size_t kMaxVersionConflictRetries = 3;
+    std::shared_ptr<core::store::SnapshotData> snapshot;
+    std::chrono::system_clock::time_point completed_at{};
 
-    while (true) {
-      const auto page = page_source_->fetch_page(offset, config_.snapshot_page_size, config_.min_edge_score);
-      if (snapshot_version.empty() && !page.snapshot_version.empty()) {
-        snapshot_version = page.snapshot_version;
-      }
-      assembler.ingest_edges(page.edges);
+    for (std::size_t attempt = 0; attempt < kMaxVersionConflictRetries; ++attempt) {
+      try {
+        core::snapshot::SnapshotAssembler<core::store::SnapshotData, core::domain::WeightedNeighbor>
+            assembler(config_.snapshot_page_size);
+        std::size_t offset = 0;
+        std::string snapshot_version;
+        std::optional<contracts::SnapshotCursor> cursor;
 
-      if (page.done || !page.next_offset.has_value()) {
+        while (true) {
+          const auto page = page_source_->fetch_page_with_cursor(
+              offset,
+              config_.snapshot_page_size,
+              config_.min_edge_score,
+              snapshot_version,
+              cursor);
+          if (snapshot_version.empty() && !page.snapshot_version.empty()) {
+            snapshot_version = page.snapshot_version;
+          } else if (!snapshot_version.empty() && !page.snapshot_version.empty() &&
+                     page.snapshot_version != snapshot_version) {
+            throw SnapshotVersionConflictError("snapshot version drifted across pages");
+          }
+          assembler.ingest_edges(page.edges);
+
+          if (page.done || (!page.next_cursor.has_value() && !page.next_offset.has_value())) {
+            break;
+          }
+          cursor = page.next_cursor;
+          if (page.next_offset.has_value()) {
+            offset = page.next_offset.value();
+          } else {
+            offset += page.edges.size();
+          }
+        }
+
+        completed_at = std::chrono::system_clock::now();
+        if (snapshot_version.empty()) {
+          snapshot_version = std::to_string(
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  completed_at.time_since_epoch())
+                  .count());
+        }
+
+        snapshot = assembler.finish(
+            config_.max_neighbors_per_user,
+            snapshot_version,
+            completed_at,
+            core::query::normalized_weight);
         break;
+      } catch (const SnapshotVersionConflictError&) {
+        if (attempt + 1 >= kMaxVersionConflictRetries) {
+          throw;
+        }
       }
-      offset = page.next_offset.value();
     }
 
-    const auto completed_at = std::chrono::system_clock::now();
     const auto duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(completed_at - started_at);
-    if (snapshot_version.empty()) {
-      snapshot_version = std::to_string(
-          std::chrono::duration_cast<std::chrono::milliseconds>(completed_at.time_since_epoch()).count());
-    }
-
-    auto snapshot = assembler.finish(
-        config_.max_neighbors_per_user,
-        snapshot_version,
-        completed_at,
-        core::query::normalized_weight);
     store_.publish_snapshot(std::move(snapshot));
     metrics_.record_refresh_success(store_.metadata(), duration, completed_at);
   } catch (const std::exception& error) {
@@ -272,6 +303,35 @@ void GenerationSnapshotLoader::refresh_once() {
         std::chrono::duration_cast<std::chrono::milliseconds>(completed_at - started_at),
         completed_at);
     throw;
+  }
+}
+
+ResilientSnapshotLoader::ResilientSnapshotLoader(
+    std::unique_ptr<SnapshotRefresher> primary,
+    std::unique_ptr<SnapshotRefresher> fallback)
+    : primary_(std::move(primary)), fallback_(std::move(fallback)) {
+  if (!primary_ || !fallback_) {
+    throw std::invalid_argument("resilient snapshot loader requires primary and fallback");
+  }
+}
+
+void ResilientSnapshotLoader::refresh_once() {
+  try {
+    primary_->refresh_once();
+  } catch (const std::exception& error) {
+    const std::string msg = error.what();
+    // 当上游尚未构建或激活 V2 Generation 快照时，无缝回退至一致性游标 V1 加载器
+    const bool unavailable =
+        msg.find("status=503") != std::string::npos ||
+        msg.find("status=404") != std::string::npos ||
+        msg.find("generation_active_missing") != std::string::npos ||
+        msg.find("empty_generation") != std::string::npos;
+    if (!unavailable) {
+      throw;
+    }
+    std::cerr << "[graph-kernel] V2 快照世代尚未就绪 (" << msg
+              << ")，自动回退至一致性游标 V1 快照加载" << std::endl;
+    fallback_->refresh_once();
   }
 }
 

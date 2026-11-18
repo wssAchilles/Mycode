@@ -4,6 +4,7 @@
 #include <cmath>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "graph/query/neighbors/direct_query.h"
 #include "graph/query/neighbors/ranked_query.h"
@@ -39,12 +40,12 @@ std::int64_t request_now_ms() {
       .count();
 }
 
+// 默认实时叠加层过期窗口（10 分钟，覆盖两个 300 秒快照刷新周期）
+constexpr std::int64_t kDefaultOverlayTtlMs = 10 * 60 * 1000;
+
 void validate_snapshot_edges(
     const std::vector<contracts::SnapshotEdgeRecord>& edges,
     const std::size_t max_neighbors_per_user) {
-  if (edges.empty()) {
-    throw std::invalid_argument("snapshot edges must not be empty");
-  }
   if (max_neighbors_per_user == 0) {
     throw std::invalid_argument("max_neighbors_per_user must be greater than 0");
   }
@@ -63,8 +64,10 @@ void validate_publishable_snapshot(
   if (snapshot == nullptr) {
     throw std::invalid_argument("snapshot must not be null");
   }
-  if (snapshot->metadata.edge_count == 0) {
-    throw std::invalid_argument("snapshot edges must not be empty");
+  // 冷启动无已加载非空快照时允许构建空 CSR 快照；若线上已有非空快照则拒绝被空边集冲掉
+  if (snapshot->metadata.edge_count == 0 && current_snapshot != nullptr &&
+      current_snapshot->metadata.loaded && current_snapshot->metadata.edge_count > 0) {
+    throw std::invalid_argument("snapshot edges must not be empty when replacing non-empty snapshot");
   }
   if (snapshot->metadata.max_neighbors_per_user == 0) {
     throw std::invalid_argument("max_neighbors_per_user must be greater than 0");
@@ -141,13 +144,25 @@ void GraphStore::replace_snapshot(
 
 void GraphStore::publish_snapshot(std::shared_ptr<const store::SnapshotData> snapshot) {
   validate_publishable_snapshot(snapshot, read_snapshot(), true);
+  const auto loaded_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             snapshot->metadata.loaded_at.time_since_epoch())
+                             .count();
   snapshot_.publish(std::move(snapshot));
+  if (delta_overlay_ != nullptr) {
+    delta_overlay_->prune_expired(loaded_ms > 0 ? loaded_ms : request_now_ms(), kDefaultOverlayTtlMs);
+  }
 }
 
 void GraphStore::publish_externally_pinned_snapshot(
     std::shared_ptr<const store::SnapshotData> snapshot) {
   validate_publishable_snapshot(snapshot, read_snapshot(), false);
+  const auto loaded_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             snapshot->metadata.loaded_at.time_since_epoch())
+                             .count();
   snapshot_.publish(std::move(snapshot));
+  if (delta_overlay_ != nullptr) {
+    delta_overlay_->prune_expired(loaded_ms > 0 ? loaded_ms : request_now_ms(), kDefaultOverlayTtlMs);
+  }
 }
 
 bool GraphStore::rollback_snapshot() {
@@ -208,6 +223,89 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
       weight_fn);
 }
 
+void GraphStore::merge_realtime_follow_boosts(
+    QueryCandidates<contracts::NeighborCandidate>& result,
+    const NeighborQuery& query,
+    const SnapshotData& snapshot,
+    const std::unordered_set<std::uint32_t>& excluded_interned_ids,
+    const bool align_social_scale) const {
+  if (delta_overlay_ == nullptr) {
+    return;
+  }
+  const auto boosts = delta_overlay_->follow_boosts_for(query.user_id);
+  if (boosts.empty()) {
+    return;
+  }
+  const auto overlay_blocked = delta_overlay_->blocked_targets_for(query.user_id);
+  const auto dense_neighbors = store::read_ranked_dense_neighbor_index(snapshot, query.user_id);
+  std::unordered_set<std::string> snapshot_available_ids;
+  snapshot_available_ids.reserve(dense_neighbors.size());
+  for (const auto& ref : dense_neighbors) {
+    if (!excluded_interned_ids.contains(ref.target_id) && ref.neighbor != nullptr) {
+      snapshot_available_ids.insert(ref.neighbor->user_id);
+    }
+  }
+
+  std::unordered_map<std::string, std::size_t> candidate_index;
+  candidate_index.reserve(result.candidates.size());
+  for (std::size_t idx = 0; idx < result.candidates.size(); ++idx) {
+    candidate_index.emplace(result.candidates[idx].user_id, idx);
+  }
+
+  bool modified = false;
+  for (const auto& [target_id, raw_weight] : boosts) {
+    if (target_id.empty() || target_id == query.user_id ||
+        query.excluded_user_ids.contains(target_id) || overlay_blocked.contains(target_id)) {
+      continue;
+    }
+    // 对齐 social_weight_at 中新鲜关注边的得分量纲（follow_bonus=2.0 + recency=0.5 + engagement=0.33）
+    const double weight =
+        align_social_scale ? std::max(raw_weight, raw_weight * 0.55 + 2.85) : raw_weight;
+    if (!snapshot_available_ids.contains(target_id)) {
+      result.available_count += 1;
+    }
+    if (query.limit == 0) {
+      continue;
+    }
+    if (auto it = candidate_index.find(target_id); it != candidate_index.end()) {
+      auto& existing = result.candidates[it->second];
+      existing.score = std::max(existing.score, weight);
+      if (std::find(existing.relation_kinds.begin(), existing.relation_kinds.end(), "realtime_follow") ==
+          existing.relation_kinds.end()) {
+        existing.relation_kinds.push_back("realtime_follow");
+      }
+      modified = true;
+      continue;
+    }
+    candidate_index.emplace(target_id, result.candidates.size());
+    result.candidates.push_back(contracts::NeighborCandidate{
+        .user_id = target_id,
+        .score = weight,
+        .relation_kinds = {"realtime_follow"},
+    });
+    modified = true;
+  }
+
+  if (query.limit == 0) {
+    result.candidates.clear();
+    return;
+  }
+  if (modified) {
+    std::sort(
+        result.candidates.begin(),
+        result.candidates.end(),
+        [](const auto& left, const auto& right) {
+          if (left.score != right.score) {
+            return left.score > right.score;
+          }
+          return left.user_id < right.user_id;
+        });
+    if (result.candidates.size() > query.limit) {
+      result.candidates.resize(query.limit);
+    }
+  }
+}
+
 QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
     const NeighborQuery& query) const {
   const auto snapshot = read_snapshot();
@@ -215,39 +313,12 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
   const auto neighbors = store::read_ranked_dense_neighbor_index(*snapshot, query.user_id);
+  const auto excluded = merged_excluded_ids(*snapshot, query.user_id, query.excluded_user_ids);
   auto result = query::direct_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
       neighbors,
       query.limit,
-      merged_excluded_ids(*snapshot, query.user_id, query.excluded_user_ids));
-  // 注入快照刷新周期内来自 Redis Stream 的实时新关注增补边
-  if (delta_overlay_ != nullptr) {
-    const auto boosts = delta_overlay_->follow_boosts_for(query.user_id);
-    if (!boosts.empty()) {
-      const auto overlay_blocked = delta_overlay_->blocked_targets_for(query.user_id);
-      std::unordered_set<std::string> seen;
-      seen.reserve(result.candidates.size());
-      for (const auto& c : result.candidates) {
-        seen.insert(c.user_id);
-      }
-      for (const auto& [target_id, w] : boosts) {
-        if (seen.contains(target_id) || query.excluded_user_ids.contains(target_id) ||
-            overlay_blocked.contains(target_id)) {
-          continue;
-        }
-        result.candidates.push_back(contracts::NeighborCandidate{
-            .user_id = target_id,
-            .score = w,
-            .relation_kinds = {"realtime_follow"},
-        });
-        result.available_count += 1;
-      }
-      if (query.limit > 0 && result.candidates.size() > query.limit) {
-        std::sort(result.candidates.begin(), result.candidates.end(),
-                  [](const auto& a, const auto& b) { return a.score > b.score; });
-        result.candidates.resize(query.limit);
-      }
-    }
-  }
+      excluded);
+  merge_realtime_follow_boosts(result, query, *snapshot, excluded);
   return with_snapshot_diagnostics(std::move(result), *snapshot);
 }
 
@@ -275,15 +346,17 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors_from_
     const NeighborQuery& query,
     const SnapshotData& snapshot,
     const std::int64_t now_ms) const {
-  return with_snapshot_diagnostics(
-      rank_dense_neighbors(
-          store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
-          query.limit,
-          merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids),
-          [now_ms](const WeightedNeighbor& neighbor) {
-            return query::social_weight_at(neighbor, now_ms);
-          }),
-      snapshot);
+  const auto excluded = merged_excluded_ids(snapshot, query.user_id, query.excluded_user_ids);
+  auto result = rank_dense_neighbors(
+      store::read_ranked_dense_neighbor_index(snapshot, query.user_id),
+      query.limit,
+      excluded,
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::social_weight_at(neighbor, now_ms);
+      });
+  // 在 social_neighbors 与 /graph/batch 主链路统一融合实时新关注增补边
+  merge_realtime_follow_boosts(result, query, snapshot, excluded, /*align_social_scale=*/true);
+  return with_snapshot_diagnostics(std::move(result), snapshot);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(

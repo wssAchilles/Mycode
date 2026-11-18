@@ -108,18 +108,35 @@ contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
     const std::size_t offset,
     const std::size_t limit,
     const double min_edge_score) const {
+  return fetch_page_with_cursor(offset, limit, min_edge_score, "", std::nullopt);
+}
+
+contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page_with_cursor(
+    const std::size_t offset,
+    const std::size_t limit,
+    const double min_edge_score,
+    const std::string& snapshot_version,
+    const std::optional<contracts::SnapshotCursor>& cursor) const {
   CURL* handle = curl_easy_init();
   if (handle == nullptr) {
     throw std::runtime_error("init curl backend snapshot client");
   }
 
   std::string response_body;
-  const auto payload = nlohmann::json{
+  auto request_json = nlohmann::json{
       {"offset", offset},
       {"limit", limit},
       {"minScore", min_edge_score},
+  };
+  if (!snapshot_version.empty()) {
+    request_json["snapshotVersion"] = snapshot_version;
   }
-                           .dump();
+  if (cursor.has_value()) {
+    request_json["afterSourceUserId"] = cursor->after_source_user_id;
+    request_json["afterTargetUserId"] = cursor->after_target_user_id;
+    request_json["afterId"] = cursor->after_id;
+  }
+  const auto payload = request_json.dump();
 
   struct curl_slist* headers = nullptr;
   headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -147,6 +164,9 @@ contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
   if (result != CURLE_OK) {
     throw std::runtime_error(std::string("backend snapshot request failed: ") + curl_easy_strerror(result));
   }
+  if (status_code == 409) {
+    throw SnapshotVersionConflictError("backend snapshot version changed during pagination");
+  }
   if (status_code < 200 || status_code >= 300) {
     std::ostringstream stream;
     stream << "backend snapshot request returned status=" << status_code << " body=" << response_body;
@@ -164,12 +184,26 @@ contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
       .offset = data.value("offset", offset),
       .limit = data.value("limit", limit),
       .next_offset = std::nullopt,
+      .next_cursor = std::nullopt,
       .done = data.value("done", true),
       .snapshot_version = data.value("snapshotVersion", std::string{}),
   };
 
   if (data.contains("nextOffset") && !data.at("nextOffset").is_null()) {
     page.next_offset = data.at("nextOffset").get<std::size_t>();
+  }
+  if (data.contains("nextCursor") && data.at("nextCursor").is_object()) {
+    const auto& cur = data.at("nextCursor");
+    const auto after_source = cur.value("afterSourceUserId", std::string{});
+    const auto after_target = cur.value("afterTargetUserId", std::string{});
+    const auto after_id = cur.value("afterId", std::string{});
+    if (!after_source.empty() && !after_target.empty() && !after_id.empty()) {
+      page.next_cursor = contracts::SnapshotCursor{
+          .after_source_user_id = after_source,
+          .after_target_user_id = after_target,
+          .after_id = after_id,
+      };
+    }
   }
 
   for (const auto& edge_json : data.at("edges")) {

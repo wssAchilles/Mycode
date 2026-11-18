@@ -571,19 +571,22 @@ TEST(BackendGenerationClientTest, UsesGenerationEndpointsAndExactProtocolBodies)
   }
 }
 
-TEST(GenerationConfigTest, DefaultsDisabledAndParsesExplicitTrue) {
+TEST(GenerationConfigTest, DefaultsEnabledAndParsesExplicitFalse) {
   ScopedEnv generation_flag("GRAPH_KERNEL_SNAPSHOT_GENERATION_V2_ENABLED");
   ScopedEnv bind_addr("GRAPH_KERNEL_BIND_ADDR");
   bind_addr.set("127.0.0.1:4300");
 
   generation_flag.unset();
+  EXPECT_TRUE(telegram::graph::config::load_from_env().snapshot_generation_v2_enabled);
+
+  generation_flag.set("false");
+  EXPECT_FALSE(telegram::graph::config::load_from_env().snapshot_generation_v2_enabled);
+
+  generation_flag.set("0");
   EXPECT_FALSE(telegram::graph::config::load_from_env().snapshot_generation_v2_enabled);
 
   generation_flag.set("true");
   EXPECT_TRUE(telegram::graph::config::load_from_env().snapshot_generation_v2_enabled);
-
-  generation_flag.set("0");
-  EXPECT_FALSE(telegram::graph::config::load_from_env().snapshot_generation_v2_enabled);
 }
 
 TEST(SnapshotRefresherTest, LegacyAndGenerationLoadersShareOneRuntimeContract) {

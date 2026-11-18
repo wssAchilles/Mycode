@@ -12,9 +12,9 @@ router = APIRouter(tags=["retrieval"])
 
 class ANNRequestV3(BaseModel):
     userId: str
-    historyPostIds: List[str] = Field(default_factory=list)
-    columnarRetrievalSequence: Optional[List[Dict[str, Any]]] = None
-    topK: int = 50
+    historyPostIds: List[str] = Field(default_factory=list, max_length=500)
+    columnarRetrievalSequence: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=500)
+    topK: int = Field(default=50, ge=1, le=500)
     expectedEvidence: Optional[Dict[str, Any]] = None
 
 
@@ -37,7 +37,7 @@ class ANNResponseV3(BaseModel):
     evidence: ANNResponseEvidenceModel
 
 
-async def _handle_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
+def _handle_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
     state = request.app.state.serving_state
     if not state.two_tower.is_ready:
         raise HTTPException(status_code=503, detail="Two-Tower ONNX session not loaded")
@@ -60,10 +60,10 @@ async def _handle_retrieve(payload: ANNRequestV3, request: Request) -> ANNRespon
 
 
 @router.post("/ann/retrieve", response_model=ANNResponseV3)
-async def ann_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
-    return await _handle_retrieve(payload, request)
+def ann_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
+    return _handle_retrieve(payload, request)
 
 
 @router.post("/v3/ann/retrieve", response_model=ANNResponseV3)
-async def v3_ann_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
-    return await _handle_retrieve(payload, request)
+def v3_ann_retrieve(payload: ANNRequestV3, request: Request) -> ANNResponseV3:
+    return _handle_retrieve(payload, request)

@@ -17,6 +17,7 @@ from src.onnx_runtime.phoenix_v3_ort import PhoenixV3OrtRunner
 from src.onnx_runtime.session_pool import OnnxSessionPool
 from src.onnx_runtime.text_encoder_ort import SidCodebookQuantizer, TextEncoderOrtRunner
 from src.onnx_runtime.two_tower_ort import TwoTowerOrtRunner
+from src.safety import DeterministicSafetyService
 from src.serving.config import ServingConfig
 
 
@@ -59,6 +60,7 @@ class ServingState:
             max_candidates_per_batch=self.config.max_candidates,
         )
         self.quantizer: Optional[SidCodebookQuantizer] = None
+        self.safety_service = DeterministicSafetyService()
         self.faiss_index: Any = None
         self.idx_to_post_id: Dict[int, str] = {}
         self.serving_manifest: Optional[Dict[str, Any]] = None

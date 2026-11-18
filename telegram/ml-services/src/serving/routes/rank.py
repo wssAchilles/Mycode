@@ -23,7 +23,7 @@ class PhoenixRequestV3(BaseModel):
     userId: str
     userActionSequence: Optional[List[Dict[str, Any]]] = None
     columnarScoringSequence: Optional[List[Dict[str, Any]]] = None
-    candidates: List[PhoenixCandidateV3]
+    candidates: List[PhoenixCandidateV3] = Field(default_factory=list, max_length=500)
 
 
 class PhoenixPredictionV3(BaseModel):
@@ -33,7 +33,12 @@ class PhoenixPredictionV3(BaseModel):
     reply: float
     repost: float
     quote: float = 0.0
+    quotedClick: float = 0.0
+    photoExpand: float = 0.0
+    profileClick: float = 0.0
     share: float = 0.0
+    shareViaDm: float = 0.0
+    shareViaCopyLink: float = 0.0
     dwell: float = 0.0
     videoView: float = 0.0
     followAuthor: float = 0.0
@@ -53,7 +58,7 @@ class PhoenixResponseV3(BaseModel):
     predictions: List[PhoenixPredictionV3]
 
 
-async def _handle_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
+def _handle_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
     state = request.app.state.serving_state
     if not state.phoenix.is_ready:
         raise HTTPException(status_code=503, detail="Phoenix V3 ONNX session not loaded")
@@ -68,10 +73,10 @@ async def _handle_predict(payload: PhoenixRequestV3, request: Request) -> Phoeni
 
 
 @router.post("/phoenix/predict", response_model=PhoenixResponseV3)
-async def phoenix_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
-    return await _handle_predict(payload, request)
+def phoenix_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
+    return _handle_predict(payload, request)
 
 
 @router.post("/v3/phoenix/predict", response_model=PhoenixResponseV3)
-async def v3_phoenix_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
-    return await _handle_predict(payload, request)
+def v3_phoenix_predict(payload: PhoenixRequestV3, request: Request) -> PhoenixResponseV3:
+    return _handle_predict(payload, request)

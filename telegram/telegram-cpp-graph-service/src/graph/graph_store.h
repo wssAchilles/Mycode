@@ -221,6 +221,12 @@ class GraphStore {
   static std::unordered_set<std::uint32_t> intern_excluded_ids(
       const SnapshotData& snapshot,
       const std::unordered_set<std::string>& excluded_user_ids);
+  void merge_realtime_follow_boosts(
+      QueryCandidates<contracts::NeighborCandidate>& result,
+      const NeighborQuery& query,
+      const SnapshotData& snapshot,
+      const std::unordered_set<std::uint32_t>& excluded_interned_ids,
+      bool align_social_scale = false) const;
   QueryCandidates<contracts::NeighborCandidate> social_neighbors_from_snapshot(
       const NeighborQuery& query,
       const SnapshotData& snapshot,

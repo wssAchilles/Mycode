@@ -12,11 +12,12 @@ namespace {
 
 constexpr std::size_t kLatencySampleCapacity = 128;
 
-std::string status_for(const core::SnapshotMetadata& metadata, std::uint64_t refresh_failures) {
+// 基于当前活跃错误状态判定健康度，刷新恢复成功后自动回归 healthy
+std::string status_for(const core::SnapshotMetadata& metadata, const bool has_active_error) {
   if (!metadata.loaded) {
-    return refresh_failures == 0 ? "bootstrap" : "degraded";
+    return has_active_error ? "degraded" : "bootstrap";
   }
-  return refresh_failures > 0 ? "degraded" : "healthy";
+  return has_active_error ? "degraded" : "healthy";
 }
 
 }  // namespace
@@ -171,8 +172,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
     const config::ServiceConfig& config,
     const core::SnapshotMetadata& metadata) const {
   std::lock_guard lock(mutex_);
-  const auto refresh_failures = refresh_failures_.load(std::memory_order_relaxed);
-  const auto status = status_for(metadata, refresh_failures);
+  const auto status = status_for(metadata, last_error_.has_value());
   const auto current_blocker = !metadata.loaded
       ? (last_error_.has_value() ? last_error_.value() : "snapshot_not_loaded")
       : (last_error_.has_value() ? last_error_.value() : "");

@@ -11,10 +11,12 @@ struct ServiceConfig {
   std::uint16_t bind_port;
   std::string backend_snapshot_url;
   std::string internal_token;
+  // 出站拉取快照使用的内部凭证（兼容回退 RECOMMENDATION_INTERNAL_TOKEN）
+  std::string snapshot_internal_token;
   std::uint64_t backend_timeout_ms;
   std::uint64_t snapshot_refresh_secs;
   std::size_t snapshot_page_size;
-  bool snapshot_generation_v2_enabled{false};
+  bool snapshot_generation_v2_enabled{true};
   double min_edge_score;
   std::size_t max_neighbors_per_user;
   std::size_t max_branching_factor;

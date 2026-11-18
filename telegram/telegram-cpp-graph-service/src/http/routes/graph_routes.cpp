@@ -1,14 +1,18 @@
 #include "http/routes/graph_routes.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <openssl/crypto.h>
+#include <openssl/sha.h>
 
 #include "contracts/types.h"
 #include "graph/realtime/delta_edge_overlay.h"
@@ -41,6 +45,69 @@ HttpResponse error_response(const int status_code, std::string code, std::string
 
 HttpResponse invalid_request_response(const std::string& message) {
   return error_response(400, "INVALID_REQUEST", message);
+}
+
+// 大小写不敏感提取请求头，兼容 HTTP 解析器与单元测试直传结构
+std::string read_header_case_insensitive(
+    const std::unordered_map<std::string, std::string>& headers,
+    const std::string& lower_key) {
+  if (const auto direct = headers.find(lower_key); direct != headers.end()) {
+    return direct->second;
+  }
+  for (const auto& [key, value] : headers) {
+    if (key.size() != lower_key.size()) {
+      continue;
+    }
+    bool matched = true;
+    for (std::size_t idx = 0; idx < key.size(); ++idx) {
+      if (static_cast<char>(std::tolower(static_cast<unsigned char>(key[idx]))) != lower_key[idx]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return value;
+    }
+  }
+  return "";
+}
+
+// 基于 SHA-256 定长摘要与 CRYPTO_memcmp 实现恒定时间密钥比对，避免长度与时序侧信道泄漏
+bool constant_time_token_equals(const std::string& provided, const std::string& expected) {
+  unsigned char provided_digest[SHA256_DIGEST_LENGTH];
+  unsigned char expected_digest[SHA256_DIGEST_LENGTH];
+  SHA256(
+      reinterpret_cast<const unsigned char*>(provided.data()),
+      provided.size(),
+      provided_digest);
+  SHA256(
+      reinterpret_cast<const unsigned char*>(expected.data()),
+      expected.size(),
+      expected_digest);
+  return CRYPTO_memcmp(provided_digest, expected_digest, SHA256_DIGEST_LENGTH) == 0;
+}
+
+std::optional<HttpResponse> verify_internal_token(
+    const HttpRequest& request,
+    const tg_config::ServiceConfig& config) {
+  if (config.internal_token.empty()) {
+    return std::nullopt;
+  }
+  const auto incoming =
+      read_header_case_insensitive(request.headers, "x-graph-kernel-internal-token");
+  if (incoming.empty()) {
+    return error_response(
+        401,
+        "UNAUTHORIZED",
+        "missing x-graph-kernel-internal-token header");
+  }
+  if (!constant_time_token_equals(incoming, config.internal_token)) {
+    return error_response(
+        403,
+        "FORBIDDEN",
+        "invalid x-graph-kernel-internal-token header");
+  }
+  return std::nullopt;
 }
 
 std::vector<std::string> sort_and_dedup(std::unordered_set<std::string> values) {
@@ -449,17 +516,22 @@ HttpServer::Handler make_graph_handler(
     core::GraphStore& store,
     ops::GraphServiceMetrics& metrics) {
   return [&config, &store, &metrics](const HttpRequest& request) -> HttpResponse {
+    // 容器存活探针免内部鉴权，其余所有 /graph/*、/ops/*、/metrics 与 /ready 均强制恒定时间验签
+    if (request.method == "GET" && request.path == "/health") {
+      return json_response(
+          200,
+          tg_contracts::success_response(nlohmann::json{
+              {"ok", true},
+              {"service", "cpp_graph_kernel"},
+          }));
+    }
+
+    if (auto auth_error = verify_internal_token(request, config); auth_error.has_value()) {
+      return std::move(auth_error.value());
+    }
+
     if (request.method == "GET") {
-      // Liveness probe — always returns 200 (unless process is crashing)
-      if (request.path == "/health") {
-        return json_response(
-            200,
-            tg_contracts::success_response(nlohmann::json{
-                {"ok", true},
-                {"service", "cpp_graph_kernel"},
-            }));
-      }
-      // Readiness probe — checks if snapshot is loaded and service can handle requests
+      // 就绪探针：校验快照是否已加载并可服务查询
       if (request.path == "/ready") {
         const auto metadata = store.metadata();
         const auto status_code = metadata.loaded ? 200 : 503;

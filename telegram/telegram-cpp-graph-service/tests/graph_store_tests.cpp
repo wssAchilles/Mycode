@@ -1,15 +1,20 @@
 #include <algorithm>
+#include <arpa/inet.h>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <future>
 #include <limits>
 #include <memory>
+#include <netinet/in.h>
 #include <optional>
 #include <semaphore>
 #include <stdexcept>
 #include <string>
+#include <sys/socket.h>
 #include <thread>
+#include <unistd.h>
 #include <unordered_set>
 #include <vector>
 
@@ -27,10 +32,12 @@
 #include "graph/snapshot/snapshot_builder.h"
 #include "graph/store/snapshot_data.h"
 #include "http/graph_routes.h"
+#include "http/http_server.h"
 #include "http/runtime/runtime_metrics.h"
 #include "http/request_validation.h"
 #include "ops/metrics.h"
 #include "snapshot/snapshot_loader.h"
+#include "telemetry/metrics.h"
 
 namespace {
 
@@ -343,24 +350,32 @@ TEST(GraphStoreTest, SnapshotAggregatesDuplicateEdges) {
 
 TEST(GraphStoreTest, RejectsInvalidSnapshotsBeforePublish) {
   GraphStore store;
+  // 冷启动允许空边集构建空 CSR 快照
+  EXPECT_NO_THROW(
+      store.replace_snapshot({}, 10, "v0-empty", std::chrono::system_clock::now()));
+  EXPECT_TRUE(store.metadata().loaded);
+  EXPECT_EQ(store.metadata().edge_count, 0u);
+
+  // 已加载非空快照后拒绝被意外空边集覆盖
+  store.replace_snapshot({edge("u1", "u2", 0.2)}, 10, "v1", std::chrono::system_clock::now());
   EXPECT_THROW(
-      store.replace_snapshot({}, 10, "v1", std::chrono::system_clock::now()),
+      store.replace_snapshot({}, 10, "v2", std::chrono::system_clock::now()),
       std::invalid_argument);
   EXPECT_THROW(
-      store.replace_snapshot({edge("u1", "u2", 0.2)}, 0, "v1", std::chrono::system_clock::now()),
+      store.replace_snapshot({edge("u1", "u2", 0.2)}, 0, "v2", std::chrono::system_clock::now()),
       std::invalid_argument);
   EXPECT_THROW(
       store.replace_snapshot(
           {edge("u1", "u2", -0.1)},
           10,
-          "v1",
+          "v2",
           std::chrono::system_clock::now()),
       std::invalid_argument);
   EXPECT_THROW(
       store.replace_snapshot(
           {edge("u1", "u2", std::numeric_limits<double>::infinity())},
           10,
-          "v1",
+          "v2",
           std::chrono::system_clock::now()),
       std::invalid_argument);
 }
@@ -1181,4 +1196,332 @@ TEST(GraphStoreRealtimeDeltaTest, HttpRoutesServeDeltaAndAuthorCredEndpoints) {
   EXPECT_EQ(ops_resp.status_code, 200);
   const auto ops_json = nlohmann::json::parse(ops_resp.body);
   EXPECT_EQ(ops_json.at("data").at("deltaOverlay").at("appliedEvents").get<std::uint64_t>(), 1U);
+}
+
+TEST(GraphStoreRealtimeDeltaTest, BatchAndSocialNeighborsMergeFollowBoostsAndPruneOnSnapshotRefresh) {
+  GraphStore store;
+  const auto t0 = std::chrono::system_clock::time_point{std::chrono::milliseconds(1'000'000)};
+  store.replace_snapshot(
+      {
+          edge("alice", "bob", 0.8),
+          edge("bob", "dave", 0.7),
+      },
+      10,
+      "snap-v1",
+      t0);
+
+  // 实时注入新关注 erin 与对 bob 的负向反馈
+  store.apply_edge_delta(
+      telegram::graph::core::realtime::EdgeDeltaEvent{
+          .source_user_id = "alice",
+          .target_user_id = "erin",
+          .op = telegram::graph::core::realtime::DeltaEdgeOp::Follow,
+          .weight_delta = 8.0,
+          .timestamp_ms = 1'000'100,
+      },
+      1'000'100);
+  store.apply_edge_delta(
+      telegram::graph::core::realtime::EdgeDeltaEvent{
+          .source_user_id = "carol",
+          .target_user_id = "bob",
+          .op = telegram::graph::core::realtime::DeltaEdgeOp::Block,
+          .weight_delta = -5.0,
+          .timestamp_ms = 1'000'100,
+      },
+      1'000'100);
+
+  // 验证 social_neighbors 与 /graph/batch 均实时召回新关注作者 erin
+  const auto social = store.social_neighbors("alice", 10, {});
+  const auto social_erin_it = std::find_if(
+      social.candidates.begin(),
+      social.candidates.end(),
+      [](const auto& c) { return c.user_id == "erin"; });
+  ASSERT_NE(social_erin_it, social.candidates.end());
+  EXPECT_EQ(social_erin_it->relation_kinds, (std::vector<std::string>{"realtime_follow"}));
+
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  const auto config = test_config();
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+  const auto batch_resp = handler(telegram::graph::http::HttpRequest{
+      .method = "POST",
+      .path = "/graph/batch",
+      .body = R"({"userId":"alice","directLimit":5,"bridgeLimit":5,"maxDepth":2})",
+  });
+  ASSERT_EQ(batch_resp.status_code, 200);
+  const auto batch_data = nlohmann::json::parse(batch_resp.body).at("data");
+  const auto& social_cands = batch_data.at("socialNeighbors").at("candidates");
+  ASSERT_GE(social_cands.size(), 2u);
+  const auto batch_erin_it = std::find_if(
+      social_cands.begin(),
+      social_cands.end(),
+      [](const auto& item) { return item.at("userId") == "erin"; });
+  ASSERT_NE(batch_erin_it, social_cands.end());
+  EXPECT_EQ(batch_erin_it->at("relationKinds")[0], "realtime_follow");
+
+  // 发布推进了 20 分钟的新快照，触发 prune_expired 清理已被快照吸收的旧增量并衰减负向惩罚
+  const double penalty_before = store.delta_overlay()->penalty_for_author("bob");
+  EXPECT_GT(penalty_before, 0.0);
+  const auto t1 = std::chrono::system_clock::time_point{std::chrono::milliseconds(2'300'000)};
+  store.replace_snapshot(
+      {
+          edge("alice", "bob", 0.8),
+          edge("alice", "erin", 1.2),
+      },
+      10,
+      "snap-v2",
+      t1);
+  EXPECT_EQ(store.delta_overlay()->metrics().boosted_pair_count, 0u);
+  EXPECT_LT(store.delta_overlay()->penalty_for_author("bob"), penalty_before);
+}
+
+TEST(GraphHandlerAuthTest, EnforcesConstantTimeInternalTokenExceptHealth) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  auto config = test_config();
+  config.internal_token = "top-secret-graph-token";
+  const auto handler = telegram::graph::http::make_graph_handler(config, store, metrics);
+
+  // /health 存活探针无需鉴权
+  const auto health_resp = handler(telegram::graph::http::HttpRequest{
+      .method = "GET",
+      .path = "/health",
+  });
+  EXPECT_EQ(health_resp.status_code, 200);
+
+  // 未携带请求头访问写接口与运维指标返回 401
+  for (const auto& [method, path, body] : std::vector<std::tuple<std::string, std::string, std::string>>{
+           {"POST", "/graph/delta", R"({"sourceUserId":"u1","targetUserId":"u2","edgeOp":"follow"})"},
+           {"POST", "/graph/batch", R"({"userId":"u1","directLimit":2,"bridgeLimit":2,"maxDepth":2})"},
+           {"GET", "/ops/graph", ""},
+           {"GET", "/metrics", ""},
+       }) {
+    const auto missing = handler(telegram::graph::http::HttpRequest{
+        .method = method,
+        .path = path,
+        .body = body,
+    });
+    EXPECT_EQ(missing.status_code, 401);
+
+    const auto wrong = handler(telegram::graph::http::HttpRequest{
+        .method = method,
+        .path = path,
+        .headers = {{"x-graph-kernel-internal-token", "wrong-token"}},
+        .body = body,
+    });
+    EXPECT_EQ(wrong.status_code, 403);
+
+    const auto authorized = handler(telegram::graph::http::HttpRequest{
+        .method = method,
+        .path = path,
+        .headers = {{"X-Graph-Kernel-Internal-Token", "top-secret-graph-token"}},
+        .body = body,
+    });
+    EXPECT_EQ(authorized.status_code, 200);
+  }
+}
+
+TEST(OpsStatusRecoveryTest, SummaryRecoversFromDegradedToHealthyAfterSuccessfulRefresh) {
+  auto store = build_store();
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  const auto config = test_config();
+
+  metrics.record_refresh_failure(
+      "transient network timeout",
+      std::chrono::milliseconds(50),
+      std::chrono::system_clock::now());
+  EXPECT_EQ(metrics.summary_payload(config, store.metadata()).at("status"), "degraded");
+
+  metrics.record_refresh_success(
+      store.metadata(),
+      std::chrono::milliseconds(20),
+      std::chrono::system_clock::now());
+  const auto summary = metrics.summary_payload(config, store.metadata());
+  EXPECT_EQ(summary.at("status"), "healthy");
+  EXPECT_EQ(summary.at("currentBlocker"), "");
+}
+
+TEST(SnapshotLoaderCursorTest, PropagatesCursorAndRecoversFromVersionConflict) {
+  class CursorTrackingSource final : public telegram::graph::snapshot::SnapshotPageSource {
+   public:
+    telegram::graph::contracts::SnapshotPagePayload fetch_page(
+        std::size_t,
+        std::size_t,
+        double) const override {
+      throw std::runtime_error("legacy fetch_page should not be called directly");
+    }
+
+    telegram::graph::contracts::SnapshotPagePayload fetch_page_with_cursor(
+        const std::size_t offset,
+        const std::size_t limit,
+        const double,
+        const std::string& snapshot_version,
+        const std::optional<telegram::graph::contracts::SnapshotCursor>& cursor) const override {
+      seen_versions.push_back(snapshot_version);
+      seen_cursors.push_back(cursor);
+      const auto call_idx = call_count++;
+      if (call_idx == 0) {
+        return telegram::graph::contracts::SnapshotPagePayload{
+            .edges = {edge("u1", "u2", 0.6)},
+            .offset = offset,
+            .limit = limit,
+            .next_offset = 1,
+            .next_cursor = telegram::graph::contracts::SnapshotCursor{
+                .after_source_user_id = "u1",
+                .after_target_user_id = "u2",
+                .after_id = "id-1",
+            },
+            .done = false,
+            .snapshot_version = "snap-stale",
+        };
+      }
+      if (call_idx == 1) {
+        // 模拟分页中途发生 409 版本冲突，验证自动从头重试最新快照
+        throw telegram::graph::snapshot::SnapshotVersionConflictError("conflict");
+      }
+      if (call_idx == 2) {
+        return telegram::graph::contracts::SnapshotPagePayload{
+            .edges = {edge("u1", "u3", 0.9)},
+            .offset = offset,
+            .limit = limit,
+            .next_offset = 1,
+            .next_cursor = telegram::graph::contracts::SnapshotCursor{
+                .after_source_user_id = "u1",
+                .after_target_user_id = "u3",
+                .after_id = "id-2",
+            },
+            .done = false,
+            .snapshot_version = "snap-consistent-v2",
+        };
+      }
+      return telegram::graph::contracts::SnapshotPagePayload{
+          .edges = {edge("u2", "u4", 0.7)},
+          .offset = offset,
+          .limit = limit,
+          .next_offset = std::nullopt,
+          .next_cursor = std::nullopt,
+          .done = true,
+          .snapshot_version = "snap-consistent-v2",
+      };
+    }
+
+    mutable std::size_t call_count{0};
+    mutable std::vector<std::string> seen_versions;
+    mutable std::vector<std::optional<telegram::graph::contracts::SnapshotCursor>> seen_cursors;
+  };
+
+  auto config = test_config();
+  config.snapshot_page_size = 1;
+  auto source = std::make_shared<CursorTrackingSource>();
+  GraphStore store;
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  telegram::graph::snapshot::SnapshotLoader loader(config, source, store, metrics);
+
+  ASSERT_NO_THROW(loader.refresh_once());
+  ASSERT_EQ(source->call_count, 4u);
+  EXPECT_EQ(source->seen_versions[0], "");
+  EXPECT_EQ(source->seen_versions[1], "snap-stale");
+  ASSERT_TRUE(source->seen_cursors[1].has_value());
+  EXPECT_EQ(source->seen_cursors[1]->after_id, "id-1");
+  EXPECT_EQ(source->seen_versions[3], "snap-consistent-v2");
+  ASSERT_TRUE(source->seen_cursors[3].has_value());
+  EXPECT_EQ(source->seen_cursors[3]->after_id, "id-2");
+  EXPECT_EQ(store.metadata().snapshot_version, "snap-consistent-v2");
+  EXPECT_EQ(store.metadata().edge_count, 2u);
+}
+
+TEST(HttpServerRuntimeTest, ReusesKeepAliveSocketMatchesConnectionHeaderAndStopsCleanly) {
+  telegram::graph::http::HttpServer::reset_shutdown_for_testing();
+  std::atomic<int> handler_calls{0};
+
+  telegram::graph::http::HttpServer server(
+      "127.0.0.1",
+      0,
+      [&handler_calls](const telegram::graph::http::HttpRequest& req) {
+        const int idx = handler_calls.fetch_add(1) + 1;
+        return telegram::graph::http::HttpResponse{
+            .status_code = 200,
+            .body = nlohmann::json{{"call", idx}, {"path", req.path}}.dump(),
+        };
+      },
+      telegram::graph::http::HttpServerOptions{
+          .max_connections = 8,
+          .worker_count = 2,
+          .queue_capacity = 8,
+          .request_timeout_secs = 2,
+          .keep_alive_timeout_secs = 2,
+          .max_keep_alive_requests = 3,
+          .max_body_bytes = 65536,
+      });
+
+  auto server_future = std::async(std::launch::async, [&server]() {
+    server.serve_forever();
+  });
+
+  // 等待监听套接字就绪并分配动态端口
+  std::uint16_t port = 0;
+  for (int i = 0; i < 100 && port == 0; ++i) {
+    port = server.bound_port();
+    if (port == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ASSERT_GT(port, 0);
+
+  const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+  ASSERT_GE(sock, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  ASSERT_EQ(::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr), 1);
+  ASSERT_EQ(::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+
+  const auto read_one_http_response = [sock]() -> std::string {
+    std::string raw;
+    char buf[2048];
+    while (raw.find("\r\n\r\n") == std::string::npos) {
+      const auto n = ::recv(sock, buf, sizeof(buf), 0);
+      if (n <= 0) break;
+      raw.append(buf, static_cast<std::size_t>(n));
+    }
+    const auto hdr_end = raw.find("\r\n\r\n");
+    if (hdr_end == std::string::npos) return raw;
+    std::size_t content_len = 0;
+    const auto cl_pos = raw.find("Content-Length: ");
+    if (cl_pos != std::string::npos && cl_pos < hdr_end) {
+      content_len = static_cast<std::size_t>(std::stoull(raw.substr(cl_pos + 16)));
+    }
+    while (raw.size() < hdr_end + 4 + content_len) {
+      const auto n = ::recv(sock, buf, sizeof(buf), 0);
+      if (n <= 0) break;
+      raw.append(buf, static_cast<std::size_t>(n));
+    }
+    return raw;
+  };
+
+  // 同一 TCP 连接连续发送 3 次 HTTP/1.1 请求（上限 max_keep_alive_requests=3）
+  const std::string req1 = "POST /graph/ping HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 2\r\n\r\n{}";
+  ASSERT_EQ(::send(sock, req1.data(), req1.size(), 0), static_cast<ssize_t>(req1.size()));
+  const auto resp1 = read_one_http_response();
+  EXPECT_NE(resp1.find("HTTP/1.1 200 OK"), std::string::npos);
+  EXPECT_NE(resp1.find("Connection: keep-alive\r\n"), std::string::npos);
+
+  const std::string req2 = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n";
+  ASSERT_EQ(::send(sock, req2.data(), req2.size(), 0), static_cast<ssize_t>(req2.size()));
+  const auto resp2 = read_one_http_response();
+  EXPECT_NE(resp2.find("HTTP/1.1 200 OK"), std::string::npos);
+  EXPECT_NE(resp2.find("Connection: keep-alive\r\n"), std::string::npos);
+
+  // 第 3 次达到最大复用上限，服务端必须在关闭连接前明确回传 Connection: close
+  const std::string req3 = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n";
+  ASSERT_EQ(::send(sock, req3.data(), req3.size(), 0), static_cast<ssize_t>(req3.size()));
+  const auto resp3 = read_one_http_response();
+  EXPECT_NE(resp3.find("HTTP/1.1 200 OK"), std::string::npos);
+  EXPECT_NE(resp3.find("Connection: close\r\n"), std::string::npos);
+  ::close(sock);
+
+  EXPECT_EQ(handler_calls.load(), 3);
+
+  // 验证停机通知唤醒所有工作线程安全退出，绝不死锁
+  server.stop();
+  EXPECT_EQ(server_future.wait_for(std::chrono::seconds(2)), std::future_status::ready);
 }

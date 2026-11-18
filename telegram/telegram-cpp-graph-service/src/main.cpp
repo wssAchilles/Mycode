@@ -50,32 +50,42 @@ int main() {
     std::signal(SIGINT, signal_handler);
 
     const auto config = tg_config::load_from_env();
+    if (config.internal_token.empty()) {
+      std::cerr << "[graph-kernel] 告警：GRAPH_KERNEL_INTERNAL_TOKEN 未配置，当前以兼容模式放行入站请求，生产环境请配置内部鉴权密钥"
+                << std::endl;
+    }
+    const auto outbound_token =
+        !config.snapshot_internal_token.empty() ? config.snapshot_internal_token : config.internal_token;
     tg_core::GraphStore store;
     store.set_traversal_best_first_enabled(config.traversal_best_first_enabled);
     store.set_overlap_streaming_topk_enabled(config.overlap_streaming_topk_enabled);
     tg_ops::GraphServiceMetrics metrics;
     auto http_runtime_metrics = std::make_shared<tg_http::HttpRuntimeMetrics>();
     metrics.attach_http_runtime_metrics(http_runtime_metrics);
+    auto v1_loader = std::make_unique<tg_snapshot::SnapshotLoader>(
+        config,
+        tg_snapshot::BackendSnapshotClient(
+            config.backend_snapshot_url,
+            outbound_token,
+            config.backend_timeout_ms),
+        store,
+        metrics);
     std::unique_ptr<tg_snapshot::SnapshotRefresher> loader;
     if (config.snapshot_generation_v2_enabled) {
-      loader = std::make_unique<tg_snapshot::GenerationSnapshotLoader>(
+      auto v2_loader = std::make_unique<tg_snapshot::GenerationSnapshotLoader>(
           config.snapshot_page_size,
           config.max_neighbors_per_user,
           std::make_shared<tg_snapshot::BackendGenerationClient>(
               config.backend_snapshot_url,
-              config.internal_token,
+              outbound_token,
               config.backend_timeout_ms),
           store,
           metrics);
+      loader = std::make_unique<tg_snapshot::ResilientSnapshotLoader>(
+          std::move(v2_loader),
+          std::move(v1_loader));
     } else {
-      loader = std::make_unique<tg_snapshot::SnapshotLoader>(
-          config,
-          tg_snapshot::BackendSnapshotClient(
-              config.backend_snapshot_url,
-              config.internal_token,
-              config.backend_timeout_ms),
-          store,
-          metrics);
+      loader = std::move(v1_loader);
     }
 
     try {

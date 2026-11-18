@@ -42,12 +42,22 @@ struct SnapshotEdgeRecord {
   std::optional<std::int64_t> updated_at_ms;
 };
 
+// V1 快照一致性分页游标，消除 skip(offset) 并发漏边与重边撕裂
+struct SnapshotCursor {
+  std::string after_source_user_id;
+  std::string after_target_user_id;
+  std::string after_id;
+
+  bool operator==(const SnapshotCursor& other) const = default;
+};
+
 struct SnapshotPagePayload {
   std::vector<SnapshotEdgeRecord> edges;
-  std::size_t offset;
-  std::size_t limit;
+  std::size_t offset{0};
+  std::size_t limit{0};
   std::optional<std::size_t> next_offset;
-  bool done;
+  std::optional<SnapshotCursor> next_cursor;
+  bool done{true};
   std::string snapshot_version;
 };
 

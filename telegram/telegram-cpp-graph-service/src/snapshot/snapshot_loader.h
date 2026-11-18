@@ -67,4 +67,18 @@ class GenerationSnapshotLoader final : public SnapshotRefresher {
   Clock clock_;
 };
 
+// 优先执行 V2 Generation 快照拉取，上游未激活 Generation 时自动回退至一致性游标 V1 加载器
+class ResilientSnapshotLoader final : public SnapshotRefresher {
+ public:
+  ResilientSnapshotLoader(
+      std::unique_ptr<SnapshotRefresher> primary,
+      std::unique_ptr<SnapshotRefresher> fallback);
+
+  void refresh_once() override;
+
+ private:
+  std::unique_ptr<SnapshotRefresher> primary_;
+  std::unique_ptr<SnapshotRefresher> fallback_;
+};
+
 }  // namespace telegram::graph::snapshot
