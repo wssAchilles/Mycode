@@ -10,6 +10,8 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 )
 
+const DefaultMaxLen int64 = 10000
+
 type StreamClient interface {
 	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
 }
@@ -17,12 +19,14 @@ type StreamClient interface {
 type Writer struct {
 	client    StreamClient
 	streamKey string
+	maxLen    int64
 }
 
 func New(client StreamClient, streamKey string) *Writer {
 	return &Writer{
 		client:    client,
 		streamKey: streamKey,
+		maxLen:    DefaultMaxLen,
 	}
 }
 
@@ -45,8 +49,11 @@ func (w *Writer) write(ctx context.Context, sourceMessageID string, reason strin
 	for key, value := range metadata {
 		values[key] = value
 	}
+	// 强制附带近似最大长度上限，防止死信流无界增长挤占 Redis 内存
 	_, err := w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamKey,
+		MaxLen: w.maxLen,
+		Approx: true,
 		Values: values,
 	}).Result()
 	if err != nil {

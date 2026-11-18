@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http/httptest"
@@ -56,6 +57,7 @@ func (f *fakeReplayOperator) Drain(
 func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
 	server := New("127.0.0.1:4100", config.Config{
+		InternalToken:                "secret",
 		ExecutionMode:                "primary",
 		GoPrimaryReady:               true,
 		PrimaryPrivateEnabled:        true,
@@ -93,6 +95,7 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0), nil)
 
 	req := httptest.NewRequest("GET", "/ops/summary", nil)
+	req.Header.Set("X-Internal-Token", "secret")
 	recorder := httptest.NewRecorder()
 	server.Handler.ServeHTTP(recorder, req)
 
@@ -187,6 +190,7 @@ func TestPlatformReplayDrainV2AcceptsOnlyOptionalPositiveLimit(t *testing.T) {
 	}, state, replay, log.New(io.Discard, "", 0), nil)
 
 	summaryRequest := httptest.NewRequest("GET", "/ops/platform/replay/summary", nil)
+	summaryRequest.Header.Set("X-Internal-Token", "secret")
 	summaryRecorder := httptest.NewRecorder()
 	server.Handler.ServeHTTP(summaryRecorder, summaryRequest)
 	if summaryRecorder.Code != 200 {
@@ -294,6 +298,7 @@ func TestReplayWorkerAuthorizationPreservesHealthAndExposesDisabledState(t *test
 	}
 
 	summaryRequest := httptest.NewRequest("GET", "/ops/platform/replay/summary", nil)
+	summaryRequest.Header.Set("X-Internal-Token", "secret")
 	summaryRecorder := httptest.NewRecorder()
 	disabled.Handler.ServeHTTP(summaryRecorder, summaryRequest)
 	var replaySummary platformreplay.Summary
@@ -410,5 +415,81 @@ func TestPlatformProbeRequiresInternalTokenAndReportsRuntime(t *testing.T) {
 	}
 	if payload.RuntimeStat["goroutines"] == nil {
 		t.Fatalf("expected runtime stats in probe, got %#v", payload.RuntimeStat)
+	}
+}
+
+type fakeConsumerHealthState struct {
+	snapshot  map[string]any
+	healthErr error
+}
+
+func (f *fakeConsumerHealthState) Snapshot() map[string]any {
+	return f.snapshot
+}
+
+func (f *fakeConsumerHealthState) Healthy() error {
+	return f.healthErr
+}
+
+func TestHealthReflectsConsumerLivenessAndAllOpsRoutesEnforceToken(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	consumerState := &fakeConsumerHealthState{
+		snapshot: map[string]any{"lifecycle": "running", "healthy": true},
+	}
+	server := New("127.0.0.1:4100", config.Config{
+		InternalToken: "super-secret-token",
+		ExecutionMode: "primary",
+	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0), consumerState)
+
+	// /health 免 Token 返回 200
+	healthOK := httptest.NewRecorder()
+	server.Handler.ServeHTTP(healthOK, httptest.NewRequest("GET", "/health", nil))
+	if healthOK.Code != 200 {
+		t.Fatalf("expected /health 200 without token, got %d", healthOK.Code)
+	}
+
+	// 当主 StreamConsumer 循环异常停止时，/health 必须返回 503
+	consumerState.healthErr = errors.New("stream_consumer_stopped: redis connection lost")
+	consumerState.snapshot = map[string]any{"lifecycle": "stopped", "healthy": false}
+	healthDead := httptest.NewRecorder()
+	server.Handler.ServeHTTP(healthDead, httptest.NewRequest("GET", "/health", nil))
+	if healthDead.Code != 503 {
+		t.Fatalf("expected /health 503 when main consumer stopped, got %d: %s", healthDead.Code, healthDead.Body.String())
+	}
+
+	// 全部 /ops/* 端点均必须强制校验 X-Internal-Token
+	opsRoutes := []struct {
+		method string
+		path   string
+		okCode int
+	}{
+		{method: "GET", path: "/ops/summary", okCode: 200},
+		{method: "GET", path: "/ops/platform/replay/summary", okCode: 200},
+		{method: "GET", path: "/ops/platform/probe", okCode: 200},
+		{method: "GET", path: "/ops/consumer", okCode: 200},
+		{method: "POST", path: "/ops/platform/replay/drain", okCode: 503},
+	}
+	for _, route := range opsRoutes {
+		missingRec := httptest.NewRecorder()
+		server.Handler.ServeHTTP(missingRec, httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`)))
+		if missingRec.Code != 403 {
+			t.Fatalf("expected 403 for %s %s without token, got %d", route.method, route.path, missingRec.Code)
+		}
+
+		wrongRec := httptest.NewRecorder()
+		wrongReq := httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`))
+		wrongReq.Header.Set("X-Internal-Token", "wrong-token")
+		server.Handler.ServeHTTP(wrongRec, wrongReq)
+		if wrongRec.Code != 403 {
+			t.Fatalf("expected 403 for %s %s with wrong token, got %d", route.method, route.path, wrongRec.Code)
+		}
+
+		okRec := httptest.NewRecorder()
+		okReq := httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`))
+		okReq.Header.Set("X-Internal-Token", "super-secret-token")
+		server.Handler.ServeHTTP(okRec, okReq)
+		if okRec.Code != route.okCode {
+			t.Fatalf("expected %d for %s %s with valid token, got %d", route.okCode, route.method, route.path, okRec.Code)
+		}
 	}
 }

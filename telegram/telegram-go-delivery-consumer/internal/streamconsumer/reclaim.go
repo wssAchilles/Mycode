@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	redis "github.com/redis/go-redis/v9"
+
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
@@ -28,8 +30,14 @@ func (c *StreamConsumer) reclaimPendingIfDue(ctx context.Context) error {
 
 func (c *StreamConsumer) reclaimPendingStream(ctx context.Context, streamKey string) error {
 	scanner := reclaimstate.Scanner{
-		Client:   c.client,
-		Handler:  c.handleMessage,
+		Client: c.client,
+		Handler: func(ctx context.Context, sk string, msg redis.XMessage) error {
+			err := c.handleMessage(ctx, sk, msg)
+			if err != nil {
+				c.applyRecovery(ctx, err, msg.ID)
+			}
+			return err
+		},
 		Recorder: reclaimSummaryRecorder{state: c.state},
 		Cursors:  c.reclaimCursors,
 		Logger:   c.logger,
@@ -56,11 +64,8 @@ func (r reclaimSummaryRecorder) DeadLetterCount() int {
 	return r.state.Snapshot().DeadLetters
 }
 
-func (r reclaimSummaryRecorder) RecordError(message string) {
-	if r.state == nil {
-		return
-	}
-	r.state.RecordError(message)
+func (r reclaimSummaryRecorder) RecordError(_ string) {
+	// 错误指标已由上层 applyRecovery 统一记录，避免同一条回收失败重复计数
 }
 
 func (r reclaimSummaryRecorder) RecordPendingReclaimDuration(

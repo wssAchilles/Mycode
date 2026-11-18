@@ -16,11 +16,7 @@ type ReplaySummaryBuilder interface {
 }
 
 func PlatformProbe(cfg config.Config, state *summary.Summary, replay ReplaySummaryBuilder) stdhttp.HandlerFunc {
-	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if cfg.InternalToken == "" || r.Header.Get("X-Internal-Token") != cfg.InternalToken {
-			writeJSON(w, stdhttp.StatusForbidden, map[string]any{"error": "forbidden"})
-			return
-		}
+	return RequireInternalToken(cfg.InternalToken, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if r.Method != stdhttp.MethodGet {
 			writeJSON(w, stdhttp.StatusMethodNotAllowed, map[string]any{
 				"error": "method_not_allowed",
@@ -52,5 +48,5 @@ func PlatformProbe(cfg config.Config, state *summary.Summary, replay ReplaySumma
 			replayPayload,
 			runtimesnapshot.Collect(),
 		))
-	}
+	})
 }

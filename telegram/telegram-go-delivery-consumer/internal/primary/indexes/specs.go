@@ -17,6 +17,7 @@ type CollectionSpec struct {
 	Indexes    []mongo.IndexModel
 }
 
+// Specs 返回主投影依赖集合的标准索引声明，不硬编码自定义索引名以避免与 Mongoose 默认索引名发生 Code 85 冲突。
 func Specs(names CollectionNames) []CollectionSpec {
 	return []CollectionSpec{
 		{
@@ -27,7 +28,7 @@ func Specs(names CollectionNames) []CollectionSpec {
 						{Key: "chatId", Value: 1},
 						{Key: "userId", Value: 1},
 					},
-					Options: options.Index().SetName("member_state_chat_user_unique").SetUnique(true),
+					Options: options.Index().SetUnique(true),
 				},
 			},
 		},
@@ -36,19 +37,18 @@ func Specs(names CollectionNames) []CollectionSpec {
 			Indexes: []mongo.IndexModel{
 				{
 					Keys: bson.D{
+						{Key: "userId", Value: 1},
 						{Key: "type", Value: 1},
 						{Key: "chatId", Value: 1},
 						{Key: "messageId", Value: 1},
-						{Key: "userId", Value: 1},
 					},
-					Options: options.Index().SetName("update_log_message_user_lookup"),
 				},
 				{
 					Keys: bson.D{
 						{Key: "userId", Value: 1},
 						{Key: "updateId", Value: 1},
 					},
-					Options: options.Index().SetName("update_log_user_update_unique").SetUnique(true),
+					Options: options.Index().SetUnique(true),
 				},
 			},
 		},
@@ -60,7 +60,6 @@ func Specs(names CollectionNames) []CollectionSpec {
 						{Key: "chunks.status", Value: 1},
 						{Key: "updatedAt", Value: 1},
 					},
-					Options: options.Index().SetName("outbox_chunk_status_updated"),
 				},
 			},
 		},

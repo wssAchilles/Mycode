@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	defaultDrainLimit = 25
-	maxDrainLimit     = 200
-	wakeQueueSize     = 64
+	defaultDrainLimit          = 25
+	maxDrainLimit              = 200
+	wakeQueueSize              = 64
+	defaultMaxCompletedEntries = 10000
+	defaultCompletedTTL        = 7 * 24 * time.Hour
 )
 
 var (
@@ -50,6 +52,11 @@ type ReplayDispatcher interface {
 	) (platformcontracts.DispatchResult, error)
 }
 
+type completionMaintenanceClient interface {
+	HDel(ctx context.Context, key string, fields ...string) *redis.IntCmd
+	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
+}
+
 type WorkerConfig struct {
 	StreamKey                string
 	ConsumerGroup            string
@@ -62,6 +69,8 @@ type WorkerConfig struct {
 	PendingReclaimMaxBatches int
 	ReclaimCursorMode        string
 	DeadLetterStreamKey      string
+	MaxCompletedEntries      int
+	CompletedTTL             time.Duration
 }
 
 type Summary struct {
@@ -96,26 +105,32 @@ type cycleRequest struct {
 }
 
 type Worker struct {
-	client        WorkerClient
-	dispatcher    ReplayDispatcher
-	writer        *Writer
-	deadLetter    *dlq.Writer
-	logger        *log.Logger
-	cfg           WorkerConfig
-	streamKey     string
-	completedKey  string
-	consumerGroup string
-	consumerName  string
-	wakes         chan cycleRequest
-	cursors       *reclaim.CursorTracker
-	scheduler     *reclaim.Scheduler
-	running       atomic.Bool
-	cycleHealthy  atomic.Bool
-	started       atomic.Bool
-	runSequence   atomic.Uint64
-	deadLetters   atomic.Int64
-	stateMu       sync.RWMutex
-	lastError     string
+	client              WorkerClient
+	dispatcher          ReplayDispatcher
+	writer              *Writer
+	deadLetter          *dlq.Writer
+	logger              *log.Logger
+	cfg                 WorkerConfig
+	streamKey           string
+	auditStreamKey      string
+	completedKey        string
+	consumerGroup       string
+	consumerName        string
+	wakes               chan cycleRequest
+	cursors             *reclaim.CursorTracker
+	scheduler           *reclaim.Scheduler
+	running             atomic.Bool
+	cycleHealthy        atomic.Bool
+	started             atomic.Bool
+	runSequence         atomic.Uint64
+	deadLetters         atomic.Int64
+	stateMu             sync.RWMutex
+	lastError           string
+	completedMu         sync.Mutex
+	completedOrder      []string
+	completedSeen       map[string]struct{}
+	maxCompletedEntries int
+	completedTTL        time.Duration
 }
 
 func NewWorker(client WorkerClient, cfg WorkerConfig, dispatcher ReplayDispatcher, logger *log.Logger) *Worker {
@@ -147,21 +162,34 @@ func NewWorker(client WorkerClient, cfg WorkerConfig, dispatcher ReplayDispatche
 	if cfg.ReclaimCursorMode != "restart" {
 		cfg.ReclaimCursorMode = "resume"
 	}
+	if cfg.MaxCompletedEntries <= 0 {
+		cfg.MaxCompletedEntries = defaultMaxCompletedEntries
+	}
+	if cfg.CompletedTTL <= 0 {
+		cfg.CompletedTTL = defaultCompletedTTL
+	}
 
+	auditStreamKey := AuditStreamKey(cfg.StreamKey)
 	worker := &Worker{
-		client:        client,
-		dispatcher:    dispatcher,
-		writer:        New(client, cfg.StreamKey),
-		deadLetter:    dlq.New(client, cfg.DeadLetterStreamKey),
-		logger:        logger,
-		cfg:           cfg,
-		streamKey:     cfg.StreamKey,
-		completedKey:  CompletedKey(cfg.StreamKey),
-		consumerGroup: cfg.ConsumerGroup + ":platform-replay:v2",
-		consumerName:  cfg.ConsumerName + ":platform-replay",
-		wakes:         make(chan cycleRequest, wakeQueueSize),
-		cursors:       reclaim.NewCursorTracker(),
-		scheduler:     reclaim.NewScheduler(cfg.PendingClaimInterval),
+		client:     client,
+		dispatcher: dispatcher,
+		// 将重放审计记录写入独立审计流，阻断同流回写引发的自激放大
+		writer:              New(client, auditStreamKey),
+		deadLetter:          dlq.New(client, cfg.DeadLetterStreamKey),
+		logger:              logger,
+		cfg:                 cfg,
+		streamKey:           cfg.StreamKey,
+		auditStreamKey:      auditStreamKey,
+		completedKey:        CompletedKey(cfg.StreamKey),
+		consumerGroup:       cfg.ConsumerGroup + ":platform-replay:v2",
+		consumerName:        cfg.ConsumerName + ":platform-replay",
+		wakes:               make(chan cycleRequest, wakeQueueSize),
+		cursors:             reclaim.NewCursorTracker(),
+		scheduler:           reclaim.NewScheduler(cfg.PendingClaimInterval),
+		completedOrder:      make([]string, 0, 256),
+		completedSeen:       make(map[string]struct{}, 256),
+		maxCompletedEntries: cfg.MaxCompletedEntries,
+		completedTTL:        cfg.CompletedTTL,
 	}
 	worker.cycleHealthy.Store(true)
 	return worker
@@ -172,6 +200,14 @@ func CompletedKey(streamKey string) string {
 		return ""
 	}
 	return strings.TrimSpace(streamKey) + ":completed"
+}
+
+// AuditStreamKey 返回平台重放审计独立流键名，避免与待重放源流混用。
+func AuditStreamKey(streamKey string) string {
+	if strings.TrimSpace(streamKey) == "" {
+		return ""
+	}
+	return strings.TrimSpace(streamKey) + ":audit"
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -347,6 +383,10 @@ func (w *Worker) processMessageForCycle(ctx context.Context, message redis.XMess
 		w.deadLetters.Add(1)
 		return w.ack(ctx, message.ID)
 	}
+	// 若流中存在历史回写的 completed 审计记录，直接确认跳过以防重放自激放大
+	if entry.AlreadyCompleted {
+		return w.ack(ctx, message.ID)
+	}
 	completionField := entry.Envelope.Topic + ":" + entry.Envelope.EventID
 	completed, err := w.client.HExists(ctx, w.completedKey, completionField).Result()
 	if err != nil {
@@ -376,10 +416,45 @@ func (w *Worker) processMessageForCycle(ctx context.Context, message redis.XMess
 	if _, err := w.writer.WriteWithRunID(ctx, entry.Envelope, result, request.runID); err != nil {
 		return fmt.Errorf("append replay audit for %s: %w", entry.Envelope.EventID, err)
 	}
-	if err := w.client.HSet(ctx, w.completedKey, completionField, platformcontracts.ReplayStatusCompleted).Err(); err != nil {
+	if err := w.persistCompletion(ctx, completionField); err != nil {
 		return fmt.Errorf("persist replay completion for %s: %w", entry.Envelope.EventID, err)
 	}
 	return w.ack(ctx, message.ID)
+}
+
+func (w *Worker) persistCompletion(ctx context.Context, completionField string) error {
+	if err := w.client.HSet(ctx, w.completedKey, completionField, platformcontracts.ReplayStatusCompleted).Err(); err != nil {
+		return err
+	}
+	maint, ok := w.client.(completionMaintenanceClient)
+	var evicted []string
+	shouldRefreshTTL := false
+
+	w.completedMu.Lock()
+	if _, exists := w.completedSeen[completionField]; !exists {
+		w.completedSeen[completionField] = struct{}{}
+		w.completedOrder = append(w.completedOrder, completionField)
+		for w.maxCompletedEntries > 0 && len(w.completedOrder) > w.maxCompletedEntries {
+			oldest := w.completedOrder[0]
+			w.completedOrder = w.completedOrder[1:]
+			delete(w.completedSeen, oldest)
+			evicted = append(evicted, oldest)
+		}
+		if len(w.completedOrder) == 1 || len(w.completedOrder)%64 == 0 {
+			shouldRefreshTTL = true
+		}
+	}
+	w.completedMu.Unlock()
+
+	if ok {
+		if len(evicted) > 0 {
+			_ = maint.HDel(ctx, w.completedKey, evicted...).Err()
+		}
+		if shouldRefreshTTL && w.completedTTL > 0 {
+			_ = maint.Expire(ctx, w.completedKey, w.completedTTL).Err()
+		}
+	}
+	return nil
 }
 
 func (w *Worker) ack(ctx context.Context, messageID string) error {
@@ -439,9 +514,10 @@ func (w *Worker) summary(available bool) Summary {
 }
 
 type replayEntry struct {
-	Attempt   int
-	LagMillis int64
-	Envelope  buscontracts.PlatformEventEnvelope
+	Attempt          int
+	LagMillis        int64
+	AlreadyCompleted bool
+	Envelope         buscontracts.PlatformEventEnvelope
 }
 
 func decodeReplayEntry(message redis.XMessage) (replayEntry, error) {
@@ -453,10 +529,12 @@ func decodeReplayEntry(message redis.XMessage) (replayEntry, error) {
 	if attempt <= 0 {
 		attempt = 1
 	}
+	status := strings.TrimSpace(readStringValue(message.Values, "status"))
 	return replayEntry{
-		Attempt:   attempt,
-		LagMillis: readInt64Value(message.Values, "lag_ms"),
-		Envelope:  envelope,
+		Attempt:          attempt,
+		LagMillis:        readInt64Value(message.Values, "lag_ms"),
+		AlreadyCompleted: strings.EqualFold(status, platformcontracts.ReplayStatusCompleted),
+		Envelope:         envelope,
 	}, nil
 }
 

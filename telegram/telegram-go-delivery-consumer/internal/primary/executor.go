@@ -342,21 +342,10 @@ func (e *MongoExecutor) RecordFailure(ctx context.Context, payload FanoutPayload
 		status = "failed"
 	}
 	now := time.Now().UTC()
-	_, err = e.outboxes.UpdateByID(ctx, outboxID, bson.M{
-		"$set": bson.M{
-			"status":                           status,
-			"lastErrorMessage":                 reason,
-			"updatedAt":                        now,
-			"chunks.$[chunk].status":           status,
-			"chunks.$[chunk].lastErrorMessage": reason,
-			"chunks.$[chunk].lastAttemptAt":    now,
-		},
-	}, options.UpdateOne().SetArrayFilters([]any{bson.M{"chunk.status": bson.M{"$in": []string{"queued", "projecting"}}}}))
+	// 单次原子聚合更新未完成分片状态并同步重算顶层聚合计数
+	_, err = e.outboxes.UpdateByID(ctx, outboxID, buildOutboxRecordFailurePipeline(status, reason, now))
 	if err != nil {
 		return fmt.Errorf("record outbox failure: %w", err)
-	}
-	if refreshErr := e.reconcileOutboxAggregates(ctx, outboxID); refreshErr != nil {
-		return refreshErr
 	}
 	return nil
 }

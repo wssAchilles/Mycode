@@ -1,6 +1,11 @@
 package primary
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
 
 func TestCompletedChunkProjectionsKeepsOnlyCompletedChunks(t *testing.T) {
 	completed := completedChunkProjections([]outboxChunk{
@@ -83,5 +88,26 @@ func TestChunkAggregateViewAppliesStateTransitionsWithoutDrift(t *testing.T) {
 	}
 	if len(completed.QueuedJobIDs) != 1 || completed.QueuedJobIDs[0] != "job-0-retry" {
 		t.Fatalf("expected latest chunk job id only after repeated completion, got %#v", completed.QueuedJobIDs)
+	}
+}
+
+func TestAtomicOutboxPipelinesMarshalCleanlyAsThreeStageUpdates(t *testing.T) {
+	now := time.Now().UTC()
+	pipelines := []struct {
+		name     string
+		pipeline any
+		stages   int
+	}{
+		{name: "started", pipeline: buildOutboxChunkStartedPipeline(0, "job-0", 1, now), stages: 3},
+		{name: "completed", pipeline: buildOutboxChunkCompletedPipeline(0, "job-0", 1, 20, 1, now), stages: 3},
+		{name: "failed", pipeline: buildOutboxChunkFailedPipeline(0, "job-0", 3, "boom", now), stages: 3},
+		{name: "record_failure", pipeline: buildOutboxRecordFailurePipeline("failed", "boom", now), stages: 3},
+	}
+
+	for _, tc := range pipelines {
+		raw, err := bson.Marshal(bson.M{"pipeline": tc.pipeline})
+		if err != nil || len(raw) == 0 {
+			t.Fatalf("marshal %s pipeline failed: %v", tc.name, err)
+		}
 	}
 }

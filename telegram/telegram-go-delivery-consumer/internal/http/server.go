@@ -22,9 +22,34 @@ type replayOperator interface {
 	Ready(ctx context.Context) error
 }
 
-// ConsumerStateProvider exposes the consumer's lifecycle state for the /ops endpoint.
+// ConsumerStateProvider 暴露消费者的运行快照供 /ops/consumer 与健康探针读取。
 type ConsumerStateProvider interface {
 	Snapshot() map[string]any
+}
+
+// ConsumerHealthProvider 暴露主消费循环真实健康状态，避免主消费者退出后 /health 仍假阳返回 200。
+type ConsumerHealthProvider interface {
+	Healthy() error
+}
+
+func checkConsumerHealth(consumerState ConsumerStateProvider) error {
+	if consumerState == nil {
+		return nil
+	}
+	if healthProvider, ok := consumerState.(ConsumerHealthProvider); ok {
+		return healthProvider.Healthy()
+	}
+	snapshot := consumerState.Snapshot()
+	if lifecycle, _ := snapshot["lifecycle"].(string); lifecycle == "stopped" || lifecycle == "draining" {
+		return fmt.Errorf("stream_consumer_%s", lifecycle)
+	}
+	if draining, _ := snapshot["draining"].(bool); draining {
+		return errors.New("stream_consumer_draining")
+	}
+	if healthy, exists := snapshot["healthy"].(bool); exists && !healthy {
+		return errors.New("stream_consumer_unhealthy")
+	}
+	return nil
 }
 
 func New(
@@ -36,7 +61,12 @@ func New(
 	consumerState ConsumerStateProvider,
 ) *stdhttp.Server {
 	mux := stdhttp.NewServeMux()
+	// /health 保持免 Token 供容器编排探针调用，同时覆盖主 StreamConsumer 与平台重放 Worker 存活态
 	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if err := checkConsumerHealth(consumerState); err != nil {
+			writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 		if cfg.PlatformReplayWorkerEnabled {
 			if replay == nil {
 				writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{"ok": false, "error": "platform_replay_worker_unavailable"})
@@ -54,8 +84,8 @@ func New(
 			"executionMode": cfg.ExecutionMode,
 		})
 	})
-	mux.HandleFunc("/ops/summary", opshandlers.Summary(cfg, state))
-	mux.HandleFunc("/ops/platform/replay/summary", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	mux.HandleFunc("/ops/summary", opshandlers.RequireInternalToken(cfg.InternalToken, opshandlers.Summary(cfg, state)))
+	mux.HandleFunc("/ops/platform/replay/summary", opshandlers.RequireInternalToken(cfg.InternalToken, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if !cfg.PlatformReplayWorkerEnabled || replay == nil {
 			mode := "disabled"
 			if cfg.PlatformReplayWorkerEnabled {
@@ -84,12 +114,8 @@ func New(
 			return
 		}
 		writeJSON(w, stdhttp.StatusOK, payload)
-	})
-	mux.HandleFunc("/ops/platform/replay/drain", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		if cfg.InternalToken == "" || r.Header.Get("X-Internal-Token") != cfg.InternalToken {
-			writeJSON(w, stdhttp.StatusForbidden, map[string]any{"error": "forbidden"})
-			return
-		}
+	}))
+	mux.HandleFunc("/ops/platform/replay/drain", opshandlers.RequireInternalToken(cfg.InternalToken, func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if r.Method != stdhttp.MethodPost {
 			writeJSON(w, stdhttp.StatusMethodNotAllowed, map[string]any{
 				"error": "method_not_allowed",
@@ -131,15 +157,15 @@ func New(
 			return
 		}
 		writeJSON(w, stdhttp.StatusAccepted, result)
-	})
+	}))
 	mux.HandleFunc("/ops/platform/probe", opshandlers.PlatformProbe(cfg, state, replay))
-	mux.HandleFunc("/ops/consumer", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	mux.HandleFunc("/ops/consumer", opshandlers.RequireInternalToken(cfg.InternalToken, func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		if consumerState == nil {
 			writeJSON(w, stdhttp.StatusOK, map[string]any{"available": false})
 			return
 		}
 		writeJSON(w, stdhttp.StatusOK, consumerState.Snapshot())
-	})
+	}))
 
 	return &stdhttp.Server{
 		Addr:              bindAddr,

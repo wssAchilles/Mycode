@@ -5,13 +5,15 @@ services:
     command:
       - redis-server
       - --appendonly
-      - "no"
+      - "yes"
+      - --appendfsync
+      - everysec
       - --save
       - ""
       - --maxmemory
-      - 256mb
+      - "${REDIS_MAXMEMORY:-256mb}"
       - --maxmemory-policy
-      - noeviction
+      - volatile-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -93,6 +95,25 @@ services:
       - "127.0.0.1:4200:4200"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  graph_kernel:
+    build:
+      context: ../../telegram-cpp-graph-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4300:4300"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4300/health"]
       interval: 20s
       timeout: 5s
       retries: 5

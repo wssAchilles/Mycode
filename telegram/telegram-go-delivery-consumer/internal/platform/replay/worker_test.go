@@ -544,3 +544,88 @@ func TestWorkerRejectsDrainLimitAboveMaximum(t *testing.T) {
 		t.Fatalf("over-limit drain request queued work")
 	}
 }
+
+type boundedReplayMockClient struct {
+	*fakeWorkerClient
+	auditStreams  []string
+	auditMaxLens  []int64
+	auditApprox   []bool
+	deletedFields []string
+	expiredTTL    time.Duration
+}
+
+func (b *boundedReplayMockClient) XAdd(ctx context.Context, args *redis.XAddArgs) *redis.StringCmd {
+	b.auditStreams = append(b.auditStreams, args.Stream)
+	b.auditMaxLens = append(b.auditMaxLens, args.MaxLen)
+	b.auditApprox = append(b.auditApprox, args.Approx)
+	return b.fakeWorkerClient.XAdd(ctx, args)
+}
+
+func (b *boundedReplayMockClient) HDel(_ context.Context, _ string, fields ...string) *redis.IntCmd {
+	b.deletedFields = append(b.deletedFields, fields...)
+	cmd := redis.NewIntCmd(context.Background())
+	cmd.SetVal(int64(len(fields)))
+	return cmd
+}
+
+func (b *boundedReplayMockClient) Expire(_ context.Context, _ string, expiration time.Duration) *redis.BoolCmd {
+	b.expiredTTL = expiration
+	cmd := redis.NewBoolCmd(context.Background())
+	cmd.SetVal(true)
+	return cmd
+}
+
+// TestWorkerSeparatesAuditStreamSkipsCompletedAndCapsDedupeSet 验证重放审计分流、跳过 completed 记录与去重集合容量滚动清理。
+func TestWorkerSeparatesAuditStreamSkipsCompletedAndCapsDedupeSet(t *testing.T) {
+	operations := &operationLog{}
+	client := &boundedReplayMockClient{
+		fakeWorkerClient: &fakeWorkerClient{log: operations},
+	}
+	dispatcher := &fakeReplayDispatcher{log: operations}
+	worker := NewWorker(client, WorkerConfig{
+		StreamKey:           "platform:events:replay:v1",
+		ConsumerGroup:       "go-delivery",
+		ConsumerName:        "worker-a",
+		DeadLetterStreamKey: "platform:events:dlq:v1",
+		MaxCompletedEntries: 2,
+		CompletedTTL:        24 * time.Hour,
+	}, dispatcher, log.New(io.Discard, "", 0))
+
+	// 1. 若消息本身已是 status=completed 历史审计记录，必须直接 XACK 跳过，不触发副作用与回写
+	alreadyCompletedMsg := replayTestMessage("0-1", "evt-already-done")
+	alreadyCompletedMsg.Values["status"] = platformcontracts.ReplayStatusCompleted
+	if err := worker.processMessage(context.Background(), alreadyCompletedMsg); err != nil {
+		t.Fatalf("process completed audit entry failed: %v", err)
+	}
+	if got := operations.snapshot(); !reflect.DeepEqual(got, []string{"ack"}) {
+		t.Fatalf("expected status=completed entry to ack immediately without side effects, got %#v", got)
+	}
+
+	// 2. 连续重放 3 条事件：审计必须写入独立 :audit 流且附带 Approx MaxLen，超出容量 2 后自动 HDel 最旧去重键
+	for i := 1; i <= 3; i++ {
+		msg := replayTestMessage(fmt.Sprintf("%d-0", i), fmt.Sprintf("evt-cap-%d", i))
+		if err := worker.processMessage(context.Background(), msg); err != nil {
+			t.Fatalf("process message %d failed: %v", i, err)
+		}
+	}
+
+	wantStreams := []string{
+		"platform:events:replay:v1:audit",
+		"platform:events:replay:v1:audit",
+		"platform:events:replay:v1:audit",
+	}
+	if !reflect.DeepEqual(client.auditStreams, wantStreams) {
+		t.Fatalf("audit entries must write to dedicated :audit stream: got %#v want %#v", client.auditStreams, wantStreams)
+	}
+	for i := range client.auditMaxLens {
+		if client.auditMaxLens[i] != DefaultMaxLen || !client.auditApprox[i] {
+			t.Fatalf("expected bounded approx MaxLen=%d on audit XADD, got maxLen=%d approx=%t", DefaultMaxLen, client.auditMaxLens[i], client.auditApprox[i])
+		}
+	}
+	if !reflect.DeepEqual(client.deletedFields, []string{"presence_fanout_requested:evt-cap-1"}) {
+		t.Fatalf("expected oldest completion field evicted via HDel, got %#v", client.deletedFields)
+	}
+	if client.expiredTTL != 24*time.Hour {
+		t.Fatalf("expected rolling TTL applied to completed hash, got %v", client.expiredTTL)
+	}
+}

@@ -1,8 +1,22 @@
+upstream telegram_gateway {
+    server 127.0.0.1:4000;
+    keepalive 32;
+}
+
 server {
     listen 80;
     server_name api.xuziqi.tech;
 
     client_max_body_size 50m;
+
+    # 阻断公网直接访问内部服务间 RPC 路由与内部就绪度探针
+    location ^~ /internal/ {
+        return 403;
+    }
+
+    location = /ready {
+        return 403;
+    }
 
     # Phase 26: 实时网关 2B 阶段 (Rust Socket 终结器)
     # 选项 A (Canary 灰度切流):
@@ -11,9 +25,9 @@ server {
     #     *       127.0.0.1:5000;  # 存量维持 Node
     # }
     # 选项 B (全量切流 2B 完成):
-    # 直接将 proxy_pass 指向 http://127.0.0.1:4000
+    # 直接将 proxy_pass 指向 http://telegram_gateway
     location /socket.io/ {
-        proxy_pass http://127.0.0.1:4000;
+        proxy_pass http://telegram_gateway;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -25,14 +39,13 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:4000;
+        proxy_pass http://telegram_gateway;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection "";
         proxy_read_timeout 120s;
     }
 }

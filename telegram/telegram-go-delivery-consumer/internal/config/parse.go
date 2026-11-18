@@ -1,22 +1,60 @@
 package config
 
 import (
+	"crypto/tls"
+	"fmt"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
+// BuildRedisOptions 解析 redis:// 或 rediss:// 连接串，支持 TLS 与 Redis ACL 用户名密码。
+func BuildRedisOptions(rawURL string) (*redis.Options, error) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty redis url")
+	}
+	if !strings.Contains(trimmed, "://") {
+		return &redis.Options{
+			Addr: trimmed,
+		}, nil
+	}
+	opts, err := redis.ParseURL(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	if opts.TLSConfig != nil && opts.TLSConfig.MinVersion == 0 {
+		opts.TLSConfig.MinVersion = tls.VersionTLS12
+	}
+	return opts, nil
+}
+
 func RedisAddress(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.Host == "" {
 		return "redis:6379"
 	}
-	return parsed.Host
+	host := parsed.Host
+	if !strings.Contains(host, ":") {
+		return host + ":6379"
+	}
+	return host
+}
+
+// RedisUsername 提取 Redis ACL 用户名。
+func RedisUsername(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.User == nil {
+		return ""
+	}
+	return parsed.User.Username()
 }
 
 func RedisPassword(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.User == nil {
 		return ""
 	}
@@ -24,8 +62,20 @@ func RedisPassword(rawURL string) string {
 	return password
 }
 
+// RedisTLSConfig 当连接串使用 rediss:// 协议时返回最小 TLS 1.2 配置。
+func RedisTLSConfig(rawURL string) *tls.Config {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "rediss") {
+		return nil
+	}
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: parsed.Hostname(),
+	}
+}
+
 func RedisDB(rawURL string) int {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return 0
 	}

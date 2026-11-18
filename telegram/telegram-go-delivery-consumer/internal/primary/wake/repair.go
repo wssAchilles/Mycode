@@ -9,6 +9,8 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+const DefaultMaxLen int64 = 10000
+
 type RepairStreamClient interface {
 	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
 }
@@ -24,10 +26,11 @@ type RepairPayload struct {
 type RepairWriter struct {
 	client    RepairStreamClient
 	streamKey string
+	maxLen    int64
 }
 
 func NewRepairWriter(client RepairStreamClient, streamKey string) *RepairWriter {
-	return &RepairWriter{client: client, streamKey: streamKey}
+	return &RepairWriter{client: client, streamKey: streamKey, maxLen: DefaultMaxLen}
 }
 
 func (w *RepairWriter) Write(ctx context.Context, payload RepairPayload) error {
@@ -41,8 +44,11 @@ func (w *RepairWriter) Write(ctx context.Context, payload RepairPayload) error {
 	if err != nil {
 		return fmt.Errorf("encode wake repair recipients: %w", err)
 	}
+	// 为唤醒补偿流设置近似长度上限，防止无消费者时持续堆积
 	_, err = w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamKey,
+		MaxLen: w.maxLen,
+		Approx: true,
 		Values: map[string]interface{}{
 			"outbox_id":     payload.OutboxID,
 			"chunk_index":   payload.ChunkIndex,

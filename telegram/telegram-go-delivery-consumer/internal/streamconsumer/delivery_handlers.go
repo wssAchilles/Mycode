@@ -8,6 +8,8 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/canary"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/common"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
@@ -59,6 +61,27 @@ func (c *StreamConsumer) handleFanoutRequested(
 	return nil
 }
 
+const defaultHardRecipientLimit = 10000
+
+func primaryHardRecipientLimit(cfg config.Config) int {
+	limit := cfg.MaxRecipientsPerChunk * 10
+	if limit < defaultHardRecipientLimit {
+		return defaultHardRecipientLimit
+	}
+	return limit
+}
+
+func isNodeDelegatedPrimaryDispatch(dispatchMode string) bool {
+	return dispatchMode == "go_primary" || dispatchMode == "go_group_canary"
+}
+
+func resolveStreamMaxLen(threshold int64) int64 {
+	if threshold > 0 {
+		return threshold
+	}
+	return 100000
+}
+
 func (c *StreamConsumer) handlePrimaryFanout(
 	ctx context.Context,
 	message redis.XMessage,
@@ -68,7 +91,45 @@ func (c *StreamConsumer) handlePrimaryFanout(
 	primaryPayload := primary.FromEnvelope(message.ID, envelope, payload)
 	eligibility := primary.CheckEligibility(c.cfg, primaryPayload)
 	if !eligibility.Eligible {
+		// 当 Node 已指定事件由 Go 主投递时，防止双端软门控阈值漂移导致直接 XACK 黑洞蒸发消息
+		if c.cfg.ExecutionMode == "primary" && c.cfg.GoPrimaryReady && isNodeDelegatedPrimaryDispatch(primaryPayload.DispatchMode) {
+			recipientCount := len(common.DedupeRecipients(primaryPayload.RecipientIDs))
+			hardLimit := primaryHardRecipientLimit(c.cfg)
+			if (eligibility.Reason == "recipient_limit_exceeded" || eligibility.Reason == "segment_not_enabled") && recipientCount <= hardLimit {
+				c.logger.Printf(
+					"warn: primary gate drift detected for event=%s outbox=%s reason=%s recipients=%d; executing primary projection to prevent message loss",
+					envelope.EventID,
+					primaryPayload.OutboxID,
+					eligibility.Reason,
+					recipientCount,
+				)
+				eligibility = primary.Eligibility{
+					Eligible: true,
+					Reason:   "eligible_drift_override",
+					Segment:  eligibility.Segment,
+				}
+			} else if eligibility.Reason == "recipient_limit_exceeded" && recipientCount > hardLimit {
+				reason := fmt.Sprintf("recipient_hard_limit_exceeded:%d>%d", recipientCount, hardLimit)
+				c.state.RecordPrimarySkipped(envelope.EventID, "recipient_hard_limit_exceeded")
+				if recorder, ok := c.primary.(primary.FailureRecorder); ok {
+					if recordErr := recorder.RecordFailure(ctx, primaryPayload, reason, true); recordErr != nil {
+						c.logger.Printf("record hard-limit primary failure failed: %v", recordErr)
+					}
+				}
+				return fmt.Errorf("primary fanout %s", reason)
+			}
+		}
+	}
+	if !eligibility.Eligible {
 		c.state.RecordPrimarySkipped(envelope.EventID, eligibility.Reason)
+		// 对回退至 Node 队列执行的大群消息同步登记 Shadow 轨迹，确保后续 Canary 对账不失明
+		if eligibility.Reason == "dispatch_mode_not_primary" {
+			tracks := streamdelivery.BuildFanoutShadowTracks(payload, c.cfg.MaxRecipientsPerChunk)
+			for _, track := range tracks {
+				c.shadow.Track(track)
+			}
+			c.state.RecordShadowPlanned(len(tracks), c.shadow.Pending())
+		}
 		return nil
 	}
 	if c.primary == nil {
@@ -126,6 +187,8 @@ func (c *StreamConsumer) retryPrimaryFanout(
 	}
 	_, err = c.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: c.cfg.StreamKey,
+		MaxLen: resolveStreamMaxLen(c.cfg.StreamTrimThreshold),
+		Approx: true,
 		Values: map[string]interface{}{
 			"event": retryEnvelope.RawEvent,
 		},
@@ -231,8 +294,10 @@ func (c *StreamConsumer) handlePoisonMessage(
 	if streamKey == c.cfg.PlatformStreamKey {
 		writer = c.platformDLQ
 	}
+	// 死信写入失败时严禁调用 XAck，直接返回类型化 DLQWriteError 使原消息保留在 PEL 等待后续恢复
 	if err := writer.Write(ctx, message, reason); err != nil {
 		c.logger.Printf("DLQ write failed for message %s: %v (original error: %s)", message.ID, err, reason)
+		return MessageResult{Disposition: DispositionNoAck}, NewDLQWriteError(streamKey, message.ID, err, cause)
 	}
 	c.state.RecordDeadLetter(reason)
 	c.state.RecordError(reason)

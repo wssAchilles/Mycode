@@ -49,34 +49,20 @@ func completedChunkProjections(chunks []outboxChunk) map[int]outboxProjection {
 	return completed
 }
 
+// markChunkStarted 使用 MongoDB 聚合更新管线在单文档原子事务中推进分片为 projecting 并重算顶层统计。
 func (e *MongoExecutor) markChunkStarted(ctx context.Context, outboxID bson.ObjectID, chunkIndex int, jobID string, attemptCount int) error {
-	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
-	if err != nil {
-		return err
-	}
 	now := time.Now().UTC()
-	_, err = e.outboxes.UpdateOne(ctx, bson.M{
+	_, err := e.outboxes.UpdateOne(ctx, bson.M{
 		"_id":               outboxID,
 		"chunks.chunkIndex": chunkIndex,
-	}, bson.M{
-		"$set": bson.M{
-			"status":                    "projecting",
-			"lastDispatchedAt":          now,
-			"updatedAt":                 now,
-			"chunks.$.status":           "projecting",
-			"chunks.$.jobId":            jobID,
-			"chunks.$.lastAttemptAt":    now,
-			"chunks.$.lastErrorMessage": nil,
-			"chunks.$.attemptCount":     attemptCount,
-		},
-	})
+	}, buildOutboxChunkStartedPipeline(chunkIndex, jobID, attemptCount, now))
 	if err != nil {
 		return fmt.Errorf("mark outbox chunk started: %w", err)
 	}
-	applyChunkStarted(&doc, chunkIndex, jobID)
-	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
+	return nil
 }
 
+// markChunkCompleted 使用 MongoDB 聚合更新管线原子写入分片完成结果与顶层投影聚合计数，消除并发 Lost Update。
 func (e *MongoExecutor) markChunkCompleted(
 	ctx context.Context,
 	outboxID bson.ObjectID,
@@ -86,35 +72,18 @@ func (e *MongoExecutor) markChunkCompleted(
 	recipientCount int,
 	projectionCount int,
 ) error {
-	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
-	if err != nil {
-		return err
-	}
 	now := time.Now().UTC()
-	_, err = e.outboxes.UpdateOne(ctx, bson.M{
+	_, err := e.outboxes.UpdateOne(ctx, bson.M{
 		"_id":               outboxID,
 		"chunks.chunkIndex": chunkIndex,
-	}, bson.M{
-		"$set": bson.M{
-			"updatedAt":                 now,
-			"chunks.$.status":           "completed",
-			"chunks.$.jobId":            jobID,
-			"chunks.$.attemptCount":     attemptCount,
-			"chunks.$.lastAttemptAt":    now,
-			"chunks.$.lastErrorMessage": nil,
-			"chunks.$.projection": bson.M{
-				"recipientCount": recipientCount,
-				"chunkCount":     projectionCount,
-			},
-		},
-	})
+	}, buildOutboxChunkCompletedPipeline(chunkIndex, jobID, attemptCount, recipientCount, projectionCount, now))
 	if err != nil {
 		return fmt.Errorf("mark outbox chunk completed: %w", err)
 	}
-	applyChunkCompleted(&doc, chunkIndex, jobID, recipientCount, projectionCount)
-	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
+	return nil
 }
 
+// markChunkFailed 使用 MongoDB 聚合更新管线原子标记毒丸分片失败并同步重算顶层计数。
 func (e *MongoExecutor) markChunkFailed(
 	ctx context.Context,
 	outboxID bson.ObjectID,
@@ -123,33 +92,15 @@ func (e *MongoExecutor) markChunkFailed(
 	attemptCount int,
 	reason string,
 ) error {
-	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
-	if err != nil {
-		return err
-	}
 	now := time.Now().UTC()
-	_, err = e.outboxes.UpdateOne(ctx, bson.M{
+	_, err := e.outboxes.UpdateOne(ctx, bson.M{
 		"_id":               outboxID,
 		"chunks.chunkIndex": chunkIndex,
-	}, bson.M{
-		"$set": bson.M{
-			"status":                            "failed",
-			"lastErrorMessage":                  reason,
-			"updatedAt":                         now,
-			"chunks.$.status":                   "failed",
-			"chunks.$.jobId":                    jobID,
-			"chunks.$.attemptCount":             attemptCount,
-			"chunks.$.lastAttemptAt":            now,
-			"chunks.$.lastErrorMessage":         reason,
-			"chunks.$.failureMetadata.jobId":    jobID,
-			"chunks.$.failureMetadata.poisoned": true,
-		},
-	})
+	}, buildOutboxChunkFailedPipeline(chunkIndex, jobID, attemptCount, reason, now))
 	if err != nil {
 		return fmt.Errorf("mark outbox chunk failed: %w", err)
 	}
-	applyChunkFailed(&doc, chunkIndex, jobID)
-	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
+	return nil
 }
 
 func (e *MongoExecutor) markOutboxCompleted(
@@ -186,37 +137,8 @@ func (e *MongoExecutor) markOutboxCompleted(
 }
 
 func (e *MongoExecutor) reconcileOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {
-	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
-	if err != nil {
-		return err
-	}
-	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
-}
-
-func (e *MongoExecutor) loadOutboxAggregateDocument(ctx context.Context, outboxID bson.ObjectID) (outboxDocument, error) {
-	var doc outboxDocument
-	if err := e.outboxes.FindOne(ctx, bson.M{"_id": outboxID}).Decode(&doc); err != nil {
-		return outboxDocument{}, fmt.Errorf("load outbox aggregates: %w", err)
-	}
-	return doc, nil
-}
-
-func (e *MongoExecutor) applyOutboxAggregatePatch(ctx context.Context, outboxID bson.ObjectID, state outboxAggregateState) error {
 	now := time.Now().UTC()
-	set := bson.M{
-		"status":                  state.Status,
-		"queuedChunkCount":        state.QueuedChunkCount,
-		"completedChunkCount":     state.CompletedChunkCount,
-		"failedChunkCount":        state.FailedChunkCount,
-		"projectedRecipientCount": state.ProjectedRecipientCount,
-		"projectedChunkCount":     state.ProjectedChunkCount,
-		"queuedJobIds":            state.QueuedJobIDs,
-		"updatedAt":               now,
-	}
-	if state.LastCompletedAt != nil {
-		set["lastCompletedAt"] = *state.LastCompletedAt
-	}
-	_, err := e.outboxes.UpdateByID(ctx, outboxID, bson.M{"$set": set})
+	_, err := e.outboxes.UpdateByID(ctx, outboxID, buildOutboxReconcileAggregatesPipeline(now))
 	if err != nil {
 		return fmt.Errorf("refresh outbox aggregates: %w", err)
 	}

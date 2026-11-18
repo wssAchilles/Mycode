@@ -33,11 +33,11 @@ func main() {
 	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.ExecutionMode, cfg.DryRun)
 	state.SetPlatformStreamKey(cfg.PlatformStreamKey)
 	state.SetPlatformReplayStreamKey(cfg.PlatformReplayStreamKey)
-	client := redis.NewClient(&redis.Options{
-		Addr:     config.RedisAddress(cfg.RedisURL),
-		Password: config.RedisPassword(cfg.RedisURL),
-		DB:       config.RedisDB(cfg.RedisURL),
-	})
+	redisOptions, err := config.BuildRedisOptions(cfg.RedisURL)
+	if err != nil {
+		logger.Fatalf("parse redis configuration: %v", err)
+	}
+	client := redis.NewClient(redisOptions)
 	defer client.Close()
 	startupCtx, startupCancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
 	if err := client.Ping(startupCtx).Err(); err != nil {

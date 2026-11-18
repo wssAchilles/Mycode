@@ -2,7 +2,10 @@ package streamconsumer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +55,11 @@ type StreamConsumer struct {
 	trimmer            *StreamTrimmer
 	trimCounter        int
 	draining           atomic.Bool
+	cycleHealthy       atomic.Bool
+	consecutiveErrors  atomic.Int32
+	fatalErrMu         sync.RWMutex
+	fatalErr           string
+	maxRecoveryBackoff time.Duration
 	processDone        chan struct{}
 	tracer             *telemetry.MessageTracer
 	lifecycle          *StateTracker
@@ -114,6 +122,7 @@ func NewWithDeps(
 		reclaimCursors:     reclaimstate.NewCursorTracker(),
 		reclaimScheduler:   reclaimstate.NewScheduler(cfg.PendingClaimInterval),
 		trimmer:            trimmer,
+		maxRecoveryBackoff: defaultMaxRecoveryBackoff,
 		processDone:        make(chan struct{}),
 		tracer:             telemetry.NewMessageTracer(),
 		lifecycle:          NewStateTracker(StateSpawning),
@@ -121,6 +130,7 @@ func NewWithDeps(
 		recipes:            defaultRecipes(),
 		ledger:             NewRecoveryLedger(256),
 	}
+	c.cycleHealthy.Store(true)
 
 	c.msgDispatcher = NewMessageDispatcher(
 		DispatchConfig{WorkerCount: cfg.ConsumerWorkerCount},
@@ -150,13 +160,64 @@ func (c *StreamConsumer) Drain(ctx context.Context) {
 	}
 }
 
-// Snapshot returns the current consumer state for the /ops endpoint.
+// Healthy 校验主消费循环的真实存活健康态，供 /health 探针拦截假阳僵尸实例。
+func (c *StreamConsumer) Healthy() error {
+	if c == nil {
+		return errors.New("stream_consumer_unavailable")
+	}
+	state := c.lifecycle.Current()
+	switch state {
+	case StateStopped:
+		if fatalErr := c.lastFatalError(); fatalErr != "" {
+			return fmt.Errorf("stream_consumer_stopped: %s", fatalErr)
+		}
+		return errors.New("stream_consumer_stopped")
+	case StateDraining:
+		return errors.New("stream_consumer_draining")
+	case StateSpawning, StateConnecting, StateEnsuringGroup:
+		return fmt.Errorf("stream_consumer_not_ready: %s", state)
+	}
+	if c.draining.Load() {
+		return errors.New("stream_consumer_draining")
+	}
+	if !c.cycleHealthy.Load() {
+		return errors.New("stream_consumer_cycle_unhealthy")
+	}
+	return nil
+}
+
+func (c *StreamConsumer) setFatalError(err error) {
+	if err == nil {
+		return
+	}
+	c.fatalErrMu.Lock()
+	defer c.fatalErrMu.Unlock()
+	c.fatalErr = err.Error()
+}
+
+func (c *StreamConsumer) lastFatalError() string {
+	c.fatalErrMu.RLock()
+	defer c.fatalErrMu.RUnlock()
+	return c.fatalErr
+}
+
+// Snapshot 返回当前消费者生命周期与恢复快照，供 /ops/consumer 端点读取。
 func (c *StreamConsumer) Snapshot() map[string]any {
-	return map[string]any{
+	healthErr := c.Healthy()
+	snapshot := map[string]any{
+		"healthy":               healthErr == nil,
 		"lifecycle":             c.lifecycle.Current().String(),
 		"recoveryLedgerEntries": c.ledger.Len(),
+		"consecutiveErrors":     c.consecutiveErrors.Load(),
 		"draining":              c.draining.Load(),
 	}
+	if healthErr != nil {
+		snapshot["healthError"] = healthErr.Error()
+	}
+	if fatalErr := c.lastFatalError(); fatalErr != "" {
+		snapshot["lastFatalError"] = fatalErr
+	}
+	return snapshot
 }
 
 func handleMessageWrapper(c *StreamConsumer) func(ctx context.Context, streamKey string, message redis.XMessage) (MessageResult, error) {

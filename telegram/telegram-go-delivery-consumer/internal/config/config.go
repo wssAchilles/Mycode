@@ -2,6 +2,7 @@ package config
 
 import "fmt"
 
+// Validate 校验投递消费者启动配置，拦截未实现模式与缺失必填项。
 func (c Config) Validate() error {
 	if c.ExecutionMode == "primary" && c.MongoURL == "" {
 		return fmt.Errorf("primary mode requires DELIVERY_CONSUMER_MONGO_URL")
@@ -15,6 +16,9 @@ func (c Config) Validate() error {
 	if c.RedisURL == "" {
 		return fmt.Errorf("redis URL is required")
 	}
+	if _, err := BuildRedisOptions(c.RedisURL); err != nil {
+		return fmt.Errorf("invalid redis URL: %w", err)
+	}
 	if c.PendingClaimCount <= 0 {
 		return fmt.Errorf("pending claim count must be positive")
 	}
@@ -27,8 +31,11 @@ func (c Config) Validate() error {
 	if c.ReservationConcurrency <= 0 || c.ReservationConcurrency > 64 {
 		return fmt.Errorf("reservation concurrency must be 1-64")
 	}
-	if c.ReservationMode != ReservationModeLegacyPerUser && c.ReservationMode != ReservationModeBlock {
-		return fmt.Errorf("reservation mode must be legacy_per_user or block")
+	if c.ReservationMode == ReservationModeBlock {
+		return fmt.Errorf("reservation mode %q is not implemented; use %s", ReservationModeBlock, ReservationModeLegacyPerUser)
+	}
+	if c.ReservationMode != ReservationModeLegacyPerUser {
+		return fmt.Errorf("reservation mode must be %s", ReservationModeLegacyPerUser)
 	}
 	if c.MongoInQueryChunkSize <= 0 {
 		return fmt.Errorf("mongo in-query chunk size must be positive")

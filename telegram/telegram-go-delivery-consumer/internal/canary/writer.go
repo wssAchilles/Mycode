@@ -10,6 +10,8 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 )
 
+const DefaultMaxLen int64 = 10000
+
 type StreamClient interface {
 	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
 }
@@ -25,12 +27,14 @@ type ProjectionBookkeepingRecord struct {
 type Writer struct {
 	client    StreamClient
 	streamKey string
+	maxLen    int64
 }
 
 func New(client StreamClient, streamKey string) *Writer {
 	return &Writer{
 		client:    client,
 		streamKey: streamKey,
+		maxLen:    DefaultMaxLen,
 	}
 }
 
@@ -43,8 +47,11 @@ func (w *Writer) WriteProjectionBookkeeping(
 		result = "mismatch"
 	}
 
+	// 限制 Canary 对账流最大近似长度，避免长期运行内存泄漏
 	eventID, err := w.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamKey,
+		MaxLen: w.maxLen,
+		Approx: true,
 		Values: map[string]interface{}{
 			"source_message_id": record.SourceMessageID,
 			"source_event_id":   record.Envelope.EventID,

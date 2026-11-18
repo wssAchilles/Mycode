@@ -299,3 +299,38 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		t.Fatalf("expected dry-run default true")
 	}
 }
+
+func TestValidateRejectsUnimplementedBlockReservationAndSupportsRedissACL(t *testing.T) {
+	t.Setenv("DELIVERY_CONSUMER_REDIS_URL", "rediss://acl-user:s3cret@redis-tls.internal:6380/3")
+	t.Setenv("DELIVERY_CONSUMER_RESERVATION_MODE", "block")
+	t.Setenv("DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS", "128")
+	_ = os.Unsetenv("DELIVERY_CONSUMER_PRIMARY_GROUP_MAX_RECIPIENTS")
+
+	cfg := Load()
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected Validate() to reject unimplemented block reservation mode")
+	}
+
+	cfg.ReservationMode = ReservationModeLegacyPerUser
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected legacy_per_user reservation mode to pass validation, got %v", err)
+	}
+	if cfg.PrimaryGroupMaxRecipients != 128 {
+		t.Fatalf("expected fallback to DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS=128, got %d", cfg.PrimaryGroupMaxRecipients)
+	}
+
+	if RedisUsername(cfg.RedisURL) != "acl-user" || RedisPassword(cfg.RedisURL) != "s3cret" || RedisDB(cfg.RedisURL) != 3 {
+		t.Fatalf("unexpected ACL/DB parse from rediss URL")
+	}
+	tlsCfg := RedisTLSConfig(cfg.RedisURL)
+	if tlsCfg == nil || tlsCfg.ServerName != "redis-tls.internal" {
+		t.Fatalf("expected TLS config with ServerName for rediss:// URL, got %#v", tlsCfg)
+	}
+	opts, err := BuildRedisOptions(cfg.RedisURL)
+	if err != nil {
+		t.Fatalf("BuildRedisOptions failed: %v", err)
+	}
+	if opts.Addr != "redis-tls.internal:6380" || opts.Username != "acl-user" || opts.Password != "s3cret" || opts.DB != 3 || opts.TLSConfig == nil {
+		t.Fatalf("unexpected BuildRedisOptions output: %#v", opts)
+	}
+}
