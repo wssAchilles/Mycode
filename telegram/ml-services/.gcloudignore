@@ -15,7 +15,6 @@ artifacts/
 tests/
 crawler/
 scripts/
-agent_plane/
 *.ipynb
 *.md
 .env
