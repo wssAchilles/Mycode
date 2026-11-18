@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { API_BASE_URL, resolveMediaCrossOrigin } from '../utils/apiUrl';
 
 const readSource = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -25,8 +26,18 @@ describe('Space desktop design tokens', () => {
     expect(shellCss).not.toContain('#8B5CF6');
     expect(shellCss).not.toContain('rgba(139, 92, 246');
     expect(timelineCss).not.toContain('rgba(135, 116, 225');
-    expect(shellCss).toContain(
-      'grid-template-columns: var(--space-nav-width) minmax(560px, var(--space-main-max)) var(--space-shell-gap) var(--space-aside-width)',
+    expect(shellCss).toMatch(
+      /grid-template-columns:\s*var\(--space-nav-width\)\s*minmax\(0,\s*1fr\)\s*var\(--space-shell-gap\)\s*var\(--space-aside-width\)/,
     );
+  });
+
+  // 校验仅对归属后端 API 源的媒体启用 anonymous CORS，避免误伤未开启 CORS 的 GCS 存储桶
+  it('enables anonymous CORS only for cross-origin API media and preserves credential-free GCS loads', () => {
+    expect(resolveMediaCrossOrigin(`${API_BASE_URL}/api/public/news/uploads/cover.jpg`)).toBe('anonymous');
+    expect(resolveMediaCrossOrigin('/api/public/space/uploads/post.png')).toBe('anonymous');
+    expect(
+      resolveMediaCrossOrigin('https://storage.googleapis.com/telegram-467705-space-uploads/space/uploads/demo.jpg'),
+    ).toBeUndefined();
+    expect(resolveMediaCrossOrigin('data:image/svg+xml;utf8,<svg/>')).toBeUndefined();
   });
 });

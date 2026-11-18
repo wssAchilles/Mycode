@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getAvatarGradient, getInitials } from '../../lib/colorUtils';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './Avatar.css';
 
 export interface AvatarProps {
@@ -73,6 +74,7 @@ const Avatar: React.FC<AvatarProps> = ({
                 <img
                     src={src}
                     alt={name || 'Avatar'}
+                    crossOrigin={resolveMediaCrossOrigin(src)}
                     className="tg-avatar-img"
                     loading="lazy"
                     decoding="async"

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import newsApi, { type NewsArticleDetail } from '../services/newsApi';
+import { resolveMediaCrossOrigin } from '../utils/apiUrl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './NewsDetailPage.css';
@@ -98,7 +99,7 @@ const NewsDetailPage: React.FC = () => {
               className="news-detail__hero-img"
               src={article.coverImageUrl}
               alt=""
-              crossOrigin="anonymous"
+              crossOrigin={resolveMediaCrossOrigin(article.coverImageUrl)}
               decoding="async"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';

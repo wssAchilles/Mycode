@@ -1,5 +1,6 @@
 import React from 'react';
 import type { NewsTopic } from '../../services/newsApi';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './NewsTopicCard.css';
 
 interface NewsTopicCardProps {
@@ -21,7 +22,7 @@ export const NewsTopicCard: React.FC<NewsTopicCardProps> = ({ cluster, onClick }
                         className="news-topic-cover__img"
                         src={cluster.coverImageUrl}
                         alt=""
-                        crossOrigin="anonymous"
+                        crossOrigin={resolveMediaCrossOrigin(cluster.coverImageUrl)}
                         loading="lazy"
                         decoding="async"
                         onError={(e) => {

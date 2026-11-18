@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './ProgressiveImage.css';
 
 interface ProgressiveImageProps {
@@ -53,6 +54,7 @@ export function ProgressiveImage({ src, thumbnailSrc, alt, className }: Progress
         <img
           src={thumbnailSrc}
           alt={alt}
+          crossOrigin={resolveMediaCrossOrigin(thumbnailSrc)}
           className="progressive-image__thumbnail"
           onLoad={handleThumbnailLoad}
           onError={handleError}
@@ -62,6 +64,7 @@ export function ProgressiveImage({ src, thumbnailSrc, alt, className }: Progress
         <img
           src={src}
           alt={alt}
+          crossOrigin={resolveMediaCrossOrigin(src)}
           className={`progressive-image__full ${phase === 'full' ? 'progressive-image__full--loaded' : ''}`}
           loading="lazy"
           decoding="async"

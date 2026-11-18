@@ -10,6 +10,7 @@ import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOve
 import { useAnalytics, useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import { useSpaceStore } from '../../stores';
 import apiClient from '../../services/apiClient';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
@@ -213,7 +214,14 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [quoteSubmitting, setQuoteSubmitting] = useState(false);
     const [isRemoving, setIsRemoving] = useState(false);
     const [isRemoved, setIsRemoved] = useState(false);
+    const [failedMediaUrls, setFailedMediaUrls] = useState<Record<string, boolean>>({});
+    const [avatarFailed, setAvatarFailed] = useState(false);
     const moreMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        setFailedMediaUrls({});
+        setAvatarFailed(false);
+    }, [post.id, post.author.avatarUrl]);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
     const analytics = useAnalytics({ source: post.recallSource });
     const hasActionIdentity = post.positionContractVersion === 'served_position_1_based_v1'
@@ -586,28 +594,37 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         }
     }, [postMotion, showMoreMenu]);
 
-    // 渲染媒体网格
+    // 渲染媒体网格（自动过滤失效媒体并在跨源 API 媒体上启用安全 CORS）
     const renderMedia = () => {
         if (!post.media || post.media.length === 0) return null;
 
-        const mediaCount = Math.min(post.media.length, 4);
+        const visibleMedia = post.media
+            .filter((media) => Boolean(media.url) && !failedMediaUrls[media.url])
+            .slice(0, 4);
+        if (visibleMedia.length === 0) return null;
+
+        const mediaCount = visibleMedia.length;
         const gridClass = `space-post__media-grid grid-${mediaCount}`;
 
         return (
             <div className="space-post__media">
                 <div className={gridClass}>
-                    {post.media.slice(0, 4).map((media, index) => (
+                    {visibleMedia.map((media) => (
                         <img
-                            key={index}
+                            key={media.url}
                             src={media.url}
                             srcSet={media.thumbnailUrl ? `${media.thumbnailUrl} 320w, ${media.url} 1200w` : undefined}
                             sizes="(max-width: 900px) 100vw, 680px"
                             alt=""
+                            crossOrigin={resolveMediaCrossOrigin(media.url)}
                             className="space-post__media-item"
                             loading="lazy"
                             decoding="async"
                             onLoad={onLayoutChanged}
-                            onError={onLayoutChanged}
+                            onError={() => {
+                                setFailedMediaUrls((prev) => ({ ...prev, [media.url]: true }));
+                                onLayoutChanged?.();
+                            }}
                         />
                     ))}
                 </div>
@@ -640,8 +657,13 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                 {/* 帖子头部 */}
                 <header className="space-post__header">
                     <button className="space-post__avatar" onClick={handleAuthorClick} aria-label={`查看 ${post.author.username} 的主页`}>
-                        {post.author.avatarUrl ? (
-                            <img src={post.author.avatarUrl} alt={post.author.username} />
+                        {post.author.avatarUrl && !avatarFailed ? (
+                            <img
+                                src={post.author.avatarUrl}
+                                alt={post.author.username}
+                                crossOrigin={resolveMediaCrossOrigin(post.author.avatarUrl)}
+                                onError={() => setAvatarFailed(true)}
+                            />
                         ) : (
                             <div className="space-post__avatar-placeholder">
                                 {getInitials(post.author.username)}

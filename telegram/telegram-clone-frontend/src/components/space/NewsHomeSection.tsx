@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StateBlock } from '@/components/design-system';
 import { useAnalytics } from '../../hooks/useAnalytics';
 import { spaceAPI, type NewsBriefItem } from '../../services/spaceApi';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './NewsHomeSection.css';
 
 const HERO_COUNT = 4;
@@ -106,7 +107,7 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen, trackImpression, trac
             className="news-home__media-img"
             src={item.coverUrl}
             alt=""
-            crossOrigin="anonymous"
+            crossOrigin={resolveMediaCrossOrigin(item.coverUrl)}
             loading="lazy"
             decoding="async"
             onError={(e) => {
@@ -157,7 +158,7 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen, trackImpression, trac
             className="news-home__media-img"
             src={item.coverUrl}
             alt=""
-            crossOrigin="anonymous"
+            crossOrigin={resolveMediaCrossOrigin(item.coverUrl)}
             loading="lazy"
             decoding="async"
             onError={(e) => {

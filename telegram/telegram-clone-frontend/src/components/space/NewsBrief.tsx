@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { spaceAPI, type NewsBriefItem } from '../../services/spaceApi';
 import { useAnalytics, useDwellTracker, useImpressionTracker } from '../../hooks/useAnalytics';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './NewsBrief.css';
 
 const DEFAULT_LIMIT = 5;
@@ -44,7 +45,7 @@ const NewsBriefCard: React.FC<NewsBriefCardProps> = ({ item, onOpen }) => {
                         className="news-brief__cover-img"
                         src={item.coverUrl}
                         alt=""
-                        crossOrigin="anonymous"
+                        crossOrigin={resolveMediaCrossOrigin(item.coverUrl)}
                         loading="lazy"
                         decoding="async"
                         onError={(e) => {

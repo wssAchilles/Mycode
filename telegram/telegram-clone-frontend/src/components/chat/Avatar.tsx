@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './Avatar.css';
 
 interface AvatarProps {
@@ -24,6 +25,12 @@ export const Avatar: React.FC<AvatarProps> = ({
     className = '',
     onClick
 }) => {
+    const [imgFailed, setImgFailed] = useState(false);
+
+    useEffect(() => {
+        setImgFailed(false);
+    }, [src]);
+
     // 获取首字母
     const getInitials = (name: string): string => {
         if (!name) return '?';
@@ -64,12 +71,14 @@ export const Avatar: React.FC<AvatarProps> = ({
             tabIndex={onClick ? 0 : undefined}
         >
             {/* 头像图片或首字母 */}
-            {src ? (
+            {src && !imgFailed ? (
                 <img
                     src={src}
                     alt={name || 'Avatar'}
+                    crossOrigin={resolveMediaCrossOrigin(src)}
                     className="tg-avatar__image"
                     loading="lazy"
+                    onError={() => setImgFailed(true)}
                 />
             ) : (
                 <div

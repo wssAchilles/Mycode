@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StateBlock } from '@/components/design-system';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
+import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import './NewsPostsList.css';
 
 const PAGE_SIZE = 12;
@@ -83,7 +84,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ item, onOpen }) => {
                         className="news-post-card__cover-img"
                         src={item.coverImageUrl}
                         alt=""
-                        crossOrigin="anonymous"
+                        crossOrigin={resolveMediaCrossOrigin(item.coverImageUrl)}
                         loading="lazy"
                         decoding="async"
                         onError={(e) => {
