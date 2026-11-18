@@ -1,11 +1,12 @@
 /* 新闻详情页 - 瑞士杂志极简白阅读排版 */
 .news-detail {
     height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
     overscroll-behavior: contain;
-    max-width: 880px;
-    margin: 0 auto;
-    padding: clamp(20px, 4vw, 44px);
+    width: min(clamp(860px, 76vw, 1180px), 100%);
+    margin-inline: auto;
+    padding: clamp(20px, 3.5vw, 44px);
     color: #0F1419;
     background: #FFFFFF;
 }

@@ -100,10 +100,20 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen, trackImpression, trac
       }}
       aria-label={`打开新闻：${item.title}`}
     >
-      <div
-        className="news-home__hero-media"
-        style={{ backgroundImage: item.coverUrl ? `url(${item.coverUrl})` : undefined }}
-      >
+      <div className="news-home__hero-media">
+        {item.coverUrl && (
+          <img
+            className="news-home__media-img"
+            src={item.coverUrl}
+            alt=""
+            crossOrigin="anonymous"
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        )}
         <span className="news-home__badge">Breaking</span>
       </div>
       <div className="news-home__hero-body">
@@ -141,10 +151,21 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen, trackImpression, trac
       }}
       aria-label={`打开新闻：${item.title}`}
     >
-      <div
-        className="news-home__card-media"
-        style={{ backgroundImage: item.coverUrl ? `url(${item.coverUrl})` : undefined }}
-      />
+      <div className="news-home__card-media">
+        {item.coverUrl && (
+          <img
+            className="news-home__media-img"
+            src={item.coverUrl}
+            alt=""
+            crossOrigin="anonymous"
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        )}
+      </div>
       <div className="news-home__card-body">
         <div className="news-home__card-meta">
           <span>{item.source}</span>

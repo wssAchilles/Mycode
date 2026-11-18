@@ -25,8 +25,8 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-bottom: 1px solid #EFF3F4;
-    padding: 0 16px;
-    height: 52px;
+    padding: 0 clamp(16px, 2.8cqi, 28px);
+    height: 54px;
 }
 
 .space-timeline__title {

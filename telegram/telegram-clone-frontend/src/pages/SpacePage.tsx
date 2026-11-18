@@ -32,10 +32,10 @@ const pageVariants = {
     exit: { opacity: 0, scale: 0.98, transition: { duration: 0.2 } }
 };
 
-const SPACE_ASIDE_WIDTH_STORAGE_KEY = 'space_aside_width_v1';
-const SPACE_ASIDE_WIDTH_DEFAULT = 320;
+const SPACE_ASIDE_WIDTH_STORAGE_KEY = 'space_aside_width_v2';
+const SPACE_ASIDE_WIDTH_FALLBACK = 360;
 const SPACE_ASIDE_WIDTH_MIN = 300;
-const SPACE_ASIDE_WIDTH_MAX = 420;
+const SPACE_ASIDE_WIDTH_MAX = 520;
 
 export const SpacePage: React.FC = () => {
     const navigate = useNavigate();
@@ -55,16 +55,18 @@ export const SpacePage: React.FC = () => {
     const contentScrollRef = useRef<HTMLDivElement>(null);
     const asideMountedRef = useRef(true);
 
-    const [asideWidth, setAsideWidth] = useState<number>(() => {
-        if (typeof window === 'undefined') return SPACE_ASIDE_WIDTH_DEFAULT;
+    // 默认置空以交由 CSS clamp() 按视口宽度自适应缩放；仅在用户主动拖拽后持久化自定义宽度
+    const [asideWidth, setAsideWidth] = useState<number | null>(() => {
+        if (typeof window === 'undefined') return null;
         const raw = window.localStorage.getItem(SPACE_ASIDE_WIDTH_STORAGE_KEY);
-        const parsed = raw ? Number(raw) : NaN;
-        if (!Number.isFinite(parsed)) return SPACE_ASIDE_WIDTH_DEFAULT;
+        if (!raw) return null;
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) return null;
         return Math.min(SPACE_ASIDE_WIDTH_MAX, Math.max(SPACE_ASIDE_WIDTH_MIN, parsed));
     });
 
     const resizingRef = useRef(false);
-    const asideWidthRef = useRef(asideWidth);
+    const asideWidthRef = useRef<number | null>(asideWidth);
 
     useEffect(() => {
         asideMountedRef.current = true;
@@ -285,11 +287,15 @@ export const SpacePage: React.FC = () => {
         return Math.min(SPACE_ASIDE_WIDTH_MAX, Math.max(SPACE_ASIDE_WIDTH_MIN, value));
     }, []);
 
-    const persistAsideWidth = useCallback((value: number) => {
+    const persistAsideWidth = useCallback((value: number | null) => {
         try {
-            window.localStorage.setItem(SPACE_ASIDE_WIDTH_STORAGE_KEY, String(value));
+            if (value === null) {
+                window.localStorage.removeItem(SPACE_ASIDE_WIDTH_STORAGE_KEY);
+            } else {
+                window.localStorage.setItem(SPACE_ASIDE_WIDTH_STORAGE_KEY, String(value));
+            }
         } catch {
-            // ignore
+            // 忽略隐私模式下 localStorage 写入异常
         }
     }, []);
 
@@ -298,7 +304,9 @@ export const SpacePage: React.FC = () => {
         e.preventDefault();
 
         const startX = e.clientX;
-        const startWidth = asideWidth;
+        const asideEl = document.querySelector('.space-page__aside');
+        const measuredWidth = asideEl ? Math.round(asideEl.getBoundingClientRect().width) : SPACE_ASIDE_WIDTH_FALLBACK;
+        const startWidth = asideWidth ?? clampAsideWidth(measuredWidth);
         asideWidthRef.current = startWidth;
         resizingRef.current = true;
 
@@ -329,12 +337,13 @@ export const SpacePage: React.FC = () => {
     }, [asideWidth, clampAsideWidth, persistAsideWidth]);
 
     const resetAsideWidth = useCallback(() => {
-        const next = SPACE_ASIDE_WIDTH_DEFAULT;
-        setAsideWidth(next);
-        persistAsideWidth(next);
+        asideWidthRef.current = null;
+        setAsideWidth(null);
+        persistAsideWidth(null);
     }, [persistAsideWidth]);
 
     const pageStyle = useMemo(() => {
+        if (asideWidth === null) return undefined;
         return {
             '--space-aside-width': `${asideWidth}px`,
         } as React.CSSProperties & Record<'--space-aside-width', string>;

@@ -5,9 +5,11 @@
 
 .space-profile {
     min-height: 100vh;
+    min-height: 100dvh;
     height: 100vh;
+    height: 100dvh;
     color: #0F1419;
-    padding: 0;
+    padding-inline: clamp(0px, 2vw, 32px);
     display: flex;
     justify-content: center;
     overflow-y: auto;
@@ -16,7 +18,8 @@
 }
 
 .space-profile__shell {
-    width: min(740px, 100%);
+    container: space-profile / inline-size;
+    width: min(clamp(740px, 68vw, 1080px), 100%);
     min-height: 100%;
     display: flex;
     flex-direction: column;

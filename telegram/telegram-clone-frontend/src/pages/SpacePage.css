@@ -4,25 +4,32 @@
  */
 
 .space-page {
-    --space-nav-width: 256px;
-    --space-main-max: 660px;
-    --space-aside-width: 340px;
-    --space-shell-gap: 12px;
+    --space-nav-width: clamp(220px, 16.5vw, 276px);
+    --space-aside-width: clamp(320px, 24.5vw, 420px);
+    --space-shell-gap: clamp(14px, 1.4vw, 24px);
     --space-nav-icon-size: 24px;
     --space-nav-item-height: 48px;
 
     display: grid;
-    grid-template-columns: var(--space-nav-width) minmax(560px, var(--space-main-max)) var(--space-shell-gap) var(--space-aside-width);
+    grid-template-columns:
+        var(--space-nav-width)
+        minmax(0, 1fr)
+        var(--space-shell-gap)
+        var(--space-aside-width);
     grid-template-rows: 1fr;
     gap: 0;
+    width: 100%;
+    max-width: 1920px;
+    margin-inline: auto;
     height: 100vh;
+    height: 100dvh;
     min-height: 100vh;
-    justify-content: center;
-    padding: 0 16px;
+    min-height: 100dvh;
+    padding-inline: clamp(16px, 2.2vw, 36px);
     background: #FFFFFF;
     color: var(--tg-text-primary);
     font-family: var(--font-family);
-    overflow: hidden;
+    overflow: clip;
 }
 
 /* ========================================
@@ -33,19 +40,23 @@
     position: sticky;
     top: 0;
     left: 0;
-    width: var(--space-nav-width);
+    width: 100%;
     height: 100vh;
+    height: 100dvh;
     background: #FFFFFF;
     border: none;
     border-radius: 0;
     box-shadow: none;
     display: flex;
     flex-direction: column;
-    padding: 16px 16px 16px 8px;
+    padding: 16px clamp(12px, 1.4vw, 20px) 16px 4px;
     flex-shrink: 0;
     z-index: 20;
     transition: width 0.25s var(--ease-out), padding 0.25s ease;
     overflow-y: auto;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 20, 25, 0.12) transparent;
     overscroll-behavior: contain;
 }
 
@@ -107,9 +118,9 @@
 .space-page__nav-item {
     display: flex;
     align-items: center;
-    gap: 18px;
-    width: fit-content;
-    min-width: 160px;
+    gap: 16px;
+    width: 100%;
+    max-width: 236px;
     height: var(--space-nav-item-height);
     padding: 0 18px 0 12px;
     border-radius: 9999px;
@@ -262,10 +273,11 @@
 }
 
 /* ========================================
-   中间主内容区（仅左右 1px 发丝线分割）
+   中间主内容区（弹性铺满剩余视口 + 容器查询上下文）
    ======================================== */
 .space-page__main {
     grid-column: 2;
+    container: space-main / inline-size;
     flex: 1;
     min-width: 0;
     max-width: none;
@@ -280,15 +292,19 @@
     justify-self: stretch;
     width: 100%;
     height: 100vh;
-    overflow: hidden;
+    height: 100dvh;
+    overflow: clip;
 }
 
 .space-page__content {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 20, 25, 0.14) transparent;
     overscroll-behavior: contain;
-    padding-bottom: 32px;
+    padding-bottom: 36px;
 }
 
 /* ========================================
@@ -325,12 +341,13 @@
 }
 
 /* ========================================
-   右侧边栏（X 风格无边框浅灰圆角块）
+   右侧边栏（自适应宽度并贴合视口右缘，消除右侧死白留空）
    ======================================== */
 .space-page__aside {
     grid-column: 4;
-    width: var(--space-aside-width);
-    padding: 14px 4px 24px 4px;
+    width: 100%;
+    min-width: 0;
+    padding: 14px 4px 28px 0;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -338,8 +355,13 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
-    justify-self: start;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 20, 25, 0.14) transparent;
+    overscroll-behavior: contain;
+    justify-self: stretch;
     background: #FFFFFF;
 }
 
@@ -792,9 +814,10 @@
 /* ========================================
    响应式断点
    ======================================== */
-@media (max-width: 1200px) {
+@media (max-width: 1120px) {
     .space-page {
         grid-template-columns: var(--space-nav-width) minmax(0, 1fr);
+        padding-inline: 12px;
     }
 
     .space-page__aside {
@@ -806,10 +829,10 @@
     }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 960px) {
     .space-page {
-        --space-nav-width: 210px;
-        padding: 0 8px;
+        --space-nav-width: 204px;
+        padding-inline: 8px;
     }
 }
 

@@ -4,14 +4,14 @@
  */
 
 .space-post {
-    --post-avatar-size: 40px;
+    --post-avatar-size: 42px;
     position: relative;
     border-radius: 0;
     border: none;
     border-bottom: 1px solid #EFF3F4;
     background: #FFFFFF;
     box-shadow: none;
-    padding: 14px 16px 10px;
+    padding: 16px clamp(16px, 2.8cqi, 28px) 12px;
     cursor: pointer;
     transition: background-color 0.15s ease;
     overflow: visible;
@@ -197,10 +197,10 @@
 }
 
 .space-post__markdown {
-    max-width: 68ch;
+    max-width: min(100%, 75ch);
     color: #0F1419;
-    font-size: 15px;
-    line-height: 1.5;
+    font-size: 15.5px;
+    line-height: 1.56;
     letter-spacing: 0;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -376,9 +376,10 @@
 /* 媒体容器 */
 .space-post__media {
     margin-top: 2px;
+    max-width: min(100%, 760px);
     border-radius: 16px;
     border: 1px solid #EFF3F4;
-    overflow: hidden;
+    overflow: clip;
     background: #F7F9F9;
 }
 
@@ -406,14 +407,16 @@
 }
 
 /* ========================================
-   交互操作栏（还原 X 原生无框透明微交互）
+   交互操作栏（还原 X 原生无框透明微交互，随容器宽度均匀舒展）
    ======================================== */
 .space-post__actions {
-    margin-top: 8px;
+    margin-top: 10px;
     margin-left: calc(var(--post-avatar-size) + 6px);
+    max-width: min(100%, 520px);
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
+    justify-content: space-between;
+    gap: 12px;
     align-items: center;
 }
 

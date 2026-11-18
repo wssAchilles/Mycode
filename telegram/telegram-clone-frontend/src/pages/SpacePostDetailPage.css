@@ -1,10 +1,12 @@
 /* 动态详情页 - 淡色 X 极简居中单栏 */
 .space-detail {
     min-height: 100vh;
+    min-height: 100dvh;
     height: 100vh;
+    height: 100dvh;
     background: #FFFFFF;
     color: #0F1419;
-    padding: 0;
+    padding-inline: clamp(0px, 2vw, 32px);
     display: flex;
     justify-content: center;
     overflow-y: auto;
@@ -12,7 +14,8 @@
 }
 
 .space-detail__shell {
-    width: min(680px, 100%);
+    container: space-detail / inline-size;
+    width: min(clamp(700px, 64vw, 1020px), 100%);
     min-height: 100%;
     display: flex;
     flex-direction: column;

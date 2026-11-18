@@ -4,8 +4,8 @@
 
 .post-composer {
     display: flex;
-    gap: 12px;
-    padding: 14px 16px 12px;
+    gap: 14px;
+    padding: 16px clamp(16px, 2.8cqi, 28px) 14px;
     border-bottom: 1px solid #EFF3F4;
     background: #FFFFFF;
 }
