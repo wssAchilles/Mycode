@@ -15,7 +15,11 @@ import { updateService } from '../services/updateService';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
-import { advanceChatLastReadSeq } from '../utils/chatReadState';
+import {
+  advanceChatLastReadSeq,
+  computeGroupReadCountAtSeq,
+  projectMessagesWithReadState,
+} from '../utils/chatReadState';
 import { sendSuccess, sendCreated, sendError, errors, ErrorCode } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 
@@ -92,6 +96,7 @@ const formatMessage = (msg: any, userMap: Map<string, string>) => {
     timestamp: msg.timestamp,
     type: msg.type || 'text',
     status: msg.status,
+    readCount: typeof msg.readCount === 'number' && chatType === 'group' ? msg.readCount : undefined,
     isGroupChat: chatType === 'group',
     attachments: buildAttachments(msg),
     fileUrl: msg.fileUrl || null,
@@ -258,7 +263,14 @@ export const getChatMessages = catchAsync(async (req: AuthenticatedRequest, res:
   });
   const userMap = new Map(users.map((u) => [u.id, u.username]));
 
-  const sortedMessages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
+  const { messages: projectedRawMessages, readState } = await projectMessagesWithReadState({
+    chatId,
+    chatType: isGroupChat ? 'group' : 'private',
+    currentUserId,
+    messages: rawMessages,
+  });
+
+  const sortedMessages = projectedRawMessages.map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
 
   const firstSeq = sortedMessages.length ? sortedMessages[0].seq : null;
   const lastSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
@@ -272,6 +284,7 @@ export const getChatMessages = catchAsync(async (req: AuthenticatedRequest, res:
     protocolVersion: CHAT_CURSOR_PROTOCOL_VERSION,
     canonicalChatId: chatId,
     messages: sortedMessages,
+    readState,
     paging: {
       hasMore,
       nextBeforeSeq,
@@ -450,7 +463,14 @@ export const getMessageContext = catchAsync(async (req: AuthenticatedRequest, re
   });
   const userMap = new Map(users.map((u) => [u.id, u.username]));
 
-  const messages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId: canonicalChatId }, userMap));
+  const { messages: projectedRawMessages, readState } = await projectMessagesWithReadState({
+    chatId: canonicalChatId,
+    chatType: parsed.type === 'group' ? 'group' : 'private',
+    currentUserId: userId,
+    messages: rawMessages,
+  });
+
+  const messages = projectedRawMessages.map((msg: any) => formatMessage({ ...msg, chatId: canonicalChatId }, userMap));
 
   const [beforeCount, afterCount] = await Promise.all([
     Message.countDocuments(beforeMatch),
@@ -461,6 +481,7 @@ export const getMessageContext = catchAsync(async (req: AuthenticatedRequest, re
     chatId: canonicalChatId,
     seq,
     messages,
+    readState,
     hasMoreBefore: beforeCount > 0,
     hasMoreAfter: afterCount > 0
   });
@@ -739,10 +760,7 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
 
   let readCount = 1;
   if (parsed.type === 'group' && parsed.groupId) {
-    readCount = await ChatMemberState.countDocuments({
-      chatId: canonicalChatId,
-      lastReadSeq: { $gte: seq }
-    });
+    readCount = await computeGroupReadCountAtSeq(canonicalChatId, seq);
   } else if (parsed.type === 'private' && seqAdvanced) {
     const otherUserId = getPrivateOtherUserId(canonicalChatId, userId);
     if (otherUserId) {

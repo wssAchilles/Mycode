@@ -185,6 +185,49 @@ describe('MessageController', () => {
         }),
       }));
     });
+
+    it('projects read status from ChatMemberState and counterpart reply seq on history reload', async () => {
+      const Message = (await import('../../src/models/Message')).default;
+      const ChatMemberState = (await import('../../src/models/ChatMemberState')).default as any;
+      (Message.find as ReturnType<typeof vi.fn>).mockReturnValue({
+        sort: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            lean: vi.fn().mockResolvedValue([
+              { _id: 'm4', content: 'ping-2', sender: 'user1', receiver: 'user2', seq: 4, status: 'delivered', chatId: 'p:user1:user2' },
+              { _id: 'm3', content: 'reply', sender: 'user2', receiver: 'user1', seq: 3, status: 'delivered', chatId: 'p:user1:user2' },
+              { _id: 'm1', content: 'ping-1', sender: 'user1', receiver: 'user2', seq: 1, status: 'delivered', chatId: 'p:user1:user2' },
+            ]),
+          }),
+        }),
+      });
+      // 对方仅记录过 seq=2 或甚至为 0，因对方已发 seq=3 回复，m1 必须投影为 read，m4 保持 delivered
+      ChatMemberState.find.mockReturnValueOnce({
+        lean: vi.fn().mockResolvedValue([
+          { userId: 'user1', lastReadSeq: 4 },
+          { userId: 'user2', lastReadSeq: 2 },
+        ]),
+      });
+
+      const { getChatMessages } = await import('../../src/controllers/messageController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { chatId: 'p:user1:user2' },
+        query: { limit: '20' },
+      });
+      const res = createMockResponse();
+
+      await getChatMessages(req, res);
+
+      expect(res._statusCode).toBe(200);
+      const msgs = (res._jsonBody as any).messages;
+      expect(msgs.find((m: any) => m.id === 'm1')?.status).toBe('read');
+      expect(msgs.find((m: any) => m.id === 'm4')?.status).toBe('delivered');
+      expect((res._jsonBody as any).readState).toEqual(expect.objectContaining({
+        chatId: 'p:user1:user2',
+        chatType: 'private',
+        partnerLastReadSeq: 3,
+      }));
+    });
   });
 
   describe('sendMessage', () => {

@@ -4,7 +4,7 @@ import { waitForMongoReady } from '../../config/db';
 import { updateService } from '../updateService';
 import { chatRuntimeMetrics } from '../chatRuntimeMetrics';
 import { parseChatId, getPrivateOtherUserId } from '../../utils/chat';
-import { advanceChatLastReadSeq } from '../../utils/chatReadState';
+import { advanceChatLastReadSeq, computeGroupReadCountAtSeq } from '../../utils/chatReadState';
 import { Op } from 'sequelize';
 import { createChildLogger } from '../../utils/logger';
 import type { TypedSocketIOServer, TypedSocket, RealtimeBatchEvent } from './types';
@@ -70,10 +70,7 @@ export class ReadReceiptHandler {
     });
     if (!member) return;
 
-    const readCount = await ChatMemberState.countDocuments({
-      chatId,
-      lastReadSeq: { $gte: seq },
-    });
+    const readCount = await computeGroupReadCountAtSeq(chatId, seq);
 
     if (this.deps.emitLegacyRealtimeEvents) {
       this.deps.io.to(`room:${groupId}`).emit('readReceipt', {

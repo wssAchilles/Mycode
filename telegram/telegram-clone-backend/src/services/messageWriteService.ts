@@ -7,6 +7,8 @@ import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { Op } from 'sequelize';
+import { advanceChatLastReadSeqWithResult } from '../utils/chatReadState';
+import { updateService } from './updateService';
 import { buildMessageFanoutCommand } from './chatDelivery/fanoutPlanner';
 import { chatFanoutCommandBus } from './chatDelivery/fanoutCommandBus';
 import { publishMessagePersistedEvent } from './chatDelivery/messageLifecyclePublisher';
@@ -225,12 +227,29 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     recipientIds = Array.from(new Set([input.senderId, input.receiverId as string]));
   }
 
-  // P0 优化: 发送者自身立即标记为已读 (同步)
-  await ChatMemberState.updateOne(
-    { chatId, userId: input.senderId },
-    { $max: { lastReadSeq: seq, lastDeliveredSeq: seq }, $set: { lastSeenAt: new Date() } },
-    { upsert: true }
-  );
+  // P0 优化: 发送者自身立即推进已读水位；若私聊中推动了前序他人消息水位，同步写入隐式已读更新给对方
+  const senderReadState = await advanceChatLastReadSeqWithResult(chatId, input.senderId, seq, {
+    updateDeliveredSeq: true,
+  });
+  if (
+    chatType === 'private'
+    && input.receiverId
+    && input.receiverId !== input.senderId
+    && seq > 1
+    && senderReadState.previousSeq < seq - 1
+  ) {
+    try {
+      await updateService.appendUpdate({
+        userId: input.receiverId,
+        type: 'read',
+        chatId,
+        seq: seq - 1,
+        payload: { readerId: input.senderId, readCount: 1 },
+      });
+    } catch {
+      // 隐式已读更新属于 best-effort，不阻断主消息写入链路
+    }
+  }
 
   // P0 优化: 异步扩散 - 将其他成员的更新任务入队
   let fanoutJobId: string | undefined;

@@ -26,6 +26,7 @@ const ChatMemberStateSchema = new Schema<IChatMemberState>({
 });
 
 ChatMemberStateSchema.index({ chatId: 1, userId: 1 }, { unique: true });
+ChatMemberStateSchema.index({ chatId: 1, lastReadSeq: 1 });
 
 const ChatMemberState = mongoose.model<IChatMemberState>('ChatMemberState', ChatMemberStateSchema);
 

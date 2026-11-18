@@ -9,6 +9,7 @@ import { sendSuccess, errors } from '../utils/apiResponse';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
 import { SYNC_PROTOCOL_VERSION, SYNC_WATERMARK_FIELD } from '../services/realtimeProtocol/contracts';
+import { projectSyncMessagesWithReadState } from '../utils/chatReadState';
 
 const router = Router();
 
@@ -159,7 +160,7 @@ function sanitizeUpdates(updates: any[], fromPts: number, limit: number): any[] 
     return out.slice(0, limit);
 }
 
-async function loadMessagesForUpdates(updates: any[]): Promise<any[]> {
+async function loadMessagesForUpdates(updates: any[], userId?: string): Promise<any[]> {
     const messageIds: string[] = [];
     const seen = new Set<string>();
     for (const u of updates) {
@@ -171,7 +172,8 @@ async function loadMessagesForUpdates(updates: any[]): Promise<any[]> {
     if (!messageIds.length) return [];
     const docs = await Message.find({ _id: { $in: messageIds } }).lean();
     const byId = new Map(docs.map((doc: any) => [String(doc?._id || ''), doc]));
-    return messageIds.map((id) => byId.get(id)).filter(Boolean);
+    const ordered = messageIds.map((id) => byId.get(id)).filter(Boolean);
+    return userId ? projectSyncMessagesWithReadState(ordered, userId) : ordered;
 }
 
 function buildSyncState(pts: number) {
@@ -190,10 +192,11 @@ async function buildSyncPayload(
     rawUpdates: any[],
     lastUpdateId: number,
     limit: number,
+    userId?: string,
 ) {
     const updates = sanitizeUpdates(rawUpdates, fromPts, limit);
     const normalizedLastUpdateId = normalizeLastUpdateId(fromPts, serverPts, updates, lastUpdateId);
-    const messages = await loadMessagesForUpdates(updates);
+    const messages = await loadMessagesForUpdates(updates, userId);
 
     return {
         updates,
@@ -296,7 +299,7 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
         }
 
         const { updates, lastUpdateId } = await updateService.getUpdates(userId, pts, limit);
-        const payload = await buildSyncPayload(pts, serverPts, updates, lastUpdateId, limit);
+        const payload = await buildSyncPayload(pts, serverPts, updates, lastUpdateId, limit, userId);
         setSyncPtsHeaders(res, {
             fromPts: payload.fromPts,
             serverPts: payload.serverPts,
@@ -423,6 +426,7 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
                     fetched.updates,
                     fetched.lastUpdateId,
                     maxPull,
+                    userId,
                 );
                 setSyncPtsHeaders(res, {
                     fromPts: clientPts,
@@ -477,6 +481,7 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
                 updates,
                 alignedLastUpdateId,
                 maxPull,
+                userId,
             );
             setSyncPtsHeaders(res, {
                 fromPts: clientPts,
