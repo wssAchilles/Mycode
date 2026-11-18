@@ -166,11 +166,11 @@ const OnboardingPage: React.FC = () => {
   return (
     <div className="onboarding-container">
       <div ref={onboardingMotion.rootRef} className="onboarding-card">
-        {/* Step: Welcome */}
+        {/* 步骤一：欢迎引导 */}
         {step === 'welcome' && (
           <div className="onboarding-step">
             <div className="onboarding-hero">
-              <div className="onboarding-logo">✦</div>
+              <div className="onboarding-logo" aria-hidden="true">✦</div>
               <h1>欢迎加入</h1>
               <p className="onboarding-subtitle">
                 个性化你的体验，让我们为你推荐更相关的内容
@@ -178,12 +178,14 @@ const OnboardingPage: React.FC = () => {
             </div>
             <div className="onboarding-actions">
               <button
+                type="button"
                 className="onboarding-btn primary"
                 onClick={() => setStep('profile')}
               >
                 开始设置
               </button>
               <button
+                type="button"
                 className="onboarding-btn ghost"
                 onClick={handleSkip}
               >
@@ -193,7 +195,7 @@ const OnboardingPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step: Profile */}
+        {/* 步骤二：基本资料 */}
         {step === 'profile' && (
           <div className="onboarding-step">
             <div className="onboarding-header">
@@ -201,7 +203,11 @@ const OnboardingPage: React.FC = () => {
               <p>帮助我们了解你，用于个性化推荐</p>
             </div>
 
-            {error && <div className="onboarding-error">{error}</div>}
+            {error && (
+              <div className="onboarding-error" role="alert">
+                {error}
+              </div>
+            )}
 
             <div className="onboarding-form">
               <div className="onboarding-field">
@@ -250,6 +256,7 @@ const OnboardingPage: React.FC = () => {
 
             <div className="onboarding-actions">
               <button
+                type="button"
                 className="onboarding-btn primary"
                 onClick={() => setStep('interests')}
                 disabled={saving}
@@ -257,6 +264,7 @@ const OnboardingPage: React.FC = () => {
                 下一步
               </button>
               <button
+                type="button"
                 className="onboarding-btn ghost"
                 onClick={() => setStep('interests')}
               >
@@ -266,7 +274,7 @@ const OnboardingPage: React.FC = () => {
           </div>
         )}
 
-        {/* Step: Interests */}
+        {/* 步骤三：兴趣标签选择 */}
         {step === 'interests' && (
           <div className="onboarding-step">
             <div className="onboarding-header">
@@ -275,31 +283,36 @@ const OnboardingPage: React.FC = () => {
             </div>
 
             <div className="interest-grid">
-              {INTEREST_TAGS.map((tag) => (
-                <button
-                  key={tag.id}
-                  className={`interest-tag ${selectedInterests.has(tag.id) ? 'selected' : ''}`}
-                  onClick={(event) => {
-                    onboardingMotion.run('select', event.currentTarget);
-                    toggleInterest(tag.id);
-                  }}
-                  type="button"
-                >
-                  <span className="interest-emoji">{tag.emoji}</span>
-                  <span className="interest-label">{tag.label}</span>
-                </button>
-              ))}
+              {INTEREST_TAGS.map((tag) => {
+                const isSelected = selectedInterests.has(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    className={`interest-tag ${isSelected ? 'selected' : ''}`}
+                    aria-pressed={isSelected}
+                    onClick={(event) => {
+                      onboardingMotion.run('select', event.currentTarget);
+                      toggleInterest(tag.id);
+                    }}
+                    type="button"
+                  >
+                    <span className="interest-emoji" aria-hidden="true">{tag.emoji}</span>
+                    <span className="interest-label">{tag.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="onboarding-actions">
               <button
+                type="button"
                 className="onboarding-btn primary"
                 onClick={handleComplete}
                 disabled={saving}
               >
                 {saving ? (
                   <>
-                    <LoadingSpinner size={18} color="white" />
+                    <LoadingSpinner size={18} color="#FFFFFF" />
                     保存中...
                   </>
                 ) : (
@@ -307,6 +320,7 @@ const OnboardingPage: React.FC = () => {
                 )}
               </button>
               <button
+                type="button"
                 className="onboarding-btn ghost"
                 onClick={handleSkip}
                 disabled={saving}
@@ -317,8 +331,8 @@ const OnboardingPage: React.FC = () => {
           </div>
         )}
 
-        {/* Progress dots */}
-        <div className="onboarding-progress">
+        {/* 引导进度指示点 */}
+        <div className="onboarding-progress" aria-label="引导步骤进度">
           <span className={`dot ${step === 'welcome' ? 'active' : ''}`} />
           <span className={`dot ${step === 'profile' ? 'active' : ''}`} />
           <span className={`dot ${step === 'interests' ? 'active' : ''}`} />

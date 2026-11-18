@@ -122,19 +122,28 @@ const LoginPage: React.FC = () => {
     <div ref={authMotion.rootRef} className="auth-container auth-container--login">
       <div className="auth-login-shell">
         <section className="auth-login-showcase" aria-label="产品亮点">
-          <div className="auth-login-showcase__brand">
-            <div className="auth-login-showcase__brand-mark">
-              <ChatIcon size={26} color="currentColor" />
+          <div className="auth-login-showcase__inner">
+            <div className="auth-login-showcase__brand">
+              <div className="auth-login-showcase__brand-mark">
+                <ChatIcon size={24} color="currentColor" />
+              </div>
+              <span className="auth-login-showcase__brand-name">Telegram Clone</span>
             </div>
-            <span className="auth-login-showcase__brand-name">Telegram Clone</span>
-          </div>
 
-          <div className="auth-login-showcase__copy">
-            <span className="auth-login-showcase__eyebrow">Secure Messaging Platform</span>
-            <p className="auth-login-showcase__headline">让每一次协作都即时抵达</p>
-            <p className="auth-login-showcase__description">
-              面向高频沟通场景打造的沉浸式聊天体验，在速度、安全与跨端一致性之间保持平衡。
-            </p>
+            <div className="auth-login-showcase__copy">
+              <span className="auth-login-showcase__eyebrow">Secure Messaging Platform</span>
+              <p className="auth-login-showcase__headline">让每一次协作都即时抵达</p>
+              <p className="auth-login-showcase__description">
+                面向高频沟通场景打造的纯净轻量级即时通讯与实时动态空间，在速度、安全与跨端一致性之间保持平衡。
+              </p>
+            </div>
+
+            <div className="auth-login-showcase__chips" aria-label="核心特性">
+              <span>毫秒级实时消息同步</span>
+              <span>Space 纯净动态流</span>
+              <span>多模态 AI 协作助手</span>
+              <span>跨设备无缝漫游</span>
+            </div>
           </div>
         </section>
 
@@ -149,7 +158,7 @@ const LoginPage: React.FC = () => {
 
             <div className="auth-login-card__header">
               <div className="auth-login-card__avatar" aria-hidden="true">
-                <UserIcon size={28} color="var(--tg-blue)" />
+                <UserIcon size={28} color="#1D9BF0" />
               </div>
               <div className="auth-login-card__copy">
                 <span className="auth-login-card__eyebrow">Secure Access</span>
@@ -229,7 +238,7 @@ const LoginPage: React.FC = () => {
               >
                 {loading ? (
                   <>
-                    <LoadingSpinner size={20} color="white" />
+                    <LoadingSpinner size={20} color="#FFFFFF" />
                     登录中...
                   </>
                 ) : (

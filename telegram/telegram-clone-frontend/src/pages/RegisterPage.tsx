@@ -164,7 +164,7 @@ const RegisterPage: React.FC = () => {
         <div className="auth-header">
           <div className="auth-logo">
             <div className="logo-icon">
-              <ChatIcon size={28} color="white" />
+              <ChatIcon size={28} color="currentColor" />
             </div>
             <h1>Telegram Clone</h1>
           </div>
@@ -324,7 +324,7 @@ const RegisterPage: React.FC = () => {
           >
             {loading ? (
               <>
-                <LoadingSpinner size={20} color="white" />
+                <LoadingSpinner size={20} color="#FFFFFF" />
                 注册中...
               </>
             ) : (
