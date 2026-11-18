@@ -15,6 +15,12 @@ pub use summary::{build_summary, compress_summary};
 use model::now_iso;
 use policy::compute_overall_status;
 
+impl Default for RuntimeControlPlane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RuntimeControlPlane {
     pub fn new() -> Self {
         Self {

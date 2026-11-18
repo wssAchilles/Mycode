@@ -20,7 +20,10 @@ use telegram_rust_gateway::{
     realtime::{
         fanout::delivery_consumer::spawn_delivery_consumer_loop,
         socket::server::{create_socket_layer, register_socket_namespace},
-        state::{redis_session_registry::RedisSessionRegistry, SessionRegistryBackend},
+        state::{
+            SessionRegistryBackend, lease_renewer::spawn_session_lease_renewer,
+            redis_session_registry::RedisSessionRegistry,
+        },
     },
     realtime_consumer::spawn_realtime_consumer_loop,
     realtime_ops::RealtimeOpsState,
@@ -39,8 +42,11 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = GatewayConfig::from_env()?;
+    // 显式将空闲连接池超时设为 4 秒（严格小于 Node 上游 keepAliveTimeout），根除空闲复用断连 502
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(config.request_timeout_secs))
+        .pool_idle_timeout(Duration::from_secs(4))
+        .tcp_keepalive(Duration::from_secs(30))
         .build()
         .context("failed to build reqwest client")?;
 
@@ -57,8 +63,20 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
-    let session_registry = match std::env::var("REDIS_URL") {
-        Ok(url) if !url.is_empty() => match redis::Client::open(url.as_str()) {
+    // 优先读取 GATEWAY_REALTIME_REDIS_URL，未配置时回退读取 REDIS_URL
+    let configured_redis_url = std::env::var("GATEWAY_REALTIME_REDIS_URL")
+        .ok()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .or_else(|| {
+            std::env::var("REDIS_URL")
+                .ok()
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty())
+        });
+
+    let session_registry = match configured_redis_url {
+        Some(url) => match redis::Client::open(url.as_str()) {
             Ok(c) => {
                 let gid = std::env::var("GATEWAY_ID").unwrap_or_else(|_| "gateway-1".into());
                 info!("using Redis session registry (gateway_id={})", gid);
@@ -75,7 +93,7 @@ async fn main() -> Result<()> {
                 )))
             }
         },
-        _ => {
+        None => {
             info!("using in-memory session registry");
             SessionRegistryBackend::InMemory(Arc::new(tokio::sync::Mutex::new(
                 RealtimeSessionRegistry::default(),
@@ -106,6 +124,7 @@ async fn main() -> Result<()> {
 
     prime_dependency_probes(&state).await;
     spawn_dependency_probe_loop(state.clone());
+    spawn_session_lease_renewer(state.clone());
     spawn_realtime_consumer_loop(state.clone());
     spawn_delivery_consumer_loop(state.clone());
 

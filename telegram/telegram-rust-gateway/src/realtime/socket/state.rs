@@ -13,6 +13,14 @@ pub struct RustSocketSessionRecord {
     pub joined_rooms: BTreeSet<String>,
 }
 
+/// 记录重认证前后房间订阅与用户归属的变化，用于驱动旧房间 `leave` 清理
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticateTransition {
+    pub joined_rooms: Vec<String>,
+    pub removed_rooms: Vec<String>,
+    pub previous_user_id: Option<String>,
+}
+
 #[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RustSocketBackpressureSnapshot {
@@ -41,14 +49,16 @@ impl RustSocketSessionStore {
             });
     }
 
-    pub fn authenticate(
+    /// 执行首次认证或重认证，更新缓存 `access_token` 并计算需要退出的旧房间集合
+    pub fn authenticate_session(
         &mut self,
         session_id: &str,
         user_id: &str,
         username: &str,
         access_token: &str,
         group_ids: &[String],
-    ) -> Vec<String> {
+    ) -> AuthenticateTransition {
+        let sid_room = session_room(session_id);
         let record = self
             .sessions
             .entry(session_id.to_string())
@@ -57,19 +67,47 @@ impl RustSocketSessionStore {
                 user_id: None,
                 username: None,
                 access_token: None,
-                joined_rooms: BTreeSet::from([session_room(session_id)]),
+                joined_rooms: BTreeSet::from([sid_room.clone()]),
             });
+
+        let previous_user_id = record.user_id.clone();
+        let previous_rooms = record.joined_rooms.clone();
+
+        let mut desired_rooms = BTreeSet::from([sid_room, user_room(user_id)]);
+        for group_id in group_ids {
+            let trimmed = group_id.trim();
+            if !trimmed.is_empty() {
+                desired_rooms.insert(normalize_group_room(trimmed));
+            }
+        }
+
+        let removed_rooms = previous_rooms
+            .difference(&desired_rooms)
+            .cloned()
+            .collect::<Vec<_>>();
+
         record.user_id = Some(user_id.to_string());
         record.username = Some(username.to_string());
         record.access_token = Some(access_token.to_string());
-        record
-            .joined_rooms
-            .retain(|room| room == &session_room(session_id));
-        record.joined_rooms.insert(user_room(user_id));
-        for group_id in group_ids {
-            record.joined_rooms.insert(normalize_group_room(group_id));
+        record.joined_rooms = desired_rooms;
+
+        AuthenticateTransition {
+            joined_rooms: record.joined_rooms.iter().cloned().collect(),
+            removed_rooms,
+            previous_user_id,
         }
-        record.joined_rooms.iter().cloned().collect()
+    }
+
+    pub fn authenticate(
+        &mut self,
+        session_id: &str,
+        user_id: &str,
+        username: &str,
+        access_token: &str,
+        group_ids: &[String],
+    ) -> Vec<String> {
+        self.authenticate_session(session_id, user_id, username, access_token, group_ids)
+            .joined_rooms
     }
 
     pub fn join_room(&mut self, session_id: &str, room_id: &str) -> Option<String> {
@@ -84,6 +122,35 @@ impl RustSocketSessionStore {
         let room = normalize_group_room(room_id);
         record.joined_rooms.remove(&room);
         Some(room)
+    }
+
+    /// 检查当前连接是否已加入指定房间（用于输入状态等房间内广播门控）
+    pub fn is_in_room(&self, session_id: &str, room: &str) -> bool {
+        self.sessions
+            .get(session_id)
+            .map(|record| record.joined_rooms.contains(room))
+            .unwrap_or(false)
+    }
+
+    /// 当令牌失效收到 401 时清理本地缓存的过期令牌
+    pub fn clear_access_token(&mut self, session_id: &str) {
+        if let Some(record) = self.sessions.get_mut(session_id) {
+            record.access_token = None;
+        }
+    }
+
+    /// 导出当前本机活跃连接快照，供后台周期续租循环刷新 Redis 租约
+    pub fn active_sessions_snapshot(&self) -> Vec<(String, Option<String>, Vec<String>)> {
+        self.sessions
+            .values()
+            .map(|record| {
+                (
+                    record.session_id.clone(),
+                    record.user_id.clone(),
+                    record.joined_rooms.iter().cloned().collect(),
+                )
+            })
+            .collect()
     }
 
     pub fn access_token(&self, session_id: &str) -> Option<String> {
@@ -146,10 +213,10 @@ mod tests {
     use super::RustSocketSessionStore;
 
     #[test]
-    fn authenticate_replaces_group_membership_and_keeps_sid_room() {
+    fn authenticate_replaces_group_membership_and_reports_removed_rooms() {
         let mut store = RustSocketSessionStore::default();
         store.register_connection("sid-1");
-        let rooms = store.authenticate(
+        let first = store.authenticate_session(
             "sid-1",
             "user-1",
             "alice",
@@ -157,10 +224,24 @@ mod tests {
             &["group-1".to_string(), "group-2".to_string()],
         );
 
-        assert!(rooms.contains(&"sid:sid-1".to_string()));
-        assert!(rooms.contains(&"user:user-1".to_string()));
-        assert!(rooms.contains(&"room:group-1".to_string()));
-        assert!(rooms.contains(&"room:group-2".to_string()));
+        assert!(first.removed_rooms.is_empty());
+        assert!(first.joined_rooms.contains(&"sid:sid-1".to_string()));
+        assert!(first.joined_rooms.contains(&"user:user-1".to_string()));
+        assert!(first.joined_rooms.contains(&"room:group-1".to_string()));
+        assert!(first.joined_rooms.contains(&"room:group-2".to_string()));
+        assert!(store.is_in_room("sid-1", "room:group-1"));
+
+        // 重发 authenticate 更新 token 并移除已退出的 group-2
+        let second = store.authenticate_session(
+            "sid-1",
+            "user-1",
+            "alice",
+            "token-2",
+            &["group-1".to_string()],
+        );
+        assert_eq!(second.removed_rooms, vec!["room:group-2".to_string()]);
+        assert_eq!(store.access_token("sid-1").as_deref(), Some("token-2"));
+        assert!(!store.is_in_room("sid-1", "room:group-2"));
     }
 
     #[test]

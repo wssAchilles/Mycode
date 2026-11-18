@@ -3,7 +3,7 @@ use std::{net::SocketAddr, time::Instant};
 use axum::{
     body::Body,
     extract::{ConnectInfo, Request, State},
-    http::{HeaderValue, StatusCode},
+    http::StatusCode,
     response::Response,
 };
 use futures_util::TryStreamExt;
@@ -11,16 +11,20 @@ use tracing::warn;
 
 use crate::{
     error::GatewayError,
+    ingress::path_normalizer::{is_blocked_external_path, normalize_uri_path},
     ingress_audit::IngressEventKind,
     probes::{mark_proxy_failure, mark_proxy_recovery},
     request_context::RequestContext,
     state::AppState,
 };
 
-use super::handlers::HOP_BY_HOP_HEADERS;
-use super::proxy_support::{
-    copy_request_headers, header_value, is_hop_by_hop, log_proxy_failure, log_proxy_success,
-    record_ingress_event,
+use super::{
+    handlers::HOP_BY_HOP_HEADERS,
+    header_sanitizer::{build_client_response_headers, is_websocket_upgrade_request},
+    proxy_support::{
+        copy_request_headers, log_proxy_failure, log_proxy_success, record_ingress_event,
+    },
+    websocket_proxy::proxy_websocket_upgrade,
 };
 
 pub async fn proxy_handler(
@@ -29,27 +33,60 @@ pub async fn proxy_handler(
     request: Request,
 ) -> Result<Response, GatewayError> {
     let started_at = Instant::now();
+
+    // 1. 先执行 URI 路径规范化与非法穿越拦截，确保网关策略与上游看到完全一致的路径
+    let normalized_path =
+        normalize_uri_path(request.uri().path()).map_err(|_| GatewayError::BadRequest)?;
+
     let request_context = RequestContext::from_headers(
         &state.config,
         request.headers(),
         addr.ip(),
-        request.uri().path(),
+        &normalized_path,
     );
 
+    // 2. 显式阻断外部访问 `/internal/*`、`/ready` 及未注册的 `/gateway/ops/*` 端点
+    if is_blocked_external_path(&normalized_path) {
+        record_ingress_event(
+            &state,
+            &request_context,
+            request.method().as_str(),
+            &normalized_path,
+            IngressEventKind::Forbidden,
+            Some(StatusCode::FORBIDDEN.as_u16()),
+            started_at.elapsed(),
+            Some("blocked external access to internal endpoint".to_string()),
+        );
+        warn!(
+            request_id = %request_context.request_id,
+            client_ip = %request_context.client_ip,
+            path = %normalized_path,
+            "blocked external request to internal endpoint"
+        );
+        return Err(GatewayError::Forbidden);
+    }
+
+    // 3. 按路由类别执行限流（SocketIoCompat 使用更高配额，防止正常轮询/握手触发 429 重连风暴）
     let decision = if request_context.rate_limit_bypassed {
         None
     } else {
-        let decision = state.limiter.check(
+        let (capacity, refill_per_sec) = request_context.route_class.rate_limit_budget(
+            state.config.rate_limit_capacity,
+            state.config.rate_limit_refill_per_sec,
+        );
+        let decision = state.limiter.check_with_limits(
             &request_context
                 .route_class
                 .bucket_key(&request_context.client_ip),
+            capacity,
+            refill_per_sec,
         );
         if !decision.allowed {
             record_ingress_event(
                 &state,
                 &request_context,
                 request.method().as_str(),
-                request.uri().path(),
+                &normalized_path,
                 IngressEventKind::RateLimited,
                 Some(StatusCode::TOO_MANY_REQUESTS.as_u16()),
                 started_at.elapsed(),
@@ -69,36 +106,51 @@ pub async fn proxy_handler(
         Some(decision)
     };
 
-    if state.config.validate_access_tokens && !request_context.jwt_prevalidation_bypassed {
-        if let Some(validator) = &state.jwt_validator {
-            validator
-                .maybe_validate_bearer(request.headers())
-                .map_err(|_| {
-                    record_ingress_event(
-                        &state,
-                        &request_context,
-                        request.method().as_str(),
-                        request.uri().path(),
-                        IngressEventKind::Unauthorized,
-                        Some(StatusCode::UNAUTHORIZED.as_u16()),
-                        started_at.elapsed(),
-                        Some("bearer token failed gateway prevalidation".to_string()),
-                    );
-                    GatewayError::Unauthorized
-                })?;
-        }
+    // 4. 对受保护路由执行 Bearer Token 边缘预校验
+    if state.config.validate_access_tokens
+        && !request_context.jwt_prevalidation_bypassed
+        && let Some(validator) = &state.jwt_validator
+    {
+        validator
+            .maybe_validate_bearer(request.headers())
+            .map_err(|_| {
+                record_ingress_event(
+                    &state,
+                    &request_context,
+                    request.method().as_str(),
+                    &normalized_path,
+                    IngressEventKind::Unauthorized,
+                    Some(StatusCode::UNAUTHORIZED.as_u16()),
+                    started_at.elapsed(),
+                    Some("bearer token failed gateway prevalidation".to_string()),
+                );
+                GatewayError::Unauthorized
+            })?;
     }
 
+    // 5. 若为 WebSocket 升级握手（如 `socketTerminator=node` 模式下的 `/socket.io/`），走 `101` 双向隧道
+    if is_websocket_upgrade_request(request.headers()) {
+        return proxy_websocket_upgrade(
+            &state,
+            request,
+            &request_context,
+            decision,
+            &normalized_path,
+            started_at,
+        )
+        .await;
+    }
+
+    // 6. 普通 HTTP 流式代理（使用规范化后的路径与单值清洗后的 HeaderMap）
     let method = request.method().clone();
-    let uri = request.uri().clone();
+    let query = request.uri().query().map(str::to_owned);
     let request_headers = request.headers().clone();
-    let upstream_url = format!(
-        "{}{}",
-        state.config.upstream_http,
-        uri.path_and_query()
-            .map(|value| value.as_str())
-            .unwrap_or(uri.path())
-    );
+    let upstream_url = match query.as_deref() {
+        Some(q) if !q.is_empty() => {
+            format!("{}{}?{}", state.config.upstream_http, normalized_path, q)
+        }
+        _ => format!("{}{}", state.config.upstream_http, normalized_path),
+    };
 
     let mut builder =
         state
@@ -112,7 +164,8 @@ pub async fn proxy_handler(
         &request_headers,
         &request_context,
         &HOP_BY_HOP_HEADERS,
-    );
+    )?;
+
     let body_stream =
         futures_util::TryStreamExt::map_err(request.into_body().into_data_stream(), |err| {
             std::io::Error::other(err.to_string())
@@ -126,7 +179,7 @@ pub async fn proxy_handler(
                 &state,
                 &request_context,
                 method.as_str(),
-                uri.path(),
+                &normalized_path,
                 IngressEventKind::UpstreamUnavailable,
                 None,
                 started_at.elapsed(),
@@ -135,62 +188,36 @@ pub async fn proxy_handler(
             log_proxy_failure(
                 &request_context,
                 &method,
-                uri.path(),
+                &normalized_path,
                 started_at.elapsed(),
                 &err,
             );
             mark_proxy_failure(
                 &state,
-                format!("proxy {} {} failed: {err}", method, uri.path()),
+                format!("proxy {} {} failed: {err}", method, normalized_path),
             );
             GatewayError::UpstreamUnavailable
         })?;
 
-    mark_proxy_recovery(&state, format!("proxy {} {}", method, uri.path()));
+    mark_proxy_recovery(&state, format!("proxy {} {}", method, normalized_path));
 
     let status = upstream_response.status();
-    let headers = upstream_response.headers().clone();
+    let upstream_headers = upstream_response.headers().clone();
+    let response_headers = build_client_response_headers(
+        &upstream_headers,
+        &request_context,
+        decision,
+        &HOP_BY_HOP_HEADERS,
+        false,
+    )?;
     let stream = upstream_response
         .bytes_stream()
         .map_err(|err| std::io::Error::other(err.to_string()));
-    let mut response_builder = Response::builder().status(status);
-    for (name, value) in headers.iter() {
-        if is_hop_by_hop(name, &HOP_BY_HOP_HEADERS) {
-            continue;
-        }
-        response_builder = response_builder.header(name, value);
-    }
-    response_builder = response_builder
-        .header("x-gateway-ingress", "rust")
-        .header(
-            "x-gateway-route-class",
-            request_context.route_class.as_str(),
-        )
-        .header(
-            "x-gateway-request-timeout-secs",
-            header_value(&request_context.request_timeout_secs.to_string())?,
-        )
-        .header("x-request-id", header_value(&request_context.request_id)?);
-    if let Some(chat_trace_id) = request_context.chat_trace_id.as_ref() {
-        response_builder = response_builder.header("x-chat-trace-id", header_value(chat_trace_id)?);
-    }
-    if let Some(decision) = decision {
-        response_builder = response_builder.header(
-            "x-ratelimit-remaining",
-            HeaderValue::from_str(&decision.remaining.to_string())
-                .unwrap_or_else(|_| HeaderValue::from_static("0")),
-        );
-    } else {
-        response_builder = response_builder.header(
-            "x-gateway-rate-limit-bypass",
-            HeaderValue::from_static("true"),
-        );
-    }
 
     log_proxy_success(
         &request_context,
         &method,
-        uri.path(),
+        &normalized_path,
         status.as_u16(),
         started_at.elapsed(),
     );
@@ -198,14 +225,15 @@ pub async fn proxy_handler(
         &state,
         &request_context,
         method.as_str(),
-        uri.path(),
+        &normalized_path,
         IngressEventKind::Proxied,
         Some(status.as_u16()),
         started_at.elapsed(),
         None,
     );
 
-    response_builder
-        .body(Body::from_stream(stream))
-        .map_err(|_| GatewayError::Internal)
+    let mut response = Response::new(Body::from_stream(stream));
+    *response.status_mut() = status;
+    *response.headers_mut() = response_headers;
+    Ok(response)
 }

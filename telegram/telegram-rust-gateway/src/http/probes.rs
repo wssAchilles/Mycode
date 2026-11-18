@@ -22,6 +22,8 @@ pub fn spawn_dependency_probe_loop(state: AppState) {
         let mut ticker = interval(Duration::from_secs(20));
         loop {
             ticker.tick().await;
+            // 周期回收过期速率限制桶，防止空闲键驻留
+            state.limiter.evict_expired();
             let _ = probe_upstream(&state).await;
             let _ = probe_realtime_protocol(&state).await;
             let _ = probe_socket_io_compat(&state).await;
@@ -39,7 +41,13 @@ pub fn control_plane_snapshot(state: &AppState) -> ControlPlaneSnapshot {
 
 pub async fn probe_upstream(state: &AppState) -> Result<UpstreamHealthPayload> {
     let health_url = format!("{}/health", state.config.upstream_http);
-    match state.client.get(&health_url).send().await {
+    match state
+        .client
+        .get(&health_url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
@@ -141,8 +149,9 @@ pub async fn probe_realtime_protocol(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-pub fn mark_proxy_failure(state: &AppState, message: String) {
-    mark_upstream_failure(state, message);
+/// 记录单请求代理异常说明，但不将全局关键单元 `upstream_http` 置为 Failed，防止单次慢请求超时污染全局 `/health`
+pub fn mark_proxy_failure(_state: &AppState, message: String) {
+    tracing::debug!(detail = %message, "transient per-request proxy failure observed without poisoning global health");
 }
 
 pub fn mark_proxy_recovery(state: &AppState, message: String) {

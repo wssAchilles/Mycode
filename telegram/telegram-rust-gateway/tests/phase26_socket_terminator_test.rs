@@ -1,7 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use serde_json::json;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::{Arc, Mutex};
 
 use telegram_rust_gateway::{
     config::{GatewayConfig, GatewayRealtimeRolloutStage, GatewayRealtimeSocketTerminator},
@@ -16,9 +16,7 @@ use telegram_rust_gateway::{
             RealtimeEventEnvelopeV1, RealtimeTopic,
         },
         socket::state::RustSocketSessionStore,
-        state::{
-            session_registry::RealtimeSessionRegistry, SessionRegistryBackend,
-        },
+        state::{SessionRegistryBackend, session_registry::RealtimeSessionRegistry},
     },
     realtime_consumer::apply_ingress_envelope,
     realtime_ops::RealtimeOpsState,
@@ -194,7 +192,10 @@ async fn test_socket_room_subscription_and_leave_indexing() {
         .session_registry
         .resolve_socket_targets(&room_target, 120)
         .await;
-    assert!(empty_targets.is_empty(), "离开房间后必须不再出现在 room_targets 中");
+    assert!(
+        empty_targets.is_empty(),
+        "离开房间后必须不再出现在 room_targets 中"
+    );
 }
 
 /// 契约测试 3: 验证 2B 模式下配置与终止者语义
@@ -235,12 +236,12 @@ fn test_config_terminator_contract_for_2b_phase() {
 #[test]
 fn test_redis_session_registry_lease_ttl_configured() {
     let client = redis::Client::open("redis://127.0.0.1:6379/0").unwrap();
-    let registry = telegram_rust_gateway::realtime::state::redis_session_registry::RedisSessionRegistry::new(
-        client,
-        "gateway-test".to_string(),
-        100,
-    );
+    let registry =
+        telegram_rust_gateway::realtime::state::redis_session_registry::RedisSessionRegistry::new(
+            client,
+            "gateway-test".to_string(),
+            100,
+        );
     // 确保通过编译且类型匹配
     let _backend = telegram_rust_gateway::realtime::state::SessionRegistryBackend::Redis(registry);
 }
-

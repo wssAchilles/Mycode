@@ -22,10 +22,12 @@ use super::{
         read_seq, session_room, user_room,
     },
     upstream::{
-        ensure_group_access, fetch_current_user, fetch_user_groups, mark_chat_read, send_message,
-        validate_auth_precheck,
+        AUTH_ERROR_CODE, UpstreamAuthError, ensure_group_access, fetch_current_user,
+        fetch_user_groups, is_auth_error, mark_chat_read, send_message, validate_auth_precheck,
     },
 };
+
+const MAX_PRESENCE_SUBSCRIBE_BATCH: usize = 200;
 
 pub fn create_socket_layer() -> (SocketIoLayer, SocketIo) {
     SocketIo::builder().max_buffer_size(512).build_layer()
@@ -35,16 +37,35 @@ pub fn register_socket_namespace(io: &SocketIo, state: AppState) {
     io.ns("/", move |socket: SocketRef| {
         let state = state.clone();
         async move {
-            register_connection(&state, &socket);
+            // 有序等待 SessionOpened 落库后再挂载事件处理器，消除与紧随其后的 authenticate 乱序覆盖竞态
+            register_connection(&state, &socket).await;
             register_handlers(&socket, state.clone());
             socket.on_disconnect(move |socket: SocketRef, reason: DisconnectReason| {
                 let state = state.clone();
                 async move {
-                    handle_disconnect(&state, &socket, reason);
+                    handle_disconnect(&state, &socket, reason).await;
                 }
             });
         }
     });
+}
+
+fn emit_auth_error(socket: &SocketRef, message: &str) {
+    let _ = socket.emit(
+        "authError",
+        &json!({
+            "code": AUTH_ERROR_CODE,
+            "message": message,
+        }),
+    );
+}
+
+fn clear_expired_session_token(state: &AppState, session_id: &str) {
+    let mut sessions = state
+        .realtime_socket_state
+        .lock()
+        .expect("rust socket session mutex poisoned");
+    sessions.clear_access_token(session_id);
 }
 
 fn register_handlers(socket: &SocketRef, state: AppState) {
@@ -56,12 +77,7 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
             async move {
                 if let Err(err) = handle_authenticate(&state, &socket, payload).await {
                     warn!(session_id = %socket.id, error = %err, "rust socket authenticate failed");
-                    let _ = socket.emit(
-                        "authError",
-                        &json!({
-                            "message": "认证失败，请重新登录"
-                        }),
-                    );
+                    emit_auth_error(&socket, "认证失败，请重新登录");
                 }
             }
         },
@@ -75,13 +91,19 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
             async move {
                 if let Err(err) = handle_join_room(&state, &socket, payload).await {
                     warn!(session_id = %socket.id, error = %err, "rust socket joinRoom failed");
-                    let _ = socket.emit(
-                        "message",
-                        &json!({
-                            "type": "error",
-                            "message": "加入房间失败"
-                        }),
-                    );
+                    if is_auth_error(&err) {
+                        let session_id = socket.id.to_string();
+                        clear_expired_session_token(&state, &session_id);
+                        emit_auth_error(&socket, "访问令牌已过期，请刷新后重新认证");
+                    } else {
+                        let _ = socket.emit(
+                            "message",
+                            &json!({
+                                "type": "error",
+                                "message": "加入房间失败"
+                            }),
+                        );
+                    }
                 }
             }
         },
@@ -106,14 +128,26 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
         move |socket: SocketRef, Data(payload): Data<SendMessagePayload>, ack: AckSender| {
             let state = send_message_state.clone();
             async move {
+                let mut should_emit_auth_error = false;
                 let response = match handle_send_message(&state, &socket, payload).await {
-                    Ok(ack) => ack,
+                    Ok(ack_payload) => ack_payload,
                     Err(err) => {
                         warn!(session_id = %socket.id, error = %err, "rust socket sendMessage failed");
-                        SocketMessageAck::err(err.to_string())
+                        if is_auth_error(&err) {
+                            let session_id = socket.id.to_string();
+                            clear_expired_session_token(&state, &session_id);
+                            should_emit_auth_error = true;
+                            SocketMessageAck::err(AUTH_ERROR_CODE)
+                        } else {
+                            SocketMessageAck::err(err.to_string())
+                        }
                     }
                 };
+                // 先回写 ACK 确保前端立即切入 HTTP Fallback 自动刷新令牌，再发送 authError 事件
                 let _ = ack.send(&response);
+                if should_emit_auth_error {
+                    emit_auth_error(&socket, "访问令牌已过期，请刷新后重新认证");
+                }
             }
         },
     );
@@ -126,6 +160,11 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
             async move {
                 if let Err(err) = handle_read_chat(&state, &socket, payload).await {
                     warn!(session_id = %socket.id, error = %err, "rust socket readChat failed");
+                    if is_auth_error(&err) {
+                        let session_id = socket.id.to_string();
+                        clear_expired_session_token(&state, &session_id);
+                        emit_auth_error(&socket, "访问令牌已过期，请刷新后重新认证");
+                    }
                 }
             }
         },
@@ -165,7 +204,7 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
     );
 }
 
-fn register_connection(state: &AppState, socket: &SocketRef) {
+async fn register_connection(state: &AppState, socket: &SocketRef) {
     let session_id = socket.id.to_string();
     socket.join(session_room(&session_id));
     {
@@ -175,7 +214,6 @@ fn register_connection(state: &AppState, socket: &SocketRef) {
             .expect("rust socket session mutex poisoned");
         sessions.register_connection(&session_id);
     }
-    let state_clone = state.clone();
     let event = build_socket_event(
         &session_id,
         None,
@@ -188,9 +226,7 @@ fn register_connection(state: &AppState, socket: &SocketRef) {
             "status": "unknown"
         }),
     );
-    tokio::spawn(async move {
-        apply_ingress_envelope(&state_clone, &event).await;
-    });
+    apply_ingress_envelope(state, &event).await;
 }
 
 async fn handle_authenticate(
@@ -200,7 +236,7 @@ async fn handle_authenticate(
 ) -> Result<()> {
     let access_token = payload.token.trim();
     if access_token.is_empty() {
-        return Err(anyhow!("AUTH_TOKEN_MISSING"));
+        return Err(anyhow::Error::new(UpstreamAuthError::Unauthorized));
     }
 
     validate_auth_precheck(state, access_token)?;
@@ -212,33 +248,69 @@ async fn handle_authenticate(
     let username = auth_me.user.username;
     let group_ids = groups.into_iter().map(|group| group.id).collect::<Vec<_>>();
 
-    let rooms = {
+    let transition = {
         let mut sessions = state
             .realtime_socket_state
             .lock()
             .expect("rust socket session mutex poisoned");
-        sessions.authenticate(&session_id, &user_id, &username, access_token, &group_ids)
+        sessions.authenticate_session(&session_id, &user_id, &username, access_token, &group_ids)
     };
 
-    for room in &rooms {
+    // 若重认证切换了账号，清理旧用户的会话索引
+    if let Some(prev_uid) = transition.previous_user_id.as_deref()
+        && prev_uid != user_id
+    {
+        state
+            .session_registry
+            .remove_user_session(&session_id, prev_uid)
+            .await;
+    }
+
+    // 对重认证后已被移除的旧房间执行 leave 并清理注册表订阅
+    for old_room in &transition.removed_rooms {
+        socket.leave(old_room.clone());
+        if old_room.starts_with("room:") {
+            apply_ingress_envelope(
+                state,
+                &build_socket_event(
+                    &session_id,
+                    Some(&user_id),
+                    None,
+                    RealtimeTopic::SessionHeartbeat,
+                    None,
+                    json!({
+                        "transport": "socket_io_compat",
+                        "activity": "room_left",
+                        "roomId": old_room,
+                        "status": "online"
+                    }),
+                ),
+            )
+            .await;
+        }
+    }
+
+    for room in &transition.joined_rooms {
         socket.join(room.clone());
-        apply_ingress_envelope(
-            state,
-            &build_socket_event(
-                &session_id,
-                Some(&user_id),
-                None,
-                RealtimeTopic::SessionHeartbeat,
-                None,
-                json!({
-                    "transport": "socket_io_compat",
-                    "activity": "room_joined",
-                    "roomId": room,
-                    "status": "online"
-                }),
-            ),
-        )
-        .await;
+        if room.starts_with("room:") {
+            apply_ingress_envelope(
+                state,
+                &build_socket_event(
+                    &session_id,
+                    Some(&user_id),
+                    None,
+                    RealtimeTopic::SessionHeartbeat,
+                    None,
+                    json!({
+                        "transport": "socket_io_compat",
+                        "activity": "room_joined",
+                        "roomId": room,
+                        "status": "online"
+                    }),
+                ),
+            )
+            .await;
+        }
     }
 
     apply_ingress_envelope(
@@ -293,6 +365,7 @@ async fn handle_join_room(
     let session_id = socket.id.to_string();
     let access_token = session_access_token(state, &session_id)?;
     let user_id = session_user_id(state, &session_id)?;
+    validate_auth_precheck(state, &access_token)?;
     ensure_group_access(state, &access_token, payload.room_id.trim()).await?;
     let room = {
         let mut sessions = state
@@ -445,33 +518,49 @@ async fn handle_read_chat(
 }
 
 async fn handle_presence_subscribe(state: &AppState, socket: &SocketRef, user_ids: Vec<String>) {
-    for target_id in user_ids
-        .into_iter()
-        .filter(|user_id| !user_id.trim().is_empty())
+    let session_id = socket.id.to_string();
+    // 强制要求已认证会话，阻断匿名枚举全站用户在线状态
+    if session_user_id_optional(state, &session_id).is_none()
+        || session_access_token(state, &session_id).is_err()
     {
-        let is_online = {
-            let snapshot = state
-                .session_registry
-                .snapshot(state.config.realtime_heartbeat_stale_secs)
-                .await;
-            snapshot
+        emit_auth_error(socket, "未认证会话禁止订阅在线状态");
+        return;
+    }
+
+    let targets = user_ids
+        .into_iter()
+        .map(|uid| uid.trim().to_string())
+        .filter(|uid| !uid.is_empty())
+        .take(MAX_PRESENCE_SUBSCRIBE_BATCH)
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        return;
+    }
+
+    let snapshot = state
+        .session_registry
+        .snapshot(state.config.realtime_heartbeat_stale_secs)
+        .await;
+    let batch = targets
+        .into_iter()
+        .map(|target_id| {
+            let is_online = snapshot
                 .users
                 .iter()
                 .find(|user| user.user_id == target_id)
                 .map(|user| user.authenticated_sessions > 0)
-                .unwrap_or(false)
-        };
-        let _ = socket.emit(
-            "realtimeBatch",
-            &vec![json!({
+                .unwrap_or(false);
+            json!({
                 "type": "presence",
                 "payload": {
                     "userId": target_id,
                     "isOnline": is_online
                 }
-            })],
-        );
-    }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let _ = socket.emit("realtimeBatch", &batch);
 }
 
 async fn handle_typing_event(
@@ -484,6 +573,30 @@ async fn handle_typing_event(
     let Some(user_id) = session_user_id_optional(state, &session_id) else {
         return;
     };
+    if session_access_token(state, &session_id).is_err() {
+        return;
+    }
+
+    // 若为群聊输入状态，强制校验发送者已加入对应群组房间，防止越权向任意群伪造广播
+    if let Some(ref group_id) = payload.group_id {
+        let target_room = normalize_group_room(group_id);
+        let joined = {
+            let sessions = state
+                .realtime_socket_state
+                .lock()
+                .expect("rust socket session mutex poisoned");
+            sessions.is_in_room(&session_id, &target_room)
+        };
+        if !joined {
+            debug!(
+                session_id = %session_id,
+                room = %target_room,
+                "rejected typing event for unjoined group room"
+            );
+            return;
+        }
+    }
+
     let username =
         session_username_optional(state, &session_id).unwrap_or_else(|| "Unknown".to_string());
     let event_name = if is_typing {
@@ -538,7 +651,7 @@ async fn handle_typing_event(
     }
 }
 
-fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: DisconnectReason) {
+async fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: DisconnectReason) {
     let session_id = socket.id.to_string();
     let removed = {
         let mut sessions = state
@@ -548,7 +661,6 @@ fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: DisconnectRea
         sessions.remove(&session_id)
     };
     let user_id = removed.as_ref().and_then(|record| record.user_id.clone());
-    let state_clone = state.clone();
     let event = build_socket_event(
         &session_id,
         user_id.as_deref(),
@@ -562,9 +674,7 @@ fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: DisconnectRea
             "status": if user_id.is_some() { "offline" } else { "unknown" }
         }),
     );
-    tokio::spawn(async move {
-        apply_ingress_envelope(&state_clone, &event).await;
-    });
+    apply_ingress_envelope(state, &event).await;
 }
 
 async fn emit_read_receipt(
@@ -620,11 +730,12 @@ fn session_access_token(state: &AppState, session_id: &str) -> Result<String> {
         .expect("rust socket session mutex poisoned");
     sessions
         .access_token(session_id)
-        .ok_or_else(|| anyhow!("USER_NOT_AUTHENTICATED"))
+        .ok_or_else(|| anyhow::Error::new(UpstreamAuthError::Unauthorized))
 }
 
 fn session_user_id(state: &AppState, session_id: &str) -> Result<String> {
-    session_user_id_optional(state, session_id).ok_or_else(|| anyhow!("USER_NOT_AUTHENTICATED"))
+    session_user_id_optional(state, session_id)
+        .ok_or_else(|| anyhow::Error::new(UpstreamAuthError::Unauthorized))
 }
 
 fn session_user_id_optional(state: &AppState, session_id: &str) -> Option<String> {

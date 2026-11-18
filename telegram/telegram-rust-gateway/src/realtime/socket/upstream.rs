@@ -1,23 +1,148 @@
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+
 use anyhow::{Context, Result, anyhow, bail};
 use dashmap::DashMap;
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use reqwest::StatusCode;
 use serde_json::{Map, Value, json};
+use thiserror::Error;
 
 use crate::state::AppState;
 
 use super::contracts::{
-    ApiSuccessEnvelope, SendMessagePayload, UpstreamAuthMeData, UpstreamGroupSummary,
-    UpstreamReadChatResponse,
+    ApiSuccessEnvelope, ParsedChatId, SendMessagePayload, UpstreamAuthMeData, UpstreamGroupSummary,
+    UpstreamReadChatResponse, parse_chat_id,
 };
+
+pub const AUTH_ERROR_CODE: &str = "AUTH_ERROR";
+
+const AUTH_METADATA_CACHE_TTL: Duration = Duration::from_secs(30);
+const MAX_AUTH_CACHE_ENTRIES: usize = 4_096;
+
+/// 上游路由保留词集合，防止通过 `joinRoom("my")` 命中 `/api/groups/my` 越权入房
+const RESERVED_GROUP_SEGMENTS: [&str; 8] = [
+    "my", "create", "public", "search", "health", "join", "leave", "members",
+];
+
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'/')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'\\');
+
+/// 标准认证失效错误，与前端 `AUTH_ERROR` 重认证及 HTTP Fallback 契约对齐
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum UpstreamAuthError {
+    #[error("AUTH_ERROR")]
+    Unauthorized,
+}
 
 static AUTH_ME_CACHE: LazyLock<DashMap<String, (Instant, UpstreamAuthMeData)>> =
     LazyLock::new(DashMap::new);
 static USER_GROUPS_CACHE: LazyLock<DashMap<String, (Instant, Vec<UpstreamGroupSummary>)>> =
     LazyLock::new(DashMap::new);
 
-const AUTH_METADATA_CACHE_TTL: Duration = Duration::from_secs(30);
+/// 判断错误是否属于认证失效（401 或令牌无效/过期）
+pub fn is_auth_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<UpstreamAuthError>().is_some() || err.to_string() == AUTH_ERROR_CODE
+}
+
+/// 当上游返回 401 时立即失效本地令牌元数据缓存
+pub fn invalidate_token_caches(access_token: &str) {
+    AUTH_ME_CACHE.remove(access_token);
+    USER_GROUPS_CACHE.remove(access_token);
+}
+
+fn bounded_cache_insert<V: Clone>(
+    cache: &DashMap<String, (Instant, V)>,
+    key: String,
+    value: V,
+    ttl: Duration,
+    max_entries: usize,
+) {
+    let now = Instant::now();
+    if cache.len() >= max_entries / 2 {
+        cache.retain(|_, (inserted_at, _)| now.duration_since(*inserted_at) < ttl);
+    }
+    if cache.len() >= max_entries
+        && let Some(oldest_key) = cache
+            .iter()
+            .min_by_key(|entry| entry.value().0)
+            .map(|entry| entry.key().clone())
+    {
+        cache.remove(&oldest_key);
+    }
+    cache.insert(key, (now, value));
+}
+
+fn is_safe_identifier_chars(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':')
+}
+
+/// 严格校验并规范化 `group_id`（剥离可选 `room:` / `g:` 前缀，拒绝路径穿越与保留词，并编码路径段）
+pub fn sanitize_group_id_segment(raw_group_id: &str) -> Result<String> {
+    let mut clean = raw_group_id.trim();
+    while let Some(stripped) = clean
+        .strip_prefix("room:")
+        .or_else(|| clean.strip_prefix("g:"))
+    {
+        clean = stripped.trim();
+    }
+
+    if !is_safe_identifier_chars(clean) || clean == "." || clean == ".." {
+        bail!("INVALID_GROUP_ID");
+    }
+
+    let lower = clean.to_ascii_lowercase();
+    if RESERVED_GROUP_SEGMENTS.contains(&lower.as_str()) {
+        bail!("INVALID_GROUP_ID");
+    }
+
+    Ok(utf8_percent_encode(clean, PATH_SEGMENT_ENCODE_SET).to_string())
+}
+
+/// 严格校验并编码 `chat_id`（仅允许合法 `g:<groupId>` 或 `p:<uid1>:<uid2>` 结构，拒绝 `/` 与 `..`）
+pub fn sanitize_chat_id_segment(raw_chat_id: &str) -> Result<String> {
+    let trimmed = raw_chat_id.trim();
+    if trimmed.is_empty() || trimmed.len() > 160 || trimmed.contains("..") || trimmed.contains('/')
+    {
+        bail!("INVALID_CHAT_ID");
+    }
+
+    match parse_chat_id(trimmed) {
+        Some(ParsedChatId::Group { group_id }) => {
+            let clean_gid = sanitize_group_id_segment(&group_id)?;
+            let canonical = format!("g:{clean_gid}");
+            Ok(utf8_percent_encode(&canonical, PATH_SEGMENT_ENCODE_SET).to_string())
+        }
+        Some(ParsedChatId::Private { user_ids }) => {
+            if user_ids.len() != 2
+                || !user_ids
+                    .iter()
+                    .all(|uid| is_safe_identifier_chars(uid) && !uid.contains(':'))
+            {
+                bail!("INVALID_CHAT_ID");
+            }
+            let canonical = format!("p:{}:{}", user_ids[0], user_ids[1]);
+            Ok(utf8_percent_encode(&canonical, PATH_SEGMENT_ENCODE_SET).to_string())
+        }
+        None => bail!("INVALID_CHAT_ID"),
+    }
+}
 
 async fn request_json<T: serde::de::DeserializeOwned>(
     state: &AppState,
@@ -41,6 +166,10 @@ async fn request_json<T: serde::de::DeserializeOwned>(
         .await
         .with_context(|| format!("send upstream request to {path}"))?;
     let status = response.status();
+    if status == StatusCode::UNAUTHORIZED {
+        invalidate_token_caches(access_token);
+        return Err(anyhow::Error::new(UpstreamAuthError::Unauthorized));
+    }
     if !status.is_success() {
         let detail = response.text().await.unwrap_or_default();
         bail!("upstream {path} returned {status}: {detail}");
@@ -75,6 +204,8 @@ pub async fn fetch_current_user(
         if entry.0.elapsed() < AUTH_METADATA_CACHE_TTL {
             return Ok(entry.1.clone());
         }
+        drop(entry);
+        AUTH_ME_CACHE.remove(access_token);
     }
 
     let data: UpstreamAuthMeData = request_success_data(
@@ -86,7 +217,13 @@ pub async fn fetch_current_user(
     )
     .await?;
 
-    AUTH_ME_CACHE.insert(access_token.to_string(), (Instant::now(), data.clone()));
+    bounded_cache_insert(
+        &AUTH_ME_CACHE,
+        access_token.to_string(),
+        data.clone(),
+        AUTH_METADATA_CACHE_TTL,
+        MAX_AUTH_CACHE_ENTRIES,
+    );
     Ok(data)
 }
 
@@ -98,6 +235,8 @@ pub async fn fetch_user_groups(
         if entry.0.elapsed() < AUTH_METADATA_CACHE_TTL {
             return Ok(entry.1.clone());
         }
+        drop(entry);
+        USER_GROUPS_CACHE.remove(access_token);
     }
 
     let data: Vec<UpstreamGroupSummary> = request_success_data(
@@ -109,7 +248,13 @@ pub async fn fetch_user_groups(
     )
     .await?;
 
-    USER_GROUPS_CACHE.insert(access_token.to_string(), (Instant::now(), data.clone()));
+    bounded_cache_insert(
+        &USER_GROUPS_CACHE,
+        access_token.to_string(),
+        data.clone(),
+        AUTH_METADATA_CACHE_TTL,
+        MAX_AUTH_CACHE_ENTRIES,
+    );
     Ok(data)
 }
 
@@ -118,7 +263,8 @@ pub async fn ensure_group_access(
     access_token: &str,
     group_id: &str,
 ) -> Result<()> {
-    let path = format!("/api/groups/{group_id}");
+    let safe_group_id = sanitize_group_id_segment(group_id)?;
+    let path = format!("/api/groups/{safe_group_id}");
     let url = format!("{}{}", state.config.upstream_http, path);
     let response = state
         .client
@@ -131,7 +277,13 @@ pub async fn ensure_group_access(
 
     match response.status() {
         StatusCode::OK => Ok(()),
-        StatusCode::FORBIDDEN | StatusCode::NOT_FOUND => Err(anyhow!("GROUP_ACCESS_DENIED")),
+        StatusCode::UNAUTHORIZED => {
+            invalidate_token_caches(access_token);
+            Err(anyhow::Error::new(UpstreamAuthError::Unauthorized))
+        }
+        StatusCode::FORBIDDEN | StatusCode::NOT_FOUND | StatusCode::BAD_REQUEST => {
+            Err(anyhow!("GROUP_ACCESS_DENIED"))
+        }
         status => {
             let detail = response.text().await.unwrap_or_default();
             Err(anyhow!("group access probe returned {status}: {detail}"))
@@ -144,6 +296,7 @@ pub async fn send_message(
     access_token: &str,
     payload: &SendMessagePayload,
 ) -> Result<Value> {
+    validate_auth_precheck(state, access_token)?;
     request_success_data(
         state,
         reqwest::Method::POST,
@@ -204,7 +357,9 @@ pub async fn mark_chat_read(
     chat_id: &str,
     seq: u64,
 ) -> Result<UpstreamReadChatResponse> {
-    let path = format!("/api/messages/chat/{chat_id}/read");
+    validate_auth_precheck(state, access_token)?;
+    let safe_chat_id = sanitize_chat_id_segment(chat_id)?;
+    let path = format!("/api/messages/chat/{safe_chat_id}/read");
     request_success_data(
         state,
         reqwest::Method::POST,
@@ -226,12 +381,15 @@ pub fn validate_auth_precheck(state: &AppState, access_token: &str) -> Result<()
     headers.insert(
         reqwest::header::AUTHORIZATION,
         reqwest::header::HeaderValue::from_str(&format!("Bearer {access_token}"))
-            .context("build authorization header")?,
+            .map_err(|_| anyhow::Error::new(UpstreamAuthError::Unauthorized))?,
     );
     validator
         .maybe_validate_bearer(&headers)
-        .context("prevalidate access token")?
-        .ok_or_else(|| anyhow!("missing access token"))?;
+        .map_err(|_| {
+            invalidate_token_caches(access_token);
+            anyhow::Error::new(UpstreamAuthError::Unauthorized)
+        })?
+        .ok_or_else(|| anyhow::Error::new(UpstreamAuthError::Unauthorized))?;
     Ok(())
 }
 
@@ -239,7 +397,10 @@ pub fn validate_auth_precheck(state: &AppState, access_token: &str) -> Result<()
 mod tests {
     use serde_json::json;
 
-    use super::{SendMessagePayload, build_send_message_body};
+    use super::{
+        SendMessagePayload, UpstreamAuthError, build_send_message_body, is_auth_error,
+        sanitize_chat_id_segment, sanitize_group_id_segment,
+    };
 
     #[test]
     fn send_message_body_omits_absent_optional_fields() {
@@ -251,7 +412,7 @@ mod tests {
             receiver_id: None,
             group_id: Some("group-1".to_string()),
             attachments: None,
-            file_url: None,
+            file_url: Some("/api/uploads/photo.png".to_string()),
             file_name: None,
             file_size: None,
             mime_type: None,
@@ -265,8 +426,40 @@ mod tests {
                 "clientTempId": "temp-1",
                 "type": "text",
                 "chatType": "group",
-                "groupId": "group-1"
+                "groupId": "group-1",
+                "fileUrl": "/api/uploads/photo.png"
             })
         );
+    }
+
+    #[test]
+    fn sanitizes_group_and_chat_ids_and_rejects_traversal_or_reserved_words() {
+        assert_eq!(
+            sanitize_group_id_segment("room:15776659-176c-4a97-8146-c6a24d85fb96").unwrap(),
+            "15776659-176c-4a97-8146-c6a24d85fb96"
+        );
+        assert!(sanitize_group_id_segment("my").is_err());
+        assert!(sanitize_group_id_segment("room:MY").is_err());
+        assert!(sanitize_group_id_segment("../auth/me").is_err());
+        assert!(sanitize_group_id_segment("group/evil").is_err());
+
+        assert_eq!(
+            sanitize_chat_id_segment("g:15776659-176c-4a97-8146-c6a24d85fb96").unwrap(),
+            "g:15776659-176c-4a97-8146-c6a24d85fb96"
+        );
+        assert_eq!(
+            sanitize_chat_id_segment("p:user-1:user-2").unwrap(),
+            "p:user-1:user-2"
+        );
+        assert!(sanitize_chat_id_segment("g:../auth/me").is_err());
+        assert!(sanitize_chat_id_segment("g:my").is_err());
+        assert!(sanitize_chat_id_segment("../internal/health").is_err());
+    }
+
+    #[test]
+    fn classifies_unauthorized_error_as_auth_error() {
+        let err = anyhow::Error::new(UpstreamAuthError::Unauthorized);
+        assert!(is_auth_error(&err));
+        assert_eq!(err.to_string(), "AUTH_ERROR");
     }
 }

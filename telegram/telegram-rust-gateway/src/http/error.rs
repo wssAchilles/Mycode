@@ -8,8 +8,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum GatewayError {
+    #[error("bad request")]
+    BadRequest,
     #[error("authorization failed")]
     Unauthorized,
+    #[error("forbidden")]
+    Forbidden,
     #[error("too many requests")]
     RateLimited { retry_after_secs: u64 },
     #[error("upstream unavailable")]
@@ -34,6 +38,17 @@ struct ErrorPayload<'a> {
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
         match self {
+            GatewayError::BadRequest => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorEnvelope {
+                    success: false,
+                    error: ErrorPayload {
+                        code: "BAD_REQUEST",
+                        message: "请求路径或参数非法",
+                    },
+                }),
+            )
+                .into_response(),
             GatewayError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorEnvelope {
@@ -41,6 +56,17 @@ impl IntoResponse for GatewayError {
                     error: ErrorPayload {
                         code: "UNAUTHORIZED",
                         message: "访问令牌无效或已过期",
+                    },
+                }),
+            )
+                .into_response(),
+            GatewayError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                Json(ErrorEnvelope {
+                    success: false,
+                    error: ErrorPayload {
+                        code: "FORBIDDEN",
+                        message: "禁止外部访问内部服务端点",
                     },
                 }),
             )

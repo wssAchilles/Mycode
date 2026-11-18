@@ -115,18 +115,16 @@ async fn dispatch_stream_message(
         record_drop_reason(state, RealtimeDropReason::DeliveryNoResolvedTargets);
     } else {
         let dispatch = if state.config.realtime_socket_terminator_owner() == "rust" {
-            emit_direct_delivery(state, &envelope, socket_ids.len())
+            emit_direct_delivery(state, envelope, socket_ids.len())
                 .await
-                .map_err(|err| {
+                .inspect_err(|_| {
                     record_drop_reason(state, RealtimeDropReason::DeliveryDispatchPublishFailed);
-                    err
                 })?
         } else {
-            publish_compat_dispatch(connection, state, &envelope, socket_ids.clone())
+            publish_compat_dispatch(connection, state, envelope, socket_ids.clone())
                 .await
-                .map_err(|err| {
+                .inspect_err(|_| {
                     record_drop_reason(state, RealtimeDropReason::DeliveryDispatchPublishFailed);
-                    err
                 })?
         };
         {
@@ -145,7 +143,7 @@ async fn dispatch_stream_message(
                 .realtime_ops
                 .lock()
                 .expect("realtime ops mutex poisoned");
-            ops.record_delivery_dispatch(&envelope, &dispatch);
+            ops.record_delivery_dispatch(envelope, &dispatch);
         }
     }
 
@@ -247,7 +245,7 @@ async fn finalize_stream_batch(
     .await;
 }
 
-fn collect_ack_ids<'a>(outcomes: &'a [StreamMessageOutcome]) -> Vec<&'a str> {
+fn collect_ack_ids(outcomes: &[StreamMessageOutcome]) -> Vec<&str> {
     outcomes
         .iter()
         .map(|outcome| outcome.message_id.as_str())
@@ -268,30 +266,6 @@ async fn ack_stream_batch(
         .xack(stream, group, message_ids)
         .await
         .unwrap_or(0);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{StreamMessageOutcome, collect_ack_ids};
-    use anyhow::anyhow;
-
-    #[test]
-    fn collect_ack_ids_keeps_stream_batch_order() {
-        let outcomes = vec![
-            StreamMessageOutcome {
-                message_id: "1-0".to_string(),
-                raw_event: Some("{}".to_string()),
-                envelope: Err(anyhow!("invalid")),
-            },
-            StreamMessageOutcome {
-                message_id: "2-0".to_string(),
-                raw_event: Some("{}".to_string()),
-                envelope: Err(anyhow!("invalid")),
-            },
-        ];
-
-        assert_eq!(collect_ack_ids(&outcomes), vec!["1-0", "2-0"]);
-    }
 }
 
 async fn ensure_group(
@@ -415,4 +389,28 @@ fn record_drop_reason(state: &AppState, reason: RealtimeDropReason) {
 
 fn value_to_string(value: &redis::Value) -> Option<String> {
     redis::from_redis_value::<String>(value).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamMessageOutcome, collect_ack_ids};
+    use anyhow::anyhow;
+
+    #[test]
+    fn collect_ack_ids_keeps_stream_batch_order() {
+        let outcomes = vec![
+            StreamMessageOutcome {
+                message_id: "1-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("invalid")),
+            },
+            StreamMessageOutcome {
+                message_id: "2-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("invalid")),
+            },
+        ];
+
+        assert_eq!(collect_ack_ids(&outcomes), vec!["1-0", "2-0"]);
+    }
 }

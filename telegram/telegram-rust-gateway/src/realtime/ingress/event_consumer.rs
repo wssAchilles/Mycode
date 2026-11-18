@@ -162,7 +162,7 @@ async fn finalize_stream_batch(
     .await;
 }
 
-fn collect_ack_ids<'a>(outcomes: &'a [StreamMessageOutcome]) -> Vec<&'a str> {
+fn collect_ack_ids(outcomes: &[StreamMessageOutcome]) -> Vec<&str> {
     outcomes
         .iter()
         .map(|outcome| outcome.message_id.as_str())
@@ -211,7 +211,16 @@ pub async fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEn
                     .apply_session_heartbeat(envelope)
                     .await
             }
-            _ => {}
+            RealtimeTopic::MessageCommandRequested
+            | RealtimeTopic::ReadAckRequested
+            | RealtimeTopic::TypingUpdated
+            | RealtimeTopic::PresenceUpdated => {
+                // 收到活跃业务事件时同步延长会话与房间订阅 TTL
+                state
+                    .session_registry
+                    .touch_session_activity(envelope)
+                    .await
+            }
         }
 
         let snapshot = state.session_registry.snapshot(120).await;

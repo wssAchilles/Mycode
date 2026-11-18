@@ -68,7 +68,8 @@ impl GatewayConfig {
         let rate_limit_capacity = read_f64("GATEWAY_RATE_LIMIT_CAPACITY", 120.0)?;
         let rate_limit_refill_per_sec = read_f64("GATEWAY_RATE_LIMIT_REFILL_PER_SEC", 2.0)?;
         let request_timeout_secs = read_u64("GATEWAY_REQUEST_TIMEOUT_SECS", 30)?;
-        let sync_request_timeout_secs = read_u64("GATEWAY_SYNC_REQUEST_TIMEOUT_SECS", 45)?;
+        // 默认长轮询超时设为 65 秒，严格大于上游 Node MAX_SYNC_TIMEOUT_MS (60s)
+        let sync_request_timeout_secs = read_u64("GATEWAY_SYNC_REQUEST_TIMEOUT_SECS", 65)?;
         let cors_extra_origins =
             read_csv_origins(&["FRONTEND_ORIGIN", "FRONTEND_ORIGINS", "CORS_EXTRA_ORIGINS"]);
         let realtime_redis_url = read_optional_string("GATEWAY_REALTIME_REDIS_URL")
@@ -150,11 +151,14 @@ impl GatewayConfig {
             "https://telegram-liart-rho.vercel.app"
                 | "https://telegram-467705.web.app"
                 | "https://telegram-467705.firebaseapp.com"
+                | "https://xuziqi.tech"
+                | "https://www.xuziqi.tech"
         ) {
             return true;
         }
 
-        if origin.starts_with("https://") && origin.ends_with(".vercel.app") {
+        // 收敛 Vercel 预览域匹配，仅允许本项目专属单级预览子域前缀，阻断任意第三方 *.vercel.app 反射带凭证 CORS
+        if is_trusted_project_vercel_origin(origin) {
             return true;
         }
 
@@ -295,6 +299,27 @@ fn is_localhost_origin(origin: &str) -> bool {
     origin.starts_with("http://localhost:") || origin.starts_with("http://127.0.0.1:")
 }
 
+/// 校验是否为受信任的项目专属 Vercel 预览域名
+fn is_trusted_project_vercel_origin(origin: &str) -> bool {
+    let Some(rest) = origin.strip_prefix("https://") else {
+        return false;
+    };
+    let Some(subdomain) = rest.strip_suffix(".vercel.app") else {
+        return false;
+    };
+    if subdomain.is_empty()
+        || !subdomain
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return false;
+    }
+    subdomain == "telegram-liart-rho"
+        || subdomain.starts_with("telegram-liart-rho-")
+        || subdomain.starts_with("telegram-clone-")
+        || subdomain.starts_with("telegram-467705-")
+}
+
 fn read_realtime_rollout_stage(
     key: &str,
     default: GatewayRealtimeRolloutStage,
@@ -370,9 +395,12 @@ mod tests {
         let config = config();
 
         assert!(config.is_origin_allowed("https://telegram-467705.web.app"));
-        assert!(config.is_origin_allowed("https://preview.vercel.app"));
+        assert!(config.is_origin_allowed("https://telegram-liart-rho-git-main.vercel.app"));
         assert!(config.is_origin_allowed("http://127.0.0.1:4173"));
         assert!(config.is_origin_allowed("https://api.xuziqi.tech"));
+        assert!(!config.is_origin_allowed("https://preview.vercel.app"));
+        assert!(!config.is_origin_allowed("https://evil.vercel.app"));
+        assert!(!config.is_origin_allowed("http://telegram-liart-rho.vercel.app"));
         assert!(!config.is_origin_allowed("https://evil.example.com"));
     }
 

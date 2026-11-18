@@ -1,3 +1,4 @@
+pub mod lease_renewer;
 pub mod presence_router;
 pub mod redis_session_registry;
 pub mod registry_backend;

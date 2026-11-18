@@ -1,8 +1,10 @@
 pub mod cors;
 pub mod error;
 pub mod handlers;
+pub mod header_sanitizer;
 pub mod ops_auth;
 pub mod ops_handlers;
 pub mod probes;
 pub mod proxy_handler;
 pub mod proxy_support;
+pub mod websocket_proxy;

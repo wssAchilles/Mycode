@@ -1,6 +1,9 @@
-use axum::http::{HeaderMap, HeaderName, HeaderValue, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use tracing::{info, warn};
 
+use super::header_sanitizer::{
+    build_upstream_request_headers, header_value as sanitize_header_value,
+};
 use crate::{
     config::{GatewayConfig, GatewayRealtimeRolloutStage, GatewayRealtimeSocketTerminator},
     error::GatewayError,
@@ -19,31 +22,14 @@ const SYNC_PROTOCOL_VERSION: u8 = 2;
 const SYNC_WATERMARK_FIELD: &str = "updateId";
 
 pub fn copy_request_headers(
-    mut builder: reqwest::RequestBuilder,
+    builder: reqwest::RequestBuilder,
     headers: &HeaderMap,
     request_context: &RequestContext,
     hop_by_hop_headers: &[&str],
-) -> reqwest::RequestBuilder {
-    for (name, value) in headers.iter() {
-        if name == header::HOST || is_hop_by_hop(name, hop_by_hop_headers) {
-            continue;
-        }
-        builder = builder.header(name, value);
-    }
-
-    builder = builder
-        .header("x-forwarded-for", request_context.forwarded_for.clone())
-        .header("x-real-ip", request_context.client_ip.to_string())
-        .header("x-request-id", request_context.request_id.clone())
-        .header("x-gateway-ingress", "rust")
-        .header(
-            "x-gateway-route-class",
-            request_context.route_class.as_str(),
-        );
-    if let Some(chat_trace_id) = request_context.chat_trace_id.as_ref() {
-        builder = builder.header("x-chat-trace-id", chat_trace_id);
-    }
-    builder
+) -> Result<reqwest::RequestBuilder, GatewayError> {
+    let sanitized =
+        build_upstream_request_headers(headers, request_context, hop_by_hop_headers, false)?;
+    Ok(builder.headers(sanitized))
 }
 
 pub fn is_hop_by_hop(name: &HeaderName, hop_by_hop_headers: &[&str]) -> bool {
@@ -53,7 +39,7 @@ pub fn is_hop_by_hop(name: &HeaderName, hop_by_hop_headers: &[&str]) -> bool {
 }
 
 pub fn header_value(value: &str) -> Result<HeaderValue, GatewayError> {
-    HeaderValue::from_str(value).map_err(|_| GatewayError::Internal)
+    sanitize_header_value(value)
 }
 
 pub fn ingress_audit_snapshot(state: &AppState) -> IngressAuditSnapshot {
@@ -64,6 +50,7 @@ pub fn ingress_audit_snapshot(state: &AppState) -> IngressAuditSnapshot {
         .snapshot()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn record_ingress_event(
     state: &AppState,
     request_context: &RequestContext,

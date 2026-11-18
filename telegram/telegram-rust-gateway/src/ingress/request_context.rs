@@ -29,9 +29,9 @@ impl RequestContext {
         let forwarded_for = resolve_forwarded_for(headers, client_ip);
 
         Self {
-            request_id: pick_header(headers, "x-request-id")
+            request_id: pick_single_token_header(headers, "x-request-id")
                 .unwrap_or_else(|| Uuid::new_v4().to_string()),
-            chat_trace_id: pick_header(headers, "x-chat-trace-id"),
+            chat_trace_id: pick_single_token_header(headers, "x-chat-trace-id"),
             client_ip,
             forwarded_for,
             route_class,
@@ -54,20 +54,47 @@ fn pick_header(headers: &HeaderMap, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// 提取单个干净的追踪标识（若客户端传入逗号拼接值则取首段并限制长度）
+fn pick_single_token_header(headers: &HeaderMap, key: &str) -> Option<String> {
+    headers
+        .get(key)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(str::to_owned)
+}
+
+/// 合并所有同名 `x-forwarded-for` 请求头
+fn collect_forwarded_for_chain(headers: &HeaderMap) -> Option<String> {
+    let parts = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
+}
+
 fn resolve_client_ip(config: &GatewayConfig, headers: &HeaderMap, socket_ip: IpAddr) -> IpAddr {
     if config.trust_x_forwarded_for {
-        if let Some(value) = pick_header(headers, "x-forwarded-for") {
-            if let Some(first) = value.split(',').next() {
-                if let Ok(ip) = first.trim().parse::<IpAddr>() {
-                    return ip;
-                }
-            }
+        // 与 Nginx `$proxy_add_x_forwarded_for` 对齐，取最右侧由受信反代追加的客户端 IP，防止客户端伪造最左 XFF 绕过限流
+        if let Some(chain) = collect_forwarded_for_chain(headers)
+            && let Some(rightmost) = chain.rsplit(',').next()
+            && let Ok(ip) = rightmost.trim().parse::<IpAddr>()
+        {
+            return ip;
         }
 
-        if let Some(value) = pick_header(headers, "x-real-ip") {
-            if let Ok(ip) = value.parse::<IpAddr>() {
-                return ip;
-            }
+        if let Some(value) = pick_header(headers, "x-real-ip")
+            && let Ok(ip) = value.parse::<IpAddr>()
+        {
+            return ip;
         }
     }
 
@@ -75,7 +102,7 @@ fn resolve_client_ip(config: &GatewayConfig, headers: &HeaderMap, socket_ip: IpA
 }
 
 fn resolve_forwarded_for(headers: &HeaderMap, client_ip: IpAddr) -> String {
-    pick_header(headers, "x-forwarded-for").unwrap_or_else(|| client_ip.to_string())
+    collect_forwarded_for_chain(headers).unwrap_or_else(|| client_ip.to_string())
 }
 
 #[cfg(test)]
@@ -125,7 +152,7 @@ mod tests {
         headers.insert("x-chat-trace-id", HeaderValue::from_static("trace-456"));
         headers.insert(
             "x-forwarded-for",
-            HeaderValue::from_static("203.0.113.7, 10.0.0.2"),
+            HeaderValue::from_static("198.51.100.99, 203.0.113.7"),
         );
 
         let context = RequestContext::from_headers(
@@ -138,7 +165,7 @@ mod tests {
         assert_eq!(context.request_id, "req-123");
         assert_eq!(context.chat_trace_id.as_deref(), Some("trace-456"));
         assert_eq!(context.client_ip, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)));
-        assert_eq!(context.forwarded_for, "203.0.113.7, 10.0.0.2");
+        assert_eq!(context.forwarded_for, "198.51.100.99, 203.0.113.7");
         assert_eq!(context.request_timeout_secs, 45);
         assert!(!context.jwt_prevalidation_bypassed);
     }

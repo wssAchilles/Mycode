@@ -16,6 +16,7 @@ pub enum IngressEventKind {
     Proxied,
     RateLimited,
     Unauthorized,
+    Forbidden,
     UpstreamUnavailable,
 }
 
@@ -140,7 +141,9 @@ impl IngressAuditTrail {
         match event.kind {
             IngressEventKind::Proxied => route_state.proxied_requests += 1,
             IngressEventKind::RateLimited => route_state.rate_limited_requests += 1,
-            IngressEventKind::Unauthorized => route_state.unauthorized_requests += 1,
+            IngressEventKind::Unauthorized | IngressEventKind::Forbidden => {
+                route_state.unauthorized_requests += 1
+            }
             IngressEventKind::UpstreamUnavailable => route_state.upstream_unavailable_requests += 1,
         }
     }

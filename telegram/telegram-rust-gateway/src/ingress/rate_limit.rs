@@ -5,6 +5,9 @@ use std::{
 
 use dashmap::DashMap;
 
+/// 限制内存中最大活跃限流桶数量，防止恶意键轮换导致无界内存增长
+const MAX_RATE_LIMIT_BUCKETS: usize = 65_536;
+
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
     inner: Arc<DashMap<String, TokenBucket>>,
@@ -39,30 +42,70 @@ impl RateLimiter {
         }
     }
 
+    /// 供周期后台任务调用的主动过期清理接口
+    pub fn evict_expired(&self) {
+        let now = Instant::now();
+        self.evict_expired_at(now);
+    }
+
+    fn evict_expired_at(&self, now: Instant) {
+        self.inner
+            .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
+        // 若仍在 TTL 内发生异常键暴涨，按较短窗口裁剪以保护网关进程内存边界
+        if self.inner.len() >= MAX_RATE_LIMIT_BUCKETS {
+            let emergency_ttl = Duration::from_secs(30);
+            self.inner
+                .retain(|_, bucket| now.duration_since(bucket.last_seen) <= emergency_ttl);
+        }
+        if self.inner.len() >= MAX_RATE_LIMIT_BUCKETS {
+            let target_remove = self.inner.len() / 4;
+            let keys_to_remove = self
+                .inner
+                .iter()
+                .take(target_remove.max(1))
+                .map(|entry| entry.key().clone())
+                .collect::<Vec<_>>();
+            for key in keys_to_remove {
+                self.inner.remove(&key);
+            }
+        }
+    }
+
     pub fn check(&self, key: &str) -> RateLimitDecision {
+        self.check_with_limits(key, self.capacity, self.refill_per_sec)
+    }
+
+    /// 支持按路由类别指定独立容量与恢复速率的令牌桶检查
+    pub fn check_with_limits(
+        &self,
+        key: &str,
+        capacity: f64,
+        refill_per_sec: f64,
+    ) -> RateLimitDecision {
         let now = Instant::now();
 
-        // Throttle cleanup to once per 30 seconds
-        if let Ok(mut last) = self.last_cleanup.try_lock() {
-            if now.duration_since(*last) > Duration::from_secs(30) {
-                self.inner
-                    .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
-                *last = now;
-            }
+        // 每 30 秒或达到容量阈值时触发惰性过期清理
+        if self.inner.len() >= MAX_RATE_LIMIT_BUCKETS {
+            self.evict_expired_at(now);
+        } else if let Ok(mut last) = self.last_cleanup.try_lock()
+            && now.duration_since(*last) > Duration::from_secs(30)
+        {
+            self.evict_expired_at(now);
+            *last = now;
         }
 
         let mut bucket = self
             .inner
             .entry(key.to_string())
             .or_insert_with(|| TokenBucket {
-                tokens: self.capacity,
+                tokens: capacity,
                 last_refill: now,
                 last_seen: now,
             });
 
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
         if elapsed > 0.0 {
-            bucket.tokens = (bucket.tokens + elapsed * self.refill_per_sec).min(self.capacity);
+            bucket.tokens = (bucket.tokens + elapsed * refill_per_sec).min(capacity);
             bucket.last_refill = now;
         }
         bucket.last_seen = now;
@@ -77,10 +120,10 @@ impl RateLimiter {
         }
 
         let missing = (1.0 - bucket.tokens).max(0.0);
-        let retry_after_secs = if self.refill_per_sec <= 0.0 {
+        let retry_after_secs = if refill_per_sec <= 0.0 {
             1
         } else {
-            (missing / self.refill_per_sec).ceil() as u64
+            (missing / refill_per_sec).ceil() as u64
         };
         RateLimitDecision {
             allowed: false,

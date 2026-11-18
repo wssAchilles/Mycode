@@ -2,6 +2,8 @@ use std::{fmt, net::IpAddr};
 
 use serde::Serialize;
 
+use super::path_normalizer::normalize_path_for_policy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrafficClass {
@@ -16,22 +18,27 @@ pub enum TrafficClass {
 
 impl TrafficClass {
     pub fn from_path(path: &str) -> Self {
-        if path == "/health" || path.starts_with("/gateway/ops/") {
+        // 先折叠 `.` / `..` 与重复斜杠并统一小写，防止路径变形绕过限流与 Bearer 预检
+        let normalized = normalize_path_for_policy(path).to_ascii_lowercase();
+        if normalized == "/health"
+            || normalized == "/gateway/ops"
+            || normalized.starts_with("/gateway/ops/")
+        {
             Self::InternalOps
-        } else if path.starts_with("/api/auth/login")
-            || path.starts_with("/api/auth/register")
-            || path.starts_with("/api/auth/refresh")
+        } else if normalized.starts_with("/api/auth/login")
+            || normalized.starts_with("/api/auth/register")
+            || normalized.starts_with("/api/auth/refresh")
         {
             Self::Auth
-        } else if path.starts_with("/api/realtime/health") {
+        } else if normalized.starts_with("/api/realtime/health") {
             Self::PublicRead
-        } else if path.starts_with("/api/realtime/") {
+        } else if normalized.starts_with("/api/realtime/") {
             Self::RealtimeBootstrap
-        } else if path.starts_with("/api/public/") {
+        } else if normalized.starts_with("/api/public/") {
             Self::PublicRead
-        } else if path.starts_with("/api/sync/updates") {
+        } else if normalized.starts_with("/api/sync/updates") {
             Self::SyncLongPoll
-        } else if path.starts_with("/socket.io/") {
+        } else if normalized == "/socket.io" || normalized.starts_with("/socket.io/") {
             Self::SocketIoCompat
         } else {
             Self::DefaultApi
@@ -40,6 +47,21 @@ impl TrafficClass {
 
     pub fn bypass_rate_limit(self) -> bool {
         matches!(self, Self::InternalOps)
+    }
+
+    /// 根据路由类别计算令牌桶容量与填充速率，防止 Socket.IO 握手与长轮询触发 429 重连风暴
+    pub fn rate_limit_budget(
+        self,
+        default_capacity: f64,
+        default_refill_per_sec: f64,
+    ) -> (f64, f64) {
+        match self {
+            Self::SocketIoCompat => (
+                (default_capacity * 5.0).max(600.0),
+                (default_refill_per_sec * 10.0).max(20.0),
+            ),
+            _ => (default_capacity, default_refill_per_sec),
+        }
     }
 
     pub fn bypass_jwt_prevalidation(self) -> bool {
@@ -205,6 +227,15 @@ mod tests {
         assert_eq!(
             TrafficClass::from_path("/api/messages/chat/abc"),
             TrafficClass::DefaultApi
+        );
+        // 验证路径折叠与大小写不敏感匹配，阻断 `..` 穿越绕过 InternalOps 豁免
+        assert_eq!(
+            TrafficClass::from_path("/gateway/ops/../../api/messages/send"),
+            TrafficClass::DefaultApi
+        );
+        assert_eq!(
+            TrafficClass::from_path("/API/Auth/Login"),
+            TrafficClass::Auth
         );
     }
 

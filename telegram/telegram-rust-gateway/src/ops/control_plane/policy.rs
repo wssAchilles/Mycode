@@ -58,18 +58,22 @@ pub fn evaluate_control_plane_policy(units: &[RuntimeUnitState]) -> Vec<PolicyRe
 }
 
 pub fn compute_overall_status(units: &[RuntimeUnitState]) -> LifecycleStatus {
+    // 仅当 critical 关键单元进入 Failed / Blocked 时将全局状态标为 Failed；非关键单元异常归为 Degraded
     if units.iter().any(|unit| {
-        matches!(
-            unit.status,
-            LifecycleStatus::Failed | LifecycleStatus::Blocked
-        )
+        unit.critical
+            && matches!(
+                unit.status,
+                LifecycleStatus::Failed | LifecycleStatus::Blocked
+            )
     }) {
         return LifecycleStatus::Failed;
     }
-    if units
-        .iter()
-        .any(|unit| unit.status == LifecycleStatus::Degraded)
-    {
+    if units.iter().any(|unit| {
+        matches!(
+            unit.status,
+            LifecycleStatus::Degraded | LifecycleStatus::Failed | LifecycleStatus::Blocked
+        )
+    }) {
         return LifecycleStatus::Degraded;
     }
     if !units.is_empty()

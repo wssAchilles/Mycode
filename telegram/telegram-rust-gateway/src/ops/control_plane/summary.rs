@@ -77,7 +77,7 @@ pub fn compress_summary(
     let mut seen = BTreeMap::<String, ()>::new();
     for line in summary.lines() {
         let normalized_line = truncate_line(
-            &line.trim().split_whitespace().collect::<Vec<_>>().join(" "),
+            &line.split_whitespace().collect::<Vec<_>>().join(" "),
             max_line_chars,
         );
         if normalized_line.is_empty() {

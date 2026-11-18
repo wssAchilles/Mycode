@@ -137,6 +137,73 @@ impl RealtimeSessionRegistry {
         self.session_by_id.insert(session_id, record);
     }
 
+    /// 收到活跃事件（如发消息、已读、输入状态）时刷新心跳时间戳，避免连接静默过期
+    pub fn touch_session_activity(&mut self, envelope: &RealtimeEventEnvelopeV1) {
+        let emitted_at_epoch_ms = parse_epoch_ms(&envelope.emitted_at);
+        if let Some(mut record) = self.session_by_id.remove(&envelope.session_id) {
+            self.remove_indexes(&record);
+            if let Some(incoming_user) = &envelope.user_id {
+                record.user_id = Some(incoming_user.clone());
+                record.authenticated = true;
+            }
+            record.last_event_at = envelope.emitted_at.clone();
+            record.last_heartbeat_at = envelope.emitted_at.clone();
+            record.last_event_epoch_ms = emitted_at_epoch_ms;
+            record.last_heartbeat_epoch_ms = emitted_at_epoch_ms;
+            self.insert_indexes(&record);
+            self.session_by_id
+                .insert(envelope.session_id.clone(), record);
+        }
+    }
+
+    /// 供周期续租任务刷新内存会话存活时间戳与房间集合
+    pub fn renew_session_lease(
+        &mut self,
+        session_id: &str,
+        user_id: Option<&str>,
+        rooms: &[String],
+        source: &str,
+    ) {
+        let now = Utc::now();
+        let now_iso = now.to_rfc3339();
+        let now_ms = now.timestamp_millis();
+        let mut record = self
+            .session_by_id
+            .remove(session_id)
+            .unwrap_or_else(|| SessionRecord {
+                session_id: session_id.to_string(),
+                user_id: user_id.map(ToString::to_string),
+                authenticated: user_id.is_some(),
+                rooms: BTreeSet::new(),
+                last_heartbeat_at: now_iso.clone(),
+                last_event_at: now_iso.clone(),
+                last_heartbeat_epoch_ms: now_ms,
+                last_event_epoch_ms: now_ms,
+                source: source.to_string(),
+            });
+        self.remove_indexes(&record);
+        if let Some(uid) = user_id {
+            record.user_id = Some(uid.to_string());
+            record.authenticated = true;
+        }
+        for room in rooms {
+            let trimmed = room.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with("sid:") && !trimmed.starts_with("user:")
+            {
+                record.rooms.insert(normalize_room_target(trimmed));
+            }
+        }
+        record.last_heartbeat_at = now_iso;
+        record.last_heartbeat_epoch_ms = now_ms;
+        self.insert_indexes(&record);
+        self.session_by_id.insert(session_id.to_string(), record);
+    }
+
+    /// 切号重认证时从旧用户索引移除当前会话
+    pub fn remove_user_session(&mut self, session_id: &str, old_user_id: &str) {
+        remove_index_entry(&mut self.sessions_by_user, old_user_id, session_id);
+    }
+
     pub fn snapshot(&self, stale_after_secs: u64) -> RealtimeRegistrySnapshot {
         let users = self
             .sessions_by_user

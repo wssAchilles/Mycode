@@ -4,7 +4,7 @@ use super::redis_session_registry::RedisSessionRegistry;
 use super::session_registry::{RealtimeRegistrySnapshot, RealtimeSessionRegistry};
 use crate::realtime_contracts::RealtimeEventEnvelopeV1;
 
-/// Session registry backend — in-memory or Redis
+/// 会话注册表后端抽象（内存版或 Redis 共享版）
 #[derive(Clone)]
 pub enum SessionRegistryBackend {
     InMemory(Arc<tokio::sync::Mutex<RealtimeSessionRegistry>>),
@@ -40,6 +40,54 @@ impl SessionRegistryBackend {
             Self::Redis(reg) => {
                 if let Err(e) = reg.apply_session_heartbeat(envelope).await {
                     tracing::warn!("redis session heartbeat failed: {}", e);
+                }
+            }
+        }
+    }
+
+    pub async fn touch_session_activity(&self, envelope: &RealtimeEventEnvelopeV1) {
+        match self {
+            Self::InMemory(reg) => reg.lock().await.touch_session_activity(envelope),
+            Self::Redis(reg) => {
+                if let Err(e) = reg.touch_session_activity(envelope).await {
+                    tracing::warn!("redis touch session activity failed: {}", e);
+                }
+            }
+        }
+    }
+
+    pub async fn renew_session_lease(
+        &self,
+        session_id: &str,
+        user_id: Option<&str>,
+        rooms: &[String],
+        source: &str,
+    ) {
+        match self {
+            Self::InMemory(reg) => reg
+                .lock()
+                .await
+                .renew_session_lease(session_id, user_id, rooms, source),
+            Self::Redis(reg) => {
+                if let Err(e) = reg
+                    .renew_session_lease(session_id, user_id, rooms, source)
+                    .await
+                {
+                    tracing::warn!(session_id = %session_id, "redis renew session lease failed: {}", e);
+                }
+            }
+        }
+    }
+
+    pub async fn remove_user_session(&self, session_id: &str, old_user_id: &str) {
+        match self {
+            Self::InMemory(reg) => reg
+                .lock()
+                .await
+                .remove_user_session(session_id, old_user_id),
+            Self::Redis(reg) => {
+                if let Err(e) = reg.remove_user_session(session_id, old_user_id).await {
+                    tracing::warn!(session_id = %session_id, "redis remove old user session failed: {}", e);
                 }
             }
         }
