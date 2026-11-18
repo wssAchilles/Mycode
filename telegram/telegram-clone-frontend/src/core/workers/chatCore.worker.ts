@@ -571,7 +571,7 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
 
   const rawMessages: RawSyncMessage[] = [];
   const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
-  const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number }>();
+  const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number; readerId?: string }>();
   const groupEvents: RawGroupEvent[] = [];
 
   for (const event of events) {
@@ -607,11 +607,14 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
       const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
       const seq = event.payload?.seq;
       if (!chatId || typeof seq !== 'number') continue;
-      const key = `${chatId}:${seq}`;
+      const readerId = typeof event.payload?.readerId === 'string' && event.payload.readerId.trim()
+        ? event.payload.readerId.trim()
+        : '';
+      const key = `${chatId}:${seq}:${readerId}`;
       const readCount = typeof event.payload.readCount === 'number' ? event.payload.readCount : 1;
       const cur = readByChatSeq.get(key);
       if (!cur || readCount >= cur.readCount) {
-        readByChatSeq.set(key, { chatId, seq, readCount });
+        readByChatSeq.set(key, { chatId, seq, readCount, readerId: readerId || undefined });
       }
       continue;
     }
@@ -2527,11 +2530,41 @@ function assertCursorContract(
   return null;
 }
 
+export interface ChatReadStateSummary {
+  partnerLastReadSeq?: number | null;
+  readWatermarks?: Array<{ userId: string; lastReadSeq: number }>;
+}
+
+function parseReadStateSummary(raw: unknown): ChatReadStateSummary | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as {
+    partnerLastReadSeq?: unknown;
+    readWatermarks?: unknown;
+  };
+  const partnerLastReadSeq = typeof obj.partnerLastReadSeq === 'number' && Number.isFinite(obj.partnerLastReadSeq)
+    ? obj.partnerLastReadSeq
+    : obj.partnerLastReadSeq === null
+      ? null
+      : undefined;
+  const readWatermarks = Array.isArray(obj.readWatermarks)
+    ? obj.readWatermarks
+        .filter(
+          (w): w is { userId: string; lastReadSeq: number } =>
+            Boolean(w)
+            && typeof (w as { userId?: unknown }).userId === 'string'
+            && typeof (w as { lastReadSeq?: unknown }).lastReadSeq === 'number',
+        )
+        .map((w) => ({ userId: w.userId, lastReadSeq: w.lastReadSeq }))
+    : undefined;
+  if (partnerLastReadSeq === undefined && readWatermarks === undefined) return undefined;
+  return { partnerLastReadSeq, readWatermarks };
+}
+
 async function fetchChatMessagesUnified(
   chatId: string,
   cursor: FetchCursor = {},
   signal?: AbortSignal,
-): Promise<{ messages: Message[]; paging: FetchPaging } | null> {
+): Promise<{ messages: Message[]; paging: FetchPaging; readState?: ChatReadStateSummary } | null> {
   const resolvedLimit =
     typeof cursor.limit === 'number' && Number.isFinite(cursor.limit)
       ? Math.max(1, Math.min(100, Math.floor(cursor.limit)))
@@ -2574,11 +2607,12 @@ async function fetchChatMessagesUnified(
   }
 
   const messages = normalizeSyncMessages(Array.isArray(json?.messages) ? json.messages : []);
+  const readState = parseReadStateSummary((json as { readState?: unknown } | null | undefined)?.readState);
   const cursorViolation = validateCursorPage(chatId, cursor, messages);
   if (cursorViolation) {
     throw new Error(`CURSOR_CONTRACT_VIOLATION:${cursorViolation}`);
   }
-  return { messages, paging };
+  return { messages, paging, readState };
 }
 
 async function fetchChatMessages(chatId: string, cursor: FetchCursor = {}, signal?: AbortSignal) {
@@ -2686,7 +2720,7 @@ async function warmPrefetchFromNetwork(
     const localLatestSeq = typeof localLatest?.seq === 'number' ? localLatest.seq : null;
     const isIncrementalWarm = typeof localLatestSeq === 'number';
 
-    let result: { messages: Message[]; paging: FetchPaging } | null = null;
+    let result: { messages: Message[]; paging: FetchPaging; readState?: ChatReadStateSummary } | null = null;
     if (isIncrementalWarm) {
       try {
         result = await fetchChatMessages(chatId, { afterSeq: localLatestSeq });
@@ -2718,6 +2752,11 @@ async function warmPrefetchFromNetwork(
         if (delta) queueUnreadDeltaMeta(listId, delta);
       }
       saveMessages(incoming).catch(() => undefined);
+      applyPrivateReplyReadReceiptIfNeeded(chatId, isGroup, incoming);
+    }
+
+    if (result.readState) {
+      applyServerReadStateInternal(chatId, result.readState);
     }
 
     const warmed = store.getOrCreate(chatId, isGroup);
@@ -2979,12 +3018,57 @@ async function ingestMessagesInternal(messages: Message[]) {
     if (chatId === store.activeChatId && removedIds.length) {
       emitDelete(chatId, store.activeLoadSeq, removedIds);
     }
+    applyPrivateReplyReadReceiptIfNeeded(chatId, bucket.isGroup, bucket.messages);
   }
 }
 
-function applyReadReceiptInternal(chatId: string, seq: number, readCount: number, senderUserId: string) {
-  const updates = store.applyReadReceipt(chatId, seq, readCount, senderUserId);
+function applyPrivateReplyReadReceiptIfNeeded(chatId: string, isGroup: boolean, messages: Message[]) {
+  if (isGroup || !currentUserId || !messages.length) return;
+  let maxOtherSeq = 0;
+  let maxOtherSenderId = '';
+  for (const m of messages) {
+    if (m.senderId && m.senderId !== currentUserId && typeof m.seq === 'number' && m.seq > maxOtherSeq) {
+      maxOtherSeq = m.seq;
+      maxOtherSenderId = m.senderId;
+    }
+  }
+  // 私聊收到对方新回复即说明其已阅读之前我发的消息，立即推进本地单/双勾显示
+  if (maxOtherSeq > 1 && maxOtherSenderId) {
+    applyReadReceiptInternal(chatId, maxOtherSeq - 1, 1, currentUserId, maxOtherSenderId);
+  }
+}
+
+function persistUpdatedMessageStates(chatId: string, updates: Array<{ id: string }>) {
   if (!updates.length) return;
+  const updatedMessages = store.getMessagesByIds(
+    chatId,
+    updates.map((u) => u.id),
+  );
+  if (updatedMessages.length) {
+    saveMessages(updatedMessages).catch(() => undefined);
+  }
+}
+
+function applyReadReceiptInternal(
+  chatId: string,
+  seq: number,
+  readCount: number,
+  senderUserId: string,
+  readerId?: string,
+) {
+  const updates = store.applyReadReceipt(chatId, seq, readCount, senderUserId, readerId);
+  if (!updates.length) return;
+  // 即便不在当前激活会话也写回 IDB，避免切回会话后恢复成旧状态
+  persistUpdatedMessageStates(chatId, updates);
+  if (chatId !== store.activeChatId) return;
+  emitPatch({ kind: 'update', chatId, loadSeq: store.activeLoadSeq, updates });
+}
+
+function applyServerReadStateInternal(chatId: string, readState?: ChatReadStateSummary | null) {
+  if (!readState || !currentUserId) return;
+  const updates = store.applyServerReadState(chatId, readState, currentUserId);
+  if (!updates.length) return;
+  persistUpdatedMessageStates(chatId, updates);
   if (chatId !== store.activeChatId) return;
   emitPatch({ kind: 'update', chatId, loadSeq: store.activeLoadSeq, updates });
 }
@@ -3038,7 +3122,8 @@ async function processSyncPayload(updates: RawSyncUpdate[], rawMessages: RawSync
         if (typeof chatId !== 'string') continue;
         if (typeof seq !== 'number') continue;
         const readCount = typeof u?.payload?.readCount === 'number' ? u.payload.readCount : 1;
-        applyReadReceiptInternal(chatId, seq, readCount, currentUserId);
+        const readerId = typeof u?.payload?.readerId === 'string' ? u.payload.readerId : undefined;
+        applyReadReceiptInternal(chatId, seq, readCount, currentUserId, readerId);
         continue;
       }
 
@@ -4069,6 +4154,10 @@ const apiImpl: ChatCoreApi = {
           }
 
           saveMessages(incoming).catch(() => undefined);
+          applyPrivateReplyReadReceiptIfNeeded(chatId, isGroup, incoming);
+        }
+        if (delta.readState) {
+          applyServerReadStateInternal(chatId, delta.readState);
         }
         return;
       } catch (err: unknown) {
@@ -4081,7 +4170,7 @@ const apiImpl: ChatCoreApi = {
 
     // 2.2) Cold-chat / fallback path: fetch latest page and reset projection.
     chatLatestAbort = new AbortController();
-    let result: { messages: Message[]; paging: FetchPaging } | null = null;
+    let result: { messages: Message[]; paging: FetchPaging; readState?: ChatReadStateSummary } | null = null;
     let fullFetchError: unknown = null;
     try {
       result = await fetchChatMessages(
@@ -4112,6 +4201,10 @@ const apiImpl: ChatCoreApi = {
     const incomingIds = new Set(incoming.map((m) => m.id));
     const extras = chat.messages.filter((m) => !incomingIds.has(m.id));
     store.replaceMessages(chatId, isGroup, [...incoming, ...extras]);
+    if (result.readState && currentUserId) {
+      const updated = store.applyServerReadState(chatId, result.readState, currentUserId);
+      persistUpdatedMessageStates(chatId, updated);
+    }
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
     searchBridge.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
     if (incoming.length) {
@@ -4148,7 +4241,7 @@ const apiImpl: ChatCoreApi = {
     chatPagingAbort = new AbortController();
     const currentPagingEpoch = ++pagingFetchEpoch;
 
-    let result: { messages: Message[]; paging: FetchPaging } | null = null;
+    let result: { messages: Message[]; paging: FetchPaging; readState?: ChatReadStateSummary } | null = null;
     let networkError: unknown = null;
     try {
       result = await fetchChatMessages(chatId, { beforeSeq }, chatPagingAbort.signal);
@@ -4276,30 +4369,41 @@ const apiImpl: ChatCoreApi = {
     }
   },
 
-  async applyReadReceipt(chatId: string, seq: number, readCount: number, currentUserId: string) {
-    applyReadReceiptInternal(chatId, seq, readCount, currentUserId);
+  async applyReadReceipt(
+    chatId: string,
+    seq: number,
+    readCount: number,
+    currentUserId: string,
+    readerId?: string,
+  ) {
+    applyReadReceiptInternal(chatId, seq, readCount, currentUserId, readerId);
   },
 
-  async applyReadReceiptsBatch(receipts: Array<{ chatId: string; seq: number; readCount: number }>, currentUserId: string) {
+  async applyReadReceiptsBatch(
+    receipts: Array<{ chatId: string; seq: number; readCount: number; readerId?: string }>,
+    currentUserId: string,
+  ) {
     if (!Array.isArray(receipts) || receipts.length === 0) return;
 
-    // Coalesce to reduce repeated scans over large chats during bursty read receipts.
-    const latestByChat = new Map<string, { seq: number; readCount: number }>();
+    // 按 (chatId, readerId) 合并批内回执，保留群聊不同成员各自的已读水位
+    const latestByKey = new Map<string, { chatId: string; seq: number; readCount: number; readerId?: string }>();
     for (const r of receipts) {
       const chatId = r?.chatId;
       const seq = r?.seq;
       if (typeof chatId !== 'string') continue;
       if (typeof seq !== 'number') continue;
       const readCount = typeof r?.readCount === 'number' ? r.readCount : 1;
+      const readerId = typeof r?.readerId === 'string' && r.readerId.trim() ? r.readerId.trim() : '';
+      const key = `${chatId}::${readerId}`;
 
-      const cur = latestByChat.get(chatId);
+      const cur = latestByKey.get(key);
       if (!cur || seq > cur.seq || (seq === cur.seq && readCount > cur.readCount)) {
-        latestByChat.set(chatId, { seq, readCount });
+        latestByKey.set(key, { chatId, seq, readCount, readerId: readerId || undefined });
       }
     }
 
-    for (const [chatId, v] of latestByChat.entries()) {
-      applyReadReceiptInternal(chatId, v.seq, v.readCount, currentUserId);
+    for (const v of latestByKey.values()) {
+      applyReadReceiptInternal(v.chatId, v.seq, v.readCount, currentUserId, v.readerId);
     }
   },
 

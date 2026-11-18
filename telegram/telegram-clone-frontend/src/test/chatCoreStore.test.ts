@@ -198,4 +198,72 @@ describe('ChatCoreStore', () => {
 
     expect(evicted).toEqual(['p:1:2']);
   });
+
+  it('忽略自己触发的群聊已读回执并按成员水位精确统计每条消息的 readCount', () => {
+    const store = new ChatCoreStore(10);
+    const chatId = 'g:grp-read-1';
+    const me = 'u1';
+    store.replaceMessages(chatId, true, [
+      msg({ id: 'm1', chatId, senderId: me, senderUsername: 'me', seq: 1, content: 'a', status: 'delivered' }),
+      msg({ id: 'm2', chatId, senderId: me, senderUsername: 'me', seq: 2, content: 'b', status: 'delivered' }),
+      msg({ id: 'm3', chatId, senderId: me, senderUsername: 'me', seq: 3, content: 'c', status: 'delivered' }),
+    ]);
+
+    // 自己读消息不得把自己的消息标成已读
+    expect(store.applyReadReceipt(chatId, 3, 1, me, me)).toEqual([]);
+    expect(store.getOrCreate(chatId, true).messages.every((m) => m.status === 'delivered')).toBe(true);
+
+    // 成员 u2 读到 seq=3（非本人已读数=1）
+    store.applyReadReceipt(chatId, 3, 1, me, 'u2');
+    // 成员 u3 仅读到 seq=1（即便 seq=1 < readReceiptSeq=3，也应精确回补 m1 的已读数为 2）
+    store.applyReadReceipt(chatId, 1, 2, me, 'u3');
+
+    const msgs = store.getOrCreate(chatId, true).messages;
+    expect(msgs[0]).toMatchObject({ seq: 1, status: 'read', readCount: 2 });
+    expect(msgs[1]).toMatchObject({ seq: 2, status: 'read', readCount: 1 });
+    expect(msgs[2]).toMatchObject({ seq: 3, status: 'read', readCount: 1 });
+  });
+
+  it('applyServerReadState 在私聊和群聊场景下正确校准缓存消息已读状态', () => {
+    const store = new ChatCoreStore(10);
+    const me = 'u1';
+
+    const privateChatId = 'p:u1:u2';
+    store.replaceMessages(privateChatId, false, [
+      msg({ id: 'p1', chatId: privateChatId, senderId: me, senderUsername: 'me', seq: 1, content: 'hi', status: 'delivered' }),
+      msg({ id: 'p2', chatId: privateChatId, senderId: me, senderUsername: 'me', seq: 2, content: 'ping', status: 'delivered' }),
+      msg({ id: 'p3', chatId: privateChatId, senderId: me, senderUsername: 'me', seq: 3, content: 'latest', status: 'delivered' }),
+    ]);
+    const privateUpdates = store.applyServerReadState(
+      privateChatId,
+      { partnerLastReadSeq: 2, readWatermarks: [{ userId: 'u2', lastReadSeq: 2 }] },
+      me,
+    );
+    expect(privateUpdates.map((u) => [u.id, u.status])).toEqual([
+      ['p1', 'read'],
+      ['p2', 'read'],
+    ]);
+    expect(store.getOrCreate(privateChatId, false).messages[2].status).toBe('delivered');
+
+    const groupChatId = 'g:grp-calibrate';
+    store.replaceMessages(groupChatId, true, [
+      msg({ id: 'g1', chatId: groupChatId, senderId: me, senderUsername: 'me', seq: 1, content: 'one', status: 'delivered', readCount: 0 }),
+      msg({ id: 'g2', chatId: groupChatId, senderId: me, senderUsername: 'me', seq: 2, content: 'two', status: 'read', readCount: 1 }),
+    ]);
+    store.applyServerReadState(
+      groupChatId,
+      {
+        partnerLastReadSeq: null,
+        readWatermarks: [
+          { userId: me, lastReadSeq: 2 },
+          { userId: 'u2', lastReadSeq: 1 },
+        ],
+      },
+      me,
+    );
+    const groupMsgs = store.getOrCreate(groupChatId, true).messages;
+    expect(groupMsgs[0]).toMatchObject({ status: 'read', readCount: 1 });
+    // g2 仅本人读过，纠正早期误标的已读状态
+    expect(groupMsgs[1]).toMatchObject({ status: 'delivered', readCount: 0 });
+  });
 });

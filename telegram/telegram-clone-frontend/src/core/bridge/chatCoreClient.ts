@@ -366,14 +366,20 @@ class ChatCoreClient {
     await this.executeWithRecovery('ingestGroupUpdates', (api) => api.ingestGroupUpdates(events));
   }
 
-  async applyReadReceipt(chatId: string, seq: number, readCount: number, currentUserId: string): Promise<void> {
+  async applyReadReceipt(
+    chatId: string,
+    seq: number,
+    readCount: number,
+    currentUserId: string,
+    readerId?: string,
+  ): Promise<void> {
     await this.executeWithRecovery('applyReadReceipt', (api) =>
-      api.applyReadReceipt(chatId, seq, readCount, currentUserId),
+      api.applyReadReceipt(chatId, seq, readCount, currentUserId, readerId),
     );
   }
 
   async applyReadReceiptsBatch(
-    receipts: Array<{ chatId: string; seq: number; readCount: number }>,
+    receipts: Array<{ chatId: string; seq: number; readCount: number; readerId?: string }>,
     currentUserId: string,
   ): Promise<void> {
     await this.executeWithRecovery('applyReadReceiptsBatch', (api) =>

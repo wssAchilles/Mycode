@@ -58,10 +58,10 @@ export interface MessageState {
   ingestRealtimeEvents: (events: SocketRealtimeEvent[]) => void;
   ingestPresenceEvent: (event: { userId: string; isOnline: boolean; lastSeen?: string }) => void;
   ingestPresenceEvents: (events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>) => void;
-  ingestReadReceiptEvent: (event: { chatId: string; seq: number; readCount: number }) => void;
-  ingestReadReceiptEvents: (events: Array<{ chatId: string; seq: number; readCount: number }>) => void;
+  ingestReadReceiptEvent: (event: { chatId: string; seq: number; readCount: number; readerId?: string }) => void;
+  ingestReadReceiptEvents: (events: Array<{ chatId: string; seq: number; readCount: number; readerId?: string }>) => void;
   ingestGroupUpdateEvent: (event: unknown) => void;
   ingestGroupUpdateEvents: (events: unknown[]) => void;
-  applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string) => void;
+  applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string, readerId?: string) => void;
   clearMessages: () => void;
 }

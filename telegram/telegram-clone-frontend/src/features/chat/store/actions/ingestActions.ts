@@ -63,7 +63,7 @@ export function createIngestActions(
       const readCount = typeof event.readCount === 'number' ? event.readCount : 1;
       deps.enqueueRealtimeEvent({
         type: 'readReceipt',
-        payload: { chatId: event.chatId, seq: event.seq, readCount },
+        payload: { chatId: event.chatId, seq: event.seq, readCount, readerId: event.readerId },
       });
     },
 
@@ -75,7 +75,7 @@ export function createIngestActions(
         const readCount = typeof event.readCount === 'number' ? event.readCount : 1;
         batch.push({
           type: 'readReceipt',
-          payload: { chatId: event.chatId, seq: event.seq, readCount },
+          payload: { chatId: event.chatId, seq: event.seq, readCount, readerId: event.readerId },
         });
       }
       if (!batch.length) return;
@@ -98,12 +98,12 @@ export function createIngestActions(
       deps.enqueueRealtimeBatch(batch);
     },
 
-    applyReadReceipt: (chatId, seq, readCount, currentUserId) => {
-      // Worker owns the authoritative state for regular chats.
+    applyReadReceipt: (chatId, seq, readCount, currentUserId, readerId) => {
+      // Worker 维护常规聊天的权威状态
       void currentUserId;
       deps.enqueueRealtimeEvent({
         type: 'readReceipt',
-        payload: { chatId, seq, readCount: typeof readCount === 'number' ? readCount : 1 },
+        payload: { chatId, seq, readCount: typeof readCount === 'number' ? readCount : 1, readerId },
       });
     },
   };

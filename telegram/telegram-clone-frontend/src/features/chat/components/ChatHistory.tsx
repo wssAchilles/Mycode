@@ -105,8 +105,10 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
     <MessageBubble
       isOut={isOut}
       time={time}
+      status={msg.status}
       isRead={msg.status === 'read'}
       isSent={msg.status !== 'failed' && msg.status !== 'pending'}
+      isFailed={msg.status === 'failed'}
       readCount={msg.readCount}
       withTail={withTail}
       isMedia={isMedia}

@@ -243,13 +243,13 @@ export function createRealtimeActions(
 
     markChatRead: (chatId: string, seq: number) => {
       if (!chatId || typeof seq !== 'number' || seq <= 0) return;
-      void messageAPI.markChatRead(chatId, seq).catch(() => undefined);
       void (async () => {
         try {
           await deps.ensureCoreReady();
           await chatCoreClient.markChatRead(chatId, seq);
         } catch {
-          // ignore
+          // Worker 通道不可用时降级调用 HTTP 已读接口，避免与 Worker 并发重复上报
+          void messageAPI.markChatRead(chatId, seq).catch(() => undefined);
         }
       })();
     },

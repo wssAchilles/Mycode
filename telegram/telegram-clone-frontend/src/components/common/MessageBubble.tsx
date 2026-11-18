@@ -3,12 +3,14 @@ import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './MessageBubble.css';
 
 export interface MessageBubbleProps {
-    isOut?: boolean; // True if sent by me
+    isOut?: boolean; // 是否为我方发出消息
     children: React.ReactNode;
     time?: string;
-    isRead?: boolean; // For double tick
-    isSent?: boolean; // For single tick (if false => clock or error)
-    withTail?: boolean; // Should show the tail?
+    status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+    isRead?: boolean; // 双勾已读
+    isSent?: boolean; // 单勾已送达（为 false 时显示时钟发送中）
+    isFailed?: boolean; // 发送失败告警态
+    withTail?: boolean; // 是否显示气泡尾角
     className?: string;
     isMedia?: boolean; // [NEW] Is this a media/image bubble?
     readCount?: number; // 群聊已读人数
@@ -22,8 +24,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     isOut = false,
     children,
     time,
+    status,
     isRead = false,
     isSent = true,
+    isFailed = false,
     withTail = true,
     className = '',
     isMedia = false,
@@ -33,8 +37,21 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     senderAvatarUrl,
     attentionKey,
 }) => {
+    const resolvedStatus: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' = isFailed || status === 'failed'
+        ? 'failed'
+        : status ?? (isRead ? 'read' : isSent ? 'delivered' : 'pending');
+    const resolvedIsRead = resolvedStatus === 'read';
+    const resolvedIsFailed = resolvedStatus === 'failed';
+    const resolvedIsSent = resolvedStatus === 'sent' || resolvedStatus === 'delivered';
+    const statusLabel = resolvedIsRead
+        ? '已读'
+        : resolvedIsFailed
+            ? '发送失败'
+            : resolvedIsSent
+                ? '已送达'
+                : '发送中';
     const showIncomingMeta = !isOut && showSenderMeta;
-    const hasReadCountBadge = isOut && typeof readCount === 'number' && readCount > 0;
+    const hasReadCountBadge = isOut && !resolvedIsFailed && resolvedStatus !== 'pending' && typeof readCount === 'number' && readCount > 0;
     const senderInitial = (senderName || '?').trim().charAt(0).toUpperCase() || '?';
     const bubbleMotion = useAnimeScope<HTMLDivElement, { attention: () => void }>(
         ({ root, reducedMotion, duration }) => ({
@@ -86,18 +103,47 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className={`tg-message-meta ${isMedia ? 'is-media-meta' : ''}`}>
                         <span className="tg-message-time">{time}</span>
                         {isOut && (
-                            <span className={`tg-message-status ${isRead ? 'is-read' : ''}`}>
-                                {isRead ? (
-                                    <svg viewBox="0 0 18 10" width="16" height="10" className="icon-read">
-                                        <path d="M4.8 9.2L0.5 4.9L1.9 3.5L4.8 6.4L11.9 0.5L13.3 1.9L4.8 9.2Z M12.8 9.2L8.5 4.9L9.9 3.5L12.8 6.4L16.2 3.5L17.6 4.9L12.8 9.2Z" fill="currentColor" />
+                            <span
+                                className={`tg-message-status ${resolvedIsRead ? 'is-read' : ''} ${resolvedIsFailed ? 'is-failed' : ''}`.trim()}
+                                role="img"
+                                aria-label={statusLabel}
+                                title={statusLabel}
+                                data-status={resolvedStatus}
+                            >
+                                {resolvedIsRead ? (
+                                    <svg viewBox="0 0 20 12" width="17" height="11" className="icon-read" aria-hidden="true">
+                                        <path
+                                            d="M1.8 6.6L5.1 9.8L12.2 2.2M7.6 6.6L10.9 9.8L18.1 2.2"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.75"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
                                     </svg>
-                                ) : isSent ? (
-                                    <svg viewBox="0 0 12 10" width="11" height="9" className="icon-sent">
-                                        <path d="M4.8 9.2L0.5 4.9L1.9 3.5L4.8 6.4L10.5 0.7L11.9 2.1L4.8 9.2Z" fill="currentColor" />
+                                ) : resolvedIsFailed ? (
+                                    <svg viewBox="0 0 16 16" width="13" height="13" className="icon-failed" aria-hidden="true">
+                                        <circle cx="8" cy="8" r="6.75" fill="#FF3B30" stroke="rgba(255,255,255,0.9)" strokeWidth="1" />
+                                        <path d="M8 4.2V8.6" stroke="#FFFFFF" strokeWidth="1.7" strokeLinecap="round" />
+                                        <circle cx="8" cy="11.3" r="0.95" fill="#FFFFFF" />
+                                    </svg>
+                                ) : resolvedIsSent ? (
+                                    <svg viewBox="0 0 14 12" width="12" height="11" className="icon-sent" aria-hidden="true">
+                                        <path
+                                            d="M2.1 6.6L5.4 9.8L12.3 2.2"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.75"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
                                     </svg>
                                 ) : (
-                                    <svg viewBox="0 0 16 16" width="12" height="12" className="icon-pending">
-                                        <path d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5A6.5 6.5 0 0 0 8 1.5Zm.75 3.25a.75.75 0 0 0-1.5 0v3.8c0 .2.08.39.22.53l2.22 2.22a.75.75 0 1 0 1.06-1.06L8.75 8.2Z" fill="currentColor" />
+                                    <svg viewBox="0 0 16 16" width="12" height="12" className="icon-pending" aria-hidden="true">
+                                        <path
+                                            d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5A6.5 6.5 0 0 0 8 1.5Zm.75 3.25a.75.75 0 0 0-1.5 0v3.8c0 .2.08.39.22.53l2.22 2.22a.75.75 0 1 0 1.06-1.06L8.75 8.2Z"
+                                            fill="currentColor"
+                                        />
                                     </svg>
                                 )}
                             </span>
@@ -105,7 +151,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                 </div>
 
-                {isOut && typeof readCount === 'number' && readCount > 0 && (
+                {hasReadCountBadge && (
                     <span className="tg-message-readcount-badge">已读 {readCount}</span>
                 )}
 

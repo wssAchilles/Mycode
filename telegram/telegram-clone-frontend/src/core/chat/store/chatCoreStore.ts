@@ -25,6 +25,8 @@ export interface ChatCacheState {
   maxSeq: number | null;
   readReceiptSeq: number;
   readReceiptReadCount: number;
+  // 记录每位群成员的非本人最大已读 seq，用于按消息精确计算群聊 readCount
+  memberReadSeq: Map<string, number>;
 
   // Paging state (unified cursor API).
   hasMore: boolean;
@@ -69,6 +71,7 @@ export class ChatCoreStore {
       maxSeq: null,
       readReceiptSeq: 0,
       readReceiptReadCount: 0,
+      memberReadSeq: new Map(),
       hasMore: true,
       nextBeforeSeq: null,
     };
@@ -108,6 +111,7 @@ export class ChatCoreStore {
     chat.maxSeq = null;
     chat.readReceiptSeq = 0;
     chat.readReceiptReadCount = 0;
+    chat.memberReadSeq.clear();
 
     const deduped: Message[] = [];
     for (const m of messages) {
@@ -322,20 +326,142 @@ export class ChatCoreStore {
     return { removedIds };
   }
 
-  applyReadReceipt(chatId: string, seq: number, readCount: number, currentUserId: string): Array<{ id: string; status?: Message['status']; readCount?: number }> {
+  private countReadersAtOrAbove(memberReadSeq: Map<string, number>, seq: number): number {
+    let count = 0;
+    for (const readerSeq of memberReadSeq.values()) {
+      if (readerSeq >= seq) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * 应用服务端权威 readState 摘要，校准内存及缓存消息的已读状态与群聊 readCount。
+   */
+  applyServerReadState(
+    chatId: string,
+    readState: {
+      partnerLastReadSeq?: number | null;
+      readWatermarks?: Array<{ userId: string; lastReadSeq: number }>;
+    } | null | undefined,
+    currentUserId: string,
+  ): Array<{ id: string; status?: Message['status']; readCount?: number }> {
+    const chat = this.chats.get(chatId);
+    if (!chat || !readState || !currentUserId) return [];
+
+    const hasWatermarks = Array.isArray(readState.readWatermarks);
+    if (hasWatermarks) {
+      chat.memberReadSeq.clear();
+      for (const watermark of readState.readWatermarks!) {
+        const uid = typeof watermark?.userId === 'string' ? watermark.userId : '';
+        const lastReadSeq = typeof watermark?.lastReadSeq === 'number' ? Math.floor(watermark.lastReadSeq) : 0;
+        if (!uid || uid === currentUserId || lastReadSeq <= 0) continue;
+        const prev = chat.memberReadSeq.get(uid) ?? 0;
+        if (lastReadSeq > prev) {
+          chat.memberReadSeq.set(uid, lastReadSeq);
+        }
+      }
+    }
+
+    const updates: Array<{ id: string; status?: Message['status']; readCount?: number }> = [];
+    const firstSeqIndex = findFirstPositiveSeqIndex(chat.messages);
+    const partnerSeq = typeof readState.partnerLastReadSeq === 'number' && Number.isFinite(readState.partnerLastReadSeq)
+      ? Math.max(0, Math.floor(readState.partnerLastReadSeq))
+      : null;
+
+    let maxWatermarkSeq = partnerSeq ?? 0;
+    for (const readerSeq of chat.memberReadSeq.values()) {
+      if (readerSeq > maxWatermarkSeq) maxWatermarkSeq = readerSeq;
+    }
+
+    if (firstSeqIndex < chat.messages.length) {
+      for (let i = firstSeqIndex; i < chat.messages.length; i += 1) {
+        const msg = chat.messages[i];
+        const msgSeq = msg.seq ?? 0;
+        if (!msgSeq || msg.senderId !== currentUserId) continue;
+
+        const isGroup = chat.isGroup || Boolean(msg.isGroupChat);
+        let nextStatus: Message['status'] = msg.status;
+        let nextReadCount = msg.readCount;
+
+        if (isGroup) {
+          if (hasWatermarks || chat.memberReadSeq.size > 0) {
+            const count = this.countReadersAtOrAbove(chat.memberReadSeq, msgSeq);
+            if (count > 0) {
+              nextStatus = 'read';
+              nextReadCount = count;
+            } else if (hasWatermarks && (msg.status === 'read' || (typeof msg.readCount === 'number' && msg.readCount > 0))) {
+              // 纠正早期因自读 Bug 写入 IndexedDB 的误判已读状态
+              nextStatus = 'delivered';
+              nextReadCount = 0;
+            }
+          }
+        } else {
+          const effectivePartnerSeq = partnerSeq ?? (maxWatermarkSeq > 0 ? maxWatermarkSeq : null);
+          if (effectivePartnerSeq !== null) {
+            if (msgSeq <= effectivePartnerSeq) {
+              nextStatus = 'read';
+            } else if (msg.status === 'read') {
+              nextStatus = 'delivered';
+            }
+          }
+        }
+
+        if (nextStatus !== msg.status || nextReadCount !== msg.readCount) {
+          chat.messages[i] = { ...msg, status: nextStatus, readCount: nextReadCount };
+          chat.entityById.set(msg.id, chat.messages[i]);
+          updates.push({ id: msg.id, status: nextStatus, readCount: nextReadCount });
+        }
+      }
+    }
+
+    if (maxWatermarkSeq > chat.readReceiptSeq) {
+      chat.readReceiptSeq = maxWatermarkSeq;
+    }
+    if (chat.isGroup && chat.memberReadSeq.size > 0) {
+      chat.readReceiptReadCount = Math.max(chat.readReceiptReadCount, chat.memberReadSeq.size);
+    }
+
+    return updates;
+  }
+
+  applyReadReceipt(
+    chatId: string,
+    seq: number,
+    readCount: number,
+    currentUserId: string,
+    readerId?: string,
+  ): Array<{ id: string; status?: Message['status']; readCount?: number }> {
     const chat = this.chats.get(chatId);
     if (!chat) return [];
     if (typeof seq !== 'number' || seq <= 0) return [];
+    // 忽略发送者本人或当前用户自己上报的已读回执
+    if (readerId && currentUserId && readerId === currentUserId) return [];
+
+    const normalizedReaderId = typeof readerId === 'string' && readerId.trim() ? readerId.trim() : '';
+    let readerAdvanced = false;
+    if (normalizedReaderId) {
+      const prevReaderSeq = chat.memberReadSeq.get(normalizedReaderId) ?? 0;
+      const nextReaderSeq = Math.max(prevReaderSeq, Math.floor(seq));
+      if (nextReaderSeq > prevReaderSeq) {
+        chat.memberReadSeq.set(normalizedReaderId, nextReaderSeq);
+        readerAdvanced = true;
+      }
+    }
+
+    if (chat.isGroup && readCount <= 0 && !readerAdvanced) {
+      return [];
+    }
 
     const updates: Array<{ id: string; status?: Message['status']; readCount?: number }> = [];
     const prevSeq = chat.readReceiptSeq;
     const prevReadCount = chat.readReceiptReadCount;
 
-    if (seq < prevSeq) return [];
+    if (!normalizedReaderId && seq < prevSeq) return [];
 
-    // Group read-count changes can require backfilling already-read messages.
+    // 群聊支持多成员在不同 seq 位点推进已读人数，需要从 seq=1 起按成员水位重算
+    const usePerMemberGroupCalc = chat.isGroup && (Boolean(normalizedReaderId) || chat.memberReadSeq.size > 0);
     const shouldBackfillReadCount = chat.isGroup && readCount > prevReadCount;
-    const minSeqToUpdate = seq > prevSeq ? prevSeq + 1 : 1;
+    const minSeqToUpdate = usePerMemberGroupCalc ? 1 : (seq > prevSeq ? prevSeq + 1 : 1);
     const firstSeqIndex = findFirstPositiveSeqIndex(chat.messages);
     if (firstSeqIndex >= chat.messages.length) {
       chat.readReceiptSeq = Math.max(prevSeq, seq);
@@ -359,12 +485,23 @@ export class ChatCoreStore {
       const msg = chat.messages[i];
       const msgSeq = msg.seq ?? 0;
       if (!msgSeq) continue;
-      if (!shouldBackfillReadCount && msgSeq < minSeqToUpdate) continue;
+      if (!usePerMemberGroupCalc && !shouldBackfillReadCount && msgSeq < minSeqToUpdate) continue;
       if (msg.senderId !== currentUserId) continue;
 
-      const nextStatus: Message['status'] = 'read';
-      const nextReadCount = msg.isGroupChat ? readCount : msg.readCount;
+      const isGroup = chat.isGroup || Boolean(msg.isGroupChat);
+      if (isGroup && readCount <= 0 && !chat.memberReadSeq.size) continue;
 
+      let nextReadCount = msg.readCount;
+      if (isGroup) {
+        const mappedCount = chat.memberReadSeq.size > 0
+          ? this.countReadersAtOrAbove(chat.memberReadSeq, msgSeq)
+          : 0;
+        const candidateCount = Math.max(mappedCount, msgSeq <= seq ? readCount : 0, msg.readCount ?? 0);
+        if (candidateCount <= 0) continue;
+        nextReadCount = candidateCount;
+      }
+
+      const nextStatus: Message['status'] = 'read';
       if (msg.status !== nextStatus || (typeof nextReadCount === 'number' && msg.readCount !== nextReadCount)) {
         chat.messages[i] = { ...msg, status: nextStatus, readCount: nextReadCount };
         chat.entityById.set(msg.id, chat.messages[i]);

@@ -24,7 +24,7 @@ export interface RealtimeIngestContext {
   markTelemetryUpdate: () => void;
   emitPatch: (patch: ChatPatch) => void;
   processSyncPayload: (updates: any[], messages: RawSyncMessage[], pts: number) => Promise<void>;
-  applyReadReceipt: (chatId: string, seq: number, readCount: number, senderUserId: string) => void;
+  applyReadReceipt: (chatId: string, seq: number, readCount: number, senderUserId: string, readerId?: string) => void;
   processGroupUpdateEvent: (raw: RawGroupEvent) => Promise<void>;
 }
 
@@ -193,7 +193,7 @@ export class RealtimeIngest {
 
     const rawMessages: RawSyncMessage[] = [];
     const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
-    const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number }>();
+    const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number; readerId?: string }>();
     const groupEvents: RawGroupEvent[] = [];
 
     for (const event of events) {
@@ -219,11 +219,14 @@ export class RealtimeIngest {
         const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
         const seq = event.payload?.seq;
         if (!chatId || typeof seq !== 'number') continue;
-        const key = `${chatId}:${seq}`;
+        const readerId = typeof event.payload?.readerId === 'string' && event.payload.readerId.trim()
+          ? event.payload.readerId.trim()
+          : '';
+        const key = `${chatId}:${seq}:${readerId}`;
         const readCount = typeof event.payload.readCount === 'number' ? event.payload.readCount : 1;
         const cur = readByChatSeq.get(key);
         if (!cur || readCount >= cur.readCount) {
-          readByChatSeq.set(key, { chatId, seq, readCount });
+          readByChatSeq.set(key, { chatId, seq, readCount, readerId: readerId || undefined });
         }
         continue;
       }
@@ -251,7 +254,7 @@ export class RealtimeIngest {
 
     if (readByChatSeq.size) {
       for (const receipt of readByChatSeq.values()) {
-        this.ctx.applyReadReceipt(receipt.chatId, receipt.seq, receipt.readCount, '');
+        this.ctx.applyReadReceipt(receipt.chatId, receipt.seq, receipt.readCount, '', receipt.readerId);
       }
     }
 

@@ -149,16 +149,32 @@
     color: rgba(255, 255, 255, 0.88);
 }
 
+.tg-message-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
 .tg-message-status svg {
     display: block;
 }
 
 .is-read {
     color: #FFFFFF;
+    filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.14));
 }
 
 .icon-sent {
-    color: rgba(255, 255, 255, 0.78);
+    color: rgba(255, 255, 255, 0.76);
+}
+
+.icon-pending {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.tg-message-status.is-failed {
+    color: #FF3B30;
 }
 
 /* 为顶部悬浮的“已读 N”徽章预留安全顶部间距，避免被 contain: content 边界裁切 */

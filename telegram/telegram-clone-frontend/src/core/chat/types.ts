@@ -349,9 +349,15 @@ export interface ChatCoreApi {
   ingestRealtimeEvents(events: SocketRealtimeEvent[]): Promise<void>;
   ingestPresenceEvents(events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>): Promise<void>;
   ingestGroupUpdates(events: unknown[]): Promise<void>;
-  applyReadReceipt(chatId: ChatId, seq: number, readCount: number, currentUserId: string): Promise<void>;
+  applyReadReceipt(
+    chatId: ChatId,
+    seq: number,
+    readCount: number,
+    currentUserId: string,
+    readerId?: string,
+  ): Promise<void>;
   applyReadReceiptsBatch(
-    receipts: Array<{ chatId: ChatId; seq: number; readCount: number }>,
+    receipts: Array<{ chatId: ChatId; seq: number; readCount: number; readerId?: string }>,
     currentUserId: string,
   ): Promise<void>;
   sendSocketMessage(payload: SocketMessageSendPayload): Promise<SocketMessageSendAck>;

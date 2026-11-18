@@ -85,4 +85,43 @@ describe('MessageBubble', () => {
         expect(row).toBeInTheDocument();
         expect(screen.getByText('已读 5')).toBeInTheDocument();
     });
+
+    it('区分渲染发送中/已送达/已读/失败四态图标及无障碍语义', () => {
+        const { rerender, container } = render(
+            <CommonMessageBubble isOut={true} time="12:01" status="pending" readCount={2}>
+                发送中消息
+            </CommonMessageBubble>
+        );
+        expect(container.querySelector('.icon-pending')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: '发送中' })).toHaveAttribute('data-status', 'pending');
+        expect(screen.queryByText('已读 2')).not.toBeInTheDocument();
+
+        rerender(
+            <CommonMessageBubble isOut={true} time="12:01" status="delivered">
+                已送达消息
+            </CommonMessageBubble>
+        );
+        expect(container.querySelector('.icon-sent')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: '已送达' })).toHaveAttribute('data-status', 'delivered');
+
+        rerender(
+            <CommonMessageBubble isOut={true} time="12:01" status="read" readCount={3}>
+                已读消息
+            </CommonMessageBubble>
+        );
+        expect(container.querySelector('.tg-message-status.is-read')).toBeInTheDocument();
+        expect(container.querySelector('.icon-read')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: '已读' })).toHaveAttribute('data-status', 'read');
+        expect(screen.getByText('已读 3')).toBeInTheDocument();
+
+        rerender(
+            <CommonMessageBubble isOut={true} time="12:01" status="failed" isFailed={true} readCount={1}>
+                失败消息
+            </CommonMessageBubble>
+        );
+        expect(container.querySelector('.tg-message-status.is-failed')).toBeInTheDocument();
+        expect(container.querySelector('.icon-failed')).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: '发送失败' })).toHaveAttribute('data-status', 'failed');
+        expect(screen.queryByText('已读 1')).not.toBeInTheDocument();
+    });
 });
