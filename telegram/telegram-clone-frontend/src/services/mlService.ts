@@ -114,6 +114,11 @@ const parseEnvBool = (value: unknown, fallback = false): boolean => {
 
 const ML_PROXY_BASE = normalizeBase(import.meta.env.VITE_ML_PROXY_URL || `${API_BASE_URL}/api/ml`);
 const ALLOW_DIRECT_ML = parseEnvBool(import.meta.env.VITE_ALLOW_DIRECT_ML, false);
+// 后端 /api/ml/* 已收紧为运维权限接口，普通浏览器会话默认交由服务端内部执行 ML 召回与安全过滤
+const ENABLE_BROWSER_ML_PROXY = parseEnvBool(import.meta.env.VITE_ENABLE_BROWSER_ML_PROXY, false);
+
+const isBrowserMlEndpointEnabled = (directEndpoint: string | undefined): boolean =>
+    Boolean((ALLOW_DIRECT_ML && directEndpoint) || ENABLE_BROWSER_ML_PROXY);
 
 const resolveMlEndpoint = (
     directEndpoint: string | undefined,
@@ -203,6 +208,9 @@ export const mlService = {
         keywords: string[] = [],
         topK: number = 20
     ): Promise<ANNCandidate[]> => {
+        if (!isBrowserMlEndpointEnabled(import.meta.env.VITE_ANN_ENDPOINT)) {
+            return [];
+        }
         try {
             const currentUser = authUtils.getCurrentUser();
             const userId = currentUser?.id || 'anonymous_user';
@@ -233,6 +241,9 @@ export const mlService = {
     phoenixRank: async (
         candidates: PhoenixCandidatePayload[]
     ): Promise<PhoenixPrediction[]> => {
+        if (!isBrowserMlEndpointEnabled(import.meta.env.VITE_PHOENIX_ENDPOINT)) {
+            return [];
+        }
         try {
             const currentUser = authUtils.getCurrentUser();
             const userId = currentUser?.id || 'anonymous_user';
@@ -261,6 +272,9 @@ export const mlService = {
      * Checks if content is safe using the Vertical Filter model
      */
     vfCheck: async (postId: string): Promise<boolean> => {
+        if (!isBrowserMlEndpointEnabled(import.meta.env.VITE_VF_ENDPOINT)) {
+            return false;
+        }
         try {
             const currentUser = authUtils.getCurrentUser();
             const userId = currentUser?.id || 'anonymous_user';
@@ -309,6 +323,9 @@ export const mlService = {
      * VF Safety Check v2 (content-aware)
      */
     vfCheckContent: async (content: string): Promise<VFResultExtended | null> => {
+        if (!isBrowserMlEndpointEnabled(import.meta.env.VITE_VF_ENDPOINT_V2)) {
+            return null;
+        }
         try {
             const currentUser = authUtils.getCurrentUser();
             const userId = currentUser?.id || 'anonymous_user';

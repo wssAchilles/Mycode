@@ -281,9 +281,7 @@ export const authAPI = {
       authStorage.setUser(normalizedUser);
       return normalizedUser;
     } catch (error: unknown) {
-      const axiosErr = error as AxiosError<{ error?: string; message?: string }>;
-      const errorMessage = axiosErr?.response?.data?.error || axiosErr?.response?.data?.message || '更新资料失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '更新资料失败'));
     }
   },
 
@@ -470,8 +468,7 @@ export const contactAPI = {
       const response = await apiClient.post('/api/contacts/add', { contactId, message });
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '添加联系人失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '添加联系人失败'));
     }
   },
 
@@ -482,8 +479,7 @@ export const contactAPI = {
       // 后端返回 { success: true, data: [...] }
       return { contacts: response.data.data };
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取联系人列表失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '获取联系人列表失败'));
     }
   },
 
@@ -493,8 +489,7 @@ export const contactAPI = {
       const response = await apiClient.get('/api/contacts/pending-requests');
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取待处理请求失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '获取待处理请求失败'));
     }
   },
 
@@ -504,8 +499,7 @@ export const contactAPI = {
       const response = await apiClient.put(`/api/contacts/requests/${requestId}`, { action });
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '处理请求失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '处理请求失败'));
     }
   },
 
@@ -537,8 +531,7 @@ export const groupAPI = {
       const response = await apiClient.post('/api/groups', data);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '创建群组失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '创建群组失败'));
     }
   },
 
@@ -549,8 +542,7 @@ export const groupAPI = {
       // 后端返回 { success: true, data: [...], meta: {...} }
       return { groups: response.data.data, meta: response.data.meta };
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取群组列表失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '获取群组列表失败'));
     }
   },
 
@@ -560,8 +552,7 @@ export const groupAPI = {
       const response = await apiClient.get(`/api/groups/${groupId}`);
       return response.data.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取群组详情失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '获取群组详情失败'));
     }
   },
 
@@ -571,8 +562,7 @@ export const groupAPI = {
       const response = await apiClient.get(`/api/groups/search?query=${encodeURIComponent(query)}&limit=${limit}`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '搜索群组失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '搜索群组失败'));
     }
   },
 
@@ -582,8 +572,7 @@ export const groupAPI = {
       const response = await apiClient.post(`/api/groups/${groupId}/members`, { userIds });
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '添加群组成员失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '添加群组成员失败'));
     }
   },
 
@@ -593,8 +582,7 @@ export const groupAPI = {
       const response = await apiClient.delete(`/api/groups/${groupId}/members/${memberId}`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '移除成员失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '移除成员失败'));
     }
   },
 
@@ -604,8 +592,7 @@ export const groupAPI = {
       const response = await apiClient.post(`/api/groups/${groupId}/leave`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '退出群组失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '退出群组失败'));
     }
   },
 
@@ -615,8 +602,7 @@ export const groupAPI = {
       const response = await apiClient.put(`/api/groups/${groupId}`, data);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '更新群组失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '更新群组失败'));
     }
   },
 
@@ -628,8 +614,7 @@ export const groupAPI = {
       });
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '禁言成员失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '禁言成员失败'));
     }
   },
 
@@ -639,8 +624,7 @@ export const groupAPI = {
       const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/unmute`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '解除禁言失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '解除禁言失败'));
     }
   },
 
@@ -650,8 +634,7 @@ export const groupAPI = {
       const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/promote`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '提升管理员失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '提升管理员失败'));
     }
   },
 
@@ -661,8 +644,7 @@ export const groupAPI = {
       const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/demote`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '降级管理员失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '降级管理员失败'));
     }
   },
 
@@ -672,8 +654,7 @@ export const groupAPI = {
       const response = await apiClient.delete(`/api/groups/${groupId}`);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '解散群组失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '解散群组失败'));
     }
   },
 
@@ -683,8 +664,7 @@ export const groupAPI = {
       const response = await apiClient.put(`/api/groups/${groupId}/transfer-ownership`, { newOwnerId });
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '转让群主失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '转让群主失败'));
     }
   }
 };

@@ -122,6 +122,29 @@ export class FollowingTimelineCache {
         });
     }
 
+    /**
+     * 删帖时主动从内存作者时间线缓存中移除对应帖子，防止缓存窗口内下发幽灵已删帖
+     */
+    invalidatePost(authorId: AuthorId, postId: string): void {
+        if (!authorId || !postId) return;
+        const entry = this.cache.get(authorId);
+        if (!entry) return;
+        const filtered = entry.posts.filter((post) => String(post._id || '') !== postId);
+        if (filtered.length === entry.posts.length) return;
+        this.cache.set(authorId, {
+            posts: filtered,
+            refreshedAt: entry.refreshedAt,
+        });
+    }
+
+    /**
+     * 清空指定作者的缓存条目
+     */
+    invalidateAuthor(authorId: AuthorId): void {
+        if (!authorId) return;
+        this.cache.delete(authorId);
+    }
+
     private computeAgeCutoff(): Date {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - this.maxAgeDays);

@@ -1301,7 +1301,8 @@ async function performSafetyChecksBatch(ids: string[]): Promise<void> {
     return;
   }
 
-  if (isAuthErrorStatus(res.status)) {
+  // 仅在 401 令牌失效时标记认证错误，避免运维级 403 权限拦截误将同步引擎置为 auth_error
+  if (res.status === 401) {
     syncAuthError = true;
     setSyncPhase('auth_error', 'safety_auth');
     return;
@@ -3703,13 +3704,10 @@ const apiImpl: ChatCoreApi = {
 
     if (workerSocketEnabled) {
       try {
-        await connectWorkerSocketInternal(true);
+        await socketBridge.handleTokensUpdated(nextAccessToken);
+        workerSocket = socketBridge.getSocket();
       } catch {
-        // Keep fallback path alive; caller can retry token refresh.
-      }
-      if (workerSocket?.connected) {
-        workerSocketAuthenticated = false;
-        workerSocket.emit('authenticate', { token: nextAccessToken });
+        // 保持 HTTP 回退链路存活，等待后续重试刷新令牌
       }
     }
 

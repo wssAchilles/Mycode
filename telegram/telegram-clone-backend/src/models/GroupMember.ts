@@ -276,8 +276,8 @@ GroupMember.getGroupMembers = async function (groupId: string, includeInactive: 
     include: [
       {
         model: sequelize.models.User,
-        as: 'user', // 修正：与 associations.ts 保持一致（小写）
-        attributes: ['id', 'username', 'email', 'avatarUrl']
+        as: 'user', // 与 associations.ts 保持一致（小写），移除私人 email 字段
+        attributes: ['id', 'username', 'avatarUrl']
       }
     ],
     order: [

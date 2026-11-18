@@ -3,6 +3,7 @@
  * Extracted from spaceService with identical control flow.
  */
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 import Contact, { ContactStatus } from '../../../models/Contact';
 import { Op } from 'sequelize';
 import {
@@ -152,6 +153,51 @@ export async function recordServedFeedTrace(
     }
 
 const SELF_POST_FRESH_WINDOW_MS = 5 * 60 * 1000;
+
+// 下发前统一剔除已软删（deletedAt != null）的帖子，消除各级缓存时间窗内的幽灵残留
+async function filterDeletedFeedCandidates(candidates: FeedCandidate[]): Promise<FeedCandidate[]> {
+    if (candidates.length === 0) return candidates;
+
+    const memoryFiltered = candidates.filter(
+        (candidate) => (candidate as FeedCandidate & { deletedAt?: Date | string | null }).deletedAt == null,
+    );
+    if (memoryFiltered.length === 0) return [];
+
+    // 仅在 MongoDB 实时连接就绪时执行轻量墓碑复核，保持离线单元测试零副作用
+    if (mongoose.connection.readyState !== 1) {
+        return memoryFiltered;
+    }
+
+    const validIds = Array.from(
+        new Set(
+            memoryFiltered
+                .map((candidate) => candidate.postId?.toString?.() || String(candidate.postId || ''))
+                .filter((id) => mongoose.Types.ObjectId.isValid(id)),
+        ),
+    );
+    if (validIds.length === 0) {
+        return memoryFiltered;
+    }
+
+    try {
+        const deletedDocs = await Post.find({
+            _id: { $in: validIds.map((id) => new mongoose.Types.ObjectId(id)) },
+            deletedAt: { $ne: null },
+        })
+            .select('_id')
+            .lean();
+        if (!Array.isArray(deletedDocs) || deletedDocs.length === 0) {
+            return memoryFiltered;
+        }
+        const deletedIdSet = new Set(deletedDocs.map((doc: any) => String(doc._id)));
+        return memoryFiltered.filter(
+            (candidate) => !deletedIdSet.has(candidate.postId?.toString?.() || String(candidate.postId || '')),
+        );
+    } catch (error) {
+        log.warn({ err: (error as any)?.message || error }, '[SpaceService] deleted post recheck skipped');
+        return memoryFiltered;
+    }
+}
 
 export async function getFeedPage(
         userId: string,
@@ -357,7 +403,7 @@ export async function getFeedPage(
                 debug: runtimeResult.debugInfo,
             });
         }
-        let feed = runtimeResult.feed;
+        let feed = await filterDeletedFeedCandidates(runtimeResult.feed);
         const pageMeta = runtimeResult.pageMeta;
         const debugInfo = runtimeResult.debugInfo;
         const rustTraceForServedFeed = runtimeResult.rustTraceForServedFeed;

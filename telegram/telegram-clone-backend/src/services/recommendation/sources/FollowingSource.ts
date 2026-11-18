@@ -162,7 +162,17 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     private recordStageDetail(query: FeedQuery, detail: Record<string, unknown>): void {
-        this.stageDetails.set(this.stageDetailKey(query), detail);
+        const key = this.stageDetailKey(query);
+        if (this.stageDetails.has(key)) {
+            this.stageDetails.delete(key);
+        } else if (this.stageDetails.size >= 256) {
+            // 淘汰最早写入的残留键，防止异常或超时路径导致无界堆积
+            const oldestKey = this.stageDetails.keys().next().value;
+            if (oldestKey !== undefined) {
+                this.stageDetails.delete(oldestKey);
+            }
+        }
+        this.stageDetails.set(key, detail);
     }
 
     private stageDetailKey(query: FeedQuery): string {

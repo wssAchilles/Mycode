@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { ErrorCode, sendError, sendSuccess } from '../utils/apiResponse';
 import {
@@ -26,13 +27,33 @@ function readBearerToken(req: Request): string | null {
   return token || null;
 }
 
+function constantTimeEquals(left: string, right: string): boolean {
+  const leftDigest = createHash('sha256').update(left).digest();
+  const rightDigest = createHash('sha256').update(right).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function isGraphKernelTokenRequired(): boolean {
+  const flag = String(
+    process.env.GRAPH_KERNEL_INTERNAL_TOKEN_REQUIRED
+      || process.env.RECOMMENDATION_INTERNAL_TOKEN_REQUIRED
+      || '',
+  )
+    .trim()
+    .toLowerCase();
+  if (flag === 'true' || flag === '1' || flag === 'yes') {
+    return true;
+  }
+  return (process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
 function verifyGraphKernelInternalToken(req: Request, res: Response, next: NextFunction): void {
   const expected = String(
     process.env.GRAPH_KERNEL_INTERNAL_TOKEN || process.env.RECOMMENDATION_INTERNAL_TOKEN || '',
   ).trim();
 
   if (!expected) {
-    if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+    if (isGraphKernelTokenRequired()) {
       res.status(503).json({
         success: false,
         error: {
@@ -53,7 +74,7 @@ function verifyGraphKernelInternalToken(req: Request, res: Response, next: NextF
     readBearerToken(req) ||
     '';
 
-  if (incoming !== expected) {
+  if (!incoming || !constantTimeEquals(incoming, expected)) {
     res.status(403).json({
       success: false,
       error: {

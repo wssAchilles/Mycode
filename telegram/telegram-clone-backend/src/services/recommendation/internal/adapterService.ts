@@ -447,13 +447,30 @@ export class RecommendationAdapterService {
       }
     });
 
+    const sourcePromise = this.getSourceCandidates(sourceName, query);
+    let timedOutFlag = false;
+    const monitoredTimeoutResult = timeoutResult.then((res) => {
+      timedOutFlag = true;
+      return res;
+    });
+
     try {
       return await Promise.race([
-        this.getSourceCandidates(sourceName, query),
-        timeoutResult,
+        sourcePromise,
+        monitoredTimeoutResult,
       ]);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      if (timedOutFlag) {
+        // 慢查询超时放弃后，待后台查询结束时主动排空残留的 stageDetail 防内存泄漏
+        void sourcePromise
+          .then(() => {
+            this.sourceCatalog[sourceName]?.stageDetail?.(query, []);
+          })
+          .catch(() => {
+            this.sourceCatalog[sourceName]?.stageDetail?.(query, []);
+          });
+      }
     }
   }
 
@@ -799,10 +816,16 @@ export class RecommendationAdapterService {
     }
     const unknownNames = orderedNames.filter((name) => !catalog[name]);
     if (unknownNames.length > 0) {
-      throw new Error(`unknown_hydrator:${unknownNames.join(',')}`);
+      // 平滑跳过 Rust 本地水合器名称（如 HasMediaCandidateHydrator 等），避免跨语言注册表差异触发 500
+      log.debug(
+        { skippedHydrators: unknownNames },
+        '跳过非 Node 侧注册的候选水合器组件',
+      );
     }
 
-    return orderedNames.map((name) => catalog[name]);
+    return orderedNames
+      .filter((name) => Boolean(catalog[name]))
+      .map((name) => catalog[name]);
   }
 
   private async runHydrators(
@@ -1084,6 +1107,20 @@ function applyRecommendationQueryPatch(
   }
   if (patch.impressedPostIds !== undefined) {
     next.impressedPostIds = patch.impressedPostIds;
+  }
+  if (patch.subscribedUserIds !== undefined) {
+    next.userFeatures = {
+      followedUserIds: next.userFeatures?.followedUserIds ?? [],
+      blockedUserIds: next.userFeatures?.blockedUserIds ?? [],
+      mutedUserIds: next.userFeatures?.mutedUserIds ?? [],
+      mutedKeywords: next.userFeatures?.mutedKeywords ?? [],
+      mutedTopicIds: next.userFeatures?.mutedTopicIds ?? [],
+      seenPostIds: next.userFeatures?.seenPostIds ?? [],
+      videoPreference: next.userFeatures?.videoPreference ?? 'standard',
+      isSubscriber: next.userFeatures?.isSubscriber ?? false,
+      ...(next.userFeatures ?? {}),
+      subscribedUserIds: patch.subscribedUserIds,
+    };
   }
   return next;
 }

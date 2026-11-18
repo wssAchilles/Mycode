@@ -594,11 +594,16 @@ export class GraphKernelClient {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    const internalToken = String(
+      process.env.GRAPH_KERNEL_INTERNAL_TOKEN || process.env.RECOMMENDATION_INTERNAL_TOKEN || '',
+    ).trim();
+
     try {
       const response = await fetch(`${this.baseUrl}/health`, {
         signal: controller.signal,
         headers: {
           'x-internal-ops-client': 'node-backend',
+          ...(internalToken ? { 'x-graph-kernel-internal-token': internalToken } : {}),
         },
       });
       return response.ok;
@@ -612,6 +617,9 @@ export class GraphKernelClient {
   private async post<T>(path: string, body: unknown): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const internalToken = String(
+      process.env.GRAPH_KERNEL_INTERNAL_TOKEN || process.env.RECOMMENDATION_INTERNAL_TOKEN || '',
+    ).trim();
 
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
@@ -620,6 +628,7 @@ export class GraphKernelClient {
         headers: {
           'content-type': 'application/json',
           'x-internal-ops-client': 'node-backend',
+          ...(internalToken ? { 'x-graph-kernel-internal-token': internalToken } : {}),
         },
         body: JSON.stringify(body),
       });

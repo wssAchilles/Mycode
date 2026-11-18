@@ -38,15 +38,22 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
     }
 
     update(query: FeedQuery, hydrated: Partial<FeedQuery>): FeedQuery {
+        const mergedFeatures = hydrated.userFeatures || query.userFeatures;
         return {
             ...query,
-            userFeatures: hydrated.userFeatures || query.userFeatures,
+            userFeatures: mergedFeatures
+                ? {
+                      videoPreference: 'standard',
+                      isSubscriber: false,
+                      ...mergedFeatures,
+                  }
+                : undefined,
         };
     }
 
     /**
      * 加载用户特征
-     * 复刻 x-algorithm 的 user context loading
+     * 复刻 x-algorithm 的用户上下文加载
      */
     private async loadUserFeatures(
         userId: string,
@@ -70,6 +77,8 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             mutedKeywords,
             mutedTopicIds: [],
             subscribedUserIds: [],
+            videoPreference: 'standard',
+            isSubscriber: false,
             seenPostIds,
             followerIds,
         };

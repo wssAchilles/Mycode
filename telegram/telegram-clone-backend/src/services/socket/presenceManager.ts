@@ -1,6 +1,10 @@
 import { redis } from '../../config/redis';
 import { createChildLogger } from '../../utils/logger';
 import { realtimeOps } from '../realtimeProtocol/realtimeOps';
+import {
+  realtimeSessionRegistry,
+  type RealtimeSessionRegistry,
+} from '../realtimeProtocol/realtimeSessionRegistry';
 import { buildGroupChatId } from '../../utils/chat';
 import { CHANNELS, pubSubService, type UserStatusEvent } from '../pubSubService';
 import { chatRuntimeMetrics } from '../chatRuntimeMetrics';
@@ -10,10 +14,15 @@ const log = createChildLogger('services:socket:presence');
 
 export interface PresenceManagerDeps {
   io: TypedSocketIOServer;
+  sessionRegistry?: RealtimeSessionRegistry;
   emitRealtimeToSocket: (socketId: string, event: RealtimeBatchEvent) => void;
   emitRealtimeBroadcast: (event: RealtimeBatchEvent) => void;
   emitLegacyRealtimeEvents: boolean;
-  publishSessionHeartbeat: (socket: TypedSocket, activity: string, options?: { force?: boolean }) => void;
+  publishSessionHeartbeat: (
+    socket: TypedSocket,
+    activity: string,
+    options?: { force?: boolean; roomId?: string },
+  ) => void;
 }
 
 export class PresenceManager {
@@ -100,15 +109,32 @@ export class PresenceManager {
       return;
     }
 
-    await socket.join(`room:${roomId}`);
+    const roomKey = `room:${roomId}`;
+    await socket.join(roomKey);
+    const registry = this.deps.sessionRegistry ?? realtimeSessionRegistry;
+    registry.addRoomSubscription(socket.id, roomKey);
+    realtimeOps.recordRoomJoined(socket.id, socket.data.userId, roomKey);
+    this.deps.publishSessionHeartbeat(socket, 'room_joined', {
+      force: true,
+      roomId: roomKey,
+    });
     log.info(`用户 ${socket.data.username} 加入房间 ${roomId}`);
     socket.emit('message', { type: 'success', message: `已加入房间 ${roomId}` });
   }
 
   async handleLeaveRoom(socket: TypedSocket, roomId: string): Promise<void> {
     if (roomId) {
-      await socket.leave(`room:${roomId}`);
-      log.info(`用户 ${socket.data.username} 离开房间 ${roomId}`);
+      const normalized = roomId.startsWith('room:') ? roomId.slice(5) : roomId;
+      const roomKey = `room:${normalized}`;
+      await socket.leave(roomKey);
+      const registry = this.deps.sessionRegistry ?? realtimeSessionRegistry;
+      registry.removeRoomSubscription(socket.id, roomKey);
+      realtimeOps.recordRoomLeft(socket.id, socket.data.userId, roomKey);
+      this.deps.publishSessionHeartbeat(socket, 'room_left', {
+        force: true,
+        roomId: roomKey,
+      });
+      log.info(`用户 ${socket.data.username} 离开房间 ${normalized}`);
     }
   }
 

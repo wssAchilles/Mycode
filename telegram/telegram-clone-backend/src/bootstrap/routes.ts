@@ -20,6 +20,7 @@ import analyticsRoutes from '../routes/analyticsRoutes';
 import featureRoutes from '../routes/featureRoutes';
 import mlProxyRoutes from '../routes/mlProxy';
 import opsRoutes from '../routes/ops';
+import { verifyOpsToken } from '../routes/ops/auth';
 import recommendationInternalRoutes from '../routes/recommendationInternal';
 import graphKernelInternalRoutes from '../routes/graphKernelInternal';
 import pushRoutes from '../routes/pushRoutes';
@@ -66,7 +67,8 @@ export function registerRoutes(app: Express): void {
   // cron 入库：仅 x-cron-secret，禁止 JWT/CRON_SECRET Bearer 旁路
   app.use('/api/news', newsIngestRouter);
   app.use('/api/news', authenticateToken, newsRoutes);
-  app.use('/api/ml', authenticateToken, mlProxyRoutes);
+  // ML 内部推理由管理凭证保护，禁止普通登录用户越权直调
+  app.use('/api/ml', verifyOpsToken, mlProxyRoutes);
   app.use('/api/analytics', authenticateToken, analyticsRoutes);
   app.use('/api/features', authenticateToken, featureRoutes);
   app.use('/api/push', pushRoutes);

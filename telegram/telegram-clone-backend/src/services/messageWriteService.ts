@@ -148,6 +148,26 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     throw new Error('receiverId 不能为空');
   }
 
+  // 先执行 clientTempId 幂等去重，仅当确认为全新消息时再分配单调递增 seq，根除重试造成的序号空洞
+  if (input.clientTempId) {
+    const existing = await Message.findOne({
+      chatId,
+      'metadata.clientTempId': input.clientTempId,
+    }).lean();
+    if (existing) {
+      chatRuntimeMetrics.increment('message.write.dedupHit');
+      return {
+        message: existing as unknown as IMessage,
+        chatId,
+        chatType,
+        seq: existing.seq || 0,
+        recipientIds: [],
+        isLargeGroup: false,
+        isDuplicate: true,
+      };
+    }
+  }
+
   const seq = await getNextSeq(chatId);
   const attachments = buildAttachments(input);
   const content = normalizeContent(input.content, attachments, input.fileName);
@@ -187,24 +207,7 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     messageDoc.thumbnailUrl = input.thumbnailUrl || null;
   }
 
-  // 离线消息去重: 检查 clientTempId 是否已存在
   if (input.clientTempId) {
-    const existing = await Message.findOne({
-      chatId,
-      'metadata.clientTempId': input.clientTempId,
-    }).lean();
-    if (existing) {
-      chatRuntimeMetrics.increment('message.write.dedupHit');
-      return {
-        message: existing as unknown as IMessage,
-        chatId,
-        chatType,
-        seq: existing.seq || 0,
-        recipientIds: [],
-        isLargeGroup: false,
-        isDuplicate: true,
-      };
-    }
     messageDoc.metadata = { ...messageDoc.metadata, clientTempId: input.clientTempId };
   }
 

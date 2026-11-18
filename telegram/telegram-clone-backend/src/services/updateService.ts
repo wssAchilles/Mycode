@@ -136,17 +136,41 @@ class UpdateService {
     });
   }
 
-  private parseWakePayload(message: string): { userId: string; updateId: number } | null {
+  // 解析单条 { userId, updateId } 或 Go batch 模式 { updates: [...] } 唤醒载荷
+  public parseWakePayloads(message: string): Array<{ userId: string; updateId: number }> {
     try {
       const parsed = JSON.parse(message);
-      const userId = typeof parsed?.userId === 'string' ? parsed.userId : '';
+      if (Array.isArray(parsed?.updates)) {
+        const mergedByUser = new Map<string, number>();
+        for (const entry of parsed.updates) {
+          const userId = typeof entry?.userId === 'string' ? entry.userId.trim() : '';
+          const updateIdRaw = Number(entry?.updateId);
+          const updateId = Number.isFinite(updateIdRaw) ? Math.max(0, Math.floor(updateIdRaw)) : 0;
+          if (!userId || updateId <= 0) continue;
+          const prev = mergedByUser.get(userId) ?? 0;
+          if (updateId > prev) {
+            mergedByUser.set(userId, updateId);
+          }
+        }
+        return Array.from(mergedByUser.entries()).map(([userId, updateId]) => ({
+          userId,
+          updateId,
+        }));
+      }
+
+      const userId = typeof parsed?.userId === 'string' ? parsed.userId.trim() : '';
       const updateIdRaw = Number(parsed?.updateId);
       const updateId = Number.isFinite(updateIdRaw) ? Math.max(0, Math.floor(updateIdRaw)) : 0;
-      if (!userId || updateId <= 0) return null;
-      return { userId, updateId };
+      if (!userId || updateId <= 0) return [];
+      return [{ userId, updateId }];
     } catch {
-      return null;
+      return [];
     }
+  }
+
+  private parseWakePayload(message: string): { userId: string; updateId: number } | null {
+    const items = this.parseWakePayloads(message);
+    return items[0] ?? null;
   }
 
   private startWakeSubscriber(): void {
@@ -161,9 +185,10 @@ class UpdateService {
 
     sub.on('message', (channel: string, message: string) => {
       if (channel !== WAKE_PUBSUB_CHANNEL) return;
-      const payload = this.parseWakePayload(message);
-      if (!payload) return;
-      this.emitUpdate(payload.userId, payload.updateId, 'pubsub');
+      const payloads = this.parseWakePayloads(message);
+      for (const payload of payloads) {
+        this.emitUpdate(payload.userId, payload.updateId, 'pubsub');
+      }
     });
     sub.on('close', () => {
       this.wakeSubscriberReady = false;

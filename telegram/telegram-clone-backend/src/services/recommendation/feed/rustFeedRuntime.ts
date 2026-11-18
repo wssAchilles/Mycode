@@ -1,4 +1,5 @@
 import type { FeedCandidate, FeedQuery } from '../types';
+import type { UserStateKind } from '../types/FeedQuery';
 import {
     RustRecommendationClient,
     getDefaultRustRecommendationBaseUrl,
@@ -173,7 +174,7 @@ async function resolvePrimaryRustFeed(
 
         return {
             feed: rustCandidates,
-            finalFeedQuery: rustResult.query,
+            finalFeedQuery: enrichQueryWithRustTraceState(rustResult.query, rustResult.summary.trace),
             pageMeta,
             rustTraceForServedFeed: rustResult.summary.trace,
             debugInfo: buildSpaceFeedDebugInfo(rustCandidates, {
@@ -318,6 +319,38 @@ async function getRustFeedCandidates(
         recommendationRuntimeMetrics.recordPrimary(result.summary);
     }
     return { ...result, query };
+}
+
+const VALID_USER_STATE_KINDS = new Set<UserStateKind>([
+    'cold_start',
+    'sparse',
+    'warm',
+    'heavy',
+]);
+
+// 当 Rust 主引擎已完成用户状态分层但外层初始 Query 尚未携带时，回填至 finalFeedQuery 供解释层读取
+function enrichQueryWithRustTraceState(
+    query: FeedQuery,
+    trace?: RecommendationTracePayload,
+): FeedQuery {
+    if (query.userStateContext?.state || !trace?.userState) {
+        return query;
+    }
+    const candidateState = trace.userState as UserStateKind;
+    if (!VALID_USER_STATE_KINDS.has(candidateState)) {
+        return query;
+    }
+    return {
+        ...query,
+        userStateContext: {
+            state: candidateState,
+            reason: 'rust_primary_hydrated',
+            followedCount: query.userFeatures?.followedUserIds.length ?? 0,
+            recentActionCount: 0,
+            recentPositiveActionCount: 0,
+            usableEmbedding: typeof trace.embeddingQualityScore === 'number',
+        },
+    };
 }
 
 const rankedCursorAbstentionPageMeta: FeedRuntimePageMeta = {

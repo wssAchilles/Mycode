@@ -185,17 +185,7 @@ export class ChatFanoutCommandBus {
       } else {
         await this.resolveOutboxService().markGoPrimaryQueued(outbox.outboxId, jobs);
       }
-      this.totals.dispatchQueued += 1;
-      if (dispatchMode === 'go_group_canary') {
-        this.totals.dispatchQueuedGoGroupCanary += 1;
-      } else {
-        this.totals.dispatchQueuedGoPrimary += 1;
-      }
-      this.recordEvent('dispatch_queued', command, {
-        dispatchMode,
-        jobId: jobs[0]?.id,
-        jobCount: jobs.length,
-      });
+
       const dispatchResult: MessageFanoutDispatchResult = {
         mode: dispatchMode,
         recipientCount,
@@ -203,17 +193,53 @@ export class ChatFanoutCommandBus {
         jobCount: jobs.length,
         outboxId: outbox.outboxId,
       };
-      await this.publishBestEffort(
-        buildFanoutRequestedEvent({
-          command,
-          dispatch: dispatchResult,
+      const fanoutEvent = buildFanoutRequestedEvent({
+        command,
+        dispatch: dispatchResult,
+        outboxId: outbox.outboxId,
+        jobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),
+      });
+
+      try {
+        // go_primary 模式下 Redis Stream 是主指令通道，推流失败必须立即降级执行本地同步投影
+        await this.resolveEventPublisher().publish([fanoutEvent]);
+        this.totals.dispatchQueued += 1;
+        if (dispatchMode === 'go_group_canary') {
+          this.totals.dispatchQueuedGoGroupCanary += 1;
+        } else {
+          this.totals.dispatchQueuedGoPrimary += 1;
+        }
+        this.recordEvent('dispatch_queued', command, {
+          dispatchMode,
+          jobId: jobs[0]?.id,
+          jobCount: jobs.length,
+        });
+        return {
+          ...dispatchResult,
+        };
+      } catch (error: any) {
+        chatRuntimeMetrics.increment(`chatDelivery.eventBus.${fanoutEvent.topic}.errors`);
+        this.totals.dispatchFallback += 1;
+        const errorMessage = error?.message || 'go primary stream publish failed';
+        const projection = await this.resolveProjector()(command);
+        await this.resolveOutboxService().markSyncFallbackCompleted(
+          outbox.outboxId,
+          projection,
+          errorMessage,
+        );
+        this.recordEvent('dispatch_sync_fallback', command, {
+          dispatchMode: 'sync_fallback',
+          projection,
+          errorMessage,
+        });
+        return {
+          mode: 'sync_fallback',
+          recipientCount,
+          jobCount: 0,
+          projection,
           outboxId: outbox.outboxId,
-          jobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),
-        }),
-      );
-      return {
-        ...dispatchResult,
-      };
+        };
+      }
     }
 
     try {

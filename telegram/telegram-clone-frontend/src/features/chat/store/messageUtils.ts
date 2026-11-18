@@ -12,15 +12,38 @@ const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
   'SOCKET_NOT_CONNECTED',
   'SOCKET_NOT_AVAILABLE',
   'SOCKET_DISCONNECTED',
+  'SOCKET_NOT_AUTHENTICATED',
+  'USER_NOT_AUTHENTICATED',
   'DISCONNECTED',
   'OFFLINE',
   'NETWORK_ERROR',
   'ACK_TIMEOUT',
   'ACK_INVALID',
   'AUTH_ERROR',
+  'UNAUTHORIZED',
+  'TOKEN_EXPIRED',
   'NOT_INITED',
   'NOT_AUTHENTICATED',
 ]);
+
+// 判定 Socket ACK 错误是否属于连接/认证可恢复类错误，命中后转走 HTTP 通道触发 401 单飞刷新，绝不误删乐观消息
+export function isSocketAuthFailureReason(reason?: string): boolean {
+  if (!reason) return false;
+  const normalized = String(reason).trim().toUpperCase();
+  if (!normalized) return false;
+  return (
+    normalized === 'AUTH_ERROR'
+    || normalized === 'NOT_AUTHENTICATED'
+    || normalized === 'USER_NOT_AUTHENTICATED'
+    || normalized === 'SOCKET_NOT_AUTHENTICATED'
+    || normalized === 'UNAUTHORIZED'
+    || normalized === 'TOKEN_EXPIRED'
+    || normalized.includes('AUTH_ERROR')
+    || normalized.includes('NOT_AUTHENTICATED')
+    || normalized.includes('UNAUTHORIZED')
+    || /\b401\b/.test(normalized)
+  );
+}
 
 export const createClientTempId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -36,7 +59,12 @@ export const createClientTempId = (): string => {
 
 export const shouldFallbackToHttpSend = (reason?: string): boolean => {
   if (!reason) return false;
-  return SOCKET_SEND_HTTP_FALLBACK_ERRORS.has(String(reason).trim().toUpperCase());
+  const normalized = String(reason).trim().toUpperCase();
+  if (!normalized) return false;
+  if (SOCKET_SEND_HTTP_FALLBACK_ERRORS.has(normalized)) {
+    return true;
+  }
+  return isSocketAuthFailureReason(normalized);
 };
 
 // ---------------------------------------------------------------------------

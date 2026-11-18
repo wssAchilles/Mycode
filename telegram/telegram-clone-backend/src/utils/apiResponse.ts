@@ -125,15 +125,16 @@ export function sendPaginated<T>(
         total: number;
     }
 ): Response {
-    const totalPages = Math.ceil(pagination.total / pagination.limit);
+    const safeLimit = pagination.limit > 0 ? pagination.limit : 0;
+    const totalPages = safeLimit > 0 ? Math.ceil(pagination.total / safeLimit) : 0;
 
     return sendSuccess(res, data, {
         meta: {
             page: pagination.page,
-            limit: pagination.limit,
+            limit: safeLimit,
             total: pagination.total,
             totalPages,
-            hasMore: pagination.page < totalPages,
+            hasMore: totalPages > 0 && pagination.page < totalPages,
         },
     });
 }

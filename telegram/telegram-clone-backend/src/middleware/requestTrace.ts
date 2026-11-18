@@ -2,6 +2,22 @@ import { randomUUID } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
 
+const SAFE_METRIC_LABEL_RE = /^[a-zA-Z0-9._:-]{1,32}$/;
+const MAX_TRACKED_WORKER_BUILDS = 16;
+const trackedWorkerBuilds = new Set<string>();
+
+const ALLOWED_RUNTIME_PROFILES = new Set<string>([
+  'default',
+  'safe',
+  'canary',
+  'baseline',
+  'high_throughput',
+  'low_memory',
+  'rust_edge',
+  'compat',
+  'unknown',
+]);
+
 function pickHeader(req: Request, key: string): string | null {
   const raw = req.header(key);
   if (!raw) return null;
@@ -9,25 +25,61 @@ function pickHeader(req: Request, key: string): string | null {
   return value || null;
 }
 
+function sanitizeTraceHeaderValue(raw: string | null, maxLen = 96): string | undefined {
+  if (!raw) return undefined;
+  const cleaned = raw.replace(/[\r\n\0]/g, '').trim();
+  if (!cleaned || cleaned.length > maxLen) return undefined;
+  return cleaned;
+}
+
+function normalizeWorkerBuildMetricLabel(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  if (!SAFE_METRIC_LABEL_RE.test(raw)) {
+    return 'invalid';
+  }
+  if (trackedWorkerBuilds.has(raw)) {
+    return raw;
+  }
+  if (trackedWorkerBuilds.size >= MAX_TRACKED_WORKER_BUILDS) {
+    return 'other';
+  }
+  trackedWorkerBuilds.add(raw);
+  return raw;
+}
+
+function normalizeRuntimeProfileMetricLabel(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.toLowerCase();
+  if (!SAFE_METRIC_LABEL_RE.test(normalized)) {
+    return 'invalid';
+  }
+  return ALLOWED_RUNTIME_PROFILES.has(normalized) ? normalized : 'other';
+}
+
 function sanitizePath(pathname: string): string {
   if (!pathname) return pathname;
   return pathname
+    .replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, ':uuid')
     .replace(/[0-9a-fA-F]{24}/g, ':id')
     .replace(/\b\d{3,}\b/g, ':n');
 }
 
-function routeKeyOf(req: Request): string {
-  const routePathRaw = ((req as any).route?.path as string | undefined) || req.path || req.originalUrl || '';
-  const routePath = sanitizePath(routePathRaw.split('?')[0]);
+export function routeKeyOf(req: Request): string {
+  const matchedRoutePath = (req as any).route?.path as string | undefined;
+  // 未命中任何已注册 Express 路由的请求（如随机 404 扫描路径）统一归并，防止高基数撑爆指标 Map
+  if (!matchedRoutePath) {
+    return `${req.method.toUpperCase()} UNMATCHED_ROUTE`;
+  }
+  const routePath = sanitizePath(String(matchedRoutePath).split('?')[0]);
   const base = sanitizePath(req.baseUrl || '');
   return `${req.method.toUpperCase()} ${base}${routePath}`;
 }
 
 export function requestTraceMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const requestId = pickHeader(req, 'x-request-id') || randomUUID();
-  const chatTraceId = pickHeader(req, 'x-chat-trace-id') || undefined;
-  const workerBuild = pickHeader(req, 'x-chat-worker-build') || undefined;
-  const runtimeProfile = pickHeader(req, 'x-chat-runtime-profile') || undefined;
+  const requestId = sanitizeTraceHeaderValue(pickHeader(req, 'x-request-id'), 64) || randomUUID();
+  const chatTraceId = sanitizeTraceHeaderValue(pickHeader(req, 'x-chat-trace-id'), 96);
+  const workerBuild = sanitizeTraceHeaderValue(pickHeader(req, 'x-chat-worker-build'), 48);
+  const runtimeProfile = sanitizeTraceHeaderValue(pickHeader(req, 'x-chat-runtime-profile'), 48);
   const startedAt = Date.now();
 
   (req as any).requestId = requestId;
@@ -53,11 +105,13 @@ export function requestTraceMiddleware(req: Request, res: Response, next: NextFu
     if (chatTraceId) {
       chatRuntimeMetrics.increment('http.requests.withChatTrace');
     }
-    if (workerBuild) {
-      chatRuntimeMetrics.increment(`http.workerBuild.${workerBuild}`);
+    const workerBuildLabel = normalizeWorkerBuildMetricLabel(workerBuild);
+    if (workerBuildLabel) {
+      chatRuntimeMetrics.increment(`http.workerBuild.${workerBuildLabel}`);
     }
-    if (runtimeProfile) {
-      chatRuntimeMetrics.increment(`http.runtimeProfile.${runtimeProfile}`);
+    const runtimeProfileLabel = normalizeRuntimeProfileMetricLabel(runtimeProfile);
+    if (runtimeProfileLabel) {
+      chatRuntimeMetrics.increment(`http.runtimeProfile.${runtimeProfileLabel}`);
     }
 
     chatRuntimeMetrics.recordRequest({

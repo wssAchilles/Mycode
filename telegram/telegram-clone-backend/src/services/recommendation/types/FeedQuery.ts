@@ -24,6 +24,10 @@ export interface UserFeatures {
     mutedTopicIds?: string[];
     /** 订阅的用户 ID 列表 */
     subscribedUserIds?: string[];
+    /** 视频消费偏好（对齐 Rust UserFeaturesPayload.videoPreference） */
+    videoPreference?: string;
+    /** 是否订阅会员（对齐 Rust UserFeaturesPayload.isSubscriber） */
+    isSubscriber?: boolean;
     /** 最近已看过的帖子 ID 列表 */
     seenPostIds: string[];
     /** 关注者数量 (用于实验分流) */
@@ -334,6 +338,8 @@ export function createFeedQuery(
             mutedKeywords: [],
             mutedTopicIds: [],
             subscribedUserIds: [],
+            videoPreference: 'standard',
+            isSubscriber: false,
             seenPostIds: [],
         },
         embeddingContext: undefined,

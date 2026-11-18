@@ -27,6 +27,8 @@ const UpdateLogSchema = new Schema<IUpdateLog>({
 });
 
 UpdateLogSchema.index({ userId: 1, updateId: 1 }, { unique: true });
+// 支撑扇出投影按用户+类型+会话+消息 ID 的幂等去重检索，消除历史全表扫描
+UpdateLogSchema.index({ userId: 1, type: 1, chatId: 1, messageId: 1 });
 
 const UpdateLog = mongoose.model<IUpdateLog>('UpdateLog', UpdateLogSchema);
 

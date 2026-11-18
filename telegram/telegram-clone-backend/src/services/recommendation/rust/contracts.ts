@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import type {
@@ -479,6 +480,8 @@ const userFeaturesSchema = z.object({
   mutedKeywords: z.array(z.string()),
   mutedTopicIds: z.array(z.string()).optional(),
   subscribedUserIds: z.array(z.string()).optional(),
+  videoPreference: z.string().optional(),
+  isSubscriber: z.boolean().optional(),
   seenPostIds: z.array(z.string()),
   followerIds: z.array(z.string()).optional(),
   followerCount: z.number().optional(),
@@ -587,11 +590,57 @@ const demographicsSchema = z.object({
   language: z.string().optional(),
 });
 
+// 跨语言 64-bit 安全整数归一化辅助函数，避免 JS 浮点舍入溢出 Rust u64/i64
+export function clampSafeU64Number(value: unknown): number {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    try {
+      const big = BigInt(value.trim());
+      if (big <= 0n) return 0;
+      const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+      return Number(big > maxSafe ? big & maxSafe : big);
+    } catch {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(parsed)));
+    }
+  }
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(num)));
+}
+
+export function clampSafeI64Number(value: unknown): number {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    try {
+      const big = BigInt(value.trim());
+      const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+      if (big > maxSafe) return Number(big & maxSafe);
+      if (big < -maxSafe) return -Number((-big) & maxSafe);
+      return Number(big);
+    } catch {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return 0;
+      return Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, Math.trunc(parsed)));
+    }
+  }
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(-Number.MAX_SAFE_INTEGER, Math.trunc(num)));
+}
+
+const safeI64Schema = z
+  .union([z.number(), z.string()])
+  .transform((val) => clampSafeI64Number(val));
+
+const safeU64Schema = z
+  .union([z.number(), z.string()])
+  .transform((val) => clampSafeU64Number(val));
+
 // V3 查询侧嵌套结构校验 Schema
 const columnarActionStepSchema = z.object({
-  postIdHash: z.number().int(),
+  postIdHash: safeI64Schema,
   semanticIds: z.array(z.number().int().min(-1).max(255)).length(6).optional(),
-  authorHash: z.number().int(),
+  authorHash: safeI64Schema,
   actionType: z.number().int(),
   actionMask: z.array(z.number().int().min(0).max(255)).optional(),
   timeDeltaSec: z.number().finite(),
@@ -674,7 +723,7 @@ export const recommendationQueryPayloadSchema = z.object({
   featureSwitches: z.record(z.string(), z.boolean()).optional(),
   columnarRetrievalSequence: z.array(columnarActionStepSchema).optional(),
   columnarScoringSequence: z.array(columnarActionStepSchema).optional(),
-  bloomFilterEntries: z.array(z.number().nonnegative()).optional(),
+  bloomFilterEntries: z.array(safeU64Schema).optional(),
   servedHistory: z.array(servedHistoryEntrySchema).optional(),
   cachedPosts: z.array(cachedPostEntrySchema).optional(),
   hasCachedPosts: z.boolean().optional(),
@@ -694,6 +743,7 @@ export const recommendationQueryPatchPayloadSchema = z.object({
   userSignalFeatures: userSignalFeaturesSchema.optional(),
   mutualFollowIds: z.array(z.string()).optional(),
   interestedTopics: z.array(z.string()).optional(),
+  demographics: demographicsSchema.optional(),
   pastRequestTimestamps: z.array(rfc3339DateTimeSchema).optional(),
   impressedPostIds: z.array(z.string()).optional(),
   subscribedUserIds: z.array(z.string()).optional(),
@@ -1063,6 +1113,44 @@ function parseObjectId(value?: string): mongoose.Types.ObjectId | undefined {
   return new mongoose.Types.ObjectId(value);
 }
 
+// 安全解析或确定性派生 ObjectId，防止外部语料 ID（如新闻 externalId）触发未捕获 BSONError
+function parseOrDeriveObjectId(value: string): mongoose.Types.ObjectId {
+  const direct = parseObjectId(value);
+  if (direct) {
+    return direct;
+  }
+  const digestHex = createHash('sha1').update(String(value || 'fallback')).digest('hex').slice(0, 24);
+  return new mongoose.Types.ObjectId(digestHex);
+}
+
+function sanitizeColumnarSteps(
+  steps?: ColumnarActionStepPayload[],
+): ColumnarActionStepPayload[] | undefined {
+  if (!steps) return undefined;
+  return steps.map((step) => ({
+    ...step,
+    postIdHash: clampSafeI64Number(step.postIdHash),
+    authorHash: clampSafeI64Number(step.authorHash),
+    timeDeltaSec: Number.isFinite(step.timeDeltaSec) ? step.timeDeltaSec : 0,
+  }));
+}
+
+function normalizeRustMediaType(value?: string): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'image') return 'photo';
+  if (
+    normalized === 'none'
+    || normalized === 'photo'
+    || normalized === 'video'
+    || normalized === 'gif'
+    || normalized === 'mixed'
+  ) {
+    return normalized;
+  }
+  return 'none';
+}
+
 function restoreExperimentContext(
   payload?: RecommendationExperimentContextPayload,
 ): ExperimentContext | undefined {
@@ -1094,6 +1182,11 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
   const userFeatures = query.userFeatures
     ? {
         ...query.userFeatures,
+        mutedUserIds: query.userFeatures.mutedUserIds ?? [],
+        mutedTopicIds: query.userFeatures.mutedTopicIds ?? [],
+        subscribedUserIds: query.userFeatures.subscribedUserIds ?? [],
+        videoPreference: query.userFeatures.videoPreference || 'standard',
+        isSubscriber: query.userFeatures.isSubscriber ?? false,
         followerCount: query.userFeatures.followerCount ?? undefined,
         accountCreatedAt: query.userFeatures.accountCreatedAt
           ? query.userFeatures.accountCreatedAt.toISOString()
@@ -1150,9 +1243,11 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
     impressedPostIds: query.impressedPostIds ?? undefined,
     subscribedUserIds: query.userFeatures?.subscribedUserIds ?? undefined,
     featureSwitches: query.featureSwitches ?? undefined,
-    columnarRetrievalSequence: query.columnarRetrievalSequence ?? undefined,
-    columnarScoringSequence: query.columnarScoringSequence ?? undefined,
-    bloomFilterEntries: query.bloomFilterEntries ?? undefined,
+    columnarRetrievalSequence: sanitizeColumnarSteps(query.columnarRetrievalSequence),
+    columnarScoringSequence: sanitizeColumnarSteps(query.columnarScoringSequence),
+    bloomFilterEntries: query.bloomFilterEntries
+      ? query.bloomFilterEntries.map(clampSafeU64Number)
+      : undefined,
     servedHistory: query.servedHistory ?? undefined,
     cachedPosts: query.cachedPosts ?? undefined,
     hasCachedPosts: query.hasCachedPosts ?? undefined,
@@ -1460,6 +1555,11 @@ export function serializeRecommendationQueryPatch(
     userFeatures: patch.userFeatures
       ? {
           ...patch.userFeatures,
+          mutedUserIds: patch.userFeatures.mutedUserIds ?? [],
+          mutedTopicIds: patch.userFeatures.mutedTopicIds ?? [],
+          subscribedUserIds: patch.userFeatures.subscribedUserIds ?? [],
+          videoPreference: patch.userFeatures.videoPreference || 'standard',
+          isSubscriber: patch.userFeatures.isSubscriber ?? false,
           followerCount: patch.userFeatures.followerCount ?? undefined,
           accountCreatedAt: patch.userFeatures.accountCreatedAt
             ? new Date(patch.userFeatures.accountCreatedAt).toISOString()
@@ -1488,6 +1588,7 @@ export function serializeRecommendationQueryPatch(
     userSignalFeatures: patch.userSignalFeatures,
     mutualFollowIds: patch.mutualFollowIds,
     interestedTopics: patch.interestedTopics,
+    demographics: patch.demographics,
     pastRequestTimestamps: patch.pastRequestTimestamps,
     impressedPostIds: patch.impressedPostIds,
     subscribedUserIds: patch.subscribedUserIds,
@@ -1589,7 +1690,7 @@ export function serializeRecommendationCandidate(
     graphRecallType: anyCandidate.graphRecallType,
     topicIds: anyCandidate.topicIds,
     hasMedia: anyCandidate.hasMedia,
-    mediaType: anyCandidate.mediaType,
+    mediaType: normalizeRustMediaType(anyCandidate.mediaType),
     videoDurationMs: anyCandidate.videoDurationMs,
     authorBlocksViewer: anyCandidate.authorBlocksViewer,
     languageCode: anyCandidate.languageCode,
@@ -1612,9 +1713,10 @@ export function serializeRecommendationCandidate(
 export function deserializeRecommendationCandidate(
   payload: RecommendationCandidatePayload,
 ): FeedCandidate {
+  const directObjectId = parseObjectId(payload.postId);
   return {
-    postId: new mongoose.Types.ObjectId(payload.postId),
-    modelPostId: payload.modelPostId,
+    postId: directObjectId ?? parseOrDeriveObjectId(payload.postId),
+    modelPostId: payload.modelPostId ?? (directObjectId ? undefined : payload.postId),
     authorId: payload.authorId,
     content: payload.content,
     createdAt: new Date(payload.createdAt),

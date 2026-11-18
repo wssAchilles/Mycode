@@ -49,7 +49,8 @@ export const runtimeFlags = {
   workerSyncFallback: readBool('VITE_CHAT_WORKER_SYNC_FALLBACK', true),
   workerQosPatchQueue: readBool('VITE_CHAT_WORKER_QOS', true),
   workerSocketEnabled: readBool('VITE_CHAT_WORKER_SOCKET', true),
-  workerSafetyChecks: readBool('VITE_CHAT_WORKER_SAFETY_CHECKS', true),
+  // 内容安全审查已统一收口至服务端内部链路，浏览器端默认关闭直调运维代理 /api/ml/*
+  workerSafetyChecks: readBool('VITE_CHAT_WORKER_SAFETY_CHECKS', false),
   workerRealtimeBatchSize: readInt('VITE_CHAT_WORKER_REALTIME_BATCH_SIZE', 220, 32, 2000),
   workerRealtimeQueueHardMax: readInt('VITE_CHAT_WORKER_REALTIME_QUEUE_HARD_MAX', 8000, 512, 100000),
   workerRealtimeQueueWarnAt: readInt('VITE_CHAT_WORKER_REALTIME_QUEUE_WARN_AT', 3000, 128, 80000),

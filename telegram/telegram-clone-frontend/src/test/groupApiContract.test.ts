@@ -53,4 +53,22 @@ describe('groupAPI contract', () => {
 
     await expect(groupAPI.getGroupDetails('group-1')).resolves.toEqual(details);
   });
+
+  it('extracts nested backend error messages instead of throwing [object Object]', async () => {
+    const axiosLikeError = {
+      response: {
+        status: 403,
+        data: {
+          success: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: '您不是该群组的成员',
+          },
+        },
+      },
+    };
+
+    axiosMocks.get.mockRejectedValueOnce(axiosLikeError);
+    await expect(groupAPI.getGroupDetails('group-1')).rejects.toThrow('您不是该群组的成员');
+  });
 });

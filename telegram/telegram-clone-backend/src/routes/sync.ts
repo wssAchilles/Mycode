@@ -400,37 +400,61 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         chatRuntimeMetrics.observeValue('sync.updates.serverPts', serverPts);
         chatRuntimeMetrics.observeValue('sync.updates.lagPts', Math.max(0, serverPts - clientPts));
 
-        // 如果有新消息，立即返回
+        // 如果服务端水位高于客户端，先拉取增量日志；若遇在途提交或历史预留空洞导致为空，短暂重试后转入正常长轮询防止 0ms 紧轮询风暴
+        let orphanGapDetected = false;
         if (serverPts > clientPts) {
             const maxPull = Math.min(serverPts - clientPts, limit);
-            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
-            const payload = await buildSyncPayload(clientPts, serverPts, updates, lastUpdateId, maxPull);
-            setSyncPtsHeaders(res, {
-                fromPts: clientPts,
-                serverPts: payload.serverPts,
-                statePts: payload.state?.pts,
-                clientPts,
-            });
-            setSyncWakeHeaders(res, 'immediate');
-            observeSyncWakeSource('immediate');
-            chatRuntimeMetrics.increment('sync.updates.immediate');
-            chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
-            chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
-            chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
-            chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
-            chatRuntimeMetrics.increment('sync.updates.success');
-            return sendSuccess(res, { ...payload, wakeSource: 'immediate' });
+            let fetched = await updateService.getUpdates(userId, clientPts, maxPull);
+
+            if (!Array.isArray(fetched.updates) || fetched.updates.length === 0) {
+                for (const retryDelayMs of [35, 65]) {
+                    await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+                    fetched = await updateService.getUpdates(userId, clientPts, maxPull);
+                    if (Array.isArray(fetched.updates) && fetched.updates.length > 0) {
+                        break;
+                    }
+                }
+            }
+
+            if (Array.isArray(fetched.updates) && fetched.updates.length > 0) {
+                const payload = await buildSyncPayload(
+                    clientPts,
+                    serverPts,
+                    fetched.updates,
+                    fetched.lastUpdateId,
+                    maxPull,
+                );
+                setSyncPtsHeaders(res, {
+                    fromPts: clientPts,
+                    serverPts: payload.serverPts,
+                    statePts: payload.state?.pts,
+                    clientPts,
+                });
+                setSyncWakeHeaders(res, 'immediate');
+                observeSyncWakeSource('immediate');
+                chatRuntimeMetrics.increment('sync.updates.immediate');
+                chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
+                chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
+                chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
+                chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
+                chatRuntimeMetrics.increment('sync.updates.success');
+                return sendSuccess(res, { ...payload, wakeSource: 'immediate' });
+            }
+
+            orphanGapDetected = true;
+            chatRuntimeMetrics.increment('sync.updates.orphanHoleDeferred');
         }
 
-        // Event-driven wait: wake early when this user receives a new update.
+        // 事件驱动长轮询等待：若存在孤儿空洞则以 serverPts 为基准等待新事件，避免 0ms 立即唤醒死循环
+        const waitBaselinePts = orphanGapDetected ? serverPts : clientPts;
         chatRuntimeMetrics.increment('sync.updates.wait');
-        const waitResult = await updateService.waitForUpdate(userId, clientPts, timeout);
+        const waitResult = await updateService.waitForUpdate(userId, waitBaselinePts, timeout);
         const waitedPts = waitResult.updateId;
         const wakeSource = waitResult.wakeSource;
         setSyncWakeHeaders(res, wakeSource, waitResult.eventSource);
         observeSyncWakeSource(wakeSource, waitResult.eventSource);
         const newPts = waitedPts !== null
-            ? Math.max(clientPts, waitedPts)
+            ? Math.max(waitBaselinePts, waitedPts)
             : await updateService.getUpdateId(userId);
         if (waitedPts !== null) {
             chatRuntimeMetrics.increment('sync.updates.waitWoken');
@@ -442,7 +466,18 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         if (newPts > clientPts) {
             const maxPull = Math.min(newPts - clientPts, limit);
             const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
-            const payload = await buildSyncPayload(clientPts, newPts, updates, lastUpdateId, maxPull);
+            // 若完整等待窗口结束后依然无任何日志记录，说明 (clientPts..newPts] 确系永久孤儿空洞，安全对齐游标打破死锁
+            const alignedLastUpdateId =
+                (!Array.isArray(updates) || updates.length === 0) && orphanGapDetected
+                    ? newPts
+                    : lastUpdateId;
+            const payload = await buildSyncPayload(
+                clientPts,
+                newPts,
+                updates,
+                alignedLastUpdateId,
+                maxPull,
+            );
             setSyncPtsHeaders(res, {
                 fromPts: clientPts,
                 serverPts: payload.serverPts,

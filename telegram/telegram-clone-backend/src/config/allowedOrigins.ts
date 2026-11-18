@@ -8,7 +8,8 @@ const STATIC_ALLOWED_ORIGINS: Array<string | RegExp> = [
   'http://localhost:5174',
   'http://127.0.0.1:5174',
   'https://telegram-liart-rho.vercel.app',
-  /\.vercel\.app$/,
+  // 强制要求 https:// 协议与项目专属前缀，禁止任意第三方 *.vercel.app 反射带凭证 CORS
+  /^https:\/\/telegram(?:-clone)?-[a-z0-9-]+\.vercel\.app$/i,
   'https://telegram-467705.web.app',
   'https://telegram-467705.firebaseapp.com',
 ];

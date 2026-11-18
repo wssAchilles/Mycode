@@ -59,6 +59,9 @@ if (sentryEnabled) {
 // Express 应用初始化
 const app = express();
 const httpServer = createServer(app);
+// 显式抬高 Keep-Alive 与头部超时，确保严格大于边缘网关连接池空闲超时（4s），根除 5s 竞态 502
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 66_000;
 const PORT = process.env.PORT || 5000;
 
 // 安全头 + 基础配置
@@ -190,13 +193,14 @@ const startServer = async () => {
         message: `AI socket listening on ${aiPort}`,
       });
     } else {
-      log.info('AI Socket.IO 服务器已禁用（AI_SOCKET_ENABLED=false）');
-      runtimeControlPlane.markFailure('ai_socket', {
+      log.info('AI Socket.IO 服务器已按配置关闭（AI_SOCKET_ENABLED=false，使用 HTTP /api/ai-chat）');
+      runtimeControlPlane.markUnit({
+        unit: 'ai_socket',
         phase: LifecyclePhase.WORKER_BOOT,
-        failureClass: FailureClass.CONFIGURATION,
-        message: 'AI socket disabled via AI_SOCKET_ENABLED=false',
-        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
-        compatMode: true,
+        status: LifecycleStatus.RUNNING,
+        critical: false,
+        compatMode: false,
+        message: 'AI socket intentionally disabled via AI_SOCKET_ENABLED=false',
       });
     }
 
@@ -279,6 +283,13 @@ async function gracefulShutdown(signal: string) {
           const svc = getSocketService();
           if (svc?.close) await svc.close();
         } catch { /* socket 可能未初始化 */ }
+      })(),
+      // 关闭独立 AI Socket.IO 服务器
+      (async () => {
+        try {
+          const { stopAiSocketServer } = await import('./aiSocketServer');
+          await stopAiSocketServer();
+        } catch { /* aiSocketServer 可能未启动 */ }
       })(),
       // 关闭 BullMQ 队列
       (async () => {

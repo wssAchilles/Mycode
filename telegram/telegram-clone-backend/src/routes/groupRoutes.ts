@@ -18,11 +18,35 @@ import {
 import { authenticateToken } from '../middleware/authMiddleware';
 import { validate } from '../middleware/validate';
 import { createGroupSchema, addGroupMemberSchema, updateGroupSchema } from '../schemas/groupSchemas';
+import { errors } from '../utils/apiResponse';
 
 const router = express.Router();
 
+const UUID_PARAM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // 所有群组路由都需要认证
 router.use(authenticateToken);
+
+// 统一剥离可选 g: 前缀并严格校验 PostgreSQL UUID 参数，杜绝非法 ID 直穿数据库抛 500
+router.param('groupId', (req, res, next, rawGroupId) => {
+  const normalized = String(rawGroupId || '')
+    .trim()
+    .replace(/^(?:room:|g:)/i, '');
+  if (!UUID_PARAM_RE.test(normalized)) {
+    return errors.badRequest(res, '无效的群组 ID 格式');
+  }
+  req.params.groupId = normalized;
+  next();
+});
+
+router.param('memberId', (req, res, next, rawMemberId) => {
+  const normalized = String(rawMemberId || '').trim();
+  if (!UUID_PARAM_RE.test(normalized)) {
+    return errors.badRequest(res, '无效的成员 ID 格式');
+  }
+  req.params.memberId = normalized;
+  next();
+});
 
 /**
  * @route POST /api/groups

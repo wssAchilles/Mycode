@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { sendSuccess } from '../utils/apiResponse';
@@ -28,10 +29,27 @@ function readBearerToken(req: Request): string | null {
   return token || null;
 }
 
+function constantTimeEquals(left: string, right: string): boolean {
+  const leftDigest = createHash('sha256').update(left).digest();
+  const rightDigest = createHash('sha256').update(right).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function isInternalTokenRequired(): boolean {
+  const envFlag = String(process.env.RECOMMENDATION_INTERNAL_TOKEN_REQUIRED || '').trim().toLowerCase();
+  if (envFlag === 'true' || envFlag === '1' || envFlag === 'yes') {
+    return true;
+  }
+  if (envFlag === 'false' || envFlag === '0' || envFlag === 'no') {
+    return (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  }
+  return (process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
 function verifyRecommendationInternalToken(req: Request, res: Response, next: NextFunction): void {
   const expected = String(process.env.RECOMMENDATION_INTERNAL_TOKEN || '').trim();
   if (!expected) {
-    if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+    if (isInternalTokenRequired()) {
       res.status(503).json({
         success: false,
         error: {
@@ -51,7 +69,7 @@ function verifyRecommendationInternalToken(req: Request, res: Response, next: Ne
     readBearerToken(req) ||
     '';
 
-  if (incoming !== expected) {
+  if (!incoming || !constantTimeEquals(incoming, expected)) {
     res.status(403).json({
       success: false,
       error: {

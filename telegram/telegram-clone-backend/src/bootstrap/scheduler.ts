@@ -6,6 +6,10 @@ import { realGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
 import { utcDailyRepairEpoch } from '../services/jobs/coordination/repairLease';
 import { dailyRecommendationRefreshJob } from '../services/jobs/DailyRecommendationRefreshJob';
 import { newsMaterializationService } from '../services/recommendation/newsMaterialization';
+import {
+  replayChatDeliveryFailures,
+  replayChatDeliveryFallbacks,
+} from '../services/ops/chatDelivery/chatDeliveryCommands';
 import { createChildLogger } from '../utils/logger';
 import {
   runtimeControlPlane,
@@ -172,6 +176,33 @@ export function registerCronJobs(): void {
     });
     log.info('RealGraph 衰减 repair 任务已启动 (每日 04:00)');
   }
+
+  // 投递 Outbox 自动中继补偿任务（每 2 分钟巡检超时滞留的 queued / failed 记录，保障至少一次投递）
+  let outboxRelayInFlight = false;
+  cron.schedule('*/2 * * * *', async () => {
+    if (outboxRelayInFlight) return;
+    outboxRelayInFlight = true;
+    try {
+      const [primaryFallback, failedReplay] = await Promise.all([
+        replayChatDeliveryFallbacks({ limit: 25, staleAfterMinutes: 3 }),
+        replayChatDeliveryFailures({ limit: 25, staleAfterMinutes: 5 }),
+      ]);
+      if ((primaryFallback.replayedRecords ?? 0) > 0 || (failedReplay.replayedRecords ?? 0) > 0) {
+        log.info(
+          {
+            replayedPrimaryFallbacks: primaryFallback.replayedRecords,
+            replayedFailedRecords: failedReplay.replayedRecords,
+          },
+          'Outbox 自动中继补偿已重放滞留记录',
+        );
+      }
+    } catch (error) {
+      log.warn({ err: error }, 'Outbox 自动中继补偿巡检跳过');
+    } finally {
+      outboxRelayInFlight = false;
+    }
+  });
+  log.info('ChatDelivery Outbox 自动中继补偿任务已启动 (每 2 分钟)');
 
   runtimeControlPlane.markUnit({
     unit: 'cron',

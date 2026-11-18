@@ -266,9 +266,36 @@ export class SocketBridge {
           resolve({ success: false, error: 'ACK_INVALID' });
           return;
         }
+        if (!ack.success && this.isAckAuthenticationError(ack.error)) {
+          // 会话内缓存令牌已过期，标记待重认证，交由上层 HTTP Fallback 触发单飞刷新后通过 updateTokens 恢复
+          this.workerSocketAuthenticated = false;
+        }
         resolve(ack);
       });
     });
+  }
+
+  private isAckAuthenticationError(reason?: string): boolean {
+    if (!reason) return false;
+    const normalized = String(reason).trim().toUpperCase();
+    return (
+      normalized.includes('AUTH_ERROR')
+      || normalized.includes('NOT_AUTHENTICATED')
+      || normalized.includes('UNAUTHORIZED')
+      || /\b401\b/.test(normalized)
+    );
+  }
+
+  // 主线程完成 401 单飞刷新后同步新令牌至桥接器，解除阻断并向已连接 Socket 重发 authenticate
+  async handleTokensUpdated(nextAccessToken: string): Promise<void> {
+    this.workerSocketAuthBlocked = false;
+    this.ctx.setWorkerSocketAuthBlocked(false);
+    if (!this.ctx.getWorkerSocketEnabled() || !nextAccessToken) return;
+    await this.connectWorkerSocketInternal(true);
+    if (this.socket?.connected) {
+      this.workerSocketAuthenticated = false;
+      this.socket.emit('authenticate', { token: nextAccessToken });
+    }
   }
 
   async subscribePresence(userIds: string[]): Promise<void> {

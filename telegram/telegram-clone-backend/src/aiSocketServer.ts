@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import { verifyAccessToken } from './utils/jwt';
-import { getAllowedOrigins } from './config/allowedOrigins';
+import { getAllowedOrigins, isOriginAllowed } from './config/allowedOrigins';
 import { generateUserAgentReply } from './services/agentPlane/orchestrator/agentResponseService';
 import { createChildLogger } from './utils/logger';
 
@@ -15,18 +15,25 @@ dotenv.config({ quiet: true });
 // Create Express app and HTTP server for AI Socket.IO
 const app = express();
 const httpServer = createServer(app);
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 66_000;
 const AI_PORT = Number(process.env.AI_SOCKET_PORT) || 5850;
 
-// Set up CORS middleware for AI server
+// 配置与主服务一致的受信任跨域白名单，避免通配符 * 与 credentials 冲突
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Vary', 'Origin');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header(
     'Access-Control-Allow-Headers',
     'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Chat-Worker-Build, X-Chat-Runtime-Profile, X-Ops-Token'
   );
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
   next();
 });
@@ -136,8 +143,30 @@ const startAiSocketServer = async () => {
   }
 };
 
+// 优雅停止 AI Socket.IO 服务器，释放监听端口与连接句柄
+const stopAiSocketServer = async (): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    try {
+      io.close(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+  await new Promise<void>((resolve) => {
+    if (!httpServer.listening) {
+      resolve();
+      return;
+    }
+    try {
+      httpServer.close(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+};
+
 // Export server for importing in other modules
-export { startAiSocketServer };
+export { startAiSocketServer, stopAiSocketServer };
 
 // Start server if this file is run directly
 if (require.main === module) {

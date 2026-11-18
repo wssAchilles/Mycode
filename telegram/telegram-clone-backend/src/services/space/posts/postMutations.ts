@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import Post, { IPost, MediaType } from '../../../models/Post';
 import { recordRecommendationEvent } from '../../recommendation/events';
 import { InNetworkTimelineService } from '../../recommendation/InNetworkTimelineService';
+import { followingTimelineCache } from '../../recommendation/sources/FollowingTimelineCache';
 import { createChildLogger } from '../../../utils/logger';
 import type { CreatePostParams } from '../types';
 import { extractKeywords } from '../internal/pureHelpers';
@@ -156,9 +157,11 @@ export async function deletePost(postId: string, userId: string): Promise<boolea
     post.deletedAt = new Date();
     await post.save();
 
-    // Best-effort removal from Redis in-network timeline.
-    InNetworkTimelineService.removePost(post.authorId, String(post._id)).catch(() => undefined);
-    recsysStreamPublisher.publishPostDeleted(String(post._id), post.authorId);
+    const deletedPostId = String(post._id);
+    // 同步驱逐进程内 FollowingTimelineCache 与 Redis 关注时间线，杜绝删帖后残留幽灵帖
+    followingTimelineCache.invalidatePost(post.authorId, deletedPostId);
+    InNetworkTimelineService.removePost(post.authorId, deletedPostId).catch(() => undefined);
+    recsysStreamPublisher.publishPostDeleted(deletedPostId, post.authorId);
     return true;
 }
 

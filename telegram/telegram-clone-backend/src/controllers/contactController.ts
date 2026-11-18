@@ -75,7 +75,7 @@ export const addContact = catchAsync(async (req: AuthenticatedRequest, res: Resp
       {
         model: User,
         as: 'contact',
-        attributes: ['id', 'username', 'email', 'avatarUrl']
+        attributes: ['id', 'username', 'avatarUrl']
       }
     ]
   });
@@ -112,7 +112,7 @@ export const getContacts = catchAsync(async (req: AuthenticatedRequest, res: Res
       {
         model: User,
         as: 'contact',
-        attributes: ['id', 'username', 'email', 'avatarUrl']
+        attributes: ['id', 'username', 'avatarUrl']
       }
     ],
     order: [['addedAt', 'DESC']]
@@ -207,7 +207,7 @@ export const getPendingRequests = catchAsync(async (req: AuthenticatedRequest, r
       {
         model: User,
         as: 'user',
-        attributes: ['id', 'username', 'email', 'avatarUrl']
+        attributes: ['id', 'username', 'avatarUrl']
       }
     ],
     order: [['addedAt', 'DESC']]

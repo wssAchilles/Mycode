@@ -22,12 +22,14 @@ export async function readDeliveryConsumerReplaySummary(): Promise<DeliveryConsu
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
+  const internalToken = String(process.env.DELIVERY_CONSUMER_INTERNAL_TOKEN || '').trim();
 
   try {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
         'x-internal-ops-client': 'node-backend',
+        ...(internalToken ? { 'x-internal-token': internalToken } : {}),
       },
     });
     if (!response.ok) {

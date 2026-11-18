@@ -233,23 +233,50 @@ export const getUserGroups = catchAsync(async (req: AuthenticatedRequest, res: R
 
   sendPaginated(res, groups, {
     page: 1,
-    limit: groups.length,
+    limit: Math.max(1, groups.length),
     total: groups.length,
   });
 });
 
+const GROUP_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_GROUP_MEMBERS_LIMIT = 200;
+const MAX_GROUP_MEMBERS_LIMIT = 500;
+
+export function stripGroupPrefix(raw?: string): string {
+  return String(raw || '')
+    .trim()
+    .replace(/^(?:room:|g:)/i, '');
+}
+
+export function normalizeGroupUuidParam(raw?: string): string | null {
+  const normalized = stripGroupPrefix(raw);
+  return GROUP_UUID_RE.test(normalized) ? normalized : null;
+}
+
 /**
- * 获取群组详情
+ * 获取群组详情（路由层 groupRoutes.ts 已完成 UUID 格式强校验）
  */
 export const getGroupDetails = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { groupId } = req.params;
+  const groupId = stripGroupPrefix(req.params.groupId);
   const userId = req.user?.id;
 
   if (!userId) {
     return errors.unauthorized(res);
   }
+  if (!groupId) {
+    return errors.badRequest(res, '无效的群组 ID 格式');
+  }
 
-  // 检查用户是否为群组成员
+  const query = req.query || {};
+  const requestedLimit = Number.parseInt(String(query.memberLimit ?? query.limit ?? ''), 10);
+  const memberLimit =
+    Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, MAX_GROUP_MEMBERS_LIMIT)
+      : DEFAULT_GROUP_MEMBERS_LIMIT;
+  const requestedOffset = Number.parseInt(String(query.memberOffset ?? query.offset ?? '0'), 10);
+  const memberOffset = Number.isFinite(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
+
+  // 先校验成员资格，拦截非成员无效查询
   const membership = await GroupMember.findOne({
     where: {
       groupId,
@@ -263,13 +290,12 @@ export const getGroupDetails = catchAsync(async (req: AuthenticatedRequest, res:
     return errors.forbidden(res, '您不是该群组的成员');
   }
 
-  // 获取群组详情
   const group = await Group.findByPk(groupId, {
     include: [
       {
         model: User,
-        as: 'owner', // 修正：与 associations.ts 保持一致（小写）
-        attributes: ['id', 'username', 'email', 'avatarUrl']
+        as: 'owner', // 与 associations.ts 保持一致（小写），不导出私人 email
+        attributes: ['id', 'username', 'avatarUrl']
       }
     ]
   });
@@ -278,25 +304,36 @@ export const getGroupDetails = catchAsync(async (req: AuthenticatedRequest, res:
     return errors.notFound(res, '群组');
   }
 
-  // 获取群组成员
-  const members = await GroupMember.findAll({
-    where: {
-      groupId,
-      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
-      isActive: true
-    },
-    include: [
-      {
-        model: User,
-        as: 'user', // 修正：与 associations.ts 保持一致（小写）
-        attributes: ['id', 'username', 'email', 'avatarUrl']
-      }
-    ],
-    order: [
-      ['role', 'ASC'], // 群主和管理员排在前面
-      ['joinedAt', 'ASC']
-    ]
-  });
+  const memberWhere = {
+    groupId,
+    status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
+    isActive: true,
+  };
+
+  // 对大群成员列表施加分页与硬上限保护，并移除成员私人 email 字段（PII 保护）
+  const [members, activeMemberTotal] = await Promise.all([
+    GroupMember.findAll({
+      where: memberWhere,
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'username', 'avatarUrl']
+        }
+      ],
+      order: [
+        ['role', 'ASC'], // 群主和管理员排在前面
+        ['joinedAt', 'ASC']
+      ],
+      limit: memberLimit,
+      offset: memberOffset,
+    }),
+    typeof GroupMember.count === 'function'
+      ? Promise.resolve(GroupMember.count({ where: memberWhere })).catch(() => 0)
+      : Promise.resolve(Number((group as any).memberCount) || 0),
+  ]);
+
+  const resolvedTotal = Math.max(Number(activeMemberTotal) || 0, Number((group as any).memberCount) || 0, members.length);
 
   sendSuccess(res, {
     group: {
@@ -305,7 +342,13 @@ export const getGroupDetails = catchAsync(async (req: AuthenticatedRequest, res:
       currentUserStatus: membership.status
     },
     members,
-    memberCount: members.length
+    memberCount: resolvedTotal,
+    hasMoreMembers: memberOffset + members.length < resolvedTotal,
+    memberPagination: {
+      limit: memberLimit,
+      offset: memberOffset,
+      total: resolvedTotal,
+    },
   });
 });
 
@@ -346,9 +389,9 @@ export const addGroupMember = catchAsync(async (req: AuthenticatedRequest, res: 
   const addMemberErrors: string[] = [];
   const addedUserIds: string[] = [];
 
-  // 批量查询用户和现有成员（避免 N+1）
+  // 批量查询用户（不暴露私人 email）和现有成员（避免 N+1）
   const [users, existingMembers] = await Promise.all([
-    User.findAll({ where: { id: userIds } }),
+    User.findAll({ where: { id: userIds }, attributes: ['id', 'username', 'avatarUrl'] }),
     GroupMember.findAll({ where: { groupId, userId: userIds } }),
   ]);
   const userMap = new Map(users.map(u => [u.id, u]));
@@ -412,6 +455,7 @@ export const addGroupMember = catchAsync(async (req: AuthenticatedRequest, res: 
       const counter = await ChatCounter.findById(chatId).lean();
       const latestSeq = counter?.seq || 0;
 
+      // 仅使用 $set 写入初始游标，消除与 $setOnInsert 操作同一路径触发的 MongoDB Code 40 冲突
       await Promise.all(
         addedUserIds.map((memberId) =>
           ChatMemberState.updateOne(
@@ -423,7 +467,6 @@ export const addGroupMember = catchAsync(async (req: AuthenticatedRequest, res: 
                 lastSeenAt: new Date(),
                 role: MemberRole.MEMBER
               },
-              $setOnInsert: { lastReadSeq: latestSeq, lastDeliveredSeq: latestSeq }
             },
             { upsert: true }
           )
@@ -1091,7 +1134,7 @@ export const searchGroups = catchAsync(async (req: AuthenticatedRequest, res: Re
 
   sendPaginated(res, groups, {
     page: 1,
-    limit: groups.length,
+    limit: Math.max(1, groups.length),
     total: groups.length,
   });
 });

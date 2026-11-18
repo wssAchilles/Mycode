@@ -39,6 +39,7 @@ import {
     DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
     isEmbeddingContractCompatible,
 } from '../contracts/embeddingContract';
+import { isKnownSemanticEmbeddingContract } from '../contracts/semanticEmbeddingContracts';
 
 const MAX_RESULTS = 80;
 const CANDIDATE_POOL = 240;
@@ -382,7 +383,14 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                 comparison,
             };
         }
-        if (!isEmbeddingContractCompatible(query.embeddingContext?.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)) {
+        // 放行受信任的 V3/V1 语义契约（如 recommendation_two_tower_v3）并兼容基准测试契约
+        if (
+            !isKnownSemanticEmbeddingContract(query.embeddingContext?.embeddingContract)
+            && !isEmbeddingContractCompatible(
+                query.embeddingContext?.embeddingContract,
+                DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+            )
+        ) {
             return {
                 mode: 'observe_only',
                 reason: 'request_contract_mismatch',

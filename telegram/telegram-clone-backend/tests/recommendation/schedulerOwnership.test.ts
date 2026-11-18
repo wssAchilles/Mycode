@@ -123,6 +123,7 @@ describe('recommendation scheduler ownership', () => {
       '0 1 * * *',
       '20 1 * * *',
       '0 2 * * *',
+      '*/2 * * * *',
     ]);
 
     vi.clearAllMocks();
@@ -137,6 +138,7 @@ describe('recommendation scheduler ownership', () => {
       '0 2 * * *',
       '0 3 * * *',
       '0 4 * * *',
+      '*/2 * * * *',
     ]);
   });
 

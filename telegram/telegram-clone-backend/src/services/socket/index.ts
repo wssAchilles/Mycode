@@ -84,6 +84,7 @@ export class SocketService {
 
     this.presenceManager = new PresenceManager({
       io: this.io,
+      sessionRegistry: ctx.sessionRegistry,
       emitRealtimeToSocket: (id, e) => this.dispatcher.emitToSocket(id, e),
       emitRealtimeBroadcast: (e) => this.dispatcher.emitBroadcast(e),
       emitLegacyRealtimeEvents: this.emitLegacyRealtimeEvents,
