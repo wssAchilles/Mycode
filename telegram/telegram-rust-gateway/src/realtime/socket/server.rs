@@ -18,8 +18,8 @@ use super::{
     contracts::{
         AuthenticatePayload, ROOM_MESSAGE_SCHEMA_VERSION, RUST_SOCKET_IO_COMPAT_SOURCE,
         ReadChatPayload, RoomRequestPayload, SendMessagePayload, SocketMessageAck, TypingPayload,
-        TypingServerPayload, normalize_group_room, other_private_user_id, read_message_id,
-        read_seq, session_room, user_room,
+        TypingServerPayload, normalize_group_room, other_private_user_id, presence_room,
+        read_message_id, read_seq, session_room, user_room,
     },
     upstream::{
         AUTH_ERROR_CODE, UpstreamAuthError, ensure_group_access, fetch_current_user,
@@ -256,7 +256,7 @@ async fn handle_authenticate(
         sessions.authenticate_session(&session_id, &user_id, &username, access_token, &group_ids)
     };
 
-    // 若重认证切换了账号，清理旧用户的会话索引
+    // 若重认证切换了账号，清理旧用户的会话索引并在旧账号无活跃会话时通知订阅者下线
     if let Some(prev_uid) = transition.previous_user_id.as_deref()
         && prev_uid != user_id
     {
@@ -264,6 +264,25 @@ async fn handle_authenticate(
             .session_registry
             .remove_user_session(&session_id, prev_uid)
             .await;
+        if !is_user_currently_online(state, prev_uid).await {
+            apply_ingress_envelope(
+                state,
+                &build_socket_event(
+                    &session_id,
+                    Some(prev_uid),
+                    None,
+                    RealtimeTopic::PresenceUpdated,
+                    None,
+                    json!({
+                        "transport": "socket_io_compat",
+                        "status": "offline",
+                        "reason": "reauthenticated_switched_user"
+                    }),
+                ),
+            )
+            .await;
+            emit_presence_change(state, prev_uid, false).await;
+        }
     }
 
     // 对重认证后已被移除的旧房间执行 leave 并清理注册表订阅
@@ -353,6 +372,9 @@ async fn handle_authenticate(
             "username": username,
         }),
     );
+
+    // 仅向订阅了该用户的连接定向推送上线通知
+    emit_presence_change(state, &user_id, true).await;
 
     Ok(())
 }
@@ -527,29 +549,55 @@ async fn handle_presence_subscribe(state: &AppState, socket: &SocketRef, user_id
         return;
     }
 
-    let targets = user_ids
-        .into_iter()
-        .map(|uid| uid.trim().to_string())
-        .filter(|uid| !uid.is_empty())
-        .take(MAX_PRESENCE_SUBSCRIBE_BATCH)
-        .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for uid in user_ids {
+        let trimmed = uid.trim();
+        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
+            continue;
+        }
+        targets.push(trimmed.to_string());
+        if targets.len() >= MAX_PRESENCE_SUBSCRIBE_BATCH {
+            break;
+        }
+    }
     if targets.is_empty() {
         return;
     }
 
-    let snapshot = state
+    // 登记订阅目标并加入对应的 presence:<user_id> 定向推送房间
+    let newly_joined_rooms = {
+        let mut sessions = state
+            .realtime_socket_state
+            .lock()
+            .expect("rust socket session mutex poisoned");
+        sessions.add_presence_subscriptions(&session_id, &targets)
+    };
+    for room in newly_joined_rooms {
+        socket.join(room);
+    }
+
+    // 使用点查替代全站 snapshot 扫描，提升并发性能并校验心跳新鲜度
+    let mut online_map = state
         .session_registry
-        .snapshot(state.config.realtime_heartbeat_stale_secs)
+        .query_users_online(&targets, state.config.realtime_heartbeat_stale_secs)
         .await;
+    {
+        let sessions = state
+            .realtime_socket_state
+            .lock()
+            .expect("rust socket session mutex poisoned");
+        for target_id in &targets {
+            if sessions.local_authenticated_sessions_for_user(target_id) > 0 {
+                online_map.insert(target_id.clone(), true);
+            }
+        }
+    }
+
     let batch = targets
         .into_iter()
         .map(|target_id| {
-            let is_online = snapshot
-                .users
-                .iter()
-                .find(|user| user.user_id == target_id)
-                .map(|user| user.authenticated_sessions > 0)
-                .unwrap_or(false);
+            let is_online = online_map.get(&target_id).copied().unwrap_or(false);
             json!({
                 "type": "presence",
                 "payload": {
@@ -675,6 +723,73 @@ async fn handle_disconnect(state: &AppState, socket: &SocketRef, reason: Disconn
         }),
     );
     apply_ingress_envelope(state, &event).await;
+
+    // 仅当该用户最后一个活跃会话断开时，定向推送下线通知给已订阅的在线连接
+    if let Some(ref uid) = user_id
+        && !is_user_currently_online(state, uid).await
+    {
+        apply_ingress_envelope(
+            state,
+            &build_socket_event(
+                &session_id,
+                Some(uid),
+                None,
+                RealtimeTopic::PresenceUpdated,
+                None,
+                json!({
+                    "transport": "socket_io_compat",
+                    "status": "offline",
+                    "reason": "session_closed"
+                }),
+            ),
+        )
+        .await;
+        emit_presence_change(state, uid, false).await;
+    }
+}
+
+async fn is_user_currently_online(state: &AppState, user_id: &str) -> bool {
+    {
+        let sessions = state
+            .realtime_socket_state
+            .lock()
+            .expect("rust socket session mutex poisoned");
+        if sessions.local_authenticated_sessions_for_user(user_id) > 0 {
+            return true;
+        }
+    }
+    state
+        .session_registry
+        .is_user_online(user_id, state.config.realtime_heartbeat_stale_secs)
+        .await
+}
+
+async fn emit_presence_change(state: &AppState, user_id: &str, is_online: bool) {
+    let Some(io) = state.realtime_socket_io.as_ref() else {
+        return;
+    };
+    let payload = if is_online {
+        json!([{
+            "type": "presence",
+            "payload": {
+                "userId": user_id,
+                "isOnline": true
+            }
+        }])
+    } else {
+        json!([{
+            "type": "presence",
+            "payload": {
+                "userId": user_id,
+                "isOnline": false,
+                "lastSeen": chrono::Utc::now().to_rfc3339()
+            }
+        }])
+    };
+    let _ = io
+        .within(presence_room(user_id))
+        .emit("realtimeBatch", &payload)
+        .await;
 }
 
 async fn emit_read_receipt(

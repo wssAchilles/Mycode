@@ -2,7 +2,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use serde::Serialize;
 
-use super::contracts::{normalize_group_room, session_room, user_room};
+use super::contracts::{normalize_group_room, presence_room, session_room, user_room};
+
+const MAX_PRESENCE_SUBSCRIPTIONS_PER_SESSION: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct RustSocketSessionRecord {
@@ -11,6 +13,7 @@ pub struct RustSocketSessionRecord {
     pub username: Option<String>,
     pub access_token: Option<String>,
     pub joined_rooms: BTreeSet<String>,
+    pub subscribed_presence_users: BTreeSet<String>,
 }
 
 /// 记录重认证前后房间订阅与用户归属的变化，用于驱动旧房间 `leave` 清理
@@ -46,6 +49,7 @@ impl RustSocketSessionStore {
                 username: None,
                 access_token: None,
                 joined_rooms: BTreeSet::from([session_room(session_id)]),
+                subscribed_presence_users: BTreeSet::new(),
             });
     }
 
@@ -68,6 +72,7 @@ impl RustSocketSessionStore {
                 username: None,
                 access_token: None,
                 joined_rooms: BTreeSet::from([sid_room.clone()]),
+                subscribed_presence_users: BTreeSet::new(),
             });
 
         let previous_user_id = record.user_id.clone();
@@ -81,10 +86,19 @@ impl RustSocketSessionStore {
             }
         }
 
-        let removed_rooms = previous_rooms
+        let mut removed_rooms = previous_rooms
             .difference(&desired_rooms)
             .cloned()
             .collect::<Vec<_>>();
+
+        // 同连接切换账号重认证时，撤回旧账号登记过的所有在线状态订阅房间
+        if let Some(prev_uid) = previous_user_id.as_deref()
+            && prev_uid != user_id
+        {
+            for target_uid in std::mem::take(&mut record.subscribed_presence_users) {
+                removed_rooms.push(presence_room(&target_uid));
+            }
+        }
 
         record.user_id = Some(user_id.to_string());
         record.username = Some(username.to_string());
@@ -96,6 +110,32 @@ impl RustSocketSessionStore {
             removed_rooms,
             previous_user_id,
         }
+    }
+
+    /// 记录会话新增订阅的在线状态目标，返回本次需 join 的 `presence:<user_id>` 房间列表
+    pub fn add_presence_subscriptions(
+        &mut self,
+        session_id: &str,
+        target_user_ids: &[String],
+    ) -> Vec<String> {
+        let Some(record) = self.sessions.get_mut(session_id) else {
+            return Vec::new();
+        };
+
+        let mut newly_joined = Vec::new();
+        for raw_uid in target_user_ids {
+            if record.subscribed_presence_users.len() >= MAX_PRESENCE_SUBSCRIPTIONS_PER_SESSION {
+                break;
+            }
+            let uid = raw_uid.trim();
+            if uid.is_empty() {
+                continue;
+            }
+            if record.subscribed_presence_users.insert(uid.to_string()) {
+                newly_joined.push(presence_room(uid));
+            }
+        }
+        newly_joined
     }
 
     pub fn authenticate(
@@ -258,5 +298,45 @@ mod tests {
         assert_eq!(snapshot.max_outbound_queue_size, 3);
         assert_eq!(snapshot.dropped_event_count, 1);
         assert_eq!(snapshot.resume_gap_count, 1);
+    }
+
+    #[test]
+    fn presence_subscriptions_deduplicate_and_clear_on_account_switch() {
+        let mut store = RustSocketSessionStore::default();
+        store.register_connection("sid-1");
+        store.authenticate_session("sid-1", "user-1", "alice", "tok-1", &[]);
+
+        let first_rooms = store.add_presence_subscriptions(
+            "sid-1",
+            &["u-a".to_string(), "u-b".to_string(), "u-a".to_string()],
+        );
+        assert_eq!(
+            first_rooms,
+            vec!["presence:u-a".to_string(), "presence:u-b".to_string()]
+        );
+        // 不得混入 active_sessions_snapshot 的群组房间集合
+        let snapshot = store.active_sessions_snapshot();
+        assert!(!snapshot[0].2.iter().any(|r| r.starts_with("presence:")));
+
+        // 同账号刷新令牌保留订阅
+        let same_user = store.authenticate_session("sid-1", "user-1", "alice", "tok-2", &[]);
+        assert!(same_user.removed_rooms.is_empty());
+        let repeat_rooms = store.add_presence_subscriptions("sid-1", &["u-a".to_string()]);
+        assert!(repeat_rooms.is_empty());
+
+        // 切换账号重认证清理旧订阅并返回 removed_rooms
+        let switch_user = store.authenticate_session("sid-1", "user-2", "bob", "tok-3", &[]);
+        assert!(
+            switch_user
+                .removed_rooms
+                .contains(&"presence:u-a".to_string())
+        );
+        assert!(
+            switch_user
+                .removed_rooms
+                .contains(&"presence:u-b".to_string())
+        );
+        let readd_rooms = store.add_presence_subscriptions("sid-1", &["u-a".to_string()]);
+        assert_eq!(readd_rooms, vec!["presence:u-a".to_string()]);
     }
 }

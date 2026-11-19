@@ -103,25 +103,56 @@ impl SessionRegistryBackend {
                 .lock()
                 .await
                 .resolve_socket_targets(target, stale_after_secs),
-            Self::Redis(reg) => reg.resolve_socket_targets(target).await.unwrap_or_default(),
+            Self::Redis(reg) => reg
+                .resolve_socket_targets(target, stale_after_secs)
+                .await
+                .unwrap_or_default(),
+        }
+    }
+
+    pub async fn query_users_online(
+        &self,
+        user_ids: &[String],
+        stale_after_secs: u64,
+    ) -> std::collections::HashMap<String, bool> {
+        match self {
+            Self::InMemory(reg) => reg
+                .lock()
+                .await
+                .query_users_online(user_ids, stale_after_secs),
+            Self::Redis(reg) => reg
+                .query_users_online(user_ids, stale_after_secs)
+                .await
+                .unwrap_or_default(),
+        }
+    }
+
+    pub async fn is_user_online(&self, user_id: &str, stale_after_secs: u64) -> bool {
+        match self {
+            Self::InMemory(reg) => reg.lock().await.is_user_online(user_id, stale_after_secs),
+            Self::Redis(reg) => reg
+                .is_user_online(user_id, stale_after_secs)
+                .await
+                .unwrap_or(false),
         }
     }
 
     pub async fn snapshot(&self, stale_after_secs: u64) -> RealtimeRegistrySnapshot {
         match self {
             Self::InMemory(reg) => reg.lock().await.snapshot(stale_after_secs),
-            Self::Redis(reg) => reg
-                .snapshot()
-                .await
-                .unwrap_or_else(|_| RealtimeRegistrySnapshot {
-                    totals: super::session_registry::RealtimeRegistryTotals {
-                        connected_sessions: 0,
-                        authenticated_sessions: 0,
-                        room_subscriptions: 0,
-                        session_index_size: 0,
-                    },
-                    users: vec![],
-                }),
+            Self::Redis(reg) => {
+                reg.snapshot(stale_after_secs)
+                    .await
+                    .unwrap_or_else(|_| RealtimeRegistrySnapshot {
+                        totals: super::session_registry::RealtimeRegistryTotals {
+                            connected_sessions: 0,
+                            authenticated_sessions: 0,
+                            room_subscriptions: 0,
+                            session_index_size: 0,
+                        },
+                        users: vec![],
+                    })
+            }
         }
     }
 }

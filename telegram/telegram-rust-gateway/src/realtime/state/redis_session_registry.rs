@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use redis::Pipeline;
 use serde::{Deserialize, Serialize};
@@ -89,7 +89,11 @@ impl RedisSessionRegistry {
         let mut normalized = BTreeSet::new();
         for room in rooms {
             let trimmed = room.trim();
-            if trimmed.is_empty() || trimmed.starts_with("sid:") || trimmed.starts_with("user:") {
+            if trimmed.is_empty()
+                || trimmed.starts_with("sid:")
+                || trimmed.starts_with("user:")
+                || trimmed.starts_with("presence:")
+            {
                 continue;
             }
             let clean = Self::normalize_room_id(trimmed);
@@ -98,6 +102,24 @@ impl RedisSessionRegistry {
             }
         }
         normalized.into_iter().collect()
+    }
+
+    /// 校验 Redis 会话记录是否已超过心跳新鲜度阈值
+    fn is_record_stale(record: &RedisSessionRecord, stale_after_secs: u64) -> bool {
+        if stale_after_secs == 0 {
+            return false;
+        }
+        let ref_ts = if record.last_heartbeat_at.trim().is_empty() {
+            record.last_event_at.as_str()
+        } else {
+            record.last_heartbeat_at.as_str()
+        };
+        let Ok(parsed) = DateTime::parse_from_rfc3339(ref_ts) else {
+            return false;
+        };
+        let now_ms = Utc::now().timestamp_millis();
+        let threshold_ms = stale_after_secs.saturating_mul(1000) as i64;
+        now_ms.saturating_sub(parsed.timestamp_millis()) > threshold_ms
     }
 
     fn add_user_membership_ops(pipe: &mut Pipeline, user_id: &str, session_id: &str, ttl: i64) {
@@ -260,7 +282,10 @@ impl RedisSessionRegistry {
                         .rooms
                         .retain(|existing| Self::normalize_room_id(existing) != clean_room);
                     pipe.srem(&room_key, &envelope.session_id);
-                } else if !clean_room.starts_with("sid:") && !clean_room.starts_with("user:") {
+                } else if !clean_room.starts_with("sid:")
+                    && !clean_room.starts_with("user:")
+                    && !clean_room.starts_with("presence:")
+                {
                     if !record
                         .rooms
                         .iter()
@@ -466,6 +491,7 @@ impl RedisSessionRegistry {
     pub async fn resolve_socket_targets(
         &self,
         target: &RealtimeDeliveryTarget,
+        stale_after_secs: u64,
     ) -> Result<Vec<String>> {
         let mut conn = self.get_conn().await?;
         let mut candidate_ids: Vec<String> = Vec::new();
@@ -528,6 +554,9 @@ impl RedisSessionRegistry {
                 .and_then(|raw| serde_json::from_str::<RedisSessionRecord>(raw).ok())
             {
                 Some(record) => {
+                    if Self::is_record_stale(&record, stale_after_secs) {
+                        continue;
+                    }
                     if matches!(target.kind, RealtimeDeliveryTargetKind::User)
                         && !record.authenticated
                     {
@@ -564,14 +593,155 @@ impl RedisSessionRegistry {
         Ok(active_sessions)
     }
 
-    pub async fn snapshot(&self) -> Result<RealtimeRegistrySnapshot> {
+    /// 按目标用户集合批量点查在线状态（校验认证态及心跳新鲜度）
+    pub async fn query_users_online(
+        &self,
+        user_ids: &[String],
+        stale_after_secs: u64,
+    ) -> Result<HashMap<String, bool>> {
+        let mut targets = Vec::with_capacity(user_ids.len());
+        let mut seen = BTreeSet::new();
+        for raw_uid in user_ids {
+            let uid = raw_uid.trim();
+            if !uid.is_empty() && seen.insert(uid.to_string()) {
+                targets.push(uid.to_string());
+            }
+        }
+
+        let mut status_map: HashMap<String, bool> =
+            targets.iter().map(|uid| (uid.clone(), false)).collect();
+        if targets.is_empty() {
+            return Ok(status_map);
+        }
+
+        let mut conn = match self.get_conn().await {
+            Ok(conn) => conn,
+            Err(_) => {
+                // Redis 暂不可用时回退本地缓存
+                let cache = self.local_cache.read().await;
+                for record in cache.values() {
+                    if !record.authenticated || Self::is_record_stale(record, stale_after_secs) {
+                        continue;
+                    }
+                    if let Some(uid) = record.user_id.as_deref()
+                        && let Some(entry) = status_map.get_mut(uid)
+                    {
+                        *entry = true;
+                    }
+                }
+                return Ok(status_map);
+            }
+        };
+
+        let mut sunion_pipe = Pipeline::new();
+        for uid in &targets {
+            sunion_pipe
+                .cmd("SUNION")
+                .arg(Self::user_sessions_key(uid))
+                .arg(Self::user_key(uid));
+        }
+
+        let user_session_lists: Vec<Vec<String>> = match sunion_pipe.query_async(&mut conn).await {
+            Ok(lists) => lists,
+            Err(_) => {
+                let cache = self.local_cache.read().await;
+                for record in cache.values() {
+                    if !record.authenticated || Self::is_record_stale(record, stale_after_secs) {
+                        continue;
+                    }
+                    if let Some(uid) = record.user_id.as_deref()
+                        && let Some(entry) = status_map.get_mut(uid)
+                    {
+                        *entry = true;
+                    }
+                }
+                return Ok(status_map);
+            }
+        };
+
+        let mut sid_to_users: HashMap<String, Vec<String>> = HashMap::new();
+        for (uid, sids) in targets.iter().zip(user_session_lists.into_iter()) {
+            for sid in sids {
+                sid_to_users.entry(sid).or_default().push(uid.clone());
+            }
+        }
+
+        if sid_to_users.is_empty() {
+            return Ok(status_map);
+        }
+
+        let candidate_sids: Vec<String> = sid_to_users.keys().cloned().collect();
+        let session_keys: Vec<String> = candidate_sids
+            .iter()
+            .map(|sid| Self::session_key(sid))
+            .collect();
+        let raw_records: Vec<Option<String>> = conn.mget(&session_keys).await?;
+
+        let mut stale_cleanup: Vec<(String, Vec<String>)> = Vec::new();
+        for (sid, raw_opt) in candidate_sids.into_iter().zip(raw_records.into_iter()) {
+            match raw_opt
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<RedisSessionRecord>(raw).ok())
+            {
+                Some(record) => {
+                    if !record.authenticated || Self::is_record_stale(&record, stale_after_secs) {
+                        continue;
+                    }
+                    if let Some(uid) = record.user_id.as_deref()
+                        && let Some(entry) = status_map.get_mut(uid)
+                    {
+                        *entry = true;
+                    }
+                }
+                None => {
+                    if let Some(uids) = sid_to_users.remove(&sid) {
+                        stale_cleanup.push((sid, uids));
+                    }
+                }
+            }
+        }
+
+        // 惰性清理用户会话集合中已过期但未 SREM 的会话 ID
+        if !stale_cleanup.is_empty() {
+            let mut cleanup_pipe = Pipeline::new();
+            for (sid, uids) in &stale_cleanup {
+                for uid in uids {
+                    Self::remove_user_membership_ops(&mut cleanup_pipe, uid, sid);
+                }
+                cleanup_pipe.srem(REGISTRY_SET_KEY, sid);
+            }
+            let _ = cleanup_pipe.query_async::<()>(&mut conn).await;
+            let mut cache = self.local_cache.write().await;
+            for (sid, _) in &stale_cleanup {
+                cache.remove(sid);
+            }
+        }
+
+        Ok(status_map)
+    }
+
+    pub async fn is_user_online(&self, user_id: &str, stale_after_secs: u64) -> Result<bool> {
+        let uid = user_id.trim();
+        if uid.is_empty() {
+            return Ok(false);
+        }
+        let result = self
+            .query_users_online(&[uid.to_string()], stale_after_secs)
+            .await?;
+        Ok(result.get(uid).copied().unwrap_or(false))
+    }
+
+    pub async fn snapshot(&self, stale_after_secs: u64) -> Result<RealtimeRegistrySnapshot> {
         let active_records = match self.fetch_active_records_from_redis().await {
             Ok(records) => records,
             Err(_) => {
                 let cache = self.local_cache.read().await;
                 cache.values().cloned().collect::<Vec<_>>()
             }
-        };
+        }
+        .into_iter()
+        .filter(|record| !Self::is_record_stale(record, stale_after_secs))
+        .collect::<Vec<_>>();
 
         let mut users: HashMap<String, RealtimeUserSessionSnapshot> = HashMap::new();
         let mut total_connected = 0;
@@ -695,5 +865,40 @@ mod tests {
             "rt:user_sessions:u-1"
         );
         assert_eq!(RedisSessionRegistry::user_key("u-1"), "rt:user:u-1");
+    }
+
+    #[test]
+    fn normalize_room_list_excludes_internal_presence_rooms_and_checks_staleness() {
+        let rooms = vec![
+            "room:group-1".to_string(),
+            "presence:user-2".to_string(),
+            "sid:sock-1".to_string(),
+            "user:u-1".to_string(),
+        ];
+        assert_eq!(
+            RedisSessionRegistry::normalize_room_list(&rooms),
+            vec!["group-1".to_string()]
+        );
+
+        let now = chrono::Utc::now();
+        let fresh = super::RedisSessionRecord {
+            session_id: "s-1".to_string(),
+            user_id: Some("u-1".to_string()),
+            authenticated: true,
+            rooms: vec![],
+            last_heartbeat_at: now.to_rfc3339(),
+            last_event_at: now.to_rfc3339(),
+            source: "test".to_string(),
+            gateway_id: "gw-1".to_string(),
+        };
+        assert!(!RedisSessionRegistry::is_record_stale(&fresh, 120));
+
+        let stale_ts = (now - chrono::Duration::seconds(180)).to_rfc3339();
+        let stale = super::RedisSessionRecord {
+            last_heartbeat_at: stale_ts.clone(),
+            last_event_at: stale_ts,
+            ..fresh
+        };
+        assert!(RedisSessionRegistry::is_record_stale(&stale, 120));
     }
 }

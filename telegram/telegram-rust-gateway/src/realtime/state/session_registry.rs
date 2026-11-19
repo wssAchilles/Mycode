@@ -204,6 +204,38 @@ impl RealtimeSessionRegistry {
         remove_index_entry(&mut self.sessions_by_user, old_user_id, session_id);
     }
 
+    /// 判断指定用户当前是否至少存在一个未过期的已认证会话
+    pub fn is_user_online(&self, user_id: &str, stale_after_secs: u64) -> bool {
+        let Some(user_sessions) = self.sessions_by_user.get(user_id) else {
+            return false;
+        };
+        user_sessions.iter().any(|session_id| {
+            self.session_by_id
+                .get(session_id)
+                .map(|session| session.authenticated && !is_stale(session, stale_after_secs))
+                .unwrap_or(false)
+        })
+    }
+
+    /// 批量点查目标用户列表的在线状态
+    pub fn query_users_online(
+        &self,
+        user_ids: &[String],
+        stale_after_secs: u64,
+    ) -> HashMap<String, bool> {
+        let mut status_map = HashMap::with_capacity(user_ids.len());
+        for user_id in user_ids {
+            let clean = user_id.trim();
+            if clean.is_empty() {
+                continue;
+            }
+            status_map
+                .entry(clean.to_string())
+                .or_insert_with(|| self.is_user_online(clean, stale_after_secs));
+        }
+        status_map
+    }
+
     pub fn snapshot(&self, stale_after_secs: u64) -> RealtimeRegistrySnapshot {
         let users = self
             .sessions_by_user
@@ -662,5 +694,35 @@ mod tests {
                 .resolve_socket_targets(&room_target, 120)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn query_users_online_filters_unauthenticated_and_stale_sessions() {
+        let mut registry = RealtimeSessionRegistry::default();
+        let now = Utc::now().to_rfc3339();
+        let stale_ts = (Utc::now() - Duration::seconds(200)).to_rfc3339();
+
+        // 在线且已认证用户
+        registry.apply_session_opened(&session_opened("s-online", Some("u-online"), now.clone()));
+        // 仅连接但未认证用户
+        registry.apply_session_opened(&session_opened("s-unauth", None, now));
+        // 心跳已超时的陈旧会话
+        registry.apply_session_opened(&session_opened("s-stale", Some("u-stale"), stale_ts));
+
+        assert!(registry.is_user_online("u-online", 120));
+        assert!(!registry.is_user_online("u-stale", 120));
+        assert!(!registry.is_user_online("u-missing", 120));
+
+        let batch = registry.query_users_online(
+            &[
+                "u-online".to_string(),
+                "u-stale".to_string(),
+                "u-missing".to_string(),
+            ],
+            120,
+        );
+        assert_eq!(batch.get("u-online"), Some(&true));
+        assert_eq!(batch.get("u-stale"), Some(&false));
+        assert_eq!(batch.get("u-missing"), Some(&false));
     }
 }

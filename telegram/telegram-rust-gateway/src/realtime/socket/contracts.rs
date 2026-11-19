@@ -134,6 +134,11 @@ pub fn user_room(user_id: &str) -> String {
     format!("user:{user_id}")
 }
 
+/// 生成用户在线状态订阅房间名称，与群组房间前缀隔离
+pub fn presence_room(user_id: &str) -> String {
+    format!("presence:{}", user_id.trim())
+}
+
 pub fn normalize_group_room(room_id: &str) -> String {
     let normalized = room_id.trim();
     if normalized.starts_with("room:") {
