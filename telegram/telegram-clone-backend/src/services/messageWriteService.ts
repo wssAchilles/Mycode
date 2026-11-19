@@ -1,17 +1,19 @@
 import Message, { MessageStatus, MessageType, IMessage, IAttachment } from '../models/Message';
 import ChatCounter from '../models/ChatCounter';
-import ChatMemberState from '../models/ChatMemberState';
 import GroupState from '../models/GroupState';
-import Group from '../models/Group';
-import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
-import { Op } from 'sequelize';
 import { advanceChatLastReadSeqWithResult } from '../utils/chatReadState';
 import { updateService } from './updateService';
 import { buildMessageFanoutCommand } from './chatDelivery/fanoutPlanner';
 import { chatFanoutCommandBus } from './chatDelivery/fanoutCommandBus';
 import { publishMessagePersistedEvent } from './chatDelivery/messageLifecyclePublisher';
+import {
+  assertCanSendGroupMessageCached,
+  getCachedGroupMemberIds,
+  getCachedGroupMeta,
+  type CachedGroupMeta,
+} from './chatDelivery/writePathCache';
 
 interface CreateMessageInput {
   senderId: string;
@@ -28,6 +30,7 @@ interface CreateMessageInput {
   thumbnailUrl?: string;
   replyTo?: string;
   clientTempId?: string; // 离线消息去重 ID
+  prefetchedGroupMeta?: CachedGroupMeta; // 上游 controller 已校验的群元信息，避免重复查库
 }
 
 export interface MessageWriteResult {
@@ -55,57 +58,23 @@ const getNextSeq = async (chatId: string): Promise<number> => {
   return doc?.seq || 1;
 };
 
-const getGroupMemberIds = async (groupId: string): Promise<string[]> => {
-  const members = await GroupMember.findAll({
-    where: {
-      groupId,
-      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
-      isActive: true,
-    },
-    attributes: ['userId'],
-  });
-  return members.map((m: any) => m.userId);
-};
-
-const getGroupMeta = async (groupId: string): Promise<{ memberCount: number; isActive: boolean }> => {
-  const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive', 'memberCount'] });
-  if (!group) {
+const getGroupMetaOrThrow = async (groupId: string): Promise<CachedGroupMeta> => {
+  const meta = await getCachedGroupMeta(groupId);
+  if (!meta) {
     throw new Error('群组不存在');
   }
-  if (!(group as any).isActive) {
+  if (!meta.isActive) {
     throw new Error('群组已被解散');
   }
-  return {
-    memberCount: (group as any).memberCount || 0,
-    isActive: (group as any).isActive,
-  };
+  return meta;
 };
 
-const assertCanSendGroupMessage = async (groupId: string, userId: string): Promise<void> => {
-  const member = await GroupMember.findOne({
-    where: {
-      groupId,
-      userId,
-      isActive: true,
-    },
-  });
-
-  if (!member || member.status === MemberStatus.BANNED || member.status === MemberStatus.LEFT) {
-    throw new Error('您不是该群组成员或已被移除');
-  }
-
-  if (member.status === MemberStatus.MUTED) {
-    const mutedUntil = (member as any).mutedUntil as Date | null;
-    if (mutedUntil && mutedUntil > new Date()) {
-      throw new Error('您已被禁言');
-    }
-    // 禁言到期，自动恢复
-    if (mutedUntil && mutedUntil <= new Date()) {
-      (member as any).status = MemberStatus.ACTIVE;
-      (member as any).mutedUntil = null;
-      await member.save();
-    }
-  }
+const findDuplicateByClientTempId = async (chatId: string, clientTempId?: string) => {
+  if (!clientTempId) return null;
+  return Message.findOne({
+    chatId,
+    'metadata.clientTempId': clientTempId,
+  }).lean();
 };
 
 const normalizeContent = (content?: string, attachments?: IAttachment[], fileName?: string): string => {
@@ -140,37 +109,60 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     throw new Error('chatType 与 groupId 不一致');
   }
   const chatId = buildChatId(input.senderId, input.receiverId, input.groupId);
-  let groupMeta: { memberCount: number; isActive: boolean } | null = null;
+  let groupMeta: CachedGroupMeta | null = null;
+  let existing: any = null;
 
   if (chatType === 'group') {
     if (!input.groupId) throw new Error('groupId 不能为空');
-    groupMeta = await getGroupMeta(input.groupId);
-    await assertCanSendGroupMessage(input.groupId, input.senderId);
-  } else if (!input.receiverId) {
-    throw new Error('receiverId 不能为空');
+    const groupMetaTask = input.prefetchedGroupMeta
+      ? Promise.resolve(input.prefetchedGroupMeta).then((meta) => {
+          if (!meta.isActive) throw new Error('群组已被解散');
+          return meta;
+        })
+      : getGroupMetaOrThrow(input.groupId);
+
+    // 并行执行群元信息、发送者权限与 clientTempId 幂等查重，避免多趟串行跨区域往返
+    const [resolvedMeta, , duplicateDoc] = await Promise.all([
+      groupMetaTask,
+      assertCanSendGroupMessageCached(input.groupId, input.senderId),
+      findDuplicateByClientTempId(chatId, input.clientTempId),
+    ]);
+    groupMeta = resolvedMeta;
+    existing = duplicateDoc;
+  } else {
+    if (!input.receiverId) {
+      throw new Error('receiverId 不能为空');
+    }
+    existing = await findDuplicateByClientTempId(chatId, input.clientTempId);
   }
 
   // 先执行 clientTempId 幂等去重，仅当确认为全新消息时再分配单调递增 seq，根除重试造成的序号空洞
-  if (input.clientTempId) {
-    const existing = await Message.findOne({
+  if (existing) {
+    chatRuntimeMetrics.increment('message.write.dedupHit');
+    return {
+      message: existing as unknown as IMessage,
       chatId,
-      'metadata.clientTempId': input.clientTempId,
-    }).lean();
-    if (existing) {
-      chatRuntimeMetrics.increment('message.write.dedupHit');
-      return {
-        message: existing as unknown as IMessage,
-        chatId,
-        chatType,
-        seq: existing.seq || 0,
-        recipientIds: [],
-        isLargeGroup: false,
-        isDuplicate: true,
-      };
-    }
+      chatType,
+      seq: existing.seq || 0,
+      recipientIds: [],
+      isLargeGroup: false,
+      isDuplicate: true,
+    };
   }
 
-  const seq = await getNextSeq(chatId);
+  const shouldFanout = chatType === 'private'
+    || (groupMeta?.memberCount ?? 0) <= LARGE_GROUP_FANOUT_THRESHOLD;
+
+  // 并行分配递增 seq 与获取扩散成员列表
+  const [seq, recipientIds] = await Promise.all([
+    getNextSeq(chatId),
+    chatType === 'group'
+      ? (shouldFanout
+          ? getCachedGroupMemberIds(input.groupId as string)
+          : Promise.resolve([input.senderId]))
+      : Promise.resolve(Array.from(new Set([input.senderId, input.receiverId as string]))),
+  ]);
+
   const attachments = buildAttachments(input);
   const content = normalizeContent(input.content, attachments, input.fileName);
 
@@ -214,93 +206,88 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
   }
 
   const message = await Message.create(messageDoc);
+  const messageIdStr = message._id.toString();
 
-  let recipientIds: string[] = [];
-  let shouldFanout = true;
-  if (chatType === 'group') {
-    const memberCount = groupMeta?.memberCount ?? (await getGroupMeta(input.groupId as string)).memberCount;
-    shouldFanout = memberCount <= LARGE_GROUP_FANOUT_THRESHOLD;
-    recipientIds = shouldFanout
-      ? await getGroupMemberIds(input.groupId as string)
-      : [input.senderId];
-  } else {
-    recipientIds = Array.from(new Set([input.senderId, input.receiverId as string]));
-  }
-
-  // P0 优化: 发送者自身立即推进已读水位；若私聊中推动了前序他人消息水位，同步写入隐式已读更新给对方
-  const senderReadState = await advanceChatLastReadSeqWithResult(chatId, input.senderId, seq, {
-    updateDeliveredSeq: true,
-  });
-  if (
-    chatType === 'private'
-    && input.receiverId
-    && input.receiverId !== input.senderId
-    && seq > 1
-    && senderReadState.previousSeq < seq - 1
-  ) {
-    try {
-      await updateService.appendUpdate({
-        userId: input.receiverId,
-        type: 'read',
-        chatId,
-        seq: seq - 1,
-        payload: { readerId: input.senderId, readCount: 1 },
-      });
-    } catch {
-      // 隐式已读更新属于 best-effort，不阻断主消息写入链路
-    }
-  }
-
-  // P0 优化: 异步扩散 - 将其他成员的更新任务入队
-  let fanoutJobId: string | undefined;
-  let fanoutJobCount = 0;
-  if (chatType === 'private' || shouldFanout) {
-    const command = buildMessageFanoutCommand({
-      messageId: message._id.toString(),
-      chatId,
-      chatType,
-      seq,
-      senderId: input.senderId,
-      recipientIds,
-      topology: 'eager',
+  // 消息落库后，将彼此独立的发送者水位推进、异步扩散分发与生命周期事件并行执行，压缩尾延迟
+  const senderReadStateTask = (async () => {
+    const senderReadState = await advanceChatLastReadSeqWithResult(chatId, input.senderId, seq, {
+      updateDeliveredSeq: true,
     });
-    chatRuntimeMetrics.observeValue('messageWrite.fanout.recipients', command.recipientIds.length);
-    if (command.recipientIds.length > 0) {
-      const dispatch = await chatFanoutCommandBus.dispatch(command);
-      fanoutJobId = dispatch.jobId;
-      fanoutJobCount = dispatch.jobCount;
-      if (dispatch.mode === 'queued') {
-        chatRuntimeMetrics.increment('messageWrite.fanout.queue.success');
-        chatRuntimeMetrics.observeValue('messageWrite.fanout.queue.jobs', fanoutJobCount);
-      } else if (dispatch.mode === 'go_primary') {
-        chatRuntimeMetrics.increment('messageWrite.fanout.goPrimary.queued');
-        chatRuntimeMetrics.observeValue('messageWrite.fanout.goPrimary.jobs', fanoutJobCount);
-      } else if (dispatch.mode === 'sync_fallback') {
-        chatRuntimeMetrics.increment('messageWrite.fanout.queue.fallback');
-        chatRuntimeMetrics.observeValue(
-          'messageWrite.fanout.fallback.chunks',
-          dispatch.projection?.chunkCount || 0,
-        );
+    if (
+      chatType === 'private'
+      && input.receiverId
+      && input.receiverId !== input.senderId
+      && seq > 1
+      && senderReadState.previousSeq < seq - 1
+    ) {
+      try {
+        await updateService.appendUpdate({
+          userId: input.receiverId,
+          type: 'read',
+          chatId,
+          seq: seq - 1,
+          payload: { readerId: input.senderId, readCount: 1 },
+        });
+      } catch {
+        // 隐式已读更新属于 best-effort，不阻断主消息写入链路
       }
     }
-  } else if (chatType === 'group' && !shouldFanout) {
-    // P2: 大群读扩散 - 更新群组全局状态
-    await GroupState.findOneAndUpdate(
-      { _id: input.groupId },
-      {
-        $set: {
-          lastSeq: seq,
-          lastMessageId: message._id.toString(),
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true }
-    );
-    console.log(`[P2] 大群 ${input.groupId} GroupState 已更新: seq=${seq}`);
-  }
+  })();
 
-  await publishMessagePersistedEvent({
-    messageId: message._id.toString(),
+  const fanoutTask = (async (): Promise<{ fanoutJobId?: string; fanoutJobCount: number }> => {
+    let fanoutJobId: string | undefined;
+    let fanoutJobCount = 0;
+
+    if (chatType === 'private' || shouldFanout) {
+      const command = buildMessageFanoutCommand({
+        messageId: messageIdStr,
+        chatId,
+        chatType,
+        seq,
+        senderId: input.senderId,
+        recipientIds,
+        topology: 'eager',
+      });
+      chatRuntimeMetrics.observeValue('messageWrite.fanout.recipients', command.recipientIds.length);
+      if (command.recipientIds.length > 0) {
+        const dispatch = await chatFanoutCommandBus.dispatch(command);
+        fanoutJobId = dispatch.jobId;
+        fanoutJobCount = dispatch.jobCount;
+        if (dispatch.mode === 'queued') {
+          chatRuntimeMetrics.increment('messageWrite.fanout.queue.success');
+          chatRuntimeMetrics.observeValue('messageWrite.fanout.queue.jobs', fanoutJobCount);
+        } else if (dispatch.mode === 'go_primary') {
+          chatRuntimeMetrics.increment('messageWrite.fanout.goPrimary.queued');
+          chatRuntimeMetrics.observeValue('messageWrite.fanout.goPrimary.jobs', fanoutJobCount);
+        } else if (dispatch.mode === 'sync_fallback') {
+          chatRuntimeMetrics.increment('messageWrite.fanout.queue.fallback');
+          chatRuntimeMetrics.observeValue(
+            'messageWrite.fanout.fallback.chunks',
+            dispatch.projection?.chunkCount || 0,
+          );
+        }
+      }
+    } else if (chatType === 'group' && !shouldFanout) {
+      // P2: 大群读扩散 - 更新群组全局状态
+      await GroupState.findOneAndUpdate(
+        { _id: input.groupId },
+        {
+          $set: {
+            lastSeq: seq,
+            lastMessageId: messageIdStr,
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+      console.log(`[P2] 大群 ${input.groupId} GroupState 已更新: seq=${seq}`);
+    }
+
+    return { fanoutJobId, fanoutJobCount };
+  })();
+
+  const lifecycleEventTask = publishMessagePersistedEvent({
+    messageId: messageIdStr,
     chatId,
     chatType,
     seq,
@@ -311,6 +298,12 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     isLargeGroup: chatType === 'group' && !shouldFanout,
   });
 
+  const [, fanoutResult] = await Promise.all([
+    senderReadStateTask,
+    fanoutTask,
+    lifecycleEventTask,
+  ]);
+
   return {
     message,
     chatId,
@@ -318,8 +311,8 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     seq,
     recipientIds,
     isLargeGroup: chatType === 'group' && !shouldFanout,
-    fanoutJobId,
-    fanoutJobCount,
+    fanoutJobId: fanoutResult.fanoutJobId,
+    fanoutJobCount: fanoutResult.fanoutJobCount,
   };
 };
 

@@ -3,6 +3,7 @@ import { getOnlineUsers, getUserStatus, searchUsers } from '../controllers/userC
 import { authenticateToken } from '../middleware/authMiddleware';
 import User from '../models/User';
 import UserMongo from '../models/UserMongo';
+import { invalidateAuthUserCache } from '../services/chatDelivery/writePathCache';
 import { createChildLogger } from '../utils/logger';
 
 const log = createChildLogger('userRoutes');
@@ -93,6 +94,8 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({ error: '用户不存在或更新失败' });
       return;
     }
+
+    await invalidateAuthUserCache(userId);
 
     // 返回更新后的用户信息
     let updatedUser: any;

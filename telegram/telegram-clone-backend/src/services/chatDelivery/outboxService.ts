@@ -104,6 +104,33 @@ export class ChatDeliveryOutboxService {
     jobs: QueueJobRef[],
     dispatchMode: Extract<ChatDeliveryDispatchMode, 'queued' | 'go_primary' | 'go_group_canary'>,
   ): Promise<void> {
+    // 单分片快速路径：一次原子 updateOne 替代 findById + save 两次往返
+    if (jobs.length === 1 && typeof (ChatDeliveryOutbox as any).updateOne === 'function') {
+      const jobId = jobs[0]?.id || null;
+      const now = new Date();
+      const updateResult = await (ChatDeliveryOutbox as any).updateOne(
+        { _id: outboxId, chunkCountExpected: 1 },
+        {
+          $set: {
+            dispatchMode,
+            status: 'queued',
+            lastDispatchedAt: now,
+            lastErrorMessage: null,
+            queuedChunkCount: 1,
+            completedChunkCount: 0,
+            failedChunkCount: 0,
+            queuedJobIds: jobId ? [jobId] : [],
+            'chunks.0.status': 'queued',
+            'chunks.0.jobId': jobId,
+            'chunks.0.lastErrorMessage': null,
+          },
+        },
+      );
+      if (updateResult && typeof updateResult.matchedCount === 'number' && updateResult.matchedCount > 0) {
+        return;
+      }
+    }
+
     const doc = await this.requireDoc(outboxId);
     doc.dispatchMode = dispatchMode;
     doc.lastDispatchedAt = new Date();

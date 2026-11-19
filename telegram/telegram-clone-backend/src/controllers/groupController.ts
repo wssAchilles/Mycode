@@ -11,6 +11,7 @@ import { updateService } from '../services/updateService';
 import { waitForMongoReady } from '../config/db';
 import { buildGroupChatId } from '../utils/chat';
 import { getSocketService } from '../services/socketRegistry';
+import { invalidateGroupWriteCache } from '../services/chatDelivery/writePathCache';
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
@@ -476,6 +477,8 @@ export const addGroupMember = catchAsync(async (req: AuthenticatedRequest, res: 
       log.warn({ err: error }, '初始化群成员状态失败');
     }
 
+    await invalidateGroupWriteCache(groupId, { userIds: addedUserIds });
+
     await broadcastGroupUpdate({
       groupId,
       actorId: userId,
@@ -562,6 +565,8 @@ export const removeGroupMember = catchAsync(async (req: AuthenticatedRequest, re
     await group.updateMemberCount();
   }
 
+  await invalidateGroupWriteCache(groupId, { userIds: [memberId] });
+
   await broadcastGroupUpdate({
     groupId,
     actorId: userId,
@@ -634,6 +639,8 @@ export const muteGroupMember = catchAsync(async (req: AuthenticatedRequest, res:
     log.warn({ err: error }, '更新群成员静默状态失败');
   }
 
+  await invalidateGroupWriteCache(groupId, { userIds: [memberId] });
+
   await broadcastGroupUpdate({
     groupId,
     actorId: userId,
@@ -686,6 +693,8 @@ export const unmuteGroupMember = catchAsync(async (req: AuthenticatedRequest, re
   } catch (error) {
     log.warn({ err: error }, '更新群成员静默状态失败');
   }
+
+  await invalidateGroupWriteCache(groupId, { userIds: [memberId] });
 
   await broadcastGroupUpdate({
     groupId,
@@ -867,6 +876,8 @@ export const leaveGroup = catchAsync(async (req: AuthenticatedRequest, res: Resp
     await group.updateMemberCount();
   }
 
+  await invalidateGroupWriteCache(groupId, { userIds: [userId] });
+
   await broadcastGroupUpdate({
     groupId,
     actorId: userId,
@@ -976,6 +987,8 @@ export const deleteGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
   } catch (error) {
     log.warn({ err: error }, '清理群成员状态失败');
   }
+
+  await invalidateGroupWriteCache(groupId, { userIds: activeMemberIds, clearAllMembers: true });
 
   await broadcastGroupUpdate({
     groupId,

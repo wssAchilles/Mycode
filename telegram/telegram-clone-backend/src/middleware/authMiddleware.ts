@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { cacheService } from '../services/cacheService';
+import { AUTH_USER_CACHE_TTL_SECONDS } from '../services/chatDelivery/writePathCache';
 import { verifyAccessToken, JWTPayload } from '../utils/jwt';
 import { errors } from '../utils/apiResponse';
 import { createChildLogger } from '../utils/logger';
@@ -42,7 +43,7 @@ async function getUserWithCache(userId: string) {
   const user = await User.findByPk(userId);
   if (user) {
     const json = user.toJSON();
-    await cacheService.set(cacheKey, json, 30); // 缓存 30 秒
+    await cacheService.set(cacheKey, json, AUTH_USER_CACHE_TTL_SECONDS);
     return json;
   }
   return null;

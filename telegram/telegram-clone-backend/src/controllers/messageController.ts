@@ -7,6 +7,7 @@ import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from '../services/messageWriteService';
+import { getCachedGroupMeta, getCachedUserExists } from '../services/chatDelivery/writePathCache';
 import {
   buildRoomMessageDisplayEnvelope,
   publishRoomMessageDisplay,
@@ -590,19 +591,21 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     return errors.badRequest(res, '接收者 ID 不能为空');
   }
 
-  // 验证接收者存在
+  // 校验接收者/群组存在（命中 Redis 短缓存时跳过跨区域 PostgreSQL 往返）
+  let prefetchedGroupMeta: { memberCount: number; isActive: boolean } | undefined;
   if (chatType === 'private' && resolvedReceiverId) {
-    const receiver = await User.findByPk(resolvedReceiverId);
-    if (!receiver) {
+    const receiverExists = await getCachedUserExists(resolvedReceiverId);
+    if (!receiverExists) {
       return errors.notFound(res, '接收者');
     }
   }
 
   if (chatType === 'group' && resolvedGroupId) {
-    const group = await Group.findByPk(resolvedGroupId);
-    if (!group || !group.isActive) {
+    const groupMeta = await getCachedGroupMeta(resolvedGroupId);
+    if (!groupMeta || !groupMeta.isActive) {
       return errors.notFound(res, '群组');
     }
+    prefetchedGroupMeta = groupMeta;
   }
 
   // 确保 MongoDB 就绪
@@ -624,7 +627,8 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     fileSize,
     mimeType,
     thumbnailUrl,
-    clientTempId
+    clientTempId,
+    ...(prefetchedGroupMeta ? { prefetchedGroupMeta } : {}),
   });
 
   const displayPayload = buildRoomMessageDisplayEnvelope({
