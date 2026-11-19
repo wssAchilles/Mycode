@@ -91,6 +91,14 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const entityCache = new Map<string, Message>();
   const knownMessageIds = new Set<string>();
   const optimisticMessageIdByTempId = new Map<string, string>();
+  const optimisticSummaryBackupByTempId = new Map<
+    string,
+    {
+      listId: string;
+      content: string;
+      snapshot: ReturnType<ReturnType<typeof useChatStore.getState>['applyOptimisticLastMessage']>;
+    }
+  >();
   const deferredEntityUpdates = new Map<string, { status?: Message['status']; readCount?: number }>();
   let resolveMissingInFlight = false;
   let resolveMissingQueue = new Set<string>();
@@ -100,6 +108,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     projectionToken += 1;
     knownMessageIds.clear();
     optimisticMessageIdByTempId.clear();
+    optimisticSummaryBackupByTempId.clear();
     entityCache.clear();
     deferredEntityUpdates.clear();
     resolveMissingQueue = new Set<string>();
@@ -211,6 +220,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
       optimisticMessageIdByTempId.set(clientTempId, message.id);
     } else if (clientTempId) {
       optimisticMessageIdByTempId.delete(clientTempId);
+      optimisticSummaryBackupByTempId.delete(clientTempId);
     }
     ids.splice(findInsertIndex(ids, message), 0, message.id);
     return { idChanged: true, entityChanged: true };
@@ -220,6 +230,19 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const optimistic = buildOptimisticPendingMessage(payload);
     if (!optimistic) return;
 
+    const listId = payload.chatType === 'group' ? payload.groupId : payload.receiverId;
+    if (listId && listId !== 'ai') {
+      // 发送瞬间同步刷新左侧会话卡片摘要，消除气泡与卡片的感知时间差
+      const snapshot = useChatStore.getState().applyOptimisticLastMessage(listId, optimistic);
+      if (optimistic.clientTempId) {
+        optimisticSummaryBackupByTempId.set(optimistic.clientTempId, {
+          listId,
+          content: optimistic.content,
+          snapshot,
+        });
+      }
+    }
+
     const state = get();
     if (state.activeChatId !== optimistic.chatId) return;
 
@@ -228,10 +251,57 @@ export const useMessageStore = create<MessageState>((set, get) => {
     set((current) => ({
       messageIdsVersion: result.idChanged ? current.messageIdsVersion + 1 : current.messageIdsVersion,
     }));
+    // 立即重建可见实体映射，避免新插入的乐观消息先渲染成空白占位符
+    rebuildVisibleEntities();
+  };
+
+  const confirmOptimisticPendingMessage = (
+    clientTempId: string,
+    ack: { messageId?: string; seq?: number },
+  ) => {
+    if (!clientTempId) return;
+    const backup = optimisticSummaryBackupByTempId.get(clientTempId);
+    optimisticSummaryBackupByTempId.delete(clientTempId);
+
+    const optimisticId = optimisticMessageIdByTempId.get(clientTempId);
+    if (!optimisticId) return;
+    const current = entityCache.get(optimisticId);
+    if (!current) return;
+
+    const confirmed: Message = {
+      ...current,
+      id: ack.messageId || current.id,
+      seq: typeof ack.seq === 'number' ? ack.seq : current.seq,
+      status: current.status === 'read' ? 'read' : 'delivered',
+    };
+
+    const state = get();
+    if (state.activeChatId === confirmed.chatId) {
+      const result = upsertProjectionMessage(state.messageIds, confirmed);
+      if (result.idChanged || result.entityChanged) {
+        set((s) => ({
+          messageIdsVersion: result.idChanged ? s.messageIdsVersion + 1 : s.messageIdsVersion,
+        }));
+        rebuildVisibleEntities();
+      }
+    }
+
+    const listId = backup?.listId || (confirmed.isGroupChat ? confirmed.groupId : confirmed.receiverId);
+    if (listId && listId !== 'ai') {
+      useChatStore.getState().applyChatMetaBatch({
+        lastMessages: [{ chatId: listId, message: confirmed }],
+      });
+    }
   };
 
   const removeOptimisticPendingMessage = (clientTempId?: string) => {
     if (!clientTempId) return;
+    const backup = optimisticSummaryBackupByTempId.get(clientTempId);
+    if (backup) {
+      optimisticSummaryBackupByTempId.delete(clientTempId);
+      useChatStore.getState().restoreOptimisticLastMessage(backup.listId, backup.snapshot, backup.content);
+    }
+
     const optimisticId = optimisticMessageIdByTempId.get(clientTempId);
     if (!optimisticId) return;
     const state = get();
@@ -240,6 +310,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     set((current) => ({
       messageIdsVersion: current.messageIdsVersion + 1,
     }));
+    rebuildVisibleEntities();
   };
 
   const queueEntityResolve = (ids: string[]) => {
@@ -998,6 +1069,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     resetProjectionCaches,
     rebuildVisibleEntities,
     insertOptimisticPendingMessage,
+    confirmOptimisticPendingMessage,
     removeOptimisticPendingMessage,
     pendingPatches,
     ensureCoreReady,

@@ -130,6 +130,16 @@ export function createRealtimeActions(
       const sendViaHttpFallback = async () => {
         const response = await messageAPI.sendMessage(toHttpSendPayload(payloadWithClientTempId));
         const sentRaw = extractSentMessageRaw(response);
+        const resolvedMessageId =
+          (typeof sentRaw?.id === 'string' ? sentRaw.id : undefined) || (sentRaw?._id ? String(sentRaw._id) : undefined);
+        const resolvedSeq = typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined;
+
+        // HTTP 降级成功时立即确认本地乐观气泡与卡片摘要，无需等待 Worker 回传
+        deps.confirmOptimisticPendingMessage?.(normalizedClientTempId, {
+          messageId: resolvedMessageId,
+          seq: resolvedSeq,
+        });
+
         if (sentRaw) {
           sentRaw.clientTempId = sentRaw.clientTempId || normalizedClientTempId;
           try {
@@ -142,8 +152,8 @@ export function createRealtimeActions(
         return {
           success: true,
           clientTempId: normalizedClientTempId,
-          messageId: (typeof sentRaw?.id === 'string' ? sentRaw.id : undefined) || (sentRaw?._id ? String(sentRaw._id) : undefined),
-          seq: typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined,
+          messageId: resolvedMessageId,
+          seq: resolvedSeq,
         };
       };
 
@@ -173,9 +183,15 @@ export function createRealtimeActions(
         await deps.ensureCoreReady();
         const ack = await chatCoreClient.sendSocketMessage(payloadWithClientTempId);
         if (ack.success) {
+          const resolvedTempId = ack.clientTempId || normalizedClientTempId;
+          // 收到 Socket ACK 即刻推进本地消息为已送达态并对齐卡片 seq，不必等待独立 realtimeBatch 旁路回推
+          deps.confirmOptimisticPendingMessage?.(resolvedTempId, {
+            messageId: ack.messageId,
+            seq: ack.seq,
+          });
           return {
             ...ack,
-            clientTempId: ack.clientTempId || normalizedClientTempId,
+            clientTempId: resolvedTempId,
           };
         }
         if (shouldFallbackToHttpSend(ack.error)) {

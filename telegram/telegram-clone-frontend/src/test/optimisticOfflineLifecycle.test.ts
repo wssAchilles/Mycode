@@ -50,6 +50,7 @@ describe('optimisticOfflineLifecycle - 离线生命周期与容灾保护', () =>
       resetProjectionCaches: vi.fn(),
       rebuildVisibleEntities: vi.fn(),
       insertOptimisticPendingMessage: vi.fn(),
+      confirmOptimisticPendingMessage: vi.fn(),
       removeOptimisticPendingMessage: vi.fn(),
       pendingPatches: [],
       ensureCoreReady: vi.fn().mockResolvedValue(undefined),
@@ -116,5 +117,36 @@ describe('optimisticOfflineLifecycle - 离线生命周期与容灾保护', () =>
 
     // 4. 返回结果指明失败原因
     expect(result.success).toBe(false);
+  });
+
+  it('在 Socket ACK 成功时立即确认本地乐观消息，不必等待异步 realtimeBatch 旁路回推', async () => {
+    const actions = createRealtimeActions(mockSet, mockGet, mockDeps);
+
+    vi.mocked(chatCoreClient.sendSocketMessage).mockResolvedValue({
+      success: true,
+      messageId: 'server-msg-88',
+      seq: 88,
+      clientTempId: 'temp_ack_fast_1',
+    });
+
+    const result = await actions.sendRealtimeMessage({
+      content: '秒级确认消息',
+      chatType: 'private',
+      receiverId: 'receiver-user-456',
+      clientTempId: 'temp_ack_fast_1',
+      type: 'text',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      messageId: 'server-msg-88',
+      seq: 88,
+      clientTempId: 'temp_ack_fast_1',
+    });
+    expect(mockDeps.insertOptimisticPendingMessage).toHaveBeenCalledTimes(1);
+    expect(mockDeps.confirmOptimisticPendingMessage).toHaveBeenCalledWith('temp_ack_fast_1', {
+      messageId: 'server-msg-88',
+      seq: 88,
+    });
   });
 });

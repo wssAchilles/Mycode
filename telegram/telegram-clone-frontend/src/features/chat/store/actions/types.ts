@@ -15,6 +15,7 @@ export interface MessageStoreDeps {
   resetProjectionCaches: () => void;
   rebuildVisibleEntities: () => void;
   insertOptimisticPendingMessage: (payload: SocketMessageSendPayload) => void;
+  confirmOptimisticPendingMessage?: (clientTempId: string, ack: { messageId?: string; seq?: number }) => void;
   removeOptimisticPendingMessage: (clientTempId?: string) => void;
 
   // Patch queue (mutable reference)

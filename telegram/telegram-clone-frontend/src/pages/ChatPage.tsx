@@ -576,6 +576,12 @@ const ChatPage: React.FC = () => {
       return;
     }
 
+    const shouldClearDraft = !content;
+    if (shouldClearDraft) {
+      // 点击发送即刻清空输入框，避免干等服务端 ACK 造成输入卡顿体感
+      setNewMessage('');
+    }
+
     void (async () => {
       let ok = false;
       if (isAiChatMode) {
@@ -601,8 +607,9 @@ const ChatPage: React.FC = () => {
         }, '私聊消息发送失败');
       }
 
-      if (ok) {
-        setNewMessage('');
+      if (!ok && shouldClearDraft) {
+        // 发送失败且用户尚未输入新内容时自动恢复草稿，便于直接重试
+        setNewMessage((current) => (current ? current : messageContent));
       }
     })();
   };

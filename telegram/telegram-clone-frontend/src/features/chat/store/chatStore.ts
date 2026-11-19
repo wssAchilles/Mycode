@@ -121,6 +121,11 @@ function compareSummaryLastMessage(
         return incomingSeq === currentSeq ? 0 : incomingSeq > currentSeq ? 1 : -1;
     }
 
+    // 权威服务端带 seq 消息应始终覆盖无 seq 的乐观占位摘要，避免客户端/服务端时钟偏差导致拒收
+    if (incomingSeq !== undefined && currentSeq === undefined) {
+        return 1;
+    }
+
     const currentTimestamp = typeof chat.lastMessageTimestamp === 'number' ? chat.lastMessageTimestamp : 0;
     if (currentTimestamp > 0 && Number.isFinite(incomingTimestamp)) {
         return incomingTimestamp === currentTimestamp ? 0 : incomingTimestamp > currentTimestamp ? 1 : -1;
@@ -217,6 +222,29 @@ interface ChatState {
     updateContactLastMessage: (userId: string, message: Message) => void;
     incrementUnread: (chatId: string) => void;
     resetUnread: (chatId: string) => void;
+
+    // 发送瞬间同步更新左侧会话卡片预览并返回回滚快照，确保与气泡同帧刷新
+    applyOptimisticLastMessage: (
+        chatId: string,
+        message: Message,
+    ) => {
+        lastMessage?: string;
+        time?: string;
+        lastMessageTimestamp?: number;
+        lastMessageSeq?: number;
+        contactLastMessage?: Message;
+    } | null;
+    restoreOptimisticLastMessage: (
+        chatId: string,
+        snapshot: {
+            lastMessage?: string;
+            time?: string;
+            lastMessageTimestamp?: number;
+            lastMessageSeq?: number;
+            contactLastMessage?: Message;
+        } | null,
+        expectedContent?: string,
+    ) => void;
 
     // Industrial: apply bursty meta updates with a single state update (call-site batches on tick-end).
     applyChatMetaBatch: (batch: {
@@ -932,6 +960,88 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (isLoadingGroupDetails !== state.isLoadingGroupDetails) partial.isLoadingGroupDetails = isLoadingGroupDetails;
             if (groupDetailsSeq !== state.groupDetailsSeq) partial.groupDetailsSeq = groupDetailsSeq;
             return partial as Partial<ChatState>;
+        });
+    },
+
+    applyOptimisticLastMessage: (chatId, message) => {
+        if (!chatId || !message) return null;
+        let previousSnapshot: {
+            lastMessage?: string;
+            time?: string;
+            lastMessageTimestamp?: number;
+            lastMessageSeq?: number;
+            contactLastMessage?: Message;
+        } | null = null;
+
+        set((state) => {
+            const chIdx = state.chats.findIndex((c) => c.id === chatId);
+            if (chIdx < 0) return state;
+
+            const prev = state.chats[chIdx];
+            const cIdx = state.contacts.findIndex((c) => c.userId === chatId);
+            previousSnapshot = {
+                lastMessage: prev.lastMessage,
+                time: prev.time,
+                lastMessageTimestamp: prev.lastMessageTimestamp,
+                lastMessageSeq: prev.lastMessageSeq,
+                contactLastMessage: cIdx >= 0 ? state.contacts[cIdx].lastMessage : undefined,
+            };
+
+            const parsedTs = Date.parse(message.timestamp);
+            const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+            const updated: ChatSummary = {
+                ...prev,
+                lastMessage: message.content,
+                time: formatChatListTimestamp(lastMessageTimestamp),
+                lastMessageTimestamp,
+                lastMessageSeq: typeof message.seq === 'number' ? message.seq : prev.lastMessageSeq,
+            };
+
+            const chats = [updated, ...state.chats.filter((c) => c.id !== chatId)];
+            const contacts = state.contacts.slice();
+            if (cIdx >= 0) {
+                contacts[cIdx] = { ...contacts[cIdx], lastMessage: message };
+            }
+            return { chats, contacts };
+        });
+
+        return previousSnapshot;
+    },
+
+    restoreOptimisticLastMessage: (chatId, snapshot, expectedContent) => {
+        if (!chatId || !snapshot) return;
+        set((state) => {
+            const chIdx = state.chats.findIndex((c) => c.id === chatId);
+            if (chIdx < 0) return state;
+            const current = state.chats[chIdx];
+            // 仅在卡片仍停留在被拒收的乐观消息且未推进新 seq 时执行回滚，防止覆盖新到达的消息
+            if (
+                typeof current.lastMessageSeq === 'number'
+                && typeof snapshot.lastMessageSeq === 'number'
+                && current.lastMessageSeq > snapshot.lastMessageSeq
+            ) {
+                return state;
+            }
+            if (expectedContent !== undefined && current.lastMessage !== expectedContent) {
+                return state;
+            }
+
+            const chats = state.chats.slice();
+            chats[chIdx] = {
+                ...current,
+                lastMessage: snapshot.lastMessage,
+                time: snapshot.time,
+                lastMessageTimestamp: snapshot.lastMessageTimestamp,
+                lastMessageSeq: snapshot.lastMessageSeq,
+            };
+            chats.sort((a, b) => (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0));
+
+            const contacts = state.contacts.slice();
+            const cIdx = contacts.findIndex((c) => c.userId === chatId);
+            if (cIdx >= 0) {
+                contacts[cIdx] = { ...contacts[cIdx], lastMessage: snapshot.contactLastMessage };
+            }
+            return { chats, contacts };
         });
     },
 }));

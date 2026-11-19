@@ -355,4 +355,82 @@ describe('chatStore applyChatMetaBatch', () => {
 
     spy.mockRestore();
   });
+
+  it('乐观更新会话卡片摘要、服务端 seq 跨时钟覆盖与硬失败回滚', () => {
+    const baseTs = Date.parse('2026-11-19T01:00:00.000Z');
+    useChatStore.setState({
+      chats: [
+        {
+          id: 'u-top',
+          title: 'Top Chat',
+          lastMessage: 'older top',
+          time: '09:00',
+          lastMessageTimestamp: baseTs + 1000,
+          lastMessageSeq: 5,
+          unreadCount: 0,
+          isGroup: false,
+        },
+        {
+          id: 'u-target',
+          title: 'Target Chat',
+          lastMessage: 'old msg',
+          time: '08:59',
+          lastMessageTimestamp: baseTs,
+          unreadCount: 0,
+          isGroup: false,
+        },
+      ],
+      contacts: [],
+    });
+
+    // 1. 乐观发送：立刻更新摘要并置顶
+    const clientAheadTs = baseTs + 60_000;
+    const optimisticMsg: Message = {
+      id: 'temp-1',
+      clientTempId: 'temp-1',
+      chatId: 'p:me:u-target',
+      chatType: 'private',
+      content: '正在发送的内容',
+      senderId: 'me',
+      senderUsername: 'me',
+      userId: 'me',
+      username: 'me',
+      receiverId: 'u-target',
+      timestamp: new Date(clientAheadTs).toISOString(),
+      type: 'text',
+      isGroupChat: false,
+      status: 'pending',
+    };
+
+    const snapshot = useChatStore.getState().applyOptimisticLastMessage('u-target', optimisticMsg);
+    expect(useChatStore.getState().chats[0].id).toBe('u-target');
+    expect(useChatStore.getState().chats[0].lastMessage).toBe('正在发送的内容');
+
+    // 2. 硬失败回滚：恢复发送前的摘要与排序
+    useChatStore.getState().restoreOptimisticLastMessage('u-target', snapshot, '正在发送的内容');
+    expect(useChatStore.getState().chats[0].id).toBe('u-top');
+    expect(useChatStore.getState().chats[1]).toMatchObject({ id: 'u-target', lastMessage: 'old msg' });
+
+    // 3. 再次乐观发送，且服务端返回的时间戳早于客户端时钟（时钟偏差），带 seq 的权威消息仍可正常覆盖
+    useChatStore.getState().applyOptimisticLastMessage('u-target', optimisticMsg);
+    useChatStore.getState().applyChatMetaBatch({
+      lastMessages: [
+        {
+          chatId: 'u-target',
+          message: {
+            ...optimisticMsg,
+            id: 'srv-1',
+            seq: 1,
+            status: 'delivered',
+            timestamp: new Date(baseTs + 10_000).toISOString(),
+          },
+        },
+      ],
+    });
+    expect(useChatStore.getState().chats[0]).toMatchObject({
+      id: 'u-target',
+      lastMessage: '正在发送的内容',
+      lastMessageSeq: 1,
+    });
+  });
 });
