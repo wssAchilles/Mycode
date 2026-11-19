@@ -113,7 +113,6 @@ let workerSocketHandlersBound = false;
 const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
 let workerSocketLastConnectAttemptAt = 0;
 const desiredJoinedRooms = new Set<string>();
-const desiredPresenceUserIds = new Set<string>();
 let workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
 let workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
 let searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
@@ -1796,12 +1795,6 @@ function detachWorkerSocket() {
 function requestWorkerSocketConnect(force = false) {
   socketBridge.requestWorkerSocketConnect(force);
   workerSocket = socketBridge.getSocket();
-}
-
-function emitWorkerPresenceSubscribe() {
-  const s = socketBridge.getSocket();
-  if (!s?.connected || !desiredPresenceUserIds.size) return;
-  s.emit('presenceSubscribe', Array.from(desiredPresenceUserIds));
 }
 
 async function connectWorkerSocketInternal(force = false): Promise<void> {
@@ -3874,17 +3867,9 @@ const apiImpl: ChatCoreApi = {
   },
 
   async subscribePresence(userIds: string[]) {
-    desiredPresenceUserIds.clear();
-    if (Array.isArray(userIds)) {
-      for (const userId of userIds) {
-        if (typeof userId === 'string' && userId) {
-          desiredPresenceUserIds.add(userId);
-        }
-      }
-    }
-    if (!desiredPresenceUserIds.size) return;
-    await connectWorkerSocketInternal();
-    emitWorkerPresenceSubscribe();
+    // 统一收口到 SocketBridge 状态机，确保未认证不抢跑、重连及令牌刷新后自动补发
+    await socketBridge.subscribePresence(userIds);
+    workerSocket = socketBridge.getSocket();
   },
 
   async prefetchChat(chatId: string, isGroup: boolean) {
@@ -4464,7 +4449,7 @@ const apiImpl: ChatCoreApi = {
     isInited = false;
     detachWorkerSocket();
     desiredJoinedRooms.clear();
-    desiredPresenceUserIds.clear();
+    socketBridge.clearPresenceSubscriptions();
     stopReconnectGapRecover();
     stopSyncLoop();
     stopChatFetches();

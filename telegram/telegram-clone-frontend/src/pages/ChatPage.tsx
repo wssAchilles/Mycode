@@ -189,18 +189,33 @@ const ChatPage: React.FC = () => {
   }, [navigate, connectRealtime, loadContacts, loadPendingRequests]);
 
   const contactUserIdsStr = useMemo(() => {
-    return contacts
-      .map((contact) => contact.userId)
-      .filter((userId): userId is string => Boolean(userId))
-      .sort()
-      .join(',');
-  }, [contacts]);
+    const selfId = currentUser?.id ? String(currentUser.id).trim() : '';
+    const idSet = new Set<string>();
+    const addCandidate = (rawId?: string | null) => {
+      const clean = typeof rawId === 'string' ? rawId.trim() : '';
+      if (!clean || clean === 'ai' || (selfId && clean === selfId)) return;
+      idSet.add(clean);
+    };
+
+    // 汇总联系人、非群聊会话列表对象以及当前选中的私聊对象（覆盖 ?dm= 非好友入口）
+    for (const contact of contacts) {
+      addCandidate(contact.userId);
+    }
+    for (const chat of chats) {
+      if (!chat.isGroup) {
+        addCandidate(chat.id);
+      }
+    }
+    addCandidate(selectedContact?.userId);
+
+    return Array.from(idSet).sort().join(',');
+  }, [contacts, chats, selectedContact?.userId, currentUser?.id]);
 
   useEffect(() => {
-    if (!currentUser || !contactUserIdsStr) return;
+    if (!currentUser?.id || !contactUserIdsStr) return;
     const userIds = contactUserIdsStr.split(',');
     subscribePresence(userIds);
-  }, [contactUserIdsStr, currentUser, subscribePresence]);
+  }, [contactUserIdsStr, currentUser?.id, subscribePresence]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {

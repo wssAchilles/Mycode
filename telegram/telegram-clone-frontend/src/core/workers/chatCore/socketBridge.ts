@@ -56,6 +56,7 @@ export class SocketBridge {
   private readonly desiredPresenceUserIds = new Set<string>();
 
   private readonly SOCKET_CONNECT_THROTTLE_MS = 1_000;
+  private readonly MAX_PRESENCE_SUBSCRIBE_BATCH = 200;
 
   constructor(private readonly ctx: SocketBridgeContext) {}
 
@@ -300,19 +301,31 @@ export class SocketBridge {
 
   async subscribePresence(userIds: string[]): Promise<void> {
     this.desiredPresenceUserIds.clear();
-    for (const userId of userIds) {
-      if (typeof userId === 'string' && userId) {
-        this.desiredPresenceUserIds.add(userId);
+    if (Array.isArray(userIds)) {
+      for (const userId of userIds) {
+        const clean = typeof userId === 'string' ? userId.trim() : '';
+        if (clean && clean !== 'ai') {
+          this.desiredPresenceUserIds.add(clean);
+        }
       }
     }
+    if (!this.desiredPresenceUserIds.size) return;
     await this.connectWorkerSocketInternal();
+    // 严格等待 Socket 完成认证后再发送订阅，防止未认证抢跑触发网关 authError 断连锁定
     if (!this.socket?.connected || !this.workerSocketAuthenticated) return;
     this.emitPresenceSubscribe(this.socket);
   }
 
+  clearPresenceSubscriptions(): void {
+    this.desiredPresenceUserIds.clear();
+  }
+
   private emitPresenceSubscribe(socket: Socket): void {
-    if (!this.desiredPresenceUserIds.size) return;
-    socket.emit('presenceSubscribe', Array.from(this.desiredPresenceUserIds));
+    if (!this.desiredPresenceUserIds.size || !this.workerSocketAuthenticated) return;
+    const allIds = Array.from(this.desiredPresenceUserIds);
+    for (let i = 0; i < allIds.length; i += this.MAX_PRESENCE_SUBSCRIBE_BATCH) {
+      socket.emit('presenceSubscribe', allIds.slice(i, i + this.MAX_PRESENCE_SUBSCRIBE_BATCH));
+    }
   }
 
   // -------------------------------------------------------------------------
