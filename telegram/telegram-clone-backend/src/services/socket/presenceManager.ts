@@ -1,5 +1,6 @@
 import { redis } from '../../config/redis';
 import { createChildLogger } from '../../utils/logger';
+import { cacheService } from '../cacheService';
 import { realtimeOps } from '../realtimeProtocol/realtimeOps';
 import {
   realtimeSessionRegistry,
@@ -201,6 +202,9 @@ export class PresenceManager {
 
   async isUserOnline(userId: string): Promise<boolean> {
     try {
+      if (await cacheService.isUserOnline(userId)) {
+        return true;
+      }
       const userData = await redis.hget('online_users', userId);
       return userData !== null;
     } catch (error) {

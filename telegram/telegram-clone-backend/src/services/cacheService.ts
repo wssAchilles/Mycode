@@ -162,11 +162,133 @@ class CacheService {
     }
 
     /**
-     * 检查用户在线状态
+     * 检查单个用户在线状态（优先读取 Rust 网关会话注册表，兼容 legacy online:<userId> 键）
      */
     async isUserOnline(userId: string): Promise<boolean> {
-        const status = await this.get<{ online: boolean }>(`online:${userId}`);
-        return status?.online || false;
+        const cleanId = String(userId || '').trim();
+        if (!cleanId) return false;
+        const map = await this.areUsersOnline([cleanId]);
+        return map.get(cleanId) ?? false;
+    }
+
+    /**
+     * 批量查询目标用户列表的实时在线状态（基于 Redis 会话注册表并校验心跳新鲜度）
+     */
+    async areUsersOnline(
+        userIds: string[],
+        staleAfterSecs: number = Number(process.env.GATEWAY_REALTIME_HEARTBEAT_STALE_SECS || 120),
+    ): Promise<Map<string, boolean>> {
+        const targets = Array.from(
+            new Set(
+                (userIds || [])
+                    .map((id) => String(id || '').trim())
+                    .filter((id) => id.length > 0 && id !== 'ai'),
+            ),
+        );
+        const result = new Map<string, boolean>();
+        for (const uid of targets) {
+            result.set(uid, false);
+        }
+        if (targets.length === 0) {
+            return result;
+        }
+
+        const client = getClient();
+        if (!client || !this.isAvailable()) {
+            return result;
+        }
+
+        try {
+            const pipe = client.pipeline();
+            for (const uid of targets) {
+                pipe.sunion(`rt:user:${uid}`, `rt:user_sessions:${uid}`);
+                pipe.get(`online:${uid}`);
+            }
+            const pipeRes = await pipe.exec();
+            if (!pipeRes) {
+                return result;
+            }
+
+            const sidToUids = new Map<string, Set<string>>();
+            for (let i = 0; i < targets.length; i += 1) {
+                const uid = targets[i];
+                const [sunionErr, sunionVal] = pipeRes[i * 2] || [];
+                const [legacyErr, legacyVal] = pipeRes[i * 2 + 1] || [];
+
+                if (!legacyErr && typeof legacyVal === 'string' && legacyVal) {
+                    try {
+                        const parsedLegacy = JSON.parse(legacyVal) as { online?: boolean };
+                        if (parsedLegacy?.online) {
+                            result.set(uid, true);
+                        }
+                    } catch {
+                        // 忽略损坏的旧版缓存数据
+                    }
+                }
+
+                if (!sunionErr && Array.isArray(sunionVal)) {
+                    for (const rawSid of sunionVal) {
+                        const sid = String(rawSid || '').trim();
+                        if (!sid) continue;
+                        let uids = sidToUids.get(sid);
+                        if (!uids) {
+                            uids = new Set<string>();
+                            sidToUids.set(sid, uids);
+                        }
+                        uids.add(uid);
+                    }
+                }
+            }
+
+            if (sidToUids.size === 0) {
+                return result;
+            }
+
+            const candidateSids = Array.from(sidToUids.keys());
+            const sessionKeys = candidateSids.map((sid) => `rt:session:${sid}`);
+            const rawSessions = await client.mget(...sessionKeys);
+            const nowMs = Date.now();
+            const staleThresholdMs =
+                Number.isFinite(staleAfterSecs) && staleAfterSecs > 0
+                    ? staleAfterSecs * 1000
+                    : 0;
+
+            for (let i = 0; i < candidateSids.length; i += 1) {
+                const raw = rawSessions[i];
+                if (!raw) continue;
+                try {
+                    const record = JSON.parse(raw) as {
+                        authenticated?: boolean;
+                        user_id?: string | null;
+                        last_heartbeat_at?: string;
+                        last_event_at?: string;
+                    };
+                    if (!record?.authenticated) continue;
+
+                    if (staleThresholdMs > 0) {
+                        const ts = record.last_heartbeat_at || record.last_event_at;
+                        if (ts) {
+                            const parsedMs = Date.parse(ts);
+                            if (Number.isFinite(parsedMs) && nowMs - parsedMs > staleThresholdMs) {
+                                continue;
+                            }
+                        }
+                    }
+
+                    const recordUid = typeof record.user_id === 'string' ? record.user_id.trim() : '';
+                    if (recordUid && result.has(recordUid)) {
+                        result.set(recordUid, true);
+                    }
+                } catch {
+                    // 忽略格式异常的会话记录
+                }
+            }
+
+            return result;
+        } catch (err) {
+            log.warn({ err }, '⚠️ 批量查询用户在线状态失败');
+            return result;
+        }
     }
 
     /**

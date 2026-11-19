@@ -107,11 +107,15 @@ class ContactService {
      * 获取用户的联系人列表
      */
     async getContacts(userId: string): Promise<ContactInfo[]> {
-        // 尝试从缓存获取
+        // 尝试从缓存获取基础资料，在线状态始终基于实时会话真源动态覆写
         const cacheKey = `contacts:${userId}`;
         const cached = await cacheService.get<ContactInfo[]>(cacheKey);
         if (cached) {
-            return cached;
+            const onlineMap = await cacheService.areUsersOnline(cached.map((contact) => contact.odId));
+            return cached.map((contact) => ({
+                ...contact,
+                isOnline: onlineMap.get(contact.odId) ?? false,
+            }));
         }
 
         const contacts = await Contact.findAll({
@@ -135,18 +139,18 @@ class ContactService {
             email: c.contactUser?.email,
             alias: c.alias,
             avatarUrl: c.contactUser?.avatarUrl,
-            isOnline: false, // 需要从 Redis 获取
+            isOnline: false, // 不将易失在线态静态固化在长缓存中
             status: c.status,
             createdAt: c.addedAt,
         }));
 
-        // 批量获取在线状态
-        for (const contact of result) {
-            contact.isOnline = await cacheService.isUserOnline(contact.odId);
-        }
-
-        // 缓存30分钟
+        // 基础资料缓存 30 分钟（在线状态置为 false，读取时实时合并）
         await cacheService.set(cacheKey, result, 1800);
+
+        const onlineMap = await cacheService.areUsersOnline(result.map((contact) => contact.odId));
+        for (const contact of result) {
+            contact.isOnline = onlineMap.get(contact.odId) ?? false;
+        }
 
         return result;
     }

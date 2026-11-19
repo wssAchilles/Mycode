@@ -10,6 +10,7 @@ import { buildPrivateChatId } from '../utils/chat';
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
+import { cacheService } from '../services/cacheService';
 const log = createChildLogger('controllers:contactController');
 
 // 扩展请求接口
@@ -168,13 +169,20 @@ export const getContacts = catchAsync(async (req: AuthenticatedRequest, res: Res
     });
   }
 
+  const contactIds = Array.from(
+    new Set(contacts.map((contact: any) => String(contact.contactId || '')).filter(Boolean)),
+  );
+  const onlineMap = await cacheService.areUsersOnline(contactIds);
+
   const enrichedContacts = contacts.map((contact: any) => {
-    const chatId = buildPrivateChatId(userId, String(contact.contactId));
+    const contactId = String(contact.contactId);
+    const chatId = buildPrivateChatId(userId, contactId);
     const latestSeq = counterMap.get(chatId) || 0;
     const lastReadSeq = stateMap.get(chatId) || 0;
     const unreadCount = Math.max(latestSeq - lastReadSeq, 0);
     return {
       ...contact.toJSON(),
+      isOnline: onlineMap.get(contactId) ?? false,
       lastMessage: lastMessageMap.get(chatId) || null,
       unreadCount,
     };
