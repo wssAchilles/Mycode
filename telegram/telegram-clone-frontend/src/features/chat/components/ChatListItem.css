@@ -171,6 +171,44 @@
     animation: chatListItemEnter 180ms ease-out both;
 }
 
+/* 侧边栏折叠态下仅居中展示头像、左侧选中竖条与右上角未读角标 */
+.tg-sidebar--collapsed .tg-chat-item {
+    justify-content: center;
+    padding: 10px 0;
+    gap: 0;
+    border-radius: 14px;
+}
+
+.tg-sidebar--collapsed .tg-chat-item-selected-indicator {
+    left: 2px;
+    top: 14px;
+    bottom: 14px;
+}
+
+.tg-sidebar--collapsed .tg-chat-item-content {
+    flex: 0 0 0;
+    width: 0;
+    min-width: 0;
+    overflow: visible;
+}
+
+.tg-sidebar--collapsed .tg-chat-item-top,
+.tg-sidebar--collapsed .tg-chat-item-message {
+    display: none;
+}
+
+.tg-sidebar--collapsed .tg-chat-item-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-size: 10px;
+    box-shadow: 0 0 0 2px #FFFFFF;
+    z-index: 2;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tg-chat-item,
     .tg-chat-item-selected-indicator,

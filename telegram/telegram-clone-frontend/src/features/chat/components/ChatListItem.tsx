@@ -50,6 +50,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
             onClick={() => onClick(chat)}
             onMouseEnter={() => prefetchChat(chat.id, !!chat.isGroup)}
             onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}
+            title={chat.title}
             aria-label={`打开会话 ${chat.title}`}
             aria-current={isSelected ? 'true' : undefined}
         >

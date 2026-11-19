@@ -1,5 +1,6 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { Sidebar } from '../components/layout/Sidebar';
 import ChatList from '../features/chat/components/ChatList';
 import type { ChatSummary } from '../features/chat/types';
 
@@ -97,5 +98,29 @@ describe('ChatList initial render motion boundary', () => {
     expect(itemsAfter[0].querySelector('.tg-chat-item-selected-indicator')?.getAttribute('style')).toBeNull();
     expect(itemsAfter[2].classList.contains('is-selected')).toBe(true);
     expect(itemsAfter[2]).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('侧边栏折叠后切换为 80px 紧凑导轨并保留会话项悬停标题', () => {
+    const chats = [makeChat('u1')];
+    const view = render(
+      <Sidebar className="chat-sidebar" width={320}>
+        <ChatList
+          chats={chats}
+          selectedChatId="u1"
+          onSelectChat={() => undefined}
+          isLoading={false}
+        />
+      </Sidebar>,
+    );
+
+    const aside = view.container.querySelector('.tg-sidebar') as HTMLElement | null;
+    expect(aside).not.toBeNull();
+    expect(aside?.classList.contains('tg-sidebar--collapsed')).toBe(false);
+    expect(view.container.querySelector('.tg-chat-item')).toHaveAttribute('title', 'chat-u1');
+
+    fireEvent.click(screen.getByRole('button', { name: '折叠侧边栏' }));
+    expect(aside?.classList.contains('tg-sidebar--collapsed')).toBe(true);
+    expect(aside?.style.width).toBe('80px');
+    expect(screen.getByRole('button', { name: '展开侧边栏' })).toBeInTheDocument();
   });
 });

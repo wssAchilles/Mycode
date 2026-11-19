@@ -14,14 +14,18 @@
     box-shadow: none;
     transition: width var(--duration-normal) var(--ease-out),
         min-width var(--duration-normal) var(--ease-out);
-    overflow: hidden;
-    z-index: 10;
-    contain: layout style paint;
+    overflow: visible;
+    z-index: 15;
+    contain: layout style;
 }
 
 .tg-sidebar--collapsed {
-    width: 72px !important;
-    min-width: 72px !important;
+    width: 80px !important;
+    min-width: 80px !important;
+}
+
+.tg-sidebar--collapsed .tg-sidebar__toggle {
+    opacity: 1;
 }
 
 .tg-sidebar__content {

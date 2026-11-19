@@ -539,3 +539,81 @@
 .detail-settings-action:hover {
   background: #FEF2F2;
 }
+
+/* =========================================
+   侧边栏收起态（80px 紧凑图标导轨模式）
+   ========================================= */
+.tg-sidebar--collapsed .sidebar-header {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px;
+}
+
+.tg-sidebar--collapsed .back-to-space-btn {
+  margin-right: 0;
+}
+
+.tg-sidebar--collapsed .user-info {
+  gap: 0;
+  justify-content: center;
+}
+
+.tg-sidebar--collapsed .user-details-container,
+.tg-sidebar--collapsed .logout-button {
+  display: none;
+}
+
+.tg-sidebar--collapsed .chat-sidebar-actions {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 6px;
+  padding: 8px 8px 4px !important;
+}
+
+.tg-sidebar--collapsed .new-group-btn,
+.tg-sidebar--collapsed .add-contact-btn {
+  width: 44px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.tg-sidebar--collapsed .new-group-btn span,
+.tg-sidebar--collapsed .add-contact-btn span {
+  display: none;
+}
+
+.tg-sidebar--collapsed .tg-contact-card {
+  width: 58px;
+  height: 58px;
+  margin: 4px auto;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  border-radius: 14px;
+}
+
+.tg-sidebar--collapsed .tg-contact-card__avatar {
+  margin-right: 0;
+}
+
+.tg-sidebar--collapsed .tg-contact-card__info {
+  display: none;
+}
+
+.tg-sidebar--collapsed .pending-request {
+  justify-content: center;
+  padding: 8px 4px;
+  margin: 4px 8px;
+}
+
+.tg-sidebar--collapsed .pending-request__details,
+.tg-sidebar--collapsed .pending-request__actions {
+  display: none;
+}
+
+.tg-sidebar--collapsed .contact-list-container {
+  padding: 4px 6px 16px;
+}

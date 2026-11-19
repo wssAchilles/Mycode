@@ -127,6 +127,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     type="button"
                     className="new-group-btn"
                     onClick={onOpenGroupModal}
+                    title="新建群组"
                     aria-label="新建群组"
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -162,6 +163,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     onChatSelected?.();
                 }}
                 className={`tg-contact-card ${isAiChatMode ? 'tg-contact-card--selected' : ''} tg-contact-card--ai`}
+                title="AI 助手"
                 aria-label="打开 AI 助手对话"
             >
                 <div className="tg-contact-card__avatar">

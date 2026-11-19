@@ -69,8 +69,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <aside
             className={`tg-sidebar ${isCollapsed ? 'tg-sidebar--collapsed' : ''} ${className}`}
             style={{
-                width: isCollapsed ? 72 : currentWidth,
-                minWidth: isCollapsed ? 72 : minWidth
+                width: isCollapsed ? 80 : currentWidth,
+                minWidth: isCollapsed ? 80 : minWidth
             }}
         >
             {/* 侧边栏内容 */}
