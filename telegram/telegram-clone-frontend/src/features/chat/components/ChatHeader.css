@@ -1,6 +1,6 @@
 /**
- * ChatHeader Styles v6.0 (Telegram Light)
- * 全宽无缝顶栏，消除黑色矩形断层
+ * ChatHeader Styles v6.1 (Apple Messages 液态磨砂顶栏)
+ * 粘性饱和毛玻璃顶栏，消除黑色矩形断层
  */
 
 .chat-header {
@@ -9,8 +9,10 @@
     justify-content: space-between;
     width: 100%;
     padding: 10px 18px;
-    background: transparent;
-    border-bottom: none;
+    background: rgba(255, 255, 255, 0.84);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid rgba(15, 20, 25, 0.06);
     min-height: 60px;
     z-index: 50;
 }
@@ -87,6 +89,7 @@
 .chat-header__name {
     font-size: 16px;
     font-weight: 700;
+    letter-spacing: -0.015em;
     color: #0F1419;
 }
 
@@ -110,17 +113,17 @@
 .chat-header__search {
     display: flex;
     align-items: center;
-    background-color: #EFF3F4;
+    background-color: rgba(15, 20, 25, 0.055);
     border: 1px solid transparent;
     border-radius: 9999px;
     padding: 7px 14px;
-    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .chat-header__search:focus-within {
     background-color: #FFFFFF;
-    border-color: #1D9BF0;
-    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.14);
+    border-color: rgba(29, 155, 240, 0.55);
+    box-shadow: 0 0 0 3px rgba(29, 155, 240, 0.14), 0 2px 6px rgba(15, 20, 25, 0.04);
 }
 
 .chat-header__search-icon {

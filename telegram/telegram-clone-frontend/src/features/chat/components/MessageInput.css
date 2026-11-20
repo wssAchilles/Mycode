@@ -7,8 +7,10 @@
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    background: #FFFFFF;
-    border-top: none;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid rgba(15, 20, 25, 0.055);
     position: relative;
     z-index: 40;
     contain: layout style;
@@ -29,17 +31,21 @@
     min-width: 0;
     min-height: 46px;
     padding: 4px 6px;
-    border: 1px solid #CFD9DE;
+    border: 1px solid rgba(15, 20, 25, 0.10);
     border-radius: 9999px;
-    background: #F7F9F9;
-    box-shadow: none;
+    background: #FFFFFF;
+    box-shadow:
+        0 2px 8px rgba(15, 20, 25, 0.035),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
     transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .message-input__wrapper:focus-within {
-    border-color: #1D9BF0;
+    border-color: rgba(29, 155, 240, 0.65);
     background: #FFFFFF;
-    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.14);
+    box-shadow:
+        0 0 0 3px rgba(29, 155, 240, 0.14),
+        0 4px 12px rgba(15, 20, 25, 0.045);
 }
 
 .message-input__field {
@@ -78,7 +84,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 150ms ease, color 150ms ease;
+    transition:
+        background-color 150ms ease,
+        color 150ms ease,
+        transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
     flex-shrink: 0;
     color: #536471;
 }
@@ -86,6 +95,10 @@
 .message-input__btn:hover:not(:disabled) {
     background-color: #EFF3F4;
     color: #0F1419;
+}
+
+.message-input__btn:active:not(:disabled) {
+    transform: scale(0.92);
 }
 
 .message-input__btn[aria-pressed='true'] {
@@ -98,14 +111,16 @@
 }
 
 .message-input__btn--active {
-    background: #1D9BF0 !important;
+    background: linear-gradient(180deg, #27A4F5 0%, #1B95E8 100%) !important;
     border-color: transparent;
     color: #FFFFFF !important;
-    box-shadow: 0 2px 8px rgba(29, 155, 240, 0.25);
+    box-shadow:
+        0 3px 10px rgba(29, 155, 240, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .message-input__btn--active:hover:not(:disabled) {
-    background: #1A8CD8 !important;
+    background: linear-gradient(180deg, #1E9CEE 0%, #1686D4 100%) !important;
     color: #FFFFFF !important;
 }
 
