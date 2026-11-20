@@ -106,10 +106,24 @@ async fn dispatch_stream_message(
     connection: &mut MultiplexedConnection,
     envelope: &RealtimeDeliveryEnvelopeV1,
 ) -> Result<()> {
-    let socket_ids = state
+    let mut socket_ids = state
         .session_registry
         .resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
         .await;
+
+    // 合并本机内存已认证活跃 Socket 会话，防止用户刚登录时 ingress 尚未落库 Redis 导致丢弃实时消息
+    {
+        let local_ids = state
+            .realtime_socket_state
+            .lock()
+            .expect("rust socket session mutex poisoned")
+            .resolve_local_socket_targets(&envelope.target);
+        for sid in local_ids {
+            if !socket_ids.contains(&sid) {
+                socket_ids.push(sid);
+            }
+        }
+    }
 
     if socket_ids.is_empty() {
         record_drop_reason(state, RealtimeDropReason::DeliveryNoResolvedTargets);

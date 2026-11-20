@@ -246,6 +246,62 @@ impl RustSocketSessionStore {
             .filter(|record| record.user_id.as_deref() == Some(user_id))
             .count()
     }
+
+    /// 解析当前网关进程内已认证/已加入目标房间的本地活跃 Socket 会话 ID，
+    /// 与 Redis 注册表结果求并集以避免刚登录或异步流延迟窗口内误判无目标而丢弃实时推送
+    pub fn resolve_local_socket_targets(
+        &self,
+        target: &crate::realtime_contracts::RealtimeDeliveryTarget,
+    ) -> Vec<String> {
+        use crate::realtime_contracts::RealtimeDeliveryTargetKind;
+
+        let mut matched: Vec<String> = match target.kind {
+            RealtimeDeliveryTargetKind::User => {
+                let Some(target_uid) = target.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    return Vec::new();
+                };
+                self.sessions
+                    .values()
+                    .filter(|record| record.user_id.as_deref() == Some(target_uid))
+                    .map(|record| record.session_id.clone())
+                    .collect()
+            }
+            RealtimeDeliveryTargetKind::Room => {
+                let Some(raw_room) = target.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    return Vec::new();
+                };
+                let normalized_room = normalize_group_room(raw_room);
+                self.sessions
+                    .values()
+                    .filter(|record| {
+                        record.joined_rooms.contains(&normalized_room)
+                            || record.joined_rooms.contains(raw_room)
+                    })
+                    .map(|record| record.session_id.clone())
+                    .collect()
+            }
+            RealtimeDeliveryTargetKind::Socket => {
+                let Some(sid) = target.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                    return Vec::new();
+                };
+                if self.sessions.contains_key(sid) {
+                    vec![sid.to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
+            RealtimeDeliveryTargetKind::Broadcast => {
+                self.sessions.keys().cloned().collect()
+            }
+        };
+
+        if !target.exclude_socket_ids.is_empty() {
+            matched.retain(|sid| !target.exclude_socket_ids.contains(sid));
+        }
+        matched.sort();
+        matched.dedup();
+        matched
+    }
 }
 
 #[cfg(test)]
@@ -338,5 +394,40 @@ mod tests {
         );
         let readd_rooms = store.add_presence_subscriptions("sid-1", &["u-a".to_string()]);
         assert_eq!(readd_rooms, vec!["presence:u-a".to_string()]);
+    }
+
+    #[test]
+    fn resolves_local_socket_targets_for_user_and_room() {
+        use crate::realtime_contracts::{RealtimeDeliveryTarget, RealtimeDeliveryTargetKind};
+
+        let mut store = RustSocketSessionStore::default();
+        store.register_connection("sid-1");
+        store.authenticate_session(
+            "sid-1",
+            "user-123",
+            "alice",
+            "tok-1",
+            &["group-abc".to_string()],
+        );
+
+        let user_target = RealtimeDeliveryTarget {
+            kind: RealtimeDeliveryTargetKind::User,
+            id: Some("user-123".to_string()),
+            exclude_socket_ids: Vec::new(),
+        };
+        assert_eq!(
+            store.resolve_local_socket_targets(&user_target),
+            vec!["sid-1".to_string()]
+        );
+
+        let room_target = RealtimeDeliveryTarget {
+            kind: RealtimeDeliveryTargetKind::Room,
+            id: Some("group-abc".to_string()),
+            exclude_socket_ids: Vec::new(),
+        };
+        assert_eq!(
+            store.resolve_local_socket_targets(&room_target),
+            vec!["sid-1".to_string()]
+        );
     }
 }
