@@ -40,7 +40,7 @@ function isLegacyMessageEndpoint(url?: string): boolean {
 // 创建 axios 实例
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 15000,
 });
 
 // 全局 Single-Flight Token 刷新并发锁，防止并发 401 触发 Refresh Storm 互踢登出

@@ -57,6 +57,16 @@ const LoginPage: React.FC = () => {
     }
   }, [navigate, location.state]);
 
+  // 登录页空闲时提前预热 ChatPage chunk，消除登录成功后切页时的白屏/按钮卡死感
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      import('./ChatPage').catch(() => {
+        // 预加载失败不影响正常路由懒加载
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     authMotion.run('enter');
   }, [authMotion]);
@@ -104,11 +114,8 @@ const LoginPage: React.FC = () => {
       const response = await authAPI.login(formData);
       console.log('登录成功:', response.user.username);
 
-      // 登录成功，延迟一下再跳转，避免DOM更新冲突
       const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/chat';
-      setTimeout(() => {
-        navigate(from, { replace: true });
-      }, 50);
+      navigate(from, { replace: true });
 
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : '登录失败，请重试');

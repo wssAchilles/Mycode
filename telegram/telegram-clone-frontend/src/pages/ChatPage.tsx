@@ -34,8 +34,8 @@ const GroupDetailPanel = lazy(() => import('./chat/GroupDetailPanel'));
 import './ChatPage.css';
 
 const MOBILE_BREAKPOINT = 900;
-const BOOT_PREFETCH_CHAT_COUNT = 12;
-const BOOT_PREFETCH_PRIORITY_COUNT = 3;
+const BOOT_PREFETCH_CHAT_COUNT = 6;
+const BOOT_PREFETCH_PRIORITY_COUNT = 2;
 
 interface IdleCallbackWindow {
   requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
@@ -46,9 +46,9 @@ function scheduleIdleTask(cb: () => void): number | null {
   if (typeof globalThis.window === 'undefined') return null;
   const win = globalThis.window as unknown as IdleCallbackWindow;
   if (typeof win.requestIdleCallback === 'function') {
-    return win.requestIdleCallback(cb, { timeout: 180 }) as number;
+    return win.requestIdleCallback(cb, { timeout: 800 }) as number;
   }
-  return globalThis.setTimeout(cb, 80) as unknown as number;
+  return globalThis.setTimeout(cb, 320) as unknown as number;
 }
 
 function cancelIdleTask(handle: number | null) {
