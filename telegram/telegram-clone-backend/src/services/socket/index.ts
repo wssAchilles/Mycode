@@ -289,7 +289,21 @@ export class SocketService {
 
   private registerDisplayDispatcher(): void {
     registerRoomMessageDisplayDispatcher((target, payload) => {
-      if (target.id) this.dispatcher.emitToRoom(target.id, { type: 'message', payload });
+      const event = { type: 'message' as const, payload };
+      switch (target.kind) {
+        case 'user':
+          if (target.id) this.dispatcher.emitToUser(target.id, event);
+          break;
+        case 'room':
+          if (target.id) this.dispatcher.emitToRoom(target.id, event);
+          break;
+        case 'socket':
+          if (target.id) this.dispatcher.emitToSocket(target.id, event);
+          break;
+        case 'broadcast':
+          this.dispatcher.emitBroadcast(event);
+          break;
+      }
     });
   }
 
