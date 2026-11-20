@@ -3,7 +3,7 @@
  * 核心职责：状态管理、Socket 消息处理、子组件协调
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
@@ -27,7 +27,9 @@ import ChatHistory from '../features/chat/components/ChatHistory';
 import AiChatComponent from '../components/AiChatComponent';
 
 // 拆分的子组件
-import { ChatSidebar, ChatDetailPanel, ChatModals, GroupDetailPanel } from './chat';
+import { ChatSidebar, ChatDetailPanel, ChatModals } from './chat';
+
+const GroupDetailPanel = lazy(() => import('./chat/GroupDetailPanel'));
 
 import './ChatPage.css';
 
@@ -821,11 +823,13 @@ const ChatPage: React.FC = () => {
 
       {/* 3.5 Group Detail Panel */}
       {!isMobileLayout && showGroupDetailPanel && isGroupChatMode && (
-        <GroupDetailPanel
-          isOpen
-          onClose={() => setShowGroupDetailPanel(false)}
-          group={selectedGroup}
-        />
+        <Suspense fallback={null}>
+          <GroupDetailPanel
+            isOpen
+            onClose={() => setShowGroupDetailPanel(false)}
+            group={selectedGroup}
+          />
+        </Suspense>
       )}
 
       {/* 4. Modals */}

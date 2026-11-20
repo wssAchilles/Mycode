@@ -1,13 +1,40 @@
 /**
- * GroupDetailPanel - 群组详情面板
- * 显示群组信息、成员列表，支持退群和管理操作
+ * GroupDetailPanel - 群组设置与成员管理抽屉
+ * 对标 Telegram / Apple HIG Grouped Inset Settings 框架：
+ * 1. Vibrancy 粘性顶栏 + Hero 群档案卡片（名称/简介/公开私有切换）
+ * 2. 快捷操作条（免打扰开关、邀请成员、复制群标识）
+ * 3. 权限与群类型设置分组
+ * 4. 成员搜索、角色筛选、Radix DropdownMenu 成员治理菜单
+ * 5. 内联危险操作二次确认（退出 / 解散群组）
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
+import {
+    Bell,
+    BellOff,
+    Check,
+    ChevronLeft,
+    Copy,
+    Crown,
+    Globe,
+    Lock,
+    MoreHorizontal,
+    Pencil,
+    Search,
+    Shield,
+    ShieldOff,
+    UserMinus,
+    UserPlus,
+    Volume2,
+    VolumeX,
+    X,
+} from 'lucide-react';
 import { useChatStore, type Group, type GroupMember } from '../../features/chat/store/chatStore';
 import { Avatar } from '../../components/common';
 import { authUtils, groupAPI } from '../../services/apiClient';
+import { showToast } from '../../components/ui/Toast';
 import './GroupDetailPanel.css';
 
 interface GroupDetailPanelProps {
@@ -16,332 +43,775 @@ interface GroupDetailPanelProps {
     group: Group | null;
 }
 
+type MemberFilter = 'all' | 'staff' | 'online';
+
 const panelVariants = {
     hidden: { x: '100%', opacity: 0 },
-    visible: { x: 0, opacity: 1, transition: { type: 'spring' as const, damping: 25, stiffness: 300 } },
-    exit: { x: '100%', opacity: 0, transition: { duration: 0.2 } }
+    visible: { x: 0, opacity: 1, transition: { type: 'spring' as const, damping: 28, stiffness: 320 } },
+    exit: { x: '100%', opacity: 0, transition: { duration: 0.18 } },
+};
+
+const MUTE_STORAGE_KEY_PREFIX = 'tg:group-muted:';
+
+const readGroupMuted = (groupId?: string): boolean => {
+    if (!groupId || typeof localStorage === 'undefined') return false;
+    try {
+        return localStorage.getItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`) === '1';
+    } catch {
+        return false;
+    }
+};
+
+const writeGroupMuted = (groupId: string, muted: boolean): void => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        if (muted) {
+            localStorage.setItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`, '1');
+        } else {
+            localStorage.removeItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`);
+        }
+    } catch {
+        // 忽略无痕模式存储异常
+    }
 };
 
 const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, group }) => {
-    const leaveGroup = useChatStore((s: { leaveGroup: (id: string) => Promise<void> }) => s.leaveGroup);
-    const loadGroupDetails = useChatStore((s: { loadGroupDetails: (id: string) => Promise<void> }) => s.loadGroupDetails);
-    const loadChats = useChatStore((s: { loadChats: () => Promise<void> }) => s.loadChats);
-    const selectGroup = useChatStore((s: { selectGroup: (group: Group | null) => void }) => s.selectGroup);
+    const leaveGroup = useChatStore((s) => s.leaveGroup);
+    const loadGroupDetails = useChatStore((s) => s.loadGroupDetails);
+    const loadChats = useChatStore((s) => s.loadChats);
+    const selectGroup = useChatStore((s) => s.selectGroup);
+    const contacts = useChatStore((s) => s.contacts);
+
     const currentUser = authUtils.getCurrentUser();
-    const isOwner = currentUser?.id === group?.ownerId;
+    const isOwner = Boolean(currentUser?.id && currentUser.id === group?.ownerId);
     const currentRole = group?.currentUserRole || (isOwner ? 'owner' : 'member');
     const canManage = currentRole === 'owner' || currentRole === 'admin';
 
     const [isEditing, setIsEditing] = useState(false);
     const [nameDraft, setNameDraft] = useState(group?.name || '');
     const [descDraft, setDescDraft] = useState(group?.description || '');
+    const [typeDraft, setTypeDraft] = useState<'public' | 'private'>(group?.type === 'private' ? 'private' : 'public');
     const [isSaving, setIsSaving] = useState(false);
+
+    const [isMuted, setIsMuted] = useState(() => readGroupMuted(group?.id));
+    const [inviteOpen, setInviteOpen] = useState(false);
+    const [selectedInviteIds, setSelectedInviteIds] = useState<string[]>([]);
+    const [inviting, setInviting] = useState(false);
+
+    const [memberSearch, setMemberSearch] = useState('');
+    const [memberFilter, setMemberFilter] = useState<MemberFilter>('all');
+    const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+    const [leaving, setLeaving] = useState(false);
+    const [pendingTransferMember, setPendingTransferMember] = useState<GroupMember | null>(null);
+    const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
 
     useEffect(() => {
         setNameDraft(group?.name || '');
         setDescDraft(group?.description || '');
+        setTypeDraft(group?.type === 'private' ? 'private' : 'public');
+        setIsMuted(readGroupMuted(group?.id));
         setIsEditing(false);
-    }, [group?.id]);
+        setInviteOpen(false);
+        setSelectedInviteIds([]);
+        setMemberSearch('');
+        setMemberFilter('all');
+        setConfirmLeaveOpen(false);
+        setPendingTransferMember(null);
+    }, [group?.id, group?.name, group?.description, group?.type]);
 
     const resetDrafts = () => {
         setNameDraft(group?.name || '');
         setDescDraft(group?.description || '');
+        setTypeDraft(group?.type === 'private' ? 'private' : 'public');
     };
 
-    const handleLeaveGroup = async () => {
+    const handleToggleMute = () => {
         if (!group) return;
+        const nextMuted = !isMuted;
+        setIsMuted(nextMuted);
+        writeGroupMuted(group.id, nextMuted);
+        showToast(nextMuted ? '已开启群消息免打扰' : '已恢复群消息通知', 'info');
+    };
 
-        const confirmMessage = isOwner
-            ? '您是群主，退出后群组将解散。确定要解散群组吗？'
-            : '确定要退出群组吗？';
-
-        if (window.confirm(confirmMessage)) {
-            try {
-                if (isOwner) {
-                    await groupAPI.deleteGroup(group.id);
-                    await loadChats();
-                    selectGroup(null);
-                } else {
-                    await leaveGroup(group.id);
-                }
-                onClose();
-            } catch (error) {
-                console.error('退出群组失败:', error);
-            }
+    const handleCopyGroupId = async () => {
+        if (!group) return;
+        try {
+            await navigator.clipboard.writeText(group.id);
+            showToast('已复制群组 ID', 'success');
+        } catch {
+            showToast('复制失败，请手动复制', 'error');
         }
     };
 
     const handleSaveGroup = async () => {
         if (!group) return;
+        const trimmedName = nameDraft.trim();
+        if (!trimmedName) {
+            showToast('群组名称不能为空', 'error');
+            return;
+        }
         setIsSaving(true);
         try {
             await groupAPI.updateGroup(group.id, {
-                name: nameDraft.trim() || group.name,
-                description: descDraft.trim()
+                name: trimmedName,
+                description: descDraft.trim(),
+                type: typeDraft,
             });
-            await loadGroupDetails(group.id);
-            await loadChats();
+            await Promise.all([loadGroupDetails(group.id), loadChats()]);
             setIsEditing(false);
+            showToast('群组设置已保存', 'success');
         } catch (error) {
-            console.error('更新群组失败:', error);
+            const msg = error instanceof Error ? error.message : '更新群组失败';
+            showToast(msg, 'error');
         } finally {
             setIsSaving(false);
         }
     };
 
-    const handleMemberAction = async (action: string, member: GroupMember) => {
-        if (!group) return;
+    const handleQuickTypeSwitch = async (nextType: 'public' | 'private') => {
+        if (!group || !canManage || group.type === nextType || isSaving) return;
+        setIsSaving(true);
+        try {
+            await groupAPI.updateGroup(group.id, { type: nextType });
+            await Promise.all([loadGroupDetails(group.id), loadChats()]);
+            showToast(nextType === 'public' ? '已切换为公开群组' : '已切换为私有群组', 'success');
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : '切换群类型失败';
+            showToast(msg, 'error');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const invitableContacts = useMemo(() => {
+        const memberIdSet = new Set((group?.members || []).map((m) => m.userId));
+        return contacts.filter((c) => c.userId && !memberIdSet.has(c.userId));
+    }, [contacts, group?.members]);
+
+    const toggleInviteCandidate = (userId: string) => {
+        setSelectedInviteIds((prev) =>
+            prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+        );
+    };
+
+    const handleInviteMembers = async () => {
+        if (!group || selectedInviteIds.length === 0) return;
+        setInviting(true);
+        try {
+            await groupAPI.addMembers(group.id, selectedInviteIds);
+            await Promise.all([loadGroupDetails(group.id), loadChats()]);
+            showToast(`已邀请 ${selectedInviteIds.length} 位联系人加入群组`, 'success');
+            setSelectedInviteIds([]);
+            setInviteOpen(false);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : '邀请成员失败';
+            showToast(msg, 'error');
+        } finally {
+            setInviting(false);
+        }
+    };
+
+    const handleLeaveOrDeleteGroup = async () => {
+        if (!group || leaving) return;
+        setLeaving(true);
+        try {
+            if (isOwner) {
+                await groupAPI.deleteGroup(group.id);
+                await loadChats();
+                selectGroup(null);
+                showToast('群组已解散', 'info');
+            } else {
+                await leaveGroup(group.id);
+                showToast('已退出群组', 'info');
+            }
+            onClose();
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : '操作失败';
+            showToast(msg, 'error');
+        } finally {
+            setLeaving(false);
+        }
+    };
+
+    const handleMemberAction = async (
+        action: 'mute' | 'unmute' | 'kick' | 'promote' | 'demote' | 'transfer',
+        member: GroupMember
+    ) => {
+        if (!group || busyMemberId) return;
+        setBusyMemberId(member.userId);
         try {
             if (action === 'mute') {
                 await groupAPI.muteMember(group.id, member.userId, 24);
+                showToast(`已禁言 ${member.username}（24 小时）`, 'info');
             } else if (action === 'unmute') {
                 await groupAPI.unmuteMember(group.id, member.userId);
+                showToast(`已解除 ${member.username} 禁言`, 'success');
             } else if (action === 'kick') {
                 await groupAPI.removeMember(group.id, member.userId);
+                showToast(`已将 ${member.username} 移出群组`, 'info');
             } else if (action === 'promote') {
                 await groupAPI.promoteMember(group.id, member.userId);
+                showToast(`已将 ${member.username} 设为管理员`, 'success');
             } else if (action === 'demote') {
                 await groupAPI.demoteMember(group.id, member.userId);
+                showToast(`已取消 ${member.username} 的管理员身份`, 'info');
             } else if (action === 'transfer') {
-                const confirmTransfer = window.confirm(`确定将群主转让给 ${member.username} 吗？`);
-                if (!confirmTransfer) return;
                 await groupAPI.transferOwnership(group.id, member.userId);
+                setPendingTransferMember(null);
+                showToast(`已将群主转让给 ${member.username}`, 'success');
             }
-            await loadGroupDetails(group.id);
-            await loadChats();
+            await Promise.all([loadGroupDetails(group.id), loadChats()]);
         } catch (error) {
-            console.error('成员操作失败:', error);
+            const msg = error instanceof Error ? error.message : '成员操作失败';
+            showToast(msg, 'error');
+        } finally {
+            setBusyMemberId(null);
         }
     };
 
     const getRoleBadge = (role: string) => {
         switch (role) {
-            case 'owner': return '群主';
-            case 'admin': return '管理员';
-            default: return null;
+            case 'owner':
+                return '群主';
+            case 'admin':
+                return '管理员';
+            default:
+                return null;
         }
     };
 
-    const sortedMembers = useMemo(() => {
+    const onlineCount = useMemo(
+        () => (group?.members || []).filter((m) => m.isOnline).length,
+        [group?.members]
+    );
+
+    const filteredMembers = useMemo(() => {
         const members = group?.members || [];
-        return members.slice().sort((a, b) => {
-            const roleRank = (role?: string) => role === 'owner' ? 0 : role === 'admin' ? 1 : 2;
-            return roleRank(a.role) - roleRank(b.role);
-        });
-    }, [group?.members]);
+        const query = memberSearch.trim().toLowerCase();
+        const roleRank = (role?: string) => (role === 'owner' ? 0 : role === 'admin' ? 1 : 2);
+
+        return members
+            .filter((member) => {
+                if (memberFilter === 'staff' && member.role !== 'owner' && member.role !== 'admin') {
+                    return false;
+                }
+                if (memberFilter === 'online' && !member.isOnline) {
+                    return false;
+                }
+                if (query && !member.username.toLowerCase().includes(query)) {
+                    return false;
+                }
+                return true;
+            })
+            .slice()
+            .sort((a, b) => roleRank(a.role) - roleRank(b.role));
+    }, [group?.members, memberFilter, memberSearch]);
 
     if (!group) return null;
+
+    const roleLabel = currentRole === 'owner' ? '群主' : currentRole === 'admin' ? '管理员' : '普通成员';
 
     return (
         <AnimatePresence>
             {isOpen && (
-                <motion.div
+                <motion.aside
                     className="group-detail-panel"
                     variants={panelVariants}
                     initial="hidden"
                     animate="visible"
                     exit="exit"
+                    aria-label="群组设置"
                 >
-                    {/* 头部 */}
-                    <div className="group-detail-header">
-                        <button className="group-detail-close" onClick={onClose} aria-label="关闭群组信息" title="关闭群组信息">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                                <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
+                    {/* Vibrancy 吸顶顶栏 */}
+                    <header className="group-detail-header">
+                        <button
+                            type="button"
+                            className="group-detail-close"
+                            onClick={onClose}
+                            aria-label="关闭群组设置"
+                            title="关闭"
+                        >
+                            <ChevronLeft size={20} strokeWidth={2.2} />
                         </button>
-                        <h2>群组信息</h2>
-                    </div>
+                        <h2>群组设置</h2>
+                        {canManage && !isEditing && (
+                            <button
+                                type="button"
+                                className="group-header-edit-btn"
+                                onClick={() => {
+                                    resetDrafts();
+                                    setIsEditing(true);
+                                }}
+                                aria-label="编辑群信息"
+                            >
+                                <Pencil size={14} />
+                                <span>编辑</span>
+                            </button>
+                        )}
+                    </header>
 
-                    {/* 群组基本信息 */}
-                    <div className="group-detail-info">
-                        <div className="group-detail-avatar">
-                            <Avatar
-                                name={group.name}
-                                src={group.avatarUrl}
-                                size="lg"
-                            />
-                        </div>
-                        {isEditing ? (
-                            <div className="group-detail-edit">
-                                <input
-                                    className="group-detail-input"
-                                    value={nameDraft}
-                                    onChange={(e) => setNameDraft(e.target.value)}
-                                    placeholder="群组名称"
-                                />
-                                <textarea
-                                    className="group-detail-textarea"
-                                    value={descDraft}
-                                    onChange={(e) => setDescDraft(e.target.value)}
-                                    placeholder="群组简介"
-                                />
-                                <div className="group-detail-edit-actions">
+                    {/* 滚动主体（Apple Grouped Inset 卡片流） */}
+                    <div className="group-detail-scroll">
+                        {/* 1. 群组档案卡片 */}
+                        <section className="group-inset-card group-detail-info">
+                            <div className="group-detail-avatar">
+                                <Avatar name={group.name} src={group.avatarUrl} size="lg" />
+                            </div>
+
+                            {isEditing ? (
+                                <div className="group-detail-edit">
+                                    <label className="group-edit-label">
+                                        <span>群组名称</span>
+                                        <input
+                                            className="group-detail-input"
+                                            value={nameDraft}
+                                            onChange={(e) => setNameDraft(e.target.value)}
+                                            placeholder="输入群组名称"
+                                            maxLength={60}
+                                        />
+                                    </label>
+                                    <label className="group-edit-label">
+                                        <span>群组简介</span>
+                                        <textarea
+                                            className="group-detail-textarea"
+                                            value={descDraft}
+                                            onChange={(e) => setDescDraft(e.target.value)}
+                                            placeholder="向成员介绍本群用途与规则..."
+                                            maxLength={240}
+                                        />
+                                    </label>
+                                    <div className="group-edit-label">
+                                        <span>群组可见性</span>
+                                        <div className="group-segmented" role="group" aria-label="群组可见性">
+                                            <button
+                                                type="button"
+                                                className={`group-segmented-btn ${typeDraft === 'public' ? 'is-active' : ''}`}
+                                                onClick={() => setTypeDraft('public')}
+                                            >
+                                                <Globe size={13} />
+                                                <span>公开群组</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={`group-segmented-btn ${typeDraft === 'private' ? 'is-active' : ''}`}
+                                                onClick={() => setTypeDraft('private')}
+                                            >
+                                                <Lock size={13} />
+                                                <span>私有群组</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="group-detail-edit-actions">
+                                        <button
+                                            type="button"
+                                            className="group-edit-btn primary"
+                                            onClick={handleSaveGroup}
+                                            disabled={isSaving}
+                                        >
+                                            {isSaving ? '保存中...' : '保存更改'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="group-edit-btn ghost"
+                                            onClick={() => {
+                                                setIsEditing(false);
+                                                resetDrafts();
+                                            }}
+                                            disabled={isSaving}
+                                        >
+                                            取消
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <h3 className="group-detail-name">{group.name}</h3>
+                                    {group.description ? (
+                                        <p className="group-detail-description">{group.description}</p>
+                                    ) : (
+                                        <p className="group-detail-description is-empty">暂无群组简介</p>
+                                    )}
+                                    <div className="group-detail-meta">
+                                        <span className="group-detail-pill">
+                                            {group.type === 'public' ? <Globe size={12} /> : <Lock size={12} />}
+                                            {group.type === 'public' ? '公开群组' : '私有群组'}
+                                        </span>
+                                        <span className="group-detail-pill">
+                                            {group.memberCount} / {group.maxMembers} 成员
+                                        </span>
+                                        {onlineCount > 0 && (
+                                            <span className="group-detail-pill is-online">
+                                                <span className="group-pill-dot" />
+                                                {onlineCount} 在线
+                                            </span>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </section>
+
+                        {/* 2. 快捷操作条（Telegram 风格宫格操作） */}
+                        <section className="group-quick-grid" aria-label="快捷操作">
+                            <button
+                                type="button"
+                                className={`group-quick-tile ${isMuted ? 'is-active' : ''}`}
+                                onClick={handleToggleMute}
+                            >
+                                {isMuted ? <BellOff size={18} /> : <Bell size={18} />}
+                                <span>{isMuted ? '已静音' : '消息通知'}</span>
+                            </button>
+                            {canManage && (
+                                <button
+                                    type="button"
+                                    className={`group-quick-tile ${inviteOpen ? 'is-active' : ''}`}
+                                    onClick={() => setInviteOpen((v) => !v)}
+                                >
+                                    <UserPlus size={18} />
+                                    <span>邀请成员</span>
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                className="group-quick-tile"
+                                onClick={handleCopyGroupId}
+                            >
+                                <Copy size={18} />
+                                <span>复制群 ID</span>
+                            </button>
+                        </section>
+
+                        {/* 2.5 内联邀请联系人面板 */}
+                        {canManage && inviteOpen && (
+                            <section className="group-inset-card group-invite-card" aria-label="邀请联系人">
+                                <div className="group-card-head">
+                                    <h4>邀请联系人入群</h4>
                                     <button
-                                        className="group-edit-btn primary"
-                                        onClick={handleSaveGroup}
-                                        disabled={isSaving}
+                                        type="button"
+                                        className="group-icon-close"
+                                        onClick={() => {
+                                            setInviteOpen(false);
+                                            setSelectedInviteIds([]);
+                                        }}
+                                        aria-label="收起邀请面板"
                                     >
-                                        {isSaving ? '保存中...' : '保存'}
+                                        <X size={15} />
+                                    </button>
+                                </div>
+                                {invitableContacts.length === 0 ? (
+                                    <p className="group-invite-empty">所有好友均已在本群中</p>
+                                ) : (
+                                    <>
+                                        <div className="group-invite-list">
+                                            {invitableContacts.map((contact) => {
+                                                const checked = selectedInviteIds.includes(contact.userId);
+                                                return (
+                                                    <button
+                                                        key={contact.userId}
+                                                        type="button"
+                                                        className={`group-invite-item ${checked ? 'is-selected' : ''}`}
+                                                        onClick={() => toggleInviteCandidate(contact.userId)}
+                                                    >
+                                                        <Avatar name={contact.username} src={contact.avatarUrl} size="sm" />
+                                                        <span className="group-invite-name">{contact.username}</span>
+                                                        <span className={`group-invite-check ${checked ? 'is-selected' : ''}`}>
+                                                            {checked && <Check size={12} strokeWidth={3} />}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="group-edit-btn primary"
+                                            disabled={selectedInviteIds.length === 0 || inviting}
+                                            onClick={handleInviteMembers}
+                                        >
+                                            {inviting
+                                                ? '邀请中...'
+                                                : `确认邀请 (${selectedInviteIds.length})`}
+                                        </button>
+                                    </>
+                                )}
+                            </section>
+                        )}
+
+                        {/* 3. 群组权限与设置分组 */}
+                        <section className="group-inset-card group-settings-card" aria-label="群组权限与配置">
+                            <div className="group-settings-row">
+                                <div className="group-settings-label">
+                                    <span className="group-settings-title">群组类型</span>
+                                    <span className="group-settings-sub">
+                                        {group.type === 'public' ? '公开可搜索加入' : '仅通过邀请加入'}
+                                    </span>
+                                </div>
+                                {canManage ? (
+                                    <div className="group-segmented is-compact" role="group" aria-label="切换群组类型">
+                                        <button
+                                            type="button"
+                                            className={`group-segmented-btn ${group.type === 'public' ? 'is-active' : ''}`}
+                                            disabled={isSaving}
+                                            onClick={() => handleQuickTypeSwitch('public')}
+                                        >
+                                            公开
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`group-segmented-btn ${group.type === 'private' ? 'is-active' : ''}`}
+                                            disabled={isSaving}
+                                            onClick={() => handleQuickTypeSwitch('private')}
+                                        >
+                                            私有
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <span className="group-settings-value">
+                                        {group.type === 'public' ? '公开群组' : '私有群组'}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="group-settings-divider" />
+                            <div className="group-settings-row">
+                                <div className="group-settings-label">
+                                    <span className="group-settings-title">我的身份权限</span>
+                                    <span className="group-settings-sub">
+                                        {currentRole === 'owner'
+                                            ? '全部管理权限 · 可任命管理员、转让或解散'
+                                            : currentRole === 'admin'
+                                                ? '可编辑群资料、邀请、禁言与移出普通成员'
+                                                : '可查看成员、发送消息与开启免打扰'}
+                                    </span>
+                                </div>
+                                <span className={`group-member-role role-${currentRole}`}>{roleLabel}</span>
+                            </div>
+                        </section>
+
+                        {/* 转让群主二次确认条 */}
+                        {pendingTransferMember && (
+                            <section className="group-inset-card group-confirm-card" role="alert">
+                                <p className="group-confirm-text">
+                                    确定将群主身份转让给 <strong>{pendingTransferMember.username}</strong> 吗？转让后您将成为管理员。
+                                </p>
+                                <div className="group-confirm-actions">
+                                    <button
+                                        type="button"
+                                        className="group-edit-btn danger"
+                                        disabled={busyMemberId === pendingTransferMember.userId}
+                                        onClick={() => handleMemberAction('transfer', pendingTransferMember)}
+                                    >
+                                        {busyMemberId === pendingTransferMember.userId ? '转让中...' : '确认转让'}
                                     </button>
                                     <button
+                                        type="button"
                                         className="group-edit-btn ghost"
-                                        onClick={() => {
-                                            setIsEditing(false);
-                                            resetDrafts();
-                                        }}
+                                        onClick={() => setPendingTransferMember(null)}
                                     >
                                         取消
                                     </button>
                                 </div>
-                            </div>
-                        ) : (
-                            <>
-                                <h3 className="group-detail-name">{group.name}</h3>
-                                {group.description && (
-                                    <p className="group-detail-description">{group.description}</p>
-                                )}
-                                {canManage && (
-                                    <button
-                                        className="group-edit-trigger"
-                                        onClick={() => {
-                                            setIsEditing(true);
-                                            resetDrafts();
-                                        }}
-                                    >
-                                        编辑群信息
-                                    </button>
-                                )}
-                            </>
+                            </section>
                         )}
-                        <div className="group-detail-meta">
-                            <span className="group-detail-type">
-                                {group.type === 'public' ? '公开群组' : '私有群组'}
-                            </span>
-                            <span className="group-detail-count">
-                                {group.memberCount} / {group.maxMembers} 成员
-                            </span>
-                        </div>
-                    </div>
 
-                    {/* 成员列表 */}
-                    <div className="group-detail-members">
-                        <h4 className="group-members-title">
-                            成员 ({group.members?.length || 0})
-                        </h4>
-                        <div className="group-members-list">
-                            {sortedMembers.map((member: GroupMember) => (
-                                <div key={member.id} className="group-member-item">
-                                    <Avatar
-                                        name={member.username}
-                                        src={member.avatarUrl}
-                                        size="sm"
-                                    />
-                                    <div className="group-member-info">
-                                        <span className="group-member-name">{member.username}</span>
-                                        {getRoleBadge(member.role) && (
-                                            <span className={`group-member-role role-${member.role}`}>
-                                                {getRoleBadge(member.role)}
-                                            </span>
-                                        )}
-                                        {member.status === 'muted' && (
-                                            <span className="group-member-muted">已禁言</span>
-                                        )}
-                                    </div>
-                                    {member.isOnline && (
-                                        <span className="group-member-online" />
-                                    )}
-
-                                    {canManage && member.userId !== currentUser?.id && (
-                                        <div className="group-member-actions">
-                                            {(currentRole === 'owner' || (currentRole === 'admin' && member.role === 'member')) && (member.status === 'muted' ? (
-                                                <button
-                                                    className="member-action-btn"
-                                                    onClick={() => handleMemberAction('unmute', member)}
-                                                    aria-label="解除禁言"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M12 3v6l4 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-                                                    </svg>
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    className="member-action-btn"
-                                                    onClick={() => handleMemberAction('mute', member)}
-                                                    aria-label="禁言"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M4 4l16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                        <path d="M9 9v6l5 3V6l-2 1.2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                    </svg>
-                                                </button>
-                                            ))}
-
-                                            {currentRole === 'owner' && member.role === 'member' && (
-                                                <button
-                                                    className="member-action-btn"
-                                                    onClick={() => handleMemberAction('promote', member)}
-                                                    aria-label="设为管理员"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                    </svg>
-                                                </button>
-                                            )}
-
-                                            {currentRole === 'owner' && member.role === 'admin' && (
-                                                <button
-                                                    className="member-action-btn"
-                                                    onClick={() => handleMemberAction('demote', member)}
-                                                    aria-label="降级为成员"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                    </svg>
-                                                </button>
-                                            )}
-
-                                            {currentRole === 'owner' && member.role !== 'owner' && (
-                                                <button
-                                                    className="member-action-btn"
-                                                    onClick={() => handleMemberAction('transfer', member)}
-                                                    aria-label="转让群主"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M7 7h10v10H7z" stroke="currentColor" strokeWidth="2" />
-                                                        <path d="M12 8v8M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                    </svg>
-                                                </button>
-                                            )}
-
-                                            {(currentRole === 'owner' || (currentRole === 'admin' && member.role === 'member')) && (
-                                                <button
-                                                    className="member-action-btn danger"
-                                                    onClick={() => handleMemberAction('kick', member)}
-                                                    aria-label="移出群组"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                                                        <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                                    </svg>
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
+                        {/* 4. 成员搜索与管理白卡 */}
+                        <section className="group-inset-card group-detail-members" aria-label="成员管理">
+                            <div className="group-members-header">
+                                <h4 className="group-members-title">
+                                    成员 ({group.members?.length || 0})
+                                </h4>
+                                <div className="group-member-filters" role="group" aria-label="成员筛选">
+                                    <button
+                                        type="button"
+                                        className={`group-filter-chip ${memberFilter === 'all' ? 'is-active' : ''}`}
+                                        onClick={() => setMemberFilter('all')}
+                                    >
+                                        全部
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`group-filter-chip ${memberFilter === 'staff' ? 'is-active' : ''}`}
+                                        onClick={() => setMemberFilter('staff')}
+                                    >
+                                        管理
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`group-filter-chip ${memberFilter === 'online' ? 'is-active' : ''}`}
+                                        onClick={() => setMemberFilter('online')}
+                                    >
+                                        在线
+                                    </button>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
+                            </div>
 
-                    {/* 操作按钮 */}
-                    <div className="group-detail-actions">
-                        <button
-                            className="group-action-btn danger"
-                            onClick={handleLeaveGroup}
-                        >
-                            {isOwner ? '解散群组' : '退出群组'}
-                        </button>
+                            <div className="group-member-search-wrap">
+                                <Search size={14} className="group-member-search-icon" />
+                                <input
+                                    type="search"
+                                    className="group-member-search-input"
+                                    value={memberSearch}
+                                    onChange={(e) => setMemberSearch(e.target.value)}
+                                    placeholder="搜索群成员..."
+                                    aria-label="搜索群成员"
+                                />
+                            </div>
+
+                            <div className="group-members-list">
+                                {filteredMembers.length === 0 ? (
+                                    <div className="group-members-empty">未找到匹配的成员</div>
+                                ) : (
+                                    filteredMembers.map((member: GroupMember) => {
+                                        const isSelfMember = member.userId === currentUser?.id;
+                                        const canModerateTarget =
+                                            canManage &&
+                                            !isSelfMember &&
+                                            (currentRole === 'owner' || member.role === 'member');
+
+                                        return (
+                                            <div key={member.id} className="group-member-item">
+                                                <Avatar name={member.username} src={member.avatarUrl} size="sm" />
+                                                <div className="group-member-info">
+                                                    <span className="group-member-name">
+                                                        {member.username}
+                                                        {isSelfMember && <em className="group-member-self">我</em>}
+                                                    </span>
+                                                    {getRoleBadge(member.role) && (
+                                                        <span className={`group-member-role role-${member.role}`}>
+                                                            {getRoleBadge(member.role)}
+                                                        </span>
+                                                    )}
+                                                    {member.status === 'muted' && (
+                                                        <span className="group-member-muted">已禁言</span>
+                                                    )}
+                                                </div>
+                                                {member.isOnline && (
+                                                    <span className="group-member-online" title="在线" />
+                                                )}
+
+                                                {canModerateTarget && (
+                                                    <DropdownMenuPrimitive.Root>
+                                                        <DropdownMenuPrimitive.Trigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                className="member-more-trigger"
+                                                                aria-label={`管理成员 ${member.username}`}
+                                                                disabled={busyMemberId === member.userId}
+                                                            >
+                                                                <MoreHorizontal size={16} />
+                                                            </button>
+                                                        </DropdownMenuPrimitive.Trigger>
+                                                        <DropdownMenuPrimitive.Portal>
+                                                            <DropdownMenuPrimitive.Content
+                                                                className="group-dropdown-content"
+                                                                align="end"
+                                                                sideOffset={6}
+                                                            >
+                                                                {member.status === 'muted' ? (
+                                                                    <DropdownMenuPrimitive.Item
+                                                                        className="group-dropdown-item"
+                                                                        onSelect={() => handleMemberAction('unmute', member)}
+                                                                    >
+                                                                        <Volume2 size={14} />
+                                                                        <span>解除禁言</span>
+                                                                    </DropdownMenuPrimitive.Item>
+                                                                ) : (
+                                                                    <DropdownMenuPrimitive.Item
+                                                                        className="group-dropdown-item"
+                                                                        onSelect={() => handleMemberAction('mute', member)}
+                                                                    >
+                                                                        <VolumeX size={14} />
+                                                                        <span>禁言 24 小时</span>
+                                                                    </DropdownMenuPrimitive.Item>
+                                                                )}
+
+                                                                {currentRole === 'owner' && member.role === 'member' && (
+                                                                    <DropdownMenuPrimitive.Item
+                                                                        className="group-dropdown-item"
+                                                                        onSelect={() => handleMemberAction('promote', member)}
+                                                                    >
+                                                                        <Shield size={14} />
+                                                                        <span>设为管理员</span>
+                                                                    </DropdownMenuPrimitive.Item>
+                                                                )}
+
+                                                                {currentRole === 'owner' && member.role === 'admin' && (
+                                                                    <DropdownMenuPrimitive.Item
+                                                                        className="group-dropdown-item"
+                                                                        onSelect={() => handleMemberAction('demote', member)}
+                                                                    >
+                                                                        <ShieldOff size={14} />
+                                                                        <span>取消管理员</span>
+                                                                    </DropdownMenuPrimitive.Item>
+                                                                )}
+
+                                                                {currentRole === 'owner' && member.role !== 'owner' && (
+                                                                    <DropdownMenuPrimitive.Item
+                                                                        className="group-dropdown-item"
+                                                                        onSelect={() => setPendingTransferMember(member)}
+                                                                    >
+                                                                        <Crown size={14} />
+                                                                        <span>转让群主</span>
+                                                                    </DropdownMenuPrimitive.Item>
+                                                                )}
+
+                                                                <DropdownMenuPrimitive.Separator className="group-dropdown-separator" />
+
+                                                                <DropdownMenuPrimitive.Item
+                                                                    className="group-dropdown-item is-danger"
+                                                                    onSelect={() => handleMemberAction('kick', member)}
+                                                                >
+                                                                    <UserMinus size={14} />
+                                                                    <span>移出群组</span>
+                                                                </DropdownMenuPrimitive.Item>
+                                                            </DropdownMenuPrimitive.Content>
+                                                        </DropdownMenuPrimitive.Portal>
+                                                    </DropdownMenuPrimitive.Root>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </section>
+
+                        {/* 5. 危险操作区（内联二次确认） */}
+                        <section className="group-inset-card group-detail-actions">
+                            {confirmLeaveOpen ? (
+                                <div className="group-confirm-inline">
+                                    <p className="group-confirm-text">
+                                        {isOwner
+                                            ? '确定要解散该群组吗？所有聊天记录与成员关系将被清除。'
+                                            : '确定要退出该群组吗？退出后将不再接收群消息。'}
+                                    </p>
+                                    <div className="group-confirm-actions">
+                                        <button
+                                            type="button"
+                                            className="group-edit-btn danger"
+                                            disabled={leaving}
+                                            onClick={handleLeaveOrDeleteGroup}
+                                        >
+                                            {leaving ? '处理中...' : isOwner ? '确认解散' : '确认退出'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="group-edit-btn ghost"
+                                            disabled={leaving}
+                                            onClick={() => setConfirmLeaveOpen(false)}
+                                        >
+                                            取消
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="group-action-btn danger"
+                                    onClick={() => setConfirmLeaveOpen(true)}
+                                >
+                                    {isOwner ? '解散群组' : '退出群组'}
+                                </button>
+                            )}
+                        </section>
                     </div>
-                </motion.div>
+                </motion.aside>
             )}
         </AnimatePresence>
     );
