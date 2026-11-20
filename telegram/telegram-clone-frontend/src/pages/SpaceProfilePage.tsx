@@ -11,6 +11,7 @@ import { StateBlock } from '@/components/design-system';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
 import { SHARE_BASE_URL } from '../config/share';
+import { compressImageForUpload } from '../utils/imageCompress';
 import './SpaceProfilePage.css';
 
 const SpaceProfilePage: React.FC = () => {
@@ -43,6 +44,7 @@ const SpaceProfilePage: React.FC = () => {
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+    const [coverLoaded, setCoverLoaded] = useState(false);
     const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes' | 'dislikes'>('posts');
 
     // 资料编辑（工业级：displayName/bio 等个性化，不直接改登录用户名）
@@ -166,6 +168,10 @@ const SpaceProfilePage: React.FC = () => {
     }, [id]);
 
     useEffect(() => {
+        setCoverLoaded(false);
+    }, [id]);
+
+    useEffect(() => {
         return () => {
             if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
         };
@@ -206,10 +212,17 @@ const SpaceProfilePage: React.FC = () => {
         if (!profile) return;
         try {
             setCoverUploading(true);
+            // 上传前先压缩至 1600x900 WebP/JPEG，避免数 MB 原图拖慢所有访客加载
+            const optimizedFile = await compressImageForUpload(file, {
+                maxWidth: 1600,
+                maxHeight: 900,
+                quality: 0.86,
+            });
             // 先本地预览，提升交互并避免“上传慢=无反馈”的体验
-            const localPreview = URL.createObjectURL(file);
+            const localPreview = URL.createObjectURL(optimizedFile);
             setCoverPreviewUrl(localPreview);
-            const coverUrl = await spaceAPI.updateCover(profile.id, file);
+            setCoverLoaded(true);
+            const coverUrl = await spaceAPI.updateCover(profile.id, optimizedFile);
             setProfile((prev) => prev ? { ...prev, coverUrl } : prev);
             setCoverPreviewUrl(null);
             showToast('封面已更新', 'success');
@@ -233,9 +246,14 @@ const SpaceProfilePage: React.FC = () => {
         if (!profile) return;
         try {
             setAvatarUploading(true);
-            const localPreview = URL.createObjectURL(file);
+            const optimizedFile = await compressImageForUpload(file, {
+                maxWidth: 512,
+                maxHeight: 512,
+                quality: 0.88,
+            });
+            const localPreview = URL.createObjectURL(optimizedFile);
             setAvatarPreviewUrl(localPreview);
-            const avatarUrl = await spaceAPI.updateAvatar(profile.id, file);
+            const avatarUrl = await spaceAPI.updateAvatar(profile.id, optimizedFile);
             setProfile((prev) => prev ? { ...prev, avatarUrl } : prev);
             setAvatarPreviewUrl(null);
             syncLocalUser({ avatarUrl });
@@ -447,15 +465,36 @@ const SpaceProfilePage: React.FC = () => {
                             {profile.stats.posts} 动态
                         </div>
                     </div>
-                    <div className="space-profile__topbar-spacer" aria-hidden="true" />
+                    <button
+                        type="button"
+                        className="space-profile__quick-jump"
+                        onClick={() => window.dispatchEvent(new CustomEvent('tg:open-command-palette'))}
+                        aria-label="打开全局指令面板（⌘K）"
+                    >
+                        <span>快速跳转</span>
+                        <kbd>⌘K</kbd>
+                    </button>
                 </header>
 
                 <section className="space-profile__hero">
-                    <div className="space-profile__cover">
+                    <div className={`space-profile__cover ${coverLoaded || coverPreviewUrl ? 'is-ready' : ''}`}>
                         {coverPreviewUrl ? (
-                            <img src={coverPreviewUrl} alt="空间封面预览" className="space-profile__cover-img" />
+                            <img
+                                src={coverPreviewUrl}
+                                alt="空间封面预览"
+                                className="space-profile__cover-img is-loaded"
+                                decoding="async"
+                            />
                         ) : profile.coverUrl ? (
-                            <img src={profile.coverUrl} alt="空间封面" className="space-profile__cover-img" />
+                            <img
+                                src={profile.coverUrl}
+                                alt="空间封面"
+                                className={`space-profile__cover-img ${coverLoaded ? 'is-loaded' : ''}`}
+                                decoding="async"
+                                fetchPriority="high"
+                                onLoad={() => setCoverLoaded(true)}
+                                onError={() => setCoverLoaded(true)}
+                            />
                         ) : (
                             <div className="space-profile__cover-placeholder" />
                         )}
