@@ -12,6 +12,7 @@
     padding: 16px clamp(12px, 3vw, 32px) 44px;
     display: flex;
     justify-content: center;
+    align-items: flex-start;
     overflow-y: auto;
     overscroll-behavior: contain;
     background: #F5F5F7;
@@ -20,11 +21,15 @@
 .space-profile__shell {
     container: space-profile / inline-size;
     width: min(840px, 100%);
-    min-height: 100%;
+    height: max-content;
     display: flex;
     flex-direction: column;
     gap: 14px;
     background: transparent;
+}
+
+.space-profile__shell > * {
+    flex-shrink: 0;
 }
 
 /* 粘性 Apple Vibrancy 磨砂顶栏 */
@@ -161,6 +166,7 @@
 .space-profile__cover {
     position: relative;
     height: 224px;
+    flex-shrink: 0;
     border-radius: 0;
     overflow: hidden;
     border: none;
