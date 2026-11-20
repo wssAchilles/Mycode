@@ -56,6 +56,7 @@ export interface IPost extends Document {
     language?: string;
     isNsfw: boolean;
     isPinned: boolean;
+    pinnedAt?: Date | null;
 
     // 推荐 V3 语义离散编码与异步安全标签
     semanticIds?: number[];
@@ -193,6 +194,7 @@ const PostSchema = new Schema<IPost>(
         language: String,
         isNsfw: { type: Boolean, default: false },
         isPinned: { type: Boolean, default: false },
+        pinnedAt: { type: Date, default: null },
 
         // 推荐 V3 语义离散编码与异步安全标签
         semanticIds: { type: [Number], default: undefined },

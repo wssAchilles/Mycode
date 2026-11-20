@@ -123,6 +123,7 @@ export async function getUserProfile(
     };
     isFollowed: boolean;
     pinnedPost?: IPost | null;
+    pinnedPosts?: IPost[];
 } | null> {
     const user = await User.findByPk(targetUserId, {
         attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'lastSeen', 'createdAt'],
@@ -130,7 +131,7 @@ export async function getUserProfile(
 
     if (!user) return null;
 
-    const [postsCount, followersCount, followingCount, followRecord, profileDoc, pinnedPost] = await Promise.all([
+    const [postsCount, followersCount, followingCount, followRecord, profileDoc, pinnedPosts] = await Promise.all([
         Post.countDocuments({ authorId: targetUserId, deletedAt: null }),
         Contact.count({ where: { contactId: targetUserId, status: ContactStatus.ACCEPTED } }),
         Contact.count({ where: { userId: targetUserId, status: ContactStatus.ACCEPTED } }),
@@ -144,7 +145,9 @@ export async function getUserProfile(
             })
             : Promise.resolve(null),
         SpaceProfile.findOne({ userId: targetUserId }).lean(),
-        Post.findOne({ authorId: targetUserId, isPinned: true, deletedAt: null }),
+        Post.find({ authorId: targetUserId, isPinned: true, deletedAt: null })
+            .sort({ pinnedAt: -1, createdAt: -1 })
+            .limit(10),
     ]);
 
     return {
@@ -165,7 +168,8 @@ export async function getUserProfile(
             following: followingCount,
         },
         isFollowed: !!followRecord,
-        pinnedPost,
+        pinnedPost: pinnedPosts[0] ?? null,
+        pinnedPosts,
     };
 }
 

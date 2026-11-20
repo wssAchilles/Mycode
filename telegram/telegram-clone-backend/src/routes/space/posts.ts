@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
 import mongoose from 'mongoose';
 import { spaceService } from '../../services/spaceService';
+import { PinLimitExceededError } from '../../services/space/posts/postMutations';
 import { createFeedCandidate, type FeedCandidate } from '../../services/recommendation';
 import { transformFeedCandidateToResponse } from '../../services/recommendation/adapters/spaceFeedResponseAdapter';
 import {
@@ -162,6 +163,9 @@ router.post('/posts/:postId/pin', async (req: Request, res: Response) => {
         const transformed = await transformPostToResponse(post);
         return res.json({ post: transformed });
     } catch (error) {
+        if (error instanceof PinLimitExceededError) {
+            return res.status(400).json({ error: error.message });
+        }
         log.error({ err: error }, '置顶失败');
         return res.status(500).json({ error: '置顶失败' });
     }

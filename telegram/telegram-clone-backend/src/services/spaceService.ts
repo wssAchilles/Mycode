@@ -530,6 +530,7 @@ class SpaceService {
         };
         isFollowed: boolean;
         pinnedPost?: IPost | null;
+        pinnedPosts?: IPost[];
     } | null> {
         return getUserProfile(targetUserId, viewerId);
     }

@@ -125,14 +125,22 @@ router.get('/users/:id/profile', async (req: Request, res: Response) => {
         const profile = await spaceService.getUserProfile(id, viewerId);
         if (!profile) return res.status(404).json({ error: '用户不存在' });
 
-        const { pinnedPost, ...rest } = profile;
-        const transformedPinned = pinnedPost ? await transformPostToResponse(pinnedPost) : null;
+        const { pinnedPost, pinnedPosts, ...rest } = profile;
+        const resolvedPinnedList = pinnedPosts && pinnedPosts.length > 0
+            ? pinnedPosts
+            : pinnedPost
+                ? [pinnedPost]
+                : [];
+        const transformedPinnedPosts = await Promise.all(
+            resolvedPinnedList.map((post) => transformPostToResponse(post))
+        );
 
         return res.json({
             profile: {
                 ...rest,
                 coverUrl: normalizeSpaceUploadUrl(rest.coverUrl) ?? null,
-                pinnedPost: transformedPinned,
+                pinnedPost: transformedPinnedPosts[0] ?? null,
+                pinnedPosts: transformedPinnedPosts,
             },
         });
     } catch (error) {

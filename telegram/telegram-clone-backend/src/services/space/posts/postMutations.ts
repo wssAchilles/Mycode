@@ -165,6 +165,15 @@ export async function deletePost(postId: string, userId: string): Promise<boolea
     return true;
 }
 
+export const MAX_PINNED_POSTS = 10;
+
+export class PinLimitExceededError extends Error {
+    constructor(limit: number = MAX_PINNED_POSTS) {
+        super(`最多支持置顶 ${limit} 条动态`);
+        this.name = 'PinLimitExceededError';
+    }
+}
+
 export async function pinPost(postId: string, userId: string): Promise<IPost | null> {
     if (!mongoose.Types.ObjectId.isValid(postId)) return null;
     const postObjectId = new mongoose.Types.ObjectId(postId);
@@ -172,8 +181,19 @@ export async function pinPost(postId: string, userId: string): Promise<IPost | n
     const post = await Post.findOne({ _id: postObjectId, authorId: userId, deletedAt: null });
     if (!post) return null;
 
-    await Post.updateMany({ authorId: userId, isPinned: true }, { $set: { isPinned: false } });
+    if (!post.isPinned) {
+        const currentPinnedCount = await Post.countDocuments({
+            authorId: userId,
+            isPinned: true,
+            deletedAt: null,
+        });
+        if (currentPinnedCount >= MAX_PINNED_POSTS) {
+            throw new PinLimitExceededError(MAX_PINNED_POSTS);
+        }
+    }
+
     post.isPinned = true;
+    post.pinnedAt = new Date();
     await post.save();
 
     return post;
@@ -187,6 +207,7 @@ export async function unpinPost(postId: string, userId: string): Promise<IPost |
     if (!post) return null;
 
     post.isPinned = false;
+    post.pinnedAt = null;
     await post.save();
 
     return post;
