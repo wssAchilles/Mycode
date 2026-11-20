@@ -206,6 +206,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [repostCount, setRepostCount] = useState(post.repostCount);
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const [showMoreMenu, setShowMoreMenu] = useState(false);
     const [showReportMenu, setShowReportMenu] = useState(false);
     const [showQuoteComposer, setShowQuoteComposer] = useState(false);
@@ -594,7 +595,19 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         }
     }, [postMotion, showMoreMenu]);
 
-    // 渲染媒体网格（自动过滤失效媒体并在跨源 API 媒体上启用安全 CORS）
+    // Lightbox 键盘 Escape 关闭支持
+    useEffect(() => {
+        if (!lightboxUrl) return;
+        const onKeyDown = (ev: KeyboardEvent) => {
+            if (ev.key === 'Escape') {
+                setLightboxUrl(null);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [lightboxUrl]);
+
+    // 渲染媒体网格（自动过滤失效媒体并在跨源 API 媒体上启用安全 CORS，支持 Apple Quick Look 预览）
     const renderMedia = () => {
         if (!post.media || post.media.length === 0) return null;
 
@@ -620,6 +633,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             className="space-post__media-item"
                             loading="lazy"
                             decoding="async"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setLightboxUrl(media.url);
+                            }}
                             onLoad={onLayoutChanged}
                             onError={() => {
                                 setFailedMediaUrls((prev) => ({ ...prev, [media.url]: true }));
@@ -944,6 +961,39 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         </button>
                     )}
                 </div>
+
+                {lightboxUrl && createPortal(
+                    <div
+                        className="space-post__lightbox"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="图片预览"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setLightboxUrl(null);
+                        }}
+                    >
+                        <button
+                            type="button"
+                            className="space-post__lightbox-close"
+                            aria-label="关闭图片预览"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setLightboxUrl(null);
+                            }}
+                        >
+                            ×
+                        </button>
+                        <img
+                            src={lightboxUrl}
+                            alt=""
+                            crossOrigin={resolveMediaCrossOrigin(lightboxUrl)}
+                            className="space-post__lightbox-img"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    </div>,
+                    document.body,
+                )}
             </>
         );
     };

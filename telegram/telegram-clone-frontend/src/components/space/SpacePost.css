@@ -216,6 +216,7 @@
 
 .space-post__markdown p {
     margin: 0 0 8px;
+    text-wrap: pretty;
 }
 
 .space-post__markdown h1,
@@ -226,6 +227,7 @@
     font-family: var(--font-display);
     font-weight: 700;
     line-height: 1.3;
+    text-wrap: balance;
 }
 
 .space-post__markdown h1 { font-size: 20px; }
@@ -240,6 +242,7 @@
 
 .space-post__markdown li {
     margin-bottom: 4px;
+    text-wrap: pretty;
 }
 
 .space-post__markdown blockquote {
@@ -249,6 +252,7 @@
     border-radius: 0 8px 8px 0;
     background: #F7F9F9;
     color: #536471;
+    text-wrap: pretty;
 }
 
 .space-post__markdown a {
@@ -373,14 +377,15 @@
     opacity: 0.45;
 }
 
-/* 媒体容器 */
+/* 媒体容器（Apple 圆角相册质感） */
 .space-post__media {
-    margin-top: 2px;
+    margin-top: 4px;
     max-width: min(100%, 760px);
     border-radius: 16px;
-    border: 1px solid #EFF3F4;
+    border: 1px solid rgba(15, 20, 25, 0.075);
+    box-shadow: 0 2px 8px rgba(15, 20, 25, 0.03);
     overflow: clip;
-    background: #F7F9F9;
+    background: #F7F9FA;
 }
 
 .space-post__media-grid {
@@ -399,15 +404,63 @@
     height: 100%;
     aspect-ratio: 16 / 9;
     object-fit: cover;
-    transition: transform 0.2s ease;
+    cursor: zoom-in;
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .space-post__media-item:hover {
-    transform: scale(1.01);
+    transform: scale(1.015);
+}
+
+/* Apple Quick Look 风格高清图片预览灯箱 */
+.space-post__lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(15, 20, 25, 0.82);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    cursor: zoom-out;
+}
+
+.space-post__lightbox-img {
+    max-width: min(92vw, 1280px);
+    max-height: 88vh;
+    border-radius: 14px;
+    object-fit: contain;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+    cursor: default;
+}
+
+.space-post__lightbox-close {
+    position: absolute;
+    top: 20px;
+    right: 24px;
+    width: 38px;
+    height: 38px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(15, 20, 25, 0.65);
+    color: #FFFFFF;
+    font-size: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.space-post__lightbox-close:hover {
+    background: rgba(15, 20, 25, 0.88);
+    transform: scale(1.04);
 }
 
 /* ========================================
-   交互操作栏（还原 X 原生无框透明微交互，随容器宽度均匀舒展）
+   交互操作栏（Apple 触觉弹簧缩放 + 精致胶囊微交互）
    ======================================== */
 .space-post__actions {
     margin-top: 10px;
@@ -422,16 +475,23 @@
 
 .space-post__action {
     min-height: 32px;
-    padding: 4px 8px;
+    padding: 4px 10px;
     border: none;
     border-radius: 9999px;
     background: transparent;
     color: #536471;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 5.5px;
     cursor: pointer;
-    transition: color 0.15s ease, background-color 0.15s ease;
+    transition:
+        color 0.16s ease,
+        background-color 0.16s ease,
+        transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.space-post__action:active {
+    transform: scale(0.91);
 }
 
 .space-post__action-icon {
@@ -495,12 +555,16 @@
 
 .space-post__more-menu {
     z-index: 1000;
-    min-width: 200px;
-    background: #FFFFFF;
-    border: 1px solid #EFF3F4;
-    border-radius: 14px;
+    min-width: 204px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid rgba(15, 20, 25, 0.08);
+    border-radius: 16px;
     padding: 6px;
-    box-shadow: 0 10px 30px rgba(15, 20, 25, 0.12), 0 2px 8px rgba(15, 20, 25, 0.06);
+    box-shadow:
+        0 16px 38px rgba(15, 20, 25, 0.14),
+        0 2px 8px rgba(15, 20, 25, 0.06);
 }
 
 .space-post__menu-item {
