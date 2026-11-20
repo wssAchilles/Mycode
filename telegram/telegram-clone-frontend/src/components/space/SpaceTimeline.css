@@ -11,22 +11,23 @@
 }
 
 /* ========================================
-   时间线顶部（粘性磨砂白 + 底部蓝线 Tab）
+   时间线顶部（Apple Vibrancy 液态磨砂白 + macOS 分段胶囊控制器）
    ======================================== */
 .space-timeline__header {
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 20;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    background: rgba(255, 255, 255, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid #EFF3F4;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid rgba(15, 20, 25, 0.06);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
     padding: 0 clamp(16px, 2.8cqi, 28px);
-    height: 54px;
+    height: 56px;
 }
 
 .space-timeline__title {
@@ -34,60 +35,65 @@
     font-weight: 800;
     color: #0F1419;
     margin: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
     font-family: var(--font-family);
+    text-wrap: balance;
 }
 
-/* Feed Toggle（去外框胶囊，改为 X 式底部蓝线指示器） */
+/* Feed Toggle（macOS / iOS 原生 Segmented Control 分段胶囊） */
 .space-timeline__feed-toggle {
     display: inline-flex;
-    align-items: stretch;
-    height: 100%;
-    gap: 4px;
-    padding: 0;
-    border-radius: 0;
-    border: none;
-    background: transparent;
+    align-items: center;
+    height: 34px;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 9999px;
+    border: 1px solid rgba(15, 20, 25, 0.045);
+    background: rgba(15, 20, 25, 0.055);
 }
 
 .space-timeline__feed-tab {
     position: relative;
     appearance: none;
     border: 0;
-    border-radius: 0;
-    padding: 0 18px;
+    border-radius: 9999px;
+    padding: 0 16px;
     height: 100%;
-    font-size: 15px;
-    font-weight: 500;
+    font-size: 13.5px;
+    font-weight: 600;
     color: #536471;
     background: transparent;
     cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition:
+        background-color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        color 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
     display: inline-flex;
     align-items: center;
     justify-content: center;
 }
 
-.space-timeline__feed-tab:hover {
-    background-color: #EFF3F4;
+.space-timeline__feed-tab:hover:not(.is-active) {
     color: #0F1419;
+}
+
+.space-timeline__feed-tab:active {
+    transform: scale(0.97);
 }
 
 .space-timeline__feed-tab.is-active {
     color: #0F1419;
     font-weight: 700;
-    background: transparent;
+    background: #FFFFFF;
+    box-shadow:
+        0 1px 3px rgba(15, 20, 25, 0.10),
+        0 1px 1px rgba(15, 20, 25, 0.05),
+        inset 0 0 0 0.5px rgba(15, 20, 25, 0.04);
 }
 
 .space-timeline__feed-tab.is-active::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 14px;
-    right: 14px;
-    height: 3.5px;
-    border-radius: 9999px;
-    background: #1D9BF0;
+    display: none;
 }
 
 .space-timeline__feed-tab:focus-visible,

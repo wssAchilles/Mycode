@@ -394,7 +394,7 @@ export const SpacePage: React.FC = () => {
                         className={`space-page__nav-item ${activeSection === 'explore' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('explore', '探索')}
                     >
-                        <SearchIcon />
+                        <SearchIcon active={activeSection === 'explore'} />
                         <span>探索</span>
                     </button>
                     <button
@@ -402,7 +402,7 @@ export const SpacePage: React.FC = () => {
                         className={`space-page__nav-item ${activeSection === 'notifications' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('notifications', '通知')}
                     >
-                        <NotificationIcon />
+                        <NotificationIcon active={activeSection === 'notifications'} />
                         <span>通知</span>
                     </button>
                     <button
@@ -410,7 +410,7 @@ export const SpacePage: React.FC = () => {
                         className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('/chat', '消息')}
                     >
-                        <MessageIcon />
+                        <MessageIcon active={location.pathname === '/chat'} />
                         <span>消息</span>
                     </button>
                 </nav>
@@ -460,6 +460,13 @@ export const SpacePage: React.FC = () => {
                         <div className="space-page__user-name">{currentUser?.username || 'User'}</div>
                         <div className="space-page__user-handle">@{currentUser?.username || 'user'}</div>
                     </div>
+                    <span className="space-page__user-more" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                            <circle cx="5" cy="12" r="1.6" />
+                            <circle cx="12" cy="12" r="1.6" />
+                            <circle cx="19" cy="12" r="1.6" />
+                        </svg>
+                    </span>
                 </div>
             </aside>
 

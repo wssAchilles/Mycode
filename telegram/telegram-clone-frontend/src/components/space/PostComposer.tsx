@@ -23,28 +23,28 @@ export interface PostComposerProps {
     placeholder?: string;
 }
 
-// SVG 图标
+// SVG 图标（Apple SF Symbols 1.85px 圆润几何笔触）
 const ImageIcon: React.FC = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-        <circle cx="8.5" cy="8.5" r="1.5" />
-        <polyline points="21 15 16 10 5 21" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" width="19" height="19">
+        <rect x="3.25" y="3.25" width="17.5" height="17.5" rx="3.75" ry="3.75" />
+        <circle cx="8.75" cy="8.75" r="1.5" />
+        <path d="M20.5 15.25l-4.65-4.65a1.5 1.5 0 0 0-2.12 0L5 19.38" />
     </svg>
 );
 
 const GifIcon: React.FC = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
-        <rect x="2" y="6" width="20" height="12" rx="2" />
-        <text x="7" y="15" fontSize="8" fill="currentColor" stroke="none">GIF</text>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" width="19" height="19">
+        <rect x="2.5" y="5.5" width="19" height="13" rx="3.5" />
+        <text x="6.5" y="14.5" fontSize="7.5" fontWeight="700" letterSpacing="0.03em" fill="currentColor" stroke="none">GIF</text>
     </svg>
 );
 
 const EmojiIcon: React.FC = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-        <line x1="9" y1="9" x2="9.01" y2="9" />
-        <line x1="15" y1="9" x2="15.01" y2="9" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" width="19" height="19">
+        <circle cx="12" cy="12" r="9.25" />
+        <path d="M8.25 14.25s1.4 1.9 3.75 1.9 3.75-1.9 3.75-1.9" />
+        <line x1="9" y1="9.5" x2="9.01" y2="9.5" strokeWidth="2.4" />
+        <line x1="15" y1="9.5" x2="15.01" y2="9.5" strokeWidth="2.4" />
     </svg>
 );
 
@@ -324,7 +324,27 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                     />
                     {charCount > 0 && (
                         <span className={getCharCountClass()}>
-                            {charCount}/{MAX_CHARS}
+                            <svg className="post-composer__char-ring" viewBox="0 0 20 20" aria-hidden="true">
+                                <circle
+                                    className="post-composer__char-ring-track"
+                                    cx="10"
+                                    cy="10"
+                                    r="7.5"
+                                    fill="none"
+                                    strokeWidth="2"
+                                />
+                                <circle
+                                    className="post-composer__char-ring-fill"
+                                    cx="10"
+                                    cy="10"
+                                    r="7.5"
+                                    fill="none"
+                                    strokeWidth="2"
+                                    strokeDasharray={47.12}
+                                    strokeDashoffset={47.12 * (1 - Math.min(1, charCount / MAX_CHARS))}
+                                />
+                            </svg>
+                            <span>{charCount}/{MAX_CHARS}</span>
                         </span>
                     )}
                 </div>

@@ -60,21 +60,25 @@
     overscroll-behavior: contain;
 }
 
-/* 品牌区 */
+/* 品牌区（34px 图标中心轴 = 9px + 17px = 26px，与下方 24px 导航图标 14px + 12px = 26px 严格光学共线） */
 .space-page__brand {
     display: inline-flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
-    margin-bottom: 12px;
+    padding: 8px 14px 8px 9px;
+    margin-bottom: 10px;
     width: fit-content;
-    border-radius: 9999px;
+    border-radius: 14px;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.18s ease, transform 0.15s ease;
 }
 
 .space-page__brand:hover {
-    background-color: #EFF3F4;
+    background-color: rgba(15, 20, 25, 0.045);
+}
+
+.space-page__brand:active {
+    transform: scale(0.98);
 }
 
 .space-page__brand:focus-visible {
@@ -85,9 +89,12 @@
 .space-page__brand-icon {
     width: 34px;
     height: 34px;
-    background: #0F1419;
+    background: linear-gradient(180deg, #1E242B 0%, #0F1419 100%);
     border: none;
     border-radius: 10px;
+    box-shadow:
+        0 2px 6px rgba(15, 20, 25, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -95,14 +102,14 @@
 }
 
 .space-page__brand-icon svg {
-    width: 19px;
-    height: 19px;
+    width: 18px;
+    height: 18px;
 }
 
 .space-page__brand-text {
     font-size: 19px;
     font-weight: 800;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.025em;
     color: #0F1419;
     font-family: var(--font-display);
 }
@@ -118,20 +125,24 @@
 .space-page__nav-item {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 15px;
     width: 100%;
     max-width: 236px;
-    height: var(--space-nav-item-height);
-    padding: 0 18px 0 12px;
-    border-radius: 9999px;
+    height: 46px;
+    padding: 0 18px 0 14px;
+    border-radius: 14px;
     background: transparent;
     border: none;
     cursor: pointer;
-    color: #0F1419;
-    font-size: 17px;
-    font-weight: 400;
+    color: #334155;
+    font-size: 16.5px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
     text-align: left;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition:
+        background-color 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        color 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
     position: relative;
 }
 
@@ -140,7 +151,6 @@
     height: var(--space-nav-icon-size);
     min-width: var(--space-nav-icon-size);
     flex-shrink: 0;
-    stroke-width: 2px;
 }
 
 .space-page__nav-item span {
@@ -148,78 +158,106 @@
 }
 
 .space-page__nav-item:hover {
-    background: #EFF3F4;
+    background: rgba(15, 20, 25, 0.045);
     color: #0F1419;
+}
+
+.space-page__nav-item:active {
+    transform: scale(0.985);
 }
 
 .space-page__nav-item.is-active {
-    background: transparent;
+    background: rgba(15, 20, 25, 0.06);
     color: #0F1419;
     font-weight: 700;
+    box-shadow: inset 0 0 0 1px rgba(15, 20, 25, 0.04);
 }
 
 .space-page__nav-item.is-active:hover {
-    background: #EFF3F4;
+    background: rgba(15, 20, 25, 0.08);
 }
 
 .space-page__nav-item.is-active svg {
     color: #0F1419;
-    stroke-width: 2.5px;
 }
 
-/* 移除左侧生硬蓝条，改用 X 式字重与图标加重 */
+/* 移除左侧生硬蓝条，改用 Apple Sidebar 胶囊底色与 SF 双态图标 */
 .space-page__nav-item.is-active::before {
     display: none;
 }
 
-/* 发布按钮 - 高对比实心黑胶囊 (参考图同款) */
+/* 发布按钮 - Apple 液态深炭黑高对比胶囊 */
 .space-page__compose-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     width: 100%;
-    height: 48px;
+    height: 46px;
     margin-top: 16px;
     padding: 0 20px;
     border-radius: 9999px;
-    background: #0F1419;
+    background: linear-gradient(180deg, #1E242B 0%, #0F1419 100%);
     border: none;
     cursor: pointer;
     color: #FFFFFF;
-    font-size: 16px;
+    font-size: 15.5px;
     font-weight: 700;
-    box-shadow: 0 4px 12px rgba(15, 20, 25, 0.12);
-    transition: background-color 0.15s ease, transform 0.12s ease;
+    letter-spacing: -0.01em;
+    box-shadow:
+        0 6px 16px rgba(15, 20, 25, 0.14),
+        0 1px 3px rgba(15, 20, 25, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    transition:
+        background-color 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .space-page__compose-btn svg {
-    width: 20px;
-    height: 20px;
+    width: 19px;
+    height: 19px;
 }
 
 .space-page__compose-btn:hover {
-    background: #272C30;
+    background: linear-gradient(180deg, #272E36 0%, #171D24 100%);
+    box-shadow:
+        0 8px 20px rgba(15, 20, 25, 0.18),
+        0 2px 4px rgba(15, 20, 25, 0.10),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .space-page__compose-btn:active {
-    transform: scale(0.985);
+    transform: scale(0.98);
 }
 
 /* 左下角用户信息区 */
 .space-page__user {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    margin-top: auto;
-    border-radius: 9999px;
+    gap: 11px;
+    padding: 9px 12px;
+    margin-top: 12px;
+    border-radius: 16px;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.18s ease;
 }
 
 .space-page__user:hover {
-    background: #EFF3F4;
+    background: rgba(15, 20, 25, 0.045);
+}
+
+.space-page__user-more {
+    color: #64748B;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.65;
+    transition: opacity 0.15s ease;
+}
+
+.space-page__user:hover .space-page__user-more {
+    opacity: 1;
 }
 
 .space-page__user:focus-visible {
@@ -366,19 +404,21 @@
 }
 
 .space-page__widget {
-    background: #F7F9F9;
-    border: none;
-    border-radius: 16px;
-    padding: 14px 16px;
-    box-shadow: none;
+    background: #F7F9FA;
+    border: 1px solid rgba(15, 20, 25, 0.055);
+    border-radius: 18px;
+    padding: 15px 16px;
+    box-shadow:
+        0 1px 2px rgba(15, 20, 25, 0.02),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .space-page__widget.glass-card:hover {
-    background: #F7F9F9;
+    background: #F7F9FA;
 }
 
 .space-page__widget-title {
-    font-size: 18px;
+    font-size: 16.5px;
     font-weight: 800;
     margin: 0 0 12px 0;
     color: #0F1419;
@@ -386,20 +426,21 @@
     align-items: center;
     gap: 8px;
     font-family: var(--font-family);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
 }
 
 .space-page__widget-title svg {
-    width: 18px;
-    height: 18px;
+    width: 17px;
+    height: 17px;
     color: #0F1419;
 }
 
-/* 推荐系统状态卡片（紧凑清爽，告别粗大蓝条） */
+/* 推荐系统状态卡片（Apple Bento 健康仪表盘微件） */
 .space-page__recommendation-status {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
 }
 
 .space-page__recommendation-status-header {
@@ -416,43 +457,166 @@
 
 .space-page__status-pill {
     flex-shrink: 0;
-    padding: 3px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3.5px 10px;
     border-radius: 999px;
-    border: none;
+    border: 1px solid rgba(15, 20, 25, 0.06);
     color: #536471;
-    background: #EFF3F4;
+    background: #FFFFFF;
     font-size: 11px;
     font-weight: 700;
     line-height: 1.25;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.03);
+}
+
+.space-page__status-dot {
+    width: 6.5px;
+    height: 6.5px;
+    border-radius: 50%;
+    background: #94A3B8;
+    flex-shrink: 0;
+}
+
+.space-page__status-human {
+    font-weight: 700;
+}
+
+.space-page__status-code {
+    font-size: 10px;
+    font-weight: 600;
+    opacity: 0.72;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
 .space-page__status-pill.is-success {
     color: #047857;
-    background: #DCFCE7;
+    background: #ECFDF5;
+    border-color: rgba(4, 120, 87, 0.16);
+}
+
+.space-page__status-pill.is-success .space-page__status-dot {
+    background: #10B981;
+    box-shadow: 0 0 0 2.5px rgba(16, 185, 129, 0.18);
 }
 
 .space-page__status-pill.is-running {
     color: #0369A1;
-    background: #E0F2FE;
+    background: #F0F9FF;
+    border-color: rgba(3, 105, 161, 0.16);
+}
+
+.space-page__status-pill.is-running .space-page__status-dot {
+    background: #0EA5E9;
+    box-shadow: 0 0 0 2.5px rgba(14, 165, 233, 0.18);
 }
 
 .space-page__status-pill.is-failed {
     color: #B91C1C;
-    background: #FEE2E2;
+    background: #FEF2F2;
+    border-color: rgba(185, 28, 28, 0.16);
+}
+
+.space-page__status-pill.is-failed .space-page__status-dot {
+    background: #EF4444;
+    box-shadow: 0 0 0 2.5px rgba(239, 68, 68, 0.18);
 }
 
 .space-page__recommendation-status-body,
 .space-page__recommendation-status-skeleton {
     display: flex;
     flex-direction: column;
+    gap: 10px;
+}
+
+/* 2x2 Bento 指标瓦片网格 */
+.space-page__recommendation-bento {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+}
+
+.space-page__recommendation-bento-card {
+    background: #FFFFFF;
+    border: 1px solid rgba(15, 20, 25, 0.055);
+    border-radius: 13px;
+    padding: 10px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    box-shadow: 0 1px 2px rgba(15, 20, 25, 0.02);
+}
+
+.space-page__recommendation-bento-label {
+    color: #64748B;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.space-page__recommendation-bento-value {
+    color: #0F1419;
+    font-size: 15.5px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+
+.space-page__recommendation-meta-list {
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid rgba(15, 20, 25, 0.045);
+    border-radius: 12px;
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.space-page__recommendation-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 0;
+    min-width: 0;
+}
+
+.space-page__recommendation-meta-row + .space-page__recommendation-meta-row {
+    border-top: 1px solid rgba(15, 20, 25, 0.04);
+}
+
+.space-page__recommendation-meta-time {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.space-page__recommendation-friendly-time {
+    color: #0F1419;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.space-page__recommendation-iso {
+    color: #64748B;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
 }
 
 .space-page__recommendation-status-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 2px 0;
+    gap: 5px;
 }
 
 .space-page__recommendation-status-copy {
@@ -465,16 +629,16 @@
 
 .space-page__recommendation-status-label {
     min-width: 0;
-    color: #536471;
-    font-size: 12.5px;
+    color: #64748B;
+    font-size: 12px;
     line-height: 1.3;
 }
 
 .space-page__recommendation-status-value {
     flex-shrink: 0;
-    max-width: 58%;
+    max-width: 62%;
     color: #0F1419;
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     line-height: 1.3;
@@ -482,38 +646,46 @@
     overflow-wrap: anywhere;
 }
 
-/* 极细克制进度丝线（不抢主视线） */
+/* 柔和语义进度丝线 */
 .space-page__recommendation-status-bar {
     width: 100%;
-    height: 2px;
-    border-radius: 1px;
-    background: rgba(15, 20, 25, 0.07);
+    height: 3px;
+    border-radius: 999px;
+    background: rgba(15, 20, 25, 0.06);
     overflow: hidden;
+    margin-top: 2px;
 }
 
 .space-page__recommendation-status-bar-fill {
     width: 100%;
     height: 100%;
-    border-radius: 1px;
-    background: rgba(15, 20, 25, 0.28);
+    border-radius: 999px;
+    background: linear-gradient(90deg, #1D9BF0 0%, #00BA7C 100%);
     transform: scaleX(var(--refresh-scale, 0));
     transform-origin: left center;
 }
 
-/* 热门趋势（复刻 X 右侧栏清爽文字列表） */
+/* 热门趋势（带 Apple 编辑序号与纯净悬浮白卡反馈） */
 .space-page__trend-item {
     display: flex;
     flex-direction: column;
-    padding: 10px 8px;
-    margin: 0 -8px;
-    border-radius: 10px;
-    border-bottom: none;
+    padding: 10px 10px;
+    margin: 2px -6px;
+    border-radius: 12px;
+    border: 1px solid transparent;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition:
+        background-color 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.15s ease;
 }
 
 .space-page__trend-item:hover {
-    background-color: rgba(15, 20, 25, 0.04);
+    background-color: #FFFFFF;
+    border-color: rgba(15, 20, 25, 0.055);
+    box-shadow: 0 2px 8px rgba(15, 20, 25, 0.04);
+    transform: translateY(-0.5px);
 }
 
 .space-page__trend-item:focus-visible {
@@ -524,19 +696,51 @@
 .space-page__trend-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
+}
+
+.space-page__trend-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.space-page__trend-rank {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: rgba(15, 20, 25, 0.06);
+    color: #0F1419;
+    font-size: 11px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
 }
 
 .space-page__trend-category {
-    font-size: 12.5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748B;
+}
+
+.space-page__trend-heat-badge {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 600;
     color: #536471;
+    font-variant-numeric: tabular-nums;
 }
 
 .space-page__trend-name {
-    font-size: 15px;
+    font-size: 14.5px;
+    line-height: 1.35;
     font-weight: 700;
     color: #0F1419;
     transition: color 0.15s ease;
+    text-wrap: balance;
 }
 
 .space-page__trend-item:hover .space-page__trend-name {
@@ -544,28 +748,28 @@
 }
 
 .space-page__trend-posts {
-    font-size: 12.5px;
-    color: #536471;
+    font-size: 12px;
+    color: #64748B;
     font-variant-numeric: tabular-nums;
 }
 
 .space-page__trend-meta {
-    margin-top: 6px;
+    margin-top: 7px;
 }
 
-/* 极克制热度微线（取代刺眼粗蓝条） */
+/* 柔和热度微线 */
 .space-page__heatbar {
     width: 100%;
-    height: 2px;
+    height: 3px;
     background: rgba(15, 20, 25, 0.06);
-    border-radius: 1px;
+    border-radius: 999px;
     overflow: hidden;
 }
 
 .space-page__heatbar-fill {
     height: 100%;
-    background: rgba(29, 155, 240, 0.45);
-    border-radius: 1px;
+    background: linear-gradient(90deg, rgba(29, 155, 240, 0.65) 0%, #1D9BF0 100%);
+    border-radius: 999px;
     width: 100%;
     transform: scaleX(var(--heat-scale, 0));
     transform-origin: left center;

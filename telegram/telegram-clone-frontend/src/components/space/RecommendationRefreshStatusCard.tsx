@@ -18,6 +18,13 @@ const STATUS_LABELS: Record<RecommendationDailyRefreshStatus, string> = {
     unknown: 'unknown',
 };
 
+const HUMAN_STATUS_LABELS: Record<RecommendationDailyRefreshStatus, string> = {
+    success: '运行正常',
+    running: '刷新中',
+    failed: '任务异常',
+    unknown: '待同步',
+};
+
 export const RecommendationRefreshStatusCard: React.FC<RecommendationRefreshStatusCardProps> = ({
     status,
     loading,
@@ -33,12 +40,16 @@ export const RecommendationRefreshStatusCard: React.FC<RecommendationRefreshStat
                     <SparkIcon />
                     推荐系统状态
                 </h2>
-                <span className={`space-page__status-pill is-${state}`}>{STATUS_LABELS[state]}</span>
+                <span className={`space-page__status-pill is-${state}`} title={`状态码: ${STATUS_LABELS[state]}`}>
+                    <span className="space-page__status-dot" aria-hidden="true" />
+                    <span className="space-page__status-human">{HUMAN_STATUS_LABELS[state]}</span>
+                    <span className="space-page__status-code">{STATUS_LABELS[state]}</span>
+                </span>
             </div>
 
             {loading && !status && (
                 <div className="space-page__recommendation-status-skeleton" aria-label="推荐系统状态加载中">
-                    {Array.from({ length: 6 }).map((_, index) => (
+                    {Array.from({ length: 4 }).map((_, index) => (
                         <div className="space-page__recommendation-status-row" key={`refresh-status-skeleton-${index}`}>
                             <Skeleton className="space-page__skeleton-line is-short" />
                             <Skeleton className="space-page__skeleton-line" />
@@ -60,42 +71,54 @@ export const RecommendationRefreshStatusCard: React.FC<RecommendationRefreshStat
 
             {status && (
                 <div className="space-page__recommendation-status-body">
-                    <MetricRow
-                        label="最近刷新时间"
-                        value={formatUtcTimestamp(status.lastRefreshAt)}
-                    />
-                    <MetricRow
-                        label="最新任务状态"
-                        value={STATUS_LABELS[status.status]}
-                    />
-                    <MetricRow
-                        label="用户向量刷新"
-                        value={`${status.users.refreshed}/${status.users.registered}`}
-                        ratio={ratio(status.users.refreshed, status.users.registered)}
-                    />
-                    <MetricRow
-                        label="用户 dense 向量兼容率"
-                        value={formatPercent(status.users.compatibleDenseVectorRatio)}
-                        ratio={status.users.compatibleDenseVectorRatio}
-                    />
-                    <MetricRow
-                        label="RealGraph 预测刷新"
-                        value={`${status.realGraph.predicted}/${status.realGraph.edges}`}
-                        ratio={ratio(status.realGraph.predicted, status.realGraph.edges)}
-                    />
-                    <MetricRow
-                        label="Post 特征快照刷新"
-                        value={String(status.posts.refreshed)}
-                        ratio={ratio(status.posts.refreshed, status.posts.snapshots)}
-                    />
-                    <MetricRow
-                        label="导出 artifact"
-                        value={`${status.artifacts.usersExported} users / ${status.artifacts.postsExported} posts`}
-                    />
-                    <MetricRow
-                        label="下一次自动刷新"
-                        value={status.schedule.label}
-                    />
+                    {/* Apple Bento 2x2 核心覆盖率指标网格 */}
+                    <div className="space-page__recommendation-bento">
+                        <BentoMetricTile
+                            label="用户向量刷新"
+                            value={`${status.users.refreshed}/${status.users.registered}`}
+                            ratio={ratio(status.users.refreshed, status.users.registered)}
+                        />
+                        <BentoMetricTile
+                            label="用户 dense 向量兼容率"
+                            value={formatPercent(status.users.compatibleDenseVectorRatio)}
+                            ratio={status.users.compatibleDenseVectorRatio}
+                        />
+                        <BentoMetricTile
+                            label="RealGraph 预测刷新"
+                            value={`${status.realGraph.predicted}/${status.realGraph.edges}`}
+                            ratio={ratio(status.realGraph.predicted, status.realGraph.edges)}
+                        />
+                        <BentoMetricTile
+                            label="Post 特征快照刷新"
+                            value={String(status.posts.refreshed)}
+                            ratio={ratio(status.posts.refreshed, status.posts.snapshots)}
+                        />
+                    </div>
+
+                    {/* 底部紧凑遥测明细条 */}
+                    <div className="space-page__recommendation-meta-list">
+                        <div className="space-page__recommendation-meta-row">
+                            <span className="space-page__recommendation-status-label">最近刷新时间</span>
+                            <span className="space-page__recommendation-meta-time">
+                                <span className="space-page__recommendation-friendly-time">
+                                    {formatFriendlyTimestamp(status.lastRefreshAt)}
+                                </span>
+                                <span className="space-page__recommendation-iso">
+                                    {formatUtcTimestamp(status.lastRefreshAt)}
+                                </span>
+                            </span>
+                        </div>
+                        <div className="space-page__recommendation-meta-row">
+                            <span className="space-page__recommendation-status-label">导出 artifact</span>
+                            <span className="space-page__recommendation-status-value">
+                                {`${status.artifacts.usersExported} users / ${status.artifacts.postsExported} posts`}
+                            </span>
+                        </div>
+                        <div className="space-page__recommendation-meta-row">
+                            <span className="space-page__recommendation-status-label">下一次自动刷新</span>
+                            <span className="space-page__recommendation-status-value">{status.schedule.label}</span>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
@@ -108,12 +131,10 @@ interface MetricRowProps {
     ratio?: number;
 }
 
-const MetricRow: React.FC<MetricRowProps> = ({ label, value, ratio: progressRatio }) => (
-    <div className="space-page__recommendation-status-row">
-        <div className="space-page__recommendation-status-copy">
-            <span className="space-page__recommendation-status-label">{label}</span>
-            <span className="space-page__recommendation-status-value">{value}</span>
-        </div>
+const BentoMetricTile: React.FC<MetricRowProps> = ({ label, value, ratio: progressRatio }) => (
+    <div className="space-page__recommendation-bento-card space-page__recommendation-status-row">
+        <span className="space-page__recommendation-bento-label">{label}</span>
+        <span className="space-page__recommendation-bento-value">{value}</span>
         {typeof progressRatio === 'number' && (
             <div className="space-page__recommendation-status-bar" aria-hidden="true">
                 <div
@@ -126,6 +147,18 @@ const MetricRow: React.FC<MetricRowProps> = ({ label, value, ratio: progressRati
         )}
     </div>
 );
+
+function formatFriendlyTimestamp(value: string | null): string {
+    if (!value) return '待同步';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
 
 function formatUtcTimestamp(value: string | null): string {
     if (!value) return '暂无记录';

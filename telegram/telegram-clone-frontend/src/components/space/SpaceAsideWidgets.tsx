@@ -116,9 +116,11 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
                 {trends.length === 0 && !loadingAside && !asideError && (
                     <div className="space-page__empty-state">暂无趋势话题</div>
                 )}
-                {trends.map((trend) => {
+                {trends.map((trend, index) => {
                     const trendLabel = trend.displayName?.trim() || `#${trend.tag}`;
                     const trendCategory = trend.kind === 'news_event' ? '新闻 · 热门' : '话题 · 热门';
+                    const rankText = String(index + 1).padStart(2, '0');
+                    const heatPercent = Math.round(Math.max(0, Math.min(100, trend.heat)));
                     return (
                         <div
                             className="space-page__trend-item"
@@ -135,7 +137,11 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
                             }}
                         >
                             <div className="space-page__trend-info">
-                                <span className="space-page__trend-category">{trendCategory}</span>
+                                <div className="space-page__trend-top">
+                                    <span className="space-page__trend-rank">{rankText}</span>
+                                    <span className="space-page__trend-category">{trendCategory}</span>
+                                    <span className="space-page__trend-heat-badge">{heatPercent}% 热度</span>
+                                </div>
                                 <span className="space-page__trend-name">{trendLabel}</span>
                                 <span className="space-page__trend-posts">{trend.count} 条相关动态</span>
                             </div>
@@ -144,7 +150,7 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
                                     <div
                                         className="space-page__heatbar-fill"
                                         style={{
-                                            '--heat-scale': String(Math.max(0, Math.min(100, trend.heat)) / 100),
+                                            '--heat-scale': String(heatPercent / 100),
                                         } as React.CSSProperties}
                                     />
                                 </div>
