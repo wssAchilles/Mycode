@@ -51,8 +51,7 @@ export const useAuthStore = create<AuthState>()(
 
             // 登录
             login: (user, accessToken, refreshToken) => {
-                authStorage.setTokens(accessToken, refreshToken);
-                authStorage.setUser(user);
+                authStorage.setSession(user, accessToken, refreshToken);
 
                 set({
                     user,

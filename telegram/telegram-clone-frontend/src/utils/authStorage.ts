@@ -246,6 +246,18 @@ export const authStorage = {
   getUser(): User | null {
     return resolveSnapshot()?.user ?? null;
   },
+  setSession(user: User, accessToken: string, refreshToken: string) {
+    if (!isBrowser || !PRIMARY) return;
+    const snapshot: AuthSnapshot = { accessToken, refreshToken, user };
+    if (!isUserTokenConsistent(snapshot)) {
+      clearPrimary();
+      clearSecondary();
+      return;
+    }
+    writePrimarySnapshot(snapshot);
+    persistSecondaryFromPrimary();
+    emitTokensUpdated({ accessToken, refreshToken });
+  },
   setTokens(accessToken: string, refreshToken: string) {
     if (!isBrowser || !PRIMARY) return;
     try {

@@ -210,8 +210,7 @@ export const authAPI = {
       // 后端返回 { success: true, data: { message, user, tokens } }
       const { user, tokens } = response.data.data;
       const normalizedUser = authAPI.normalizeUser(user);
-      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
-      authStorage.setUser(normalizedUser);
+      authStorage.setSession(normalizedUser, tokens.accessToken, tokens.refreshToken);
 
       return { ...response.data.data, user: normalizedUser };
     } catch (error: unknown) {
@@ -235,8 +234,7 @@ export const authAPI = {
       // 后端返回 { success: true, data: { message, user, tokens } }
       const { user, tokens } = response.data.data;
       const normalizedUser = authAPI.normalizeUser(user);
-      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
-      authStorage.setUser(normalizedUser);
+      authStorage.setSession(normalizedUser, tokens.accessToken, tokens.refreshToken);
 
       return { ...response.data.data, user: normalizedUser };
     } catch (error: unknown) {
