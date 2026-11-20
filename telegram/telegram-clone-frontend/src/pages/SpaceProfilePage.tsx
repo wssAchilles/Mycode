@@ -41,6 +41,7 @@ const SpaceProfilePage: React.FC = () => {
     const [undoingNegativeFeedbackId, setUndoingNegativeFeedbackId] = useState<string | null>(null);
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
     const [pinnedPosts, setPinnedPosts] = useState<PostData[]>([]);
+    const pinningIdsRef = useRef<Set<string>>(new Set());
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
@@ -334,31 +335,73 @@ const SpaceProfilePage: React.FC = () => {
     };
 
     const handlePinToggle = async (postId: string, nextPinned: boolean) => {
+        if (pinningIdsRef.current.has(postId)) return;
+        pinningIdsRef.current.add(postId);
+
+        const prevPinnedSnapshot = pinnedPosts;
+        const prevPostsSnapshot = posts;
+        const targetPost =
+            pinnedPosts.find((post) => post.id === postId) ??
+            posts.find((post) => post.id === postId);
+
+        // 0ms 乐观更新：点击即刻完成位置迁移，消除等待后端 RTT 造成的卡顿撕裂感
+        if (targetPost) {
+            if (nextPinned) {
+                const optimisticPinned: PostData = { ...targetPost, isPinned: true };
+                setPinnedPosts((prev) => [optimisticPinned, ...prev.filter((post) => post.id !== postId)]);
+                setPosts((prev) => prev.filter((post) => post.id !== postId));
+                showToast('已置顶到主页', 'success');
+            } else {
+                const optimisticUnpinned: PostData = { ...targetPost, isPinned: false };
+                setPinnedPosts((prev) => prev.filter((post) => post.id !== postId));
+                setPosts((prev) => {
+                    const exists = prev.some((post) => post.id === postId);
+                    return exists
+                        ? prev.map((post) => (post.id === postId ? optimisticUnpinned : post))
+                        : [optimisticUnpinned, ...prev];
+                });
+                showToast('已取消置顶', 'info');
+            }
+        }
+
         try {
             if (nextPinned) {
                 const updated = await spaceAPI.pinPost(postId);
                 const pinnedItem: PostData = { ...updated, isPinned: true };
-                setPinnedPosts((prev) => [pinnedItem, ...prev.filter((post) => post.id !== postId)]);
-                setPosts((prev) => prev.filter((post) => post.id !== postId));
-                showToast('已置顶到主页', 'success');
+                setPinnedPosts((prev) => {
+                    const hasItem = prev.some((post) => post.id === postId);
+                    return hasItem
+                        ? prev.map((post) => (post.id === postId ? pinnedItem : post))
+                        : [pinnedItem, ...prev];
+                });
+                if (!targetPost) {
+                    setPosts((prev) => prev.filter((post) => post.id !== postId));
+                    showToast('已置顶到主页', 'success');
+                }
             } else {
                 const updated = await spaceAPI.unpinPost(postId);
                 const unpinnedItem: PostData = { ...updated, isPinned: false };
-                setPinnedPosts((prev) => prev.filter((post) => post.id !== postId));
                 setPosts((prev) => {
                     const exists = prev.some((post) => post.id === postId);
-                    if (exists) {
-                        return prev.map((post) => (post.id === postId ? unpinnedItem : post));
-                    }
-                    return [unpinnedItem, ...prev];
+                    return exists
+                        ? prev.map((post) => (post.id === postId ? unpinnedItem : post))
+                        : [unpinnedItem, ...prev];
                 });
-                showToast('已取消置顶', 'info');
+                if (!targetPost) {
+                    setPinnedPosts((prev) => prev.filter((post) => post.id !== postId));
+                    showToast('已取消置顶', 'info');
+                }
             }
         } catch (err: unknown) {
             console.error('置顶操作失败:', err);
+            // 失败时精准回滚到操作前列表状态
+            setPinnedPosts(prevPinnedSnapshot);
+            setPosts(prevPostsSnapshot);
             const axiosMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
             const msg = axiosMsg || (err instanceof Error ? err.message : '置顶操作失败，请稍后再试');
             showToast(msg, 'error');
+        } finally {
+            pinningIdsRef.current.delete(postId);
         }
     };
 

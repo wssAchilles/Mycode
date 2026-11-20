@@ -223,6 +223,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         setFailedMediaUrls({});
         setAvatarFailed(false);
     }, [post.id, post.author.avatarUrl]);
+
+    useEffect(() => {
+        setIsPinned(Boolean(post.isPinned));
+    }, [post.id, post.isPinned]);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
     const analytics = useAnalytics({ source: post.recallSource });
     const hasActionIdentity = post.positionContractVersion === 'served_position_1_based_v1'
