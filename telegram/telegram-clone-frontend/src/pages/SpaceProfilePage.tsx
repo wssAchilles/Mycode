@@ -40,7 +40,7 @@ const SpaceProfilePage: React.FC = () => {
     const [negativeFeedbackError, setNegativeFeedbackError] = useState<string | null>(null);
     const [undoingNegativeFeedbackId, setUndoingNegativeFeedbackId] = useState<string | null>(null);
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
-    const [pinnedPost, setPinnedPost] = useState<PostData | null>(null);
+    const [pinnedPosts, setPinnedPosts] = useState<PostData[]>([]);
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
@@ -63,12 +63,15 @@ const SpaceProfilePage: React.FC = () => {
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
 
-    const loadPosts = async (reset: boolean = false, pinnedId?: string | null) => {
+    const loadPosts = async (reset: boolean = false, pinnedIds?: string[]) => {
         if (!id) return;
         setLoadingPosts(true);
         try {
             const result = await spaceAPI.getUserPosts(id, 20, reset ? undefined : cursor);
-            const filtered = pinnedId ? result.posts.filter((post) => post.id !== pinnedId) : result.posts;
+            const pinnedIdSet = new Set(pinnedIds ?? pinnedPosts.map((post) => post.id));
+            const filtered = pinnedIdSet.size > 0
+                ? result.posts.filter((post) => !pinnedIdSet.has(post.id))
+                : result.posts;
             setPosts((prev) => (reset ? filtered : [...prev, ...filtered]));
             setHasMore(result.hasMore);
             setCursor(result.nextCursor);
@@ -151,8 +154,13 @@ const SpaceProfilePage: React.FC = () => {
                 const profileData = await spaceAPI.getUserProfile(id);
                 if (!mounted) return;
                 setProfile(profileData);
-                setPinnedPost(profileData.pinnedPost || null);
-                await loadPosts(true, profileData.pinnedPost?.id || null);
+                const resolvedPinned = profileData.pinnedPosts?.length
+                    ? profileData.pinnedPosts
+                    : profileData.pinnedPost
+                        ? [profileData.pinnedPost]
+                        : [];
+                setPinnedPosts(resolvedPinned);
+                await loadPosts(true, resolvedPinned.map((post) => post.id));
             } catch (err: unknown) {
                 if (!mounted) return;
                 setError(err instanceof Error ? err.message : '加载失败');
@@ -328,26 +336,29 @@ const SpaceProfilePage: React.FC = () => {
     const handlePinToggle = async (postId: string, nextPinned: boolean) => {
         try {
             if (nextPinned) {
-                const previousPinned = pinnedPost;
                 const updated = await spaceAPI.pinPost(postId);
-                setPinnedPost(updated);
-                setPosts((prev) => {
-                    const withoutNew = prev.filter((post) => post.id !== postId);
-                    if (previousPinned && previousPinned.id !== postId) {
-                        return [{ ...previousPinned, isPinned: false }, ...withoutNew];
-                    }
-                    return withoutNew;
-                });
-                showToast('已设为置顶动态', 'success');
+                const pinnedItem: PostData = { ...updated, isPinned: true };
+                setPinnedPosts((prev) => [pinnedItem, ...prev.filter((post) => post.id !== postId)]);
+                setPosts((prev) => prev.filter((post) => post.id !== postId));
+                showToast('已置顶到主页', 'success');
             } else {
                 const updated = await spaceAPI.unpinPost(postId);
-                setPinnedPost(null);
-                setPosts((prev) => [{ ...updated, isPinned: false }, ...prev]);
+                const unpinnedItem: PostData = { ...updated, isPinned: false };
+                setPinnedPosts((prev) => prev.filter((post) => post.id !== postId));
+                setPosts((prev) => {
+                    const exists = prev.some((post) => post.id === postId);
+                    if (exists) {
+                        return prev.map((post) => (post.id === postId ? unpinnedItem : post));
+                    }
+                    return [unpinnedItem, ...prev];
+                });
                 showToast('已取消置顶', 'info');
             }
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('置顶操作失败:', err);
-            showToast('置顶操作失败，请稍后再试', 'error');
+            const axiosMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+            const msg = axiosMsg || (err instanceof Error ? err.message : '置顶操作失败，请稍后再试');
+            showToast(msg, 'error');
         }
     };
 
@@ -373,7 +384,7 @@ const SpaceProfilePage: React.FC = () => {
 
     const handleCommentAdded = (postId: string) => {
         setPosts((prev) => prev.map((post) => post.id === postId ? { ...post, commentCount: post.commentCount + 1 } : post));
-        setPinnedPost((prev) => prev && prev.id === postId ? { ...prev, commentCount: prev.commentCount + 1 } : prev);
+        setPinnedPosts((prev) => prev.map((post) => post.id === postId ? { ...post, commentCount: post.commentCount + 1 } : post));
         setLikes((prev) => prev.map((post) => post.id === postId ? { ...post, commentCount: post.commentCount + 1 } : post));
     };
 
@@ -408,7 +419,10 @@ const SpaceProfilePage: React.FC = () => {
     const isLikesTab = activeTab === 'likes';
     const isDislikesTab = activeTab === 'dislikes';
     const visiblePosts = isMediaTab ? mediaPosts : posts;
-    const showPinned = !isLikesTab && !isDislikesTab && (activeTab === 'posts' || (isMediaTab && pinnedPost?.media?.length));
+    const visiblePinnedPosts = isMediaTab
+        ? pinnedPosts.filter((post) => post.media && post.media.length > 0)
+        : pinnedPosts;
+    const showPinned = !isLikesTab && !isDislikesTab && (activeTab === 'posts' || (isMediaTab && visiblePinnedPosts.length > 0));
 
     useEffect(() => {
         if (activeTab !== 'likes') return;
@@ -681,38 +695,42 @@ const SpaceProfilePage: React.FC = () => {
                 {showPinned && (
                     <section className="space-profile__pinned">
                         <div className="space-profile__pinned-header">
-                            <h2>置顶动态</h2>
+                            <h2>置顶动态{visiblePinnedPosts.length > 0 ? ` · ${visiblePinnedPosts.length}` : ''}</h2>
                             {isSelf && (
                                 <span className="space-profile__pinned-tip">
-                                    置顶后将展示在主页顶部
+                                    支持多条置顶，展示在主页顶部
                                 </span>
                             )}
                         </div>
-                        {pinnedPost ? (
-                            <SpacePost
-                                key={pinnedPost.id}
-                                post={pinnedPost}
-                                onLike={(postId) => spaceAPI.likePost(postId)}
-                                onUnlike={(postId) => spaceAPI.unlikePost(postId)}
-                                onComment={(postId) => {
-                                    setCommentPost(pinnedPost.id === postId ? pinnedPost : null);
-                                }}
-                                onRepost={(postId) => spaceAPI.repostPost(postId)}
-                                onUnrepost={(postId) => spaceAPI.unrepostPost(postId)}
-                                onQuote={(postId, quoteContent) => spaceAPI.createPost(quoteContent, undefined, {
-                                    quotePostId: postId,
-                                    quoteContent,
-                                })}
-                                onShare={(postId) => {
-                                    navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
-                                    showToast('链接已复制到剪贴板', 'success');
-                                }}
-                                onClick={(postId) => navigate(`/space/post/${postId}`)}
-                                onAuthorClick={(authorId) => navigate(`/space/user/${authorId}`)}
-                                showRecommendationReason={false}
-                                showPinAction={isSelf}
-                                onPinToggle={handlePinToggle}
-                            />
+                        {visiblePinnedPosts.length > 0 ? (
+                            <div className="space-profile__post-list">
+                                {visiblePinnedPosts.map((pinnedPost) => (
+                                    <SpacePost
+                                        key={pinnedPost.id}
+                                        post={pinnedPost}
+                                        onLike={(postId) => spaceAPI.likePost(postId)}
+                                        onUnlike={(postId) => spaceAPI.unlikePost(postId)}
+                                        onComment={(postId) => {
+                                            setCommentPost(pinnedPost.id === postId ? pinnedPost : null);
+                                        }}
+                                        onRepost={(postId) => spaceAPI.repostPost(postId)}
+                                        onUnrepost={(postId) => spaceAPI.unrepostPost(postId)}
+                                        onQuote={(postId, quoteContent) => spaceAPI.createPost(quoteContent, undefined, {
+                                            quotePostId: postId,
+                                            quoteContent,
+                                        })}
+                                        onShare={(postId) => {
+                                            navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
+                                            showToast('链接已复制到剪贴板', 'success');
+                                        }}
+                                        onClick={(postId) => navigate(`/space/post/${postId}`)}
+                                        onAuthorClick={(authorId) => navigate(`/space/user/${authorId}`)}
+                                        showRecommendationReason={false}
+                                        showPinAction={isSelf}
+                                        onPinToggle={handlePinToggle}
+                                    />
+                                ))}
+                            </div>
                         ) : (
                             <div className="space-profile__empty space-profile__empty--pinned">
                                 还没有置顶动态
@@ -842,7 +860,7 @@ const SpaceProfilePage: React.FC = () => {
                     {!isLikesTab && !isDislikesTab && hasMore && (
                         <button
                             className="space-profile__more"
-                            onClick={() => loadPosts(false, pinnedPost?.id || null)}
+                            onClick={() => loadPosts(false, pinnedPosts.map((post) => post.id))}
                             disabled={loadingPosts}
                         >
                             {loadingPosts ? '加载中...' : '加载更多'}

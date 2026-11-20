@@ -271,6 +271,7 @@ export interface UserProfile {
     };
     isFollowed: boolean;
     pinnedPost?: PostData | null;
+    pinnedPosts?: PostData[];
 }
 
 export type NegativeFeedbackSignalType =
@@ -326,8 +327,9 @@ export interface NegativeFeedbackResponse {
     summary: NegativeFeedbackSummary;
 }
 
-interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
+interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost' | 'pinnedPosts'> {
     pinnedPost?: PostResponse | null;
+    pinnedPosts?: PostResponse[];
 }
 
 const mapRecallSource = (
@@ -1131,11 +1133,17 @@ export const spaceAPI = {
     getUserProfile: async (userId: string): Promise<UserProfile> => {
         const response = await apiClient.get<{ profile: UserProfileResponse }>(`/api/space/users/${userId}/profile`);
         const profile = response.data.profile;
+        const transformedPinnedList = Array.isArray(profile.pinnedPosts)
+            ? profile.pinnedPosts.map(transformPost)
+            : profile.pinnedPost
+                ? [transformPost(profile.pinnedPost)]
+                : [];
         return {
             ...profile,
             avatarUrl: withApiBase(normalizeSpaceMediaUrl(profile.avatarUrl)) ?? profile.avatarUrl,
             coverUrl: withApiBase(normalizeSpaceMediaUrl(profile.coverUrl)),
-            pinnedPost: profile.pinnedPost ? transformPost(profile.pinnedPost) : null,
+            pinnedPost: transformedPinnedList[0] ?? null,
+            pinnedPosts: transformedPinnedList,
         };
     },
 
