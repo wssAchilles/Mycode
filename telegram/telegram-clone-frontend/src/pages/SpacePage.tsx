@@ -21,6 +21,7 @@ import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon } from '../components/icons/SpaceIcons';
+import { openCommandPalette } from '../components/command/CommandPalette';
 import { spaceAPI, type RecommendedUser, type RecommendationDailyRefreshOps, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
 import { useAnalytics } from '../hooks/useAnalytics';
@@ -74,6 +75,14 @@ export const SpacePage: React.FC = () => {
             asideMountedRef.current = false;
         };
     }, []);
+
+    // 同步 URL 查询参数（如通过全局 ⌘K 命令面板跳转到 ?section=explore）
+    useEffect(() => {
+        const sectionParam = new URLSearchParams(location.search).get('section');
+        if (sectionParam === 'explore' || sectionParam === 'notifications' || sectionParam === 'home') {
+            setActiveSection(sectionParam);
+        }
+    }, [location.search]);
 
     useEffect(() => {
         asideWidthRef.current = asideWidth;
@@ -243,6 +252,9 @@ export const SpacePage: React.FC = () => {
             refreshFeed();
             scrollContentToTop('smooth');
             setActiveSection('home');
+            if (location.search) {
+                navigate('/space', { replace: true });
+            }
         } else {
             if (path === 'explore') {
                 setActiveSection('explore');
@@ -379,6 +391,18 @@ export const SpacePage: React.FC = () => {
                     </div>
                     <span className="space-page__brand-text">Space</span>
                 </div>
+
+                {/* Apple Spotlight 快捷命令触发胶囊 */}
+                <button
+                    type="button"
+                    className="space-page__spotlight-trigger"
+                    onClick={openCommandPalette}
+                    aria-label="打开全局指令面板（⌘K）"
+                >
+                    <SearchIcon />
+                    <span className="space-page__spotlight-label">快速跳转</span>
+                    <kbd className="space-page__spotlight-kbd">⌘K</kbd>
+                </button>
 
                 <nav className="space-page__nav">
                     <button

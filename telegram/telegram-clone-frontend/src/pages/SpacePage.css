@@ -114,6 +114,62 @@
     font-family: var(--font-display);
 }
 
+/* Apple Spotlight 凹槽快捷入口胶囊 */
+.space-page__spotlight-trigger {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 236px;
+    height: 36px;
+    padding: 0 10px 0 12px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(15, 20, 25, 0.055);
+    background: rgba(15, 20, 25, 0.04);
+    color: #536471;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.space-page__spotlight-trigger:hover {
+    background: rgba(15, 20, 25, 0.065);
+    border-color: rgba(15, 20, 25, 0.09);
+    color: #0F1419;
+}
+
+.space-page__spotlight-trigger:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
+.space-page__spotlight-trigger svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+}
+
+.space-page__spotlight-label {
+    flex: 1;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.space-page__spotlight-kbd {
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(15, 20, 25, 0.08);
+    background: rgba(255, 255, 255, 0.88);
+    color: #64748B;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.15;
+    box-shadow: 0 1px 1px rgba(15, 20, 25, 0.03);
+}
+
 /* 导航列表 */
 .space-page__nav {
     display: flex;
