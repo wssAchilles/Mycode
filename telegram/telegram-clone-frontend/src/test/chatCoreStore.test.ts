@@ -266,4 +266,38 @@ describe('ChatCoreStore', () => {
     // g2 仅本人读过，纠正早期误标的已读状态
     expect(groupMsgs[1]).toMatchObject({ status: 'delivered', readCount: 0 });
   });
+
+  it('对端 readReceipt 先于我方消息回显到达时，mergeMessages 自动保持已读状态且不误标对端消息', () => {
+    const store = new ChatCoreStore(10);
+    const chatId = 'p:me:you';
+    store.setCurrentUserId('me');
+
+    // 回显消息尚未入库前，对方已发来 readReceipt（seq=5）
+    store.applyReadReceipt(chatId, 5, 1, 'me', 'you');
+
+    const myMsg = msg({
+      id: 'm5',
+      chatId,
+      senderId: 'me',
+      senderUsername: 'me',
+      seq: 5,
+      content: 'hello',
+      status: 'delivered',
+    });
+    const peerMsg = msg({
+      id: 'm4',
+      chatId,
+      senderId: 'you',
+      senderUsername: 'you',
+      seq: 4,
+      content: 'hi',
+      status: 'delivered',
+    });
+
+    store.mergeMessages(chatId, false, [peerMsg, myMsg]);
+    const messages = store.getOrCreate(chatId, false).messages;
+    const byId = new Map(messages.map((m) => [m.id, m]));
+    expect(byId.get('m5')?.status).toBe('read');
+    expect(byId.get('m4')?.status).toBe('delivered');
+  });
 });

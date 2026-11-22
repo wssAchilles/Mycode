@@ -118,13 +118,33 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const touchEntityCache = (raw: Message) => {
     if (!raw?.id) return;
 
+    const existing = entityCache.get(raw.id);
     const deferred = deferredEntityUpdates.get(raw.id);
     let next = raw;
+
+    // 防止已读状态被后到的 delivered/回显 补丁降级回单勾
+    if (existing?.status === 'read' && next.status !== 'read') {
+      next = {
+        ...next,
+        status: 'read',
+        readCount: Math.max(existing.readCount ?? 0, next.readCount ?? 0) || existing.readCount,
+      };
+    } else if (
+      existing
+      && typeof existing.readCount === 'number'
+      && existing.readCount > (next.readCount ?? 0)
+    ) {
+      next = {
+        ...next,
+        readCount: existing.readCount,
+      };
+    }
+
     if (deferred) {
       next = {
-        ...raw,
-        status: deferred.status ?? raw.status,
-        readCount: deferred.readCount ?? raw.readCount,
+        ...next,
+        status: next.status === 'read' ? 'read' : (deferred.status ?? next.status),
+        readCount: Math.max(next.readCount ?? 0, deferred.readCount ?? 0) || deferred.readCount || next.readCount,
       };
       deferredEntityUpdates.delete(raw.id);
     }

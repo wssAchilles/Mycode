@@ -261,4 +261,62 @@ describe('chatCore.worker lifecycle & sync guards', () => {
     await api.shutdown();
     expect(syncStateCallCount).toBe(1);
   });
+
+  it('does not block markChatRead or flip authBlocked when background prefetch receives 403 Forbidden', async () => {
+    const readHttpCalls: string[] = [];
+    const { loadHotChatCandidates } = await import('../core/chat/persist/idb');
+    vi.mocked(loadHotChatCandidates).mockResolvedValueOnce([
+      { chatId: 'g:forbidden-group', isGroup: true, lastTs: Date.now() },
+      { chatId: 'p:other-a:other-b', isGroup: false, lastTs: Date.now() },
+    ]);
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('forbidden-group')) {
+        return new Response(JSON.stringify({ success: false, message: 'Forbidden' }), { status: 403 });
+      }
+      if (url.includes('/api/messages/chat/p%3Au-1%3Au-2/read')) {
+        readHttpCalls.push(url);
+        return new Response(JSON.stringify({ success: true, data: { chatId: 'p:u-1:u-2', seq: 5, readCount: 1 } }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ success: true, data: {} }), { status: 200 });
+    }) as typeof fetch;
+
+    await import('../core/workers/chatCore.worker');
+    const api = workerTestState.exposedApi!;
+
+    await api.init({
+      userId: 'u-1',
+      accessToken: 'token-1',
+      refreshToken: 'refresh-1',
+      apiBaseUrl: 'https://api.example.com',
+      socketUrl: 'https://api.example.com',
+      enableWorkerSocket: true,
+      runtimeOverrides: {
+        workerSyncFallback: false,
+        wasmRequired: false,
+      },
+    });
+
+    if (workerTestState.mockSocket) {
+      workerTestState.mockSocket.connected = true;
+    }
+    triggerSocketEvent('connect');
+    triggerSocketEvent('authenticated');
+
+    // 等待预取触发 403
+    await vi.advanceTimersByTimeAsync(100);
+
+    await api.markChatRead('p:u-1:u-2', 5);
+
+    const runtime = await api.getRuntimeInfo();
+    expect(runtime.sync.authBlocked).toBe(false);
+    expect(workerTestState.mockSocket?.emit).toHaveBeenCalledWith('readChat', {
+      chatId: 'p:u-1:u-2',
+      seq: 5,
+    });
+    expect(readHttpCalls).toHaveLength(1);
+  });
 });

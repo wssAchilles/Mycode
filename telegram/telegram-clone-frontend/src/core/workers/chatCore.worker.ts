@@ -1412,7 +1412,8 @@ async function fetchJson(url: string, init: RequestInit = {}) {
 }
 
 function isAuthErrorStatus(status: number) {
-  return status === 401 || status === 403;
+  // 仅将 401 视为令牌失效，群组/会话无权访问返回的 403 不得锁死全局同步与已读上报状态
+  return status === 401;
 }
 
 function unwrapSuccessData<T = Record<string, unknown>>(json: Record<string, unknown> | null | undefined): T {
@@ -2069,7 +2070,7 @@ async function flushPendingReadReceipts(): Promise<void> {
       if (!latestSeq || latestSeq !== seq) continue;
 
       let delivered = false;
-      if (workerSocketEnabled && workerSocket?.connected) {
+      if (workerSocketEnabled && socketBridge.isSocketConnected()) {
         try {
           await emitWorkerSocket('readChat', { chatId, seq });
         } catch {
@@ -2318,6 +2319,18 @@ function parsePrivateChatOtherUserId(chatId: string, me: string): string | null 
   if (a === me) return b;
   if (b === me) return a;
   return null;
+}
+
+function isChatCandidateOwnedByCurrentUser(chatId: string, isGroup: boolean): boolean {
+  if (!chatId) return false;
+  if (isGroup || chatId.startsWith('g:')) return true;
+  if (chatId.startsWith('p:')) {
+    if (!currentUserId) return false;
+    const otherId = parsePrivateChatOtherUserId(chatId, currentUserId);
+    // 过滤非当前账号的私聊会话以及历史异常生成的自聊 p:self:self
+    return Boolean(otherId && otherId !== currentUserId);
+  }
+  return true;
 }
 
 function chatListIdFromChatId(chatId: string, isGroup: boolean): string | null {
@@ -2763,6 +2776,8 @@ async function warmPrefetchFromNetwork(
     if (isAuthErrorMessage(err)) {
       syncAuthError = true;
       setSyncPhase('auth_error', 'auth');
+    } else {
+      dropPrefetchTarget(chatId);
     }
   } finally {
     prefetchInFlight.delete(chatId);
@@ -2791,7 +2806,9 @@ function enqueueNetworkPrefetch(chatId: string, isGroup: boolean, highPriority =
 }
 
 async function prefetchChatsInternal(targets: ChatPrefetchTarget[]): Promise<void> {
-  const normalized = normalizePrefetchTargets(targets);
+  const normalized = normalizePrefetchTargets(targets).filter((target) =>
+    isChatCandidateOwnedByCurrentUser(target.chatId, target.isGroup),
+  );
   if (!normalized.length) return;
 
   await Promise.all(
@@ -2833,7 +2850,9 @@ async function bootstrapHotChatPrefetch(): Promise<void> {
   try {
     const hot = await loadHotChatCandidates(BOOT_HOT_CHAT_PREFETCH_LIMIT);
     if (!hot.length) return;
-    candidates = hot.map((item) => ({ chatId: item.chatId, isGroup: item.isGroup }));
+    candidates = hot
+      .filter((item) => isChatCandidateOwnedByCurrentUser(item.chatId, item.isGroup))
+      .map((item) => ({ chatId: item.chatId, isGroup: item.isGroup }));
   } catch {
     return;
   }
@@ -3007,6 +3026,18 @@ async function ingestMessagesInternal(messages: Message[]) {
     // Only patch active chat view.
     if (chatId === store.activeChatId && addedForPatch.length) {
       emitPatch({ kind: 'append', chatId, loadSeq: store.activeLoadSeq, messages: addedForPatch });
+      if (currentUserId) {
+        let maxIncomingFromOtherSeq = 0;
+        for (const m of addedForPatch) {
+          if (m?.senderId && m.senderId !== currentUserId && typeof m.seq === 'number' && m.seq > maxIncomingFromOtherSeq) {
+            maxIncomingFromOtherSeq = m.seq;
+          }
+        }
+        // 在 Worker 内直接为当前激活会话收到的对方新消息入队已读，避免主线程视口虚拟化未覆盖时漏报 readChat
+        if (maxIncomingFromOtherSeq > 0) {
+          queuePendingReadReceipt(chatId, maxIncomingFromOtherSeq);
+        }
+      }
     }
     if (chatId === store.activeChatId && removedIds.length) {
       emitDelete(chatId, store.activeLoadSeq, removedIds);
@@ -3516,11 +3547,32 @@ const apiImpl: ChatCoreApi = {
   },
 
   async init(params: ChatCoreInit) {
+    const isUserSwitched = Boolean(currentUserId && currentUserId !== params.userId);
+    // 切换账号或重建会话时彻底重置连接、预取队列与同步认证错误标志，避免旧账号遗留状态锁死已读推送
+    detachWorkerSocket();
+    desiredJoinedRooms.clear();
+    socketBridge.clearPresenceSubscriptions();
+    stopReconnectGapRecover();
+    stopSyncLoop();
+    stopChatFetches();
+    store.clearAll();
+    searchService.clearAll();
+    prefetchInFlight.clear();
+    prefetchLastAt.clear();
+    prefetchQueue.length = 0;
+    prefetchQueued.clear();
+    if (isUserSwitched) {
+      subscribers.clear();
+    }
+    syncAuthError = false;
+    workerSocketAuthBlocked = false;
+
     apiBaseUrl = params.apiBaseUrl.replace(/\/$/, '');
     accessToken = params.accessToken;
     // Worker does not refresh tokens itself; main thread refreshes and calls `updateTokens`.
     void params.refreshToken;
     currentUserId = params.userId;
+    store.setCurrentUserId(params.userId);
     runtimePolicyProfile = params.runtimeOverrides?.policyProfile || 'baseline';
     emergencySafeModeEnabled = !!params.runtimeOverrides?.emergencySafeMode;
     runtimePolicyLocked = !!params.runtimeOverrides?.policyLocked;

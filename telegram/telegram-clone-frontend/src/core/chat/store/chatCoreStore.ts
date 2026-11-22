@@ -37,6 +37,7 @@ export class ChatCoreStore {
   private readonly chats: LruCache<string, ChatCacheState>;
   private seqMergeOps: SeqMergeOps | null = null;
   private onChatEvicted: ((chat: ChatCacheState) => void) | null = null;
+  private currentUserId: string | null = null;
 
   activeChatId: string | null = null;
   activeIsGroup = false;
@@ -44,6 +45,10 @@ export class ChatCoreStore {
 
   constructor(limit: number) {
     this.chats = new LruCache(limit);
+  }
+
+  setCurrentUserId(userId: string | null): void {
+    this.currentUserId = userId ? String(userId) : null;
   }
 
   setSeqMergeOps(ops: SeqMergeOps | null): void {
@@ -99,6 +104,39 @@ export class ChatCoreStore {
     return this.getOrCreate(this.activeChatId, this.activeIsGroup);
   }
 
+  private applyKnownReadWatermarksToMessage(chat: ChatCacheState, raw: Message): Message {
+    const seq = normalizePositiveSeq(raw?.seq);
+    if (seq === null) return raw;
+    if (this.currentUserId && raw.senderId !== this.currentUserId) return raw;
+
+    const isGroup = chat.isGroup || Boolean(raw.isGroupChat);
+    if (isGroup) {
+      const mappedCount = chat.memberReadSeq.size > 0
+        ? this.countReadersAtOrAbove(chat.memberReadSeq, seq)
+        : 0;
+      const fallbackCount = seq <= chat.readReceiptSeq ? chat.readReceiptReadCount : 0;
+      const candidateCount = Math.max(mappedCount, fallbackCount, raw.readCount ?? 0);
+      if (candidateCount > 0 && (raw.status !== 'read' || raw.readCount !== candidateCount)) {
+        return { ...raw, status: 'read', readCount: candidateCount };
+      }
+      return raw;
+    }
+
+    let maxPartnerSeq = chat.readReceiptSeq;
+    for (const [readerId, readerSeq] of chat.memberReadSeq.entries()) {
+      if (raw.senderId && readerId === raw.senderId) continue;
+      if (readerSeq > maxPartnerSeq) maxPartnerSeq = readerSeq;
+    }
+    // 未显式注入 currentUserId 时，跳过已知读者本人发出的消息
+    if (!this.currentUserId && raw.senderId && chat.memberReadSeq.has(raw.senderId) && maxPartnerSeq === chat.readReceiptSeq) {
+      return raw;
+    }
+    if (seq <= maxPartnerSeq && raw.status !== 'read') {
+      return { ...raw, status: 'read' };
+    }
+    return raw;
+  }
+
   replaceMessages(chatId: string, isGroup: boolean, messages: Message[]): { added: Message[] } {
     const chat = this.getOrCreate(chatId, isGroup);
     chat.isGroup = isGroup;
@@ -109,16 +147,14 @@ export class ChatCoreStore {
     chat.seqList = [];
     chat.minSeq = null;
     chat.maxSeq = null;
-    chat.readReceiptSeq = 0;
-    chat.readReceiptReadCount = 0;
-    chat.memberReadSeq.clear();
 
     const deduped: Message[] = [];
-    for (const m of messages) {
-      if (!m?.id) continue;
-      if (chat.ids.has(m.id)) continue;
-      const seq = normalizePositiveSeq(m.seq);
+    for (const rawMsg of messages) {
+      if (!rawMsg?.id) continue;
+      if (chat.ids.has(rawMsg.id)) continue;
+      const seq = normalizePositiveSeq(rawMsg.seq);
       if (seq !== null && chat.seqSet.has(seq)) continue;
+      const m = this.applyKnownReadWatermarksToMessage(chat, rawMsg);
       chat.ids.add(m.id);
       chat.entityById.set(m.id, m);
       if (seq !== null) chat.seqSet.add(seq);
@@ -167,11 +203,11 @@ export class ChatCoreStore {
     }
 
     const added: Message[] = [];
-    for (const m of incoming) {
-      if (!m?.id) continue;
-      if (chat.ids.has(m.id)) continue;
+    for (const rawMsg of incoming) {
+      if (!rawMsg?.id) continue;
+      if (chat.ids.has(rawMsg.id)) continue;
 
-      const seq = normalizePositiveSeq(m.seq);
+      const seq = normalizePositiveSeq(rawMsg.seq);
       if (seq !== null) {
         // Fast path for large batches: rely on wasm diff result when available.
         if (newSeqSet) {
@@ -181,6 +217,7 @@ export class ChatCoreStore {
         }
       }
 
+      const m = this.applyKnownReadWatermarksToMessage(chat, rawMsg);
       chat.ids.add(m.id);
       chat.entityById.set(m.id, m);
       if (seq !== null) chat.seqSet.add(seq);
@@ -431,11 +468,12 @@ export class ChatCoreStore {
     currentUserId: string,
     readerId?: string,
   ): Array<{ id: string; status?: Message['status']; readCount?: number }> {
-    const chat = this.chats.get(chatId);
-    if (!chat) return [];
-    if (typeof seq !== 'number' || seq <= 0) return [];
+    if (!chatId || typeof seq !== 'number' || seq <= 0) return [];
     // 忽略发送者本人或当前用户自己上报的已读回执
     if (readerId && currentUserId && readerId === currentUserId) return [];
+
+    // 即便会话尚未加载或已被 LRU 淘汰，仍保留已读水位供后续合入消息同步升级为已读
+    const chat = this.getOrCreate(chatId, chatId.startsWith('g:'));
 
     const normalizedReaderId = typeof readerId === 'string' && readerId.trim() ? readerId.trim() : '';
     let readerAdvanced = false;

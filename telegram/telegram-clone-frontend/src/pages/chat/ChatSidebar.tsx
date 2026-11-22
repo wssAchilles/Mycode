@@ -5,8 +5,9 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, messageAPI } from '../../services/apiClient';
+import { authAPI } from '../../services/apiClient';
 import { useChatStore } from '../../features/chat/store/chatStore';
+import { useMessageStore } from '../../features/chat/store/messageStore';
 import { Sidebar } from '../../components/layout';
 import { Avatar } from '../../components/common';
 import ChatListContainer from '../../features/chat/ChatListContainer';
@@ -64,7 +65,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         ? buildPrivateChatId(currentUser.id, chat.id)
                         : null;
                 if (durableChatId) {
-                    void messageAPI.markChatRead(durableChatId, chat.lastMessageSeq).catch(() => undefined);
+                    useMessageStore.getState().markChatRead(durableChatId, chat.lastMessageSeq);
                 }
             }
             if (chat.isGroup) {
