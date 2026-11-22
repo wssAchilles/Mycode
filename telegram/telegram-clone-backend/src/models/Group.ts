@@ -1,5 +1,6 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import { sequelize } from '../config/sequelize';
+import { isSafeGroupAvatarUrl } from '../schemas/groupSchemas';
 
 // 群组类型枚举
 export enum GroupType {
@@ -11,10 +12,10 @@ export enum GroupType {
 export interface IGroup {
   id: string;
   name: string;           // 群组名称
-  description?: string;   // 群组描述
+  description?: string | null;   // 群组描述
   ownerId: string;        // 群主用户 ID
   type: GroupType;        // 群组类型
-  avatarUrl?: string;     // 群组头像
+  avatarUrl?: string | null;     // 群组头像
   maxMembers: number;     // 最大成员数
   memberCount: number;    // 当前成员数
   isActive: boolean;      // 是否活跃
@@ -41,10 +42,10 @@ interface GroupStaticMethods {
 class Group extends Model<IGroup, GroupCreationAttributes> implements IGroup, GroupInstanceMethods {
   public id!: string;
   public name!: string;
-  public description?: string;
+  public description?: string | null;
   public ownerId!: string;
   public type!: GroupType;
-  public avatarUrl?: string;
+  public avatarUrl?: string | null;
   public maxMembers!: number;
   public memberCount!: number;
   public isActive!: boolean;
@@ -123,7 +124,14 @@ Group.init({
     allowNull: true,
     field: 'avatar_url',
     validate: {
-      isUrl: true
+      isSafeAvatarUrl(value: string | null) {
+        if (value === null || value === undefined || value === '') {
+          return;
+        }
+        if (typeof value !== 'string' || !isSafeGroupAvatarUrl(value)) {
+          throw new Error('群组头像 URL 格式无效');
+        }
+      }
     }
   },
   maxMembers: {

@@ -15,6 +15,7 @@ import { invalidateGroupWriteCache } from '../services/chatDelivery/writePathCac
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
+import { saveSpaceUpload } from './uploadController';
 const log = createChildLogger('controllers:groupController');
 
 // 扩展请求接口
@@ -72,13 +73,48 @@ const broadcastGroupUpdate = async (params: {
 };
 
 /**
- * 创建群组 — Zod createGroupSchema 已验证 name
+ * 上传群组头像
+ */
+export const uploadGroupAvatar = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return errors.unauthorized(res);
+  }
+
+  const file = (req as Request & { file?: Express.Multer.File }).file;
+  if (!file) {
+    return errors.badRequest(res, '请选择群组头像图片');
+  }
+  if (!file.mimetype?.startsWith('image/')) {
+    return errors.badRequest(res, '群组头像仅支持图片格式');
+  }
+
+  const stored = await saveSpaceUpload(file);
+  return sendSuccess(
+    res,
+    {
+      avatarUrl: stored.url,
+      thumbnailUrl: stored.thumbnailUrl || null
+    },
+    { message: '群组头像上传成功' }
+  );
+});
+
+/**
+ * 创建群组 — Zod createGroupSchema 已验证相关参数
  */
 export const createGroup = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const { name, description, type = GroupType.PRIVATE, maxMembers = 200 } = req.body;
+    const {
+      name,
+      description,
+      type = GroupType.PRIVATE,
+      maxMembers = 200,
+      avatarUrl,
+      avatar
+    } = req.body;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -86,10 +122,15 @@ export const createGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
       return errors.unauthorized(res);
     }
 
+    const rawAvatar = avatarUrl ?? avatar;
+    const normalizedAvatarUrl = typeof rawAvatar === 'string' ? (rawAvatar.trim() || null) : null;
+    const normalizedDescription = typeof description === 'string' ? (description.trim() || null) : null;
+
     // 创建群组
     const group = await Group.create({
       name: name.trim(),
-      description: description?.trim(),
+      description: normalizedDescription,
+      avatarUrl: normalizedAvatarUrl,
       ownerId: userId,
       type,
       maxMembers,
@@ -895,7 +936,7 @@ export const leaveGroup = catchAsync(async (req: AuthenticatedRequest, res: Resp
  */
 export const updateGroup = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { groupId } = req.params;
-  const { name, description, avatarUrl } = req.body;
+  const { name, description, avatarUrl, avatar, type, maxMembers } = req.body;
   const userId = req.user?.id;
 
   if (!userId) {
@@ -914,15 +955,31 @@ export const updateGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
     return errors.notFound(res, '群组');
   }
 
+  // 校验人数上限不得低于当前成员数
+  if (maxMembers !== undefined) {
+    const parsedMaxMembers = Number(maxMembers);
+    if (!Number.isInteger(parsedMaxMembers) || parsedMaxMembers < 2 || parsedMaxMembers > 1000) {
+      return errors.badRequest(res, '人数上限需在 2 到 1000 之间');
+    }
+    if (parsedMaxMembers < group.memberCount) {
+      return errors.badRequest(res, `成员上限不能小于当前成员数（${group.memberCount}）`);
+    }
+    group.maxMembers = parsedMaxMembers;
+  }
+
   // 更新群组信息
   if (name && name.trim().length > 0) {
     group.name = name.trim();
   }
   if (description !== undefined) {
-    group.description = description?.trim() || null;
+    group.description = typeof description === 'string' ? (description.trim() || null) : null;
   }
-  if (avatarUrl !== undefined) {
-    group.avatarUrl = avatarUrl?.trim() || null;
+  if (avatarUrl !== undefined || avatar !== undefined) {
+    const rawAvatar = avatarUrl !== undefined ? avatarUrl : avatar;
+    group.avatarUrl = typeof rawAvatar === 'string' ? (rawAvatar.trim() || null) : null;
+  }
+  if (type === GroupType.PUBLIC || type === GroupType.PRIVATE) {
+    group.type = type;
   }
 
   await group.save();
@@ -934,7 +991,9 @@ export const updateGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
     payload: {
       name: group.name,
       description: group.description,
-      avatarUrl: group.avatarUrl
+      avatarUrl: group.avatarUrl,
+      type: group.type,
+      maxMembers: group.maxMembers
     }
   });
 

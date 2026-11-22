@@ -13,11 +13,14 @@ import {
   updateGroup,
   deleteGroup,
   transferOwnership,
-  searchGroups
+  searchGroups,
+  uploadGroupAvatar
 } from '../controllers/groupController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { validate } from '../middleware/validate';
+import { uploadLimiter } from '../middleware/rateLimiter';
 import { createGroupSchema, addGroupMemberSchema, updateGroupSchema } from '../schemas/groupSchemas';
+import { createSingleUploadMiddleware } from './space/shared';
 import { errors } from '../utils/apiResponse';
 
 const router = express.Router();
@@ -70,6 +73,14 @@ router.get('/my', getUserGroups);
  * @query limit - 结果数量限制 (默认 20, 最大 50)
  */
 router.get('/search', searchGroups);
+
+/**
+ * @route POST /api/groups/avatar
+ * @desc 上传群组头像（必须置于 /:groupId 参数路由之前，防止被 UUID 校验拦截）
+ * @access Private
+ */
+const handleGroupAvatarUpload = createSingleUploadMiddleware('avatar', '群组头像上传失败');
+router.post('/avatar', uploadLimiter, handleGroupAvatarUpload, uploadGroupAvatar);
 
 /**
  * @route GET /api/groups/:groupId

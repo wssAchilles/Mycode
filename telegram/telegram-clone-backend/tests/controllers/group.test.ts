@@ -103,6 +103,17 @@ vi.mock('../../src/services/socketRegistry', () => ({
   getSocketService: vi.fn().mockReturnValue(null),
 }));
 
+vi.mock('../../src/controllers/uploadController', () => ({
+  saveSpaceUpload: vi.fn().mockResolvedValue({
+    url: '/api/public/space/uploads/group-avatar.webp',
+    thumbnailUrl: '/api/public/space/uploads/thumbnails/thumb_group-avatar_md.jpg',
+  }),
+}));
+
+vi.mock('../../src/services/chatDelivery/writePathCache', () => ({
+  invalidateGroupWriteCache: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe('GroupController', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -132,6 +143,153 @@ describe('GroupController', () => {
       const res = createMockResponse();
       await createGroup(req, res);
       expect(res._statusCode).toBe(201);
+    });
+
+    it('should persist avatarUrl, description, type, and maxMembers on creation', async () => {
+      const Group = (await import('../../src/models/Group')).default;
+      const { createGroup } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        body: {
+          name: 'Engineering Core',
+          description: 'Backend & Infra',
+          type: 'public',
+          maxMembers: 500,
+          avatarUrl: '/api/public/space/uploads/team.webp',
+        },
+      });
+      const res = createMockResponse();
+      await createGroup(req, res);
+
+      expect(res._statusCode).toBe(201);
+      expect(Group.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Engineering Core',
+          description: 'Backend & Infra',
+          type: 'public',
+          maxMembers: 500,
+          avatarUrl: '/api/public/space/uploads/team.webp',
+        }),
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe('uploadGroupAvatar', () => {
+    it('should return 400 when image file is missing', async () => {
+      const { uploadGroupAvatar } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({ user: { id: 'user1', username: 'testuser' } });
+      const res = createMockResponse();
+      await uploadGroupAvatar(req, res);
+      expect(res._statusCode).toBe(400);
+    });
+
+    it('should return 400 when uploaded file is not an image', async () => {
+      const { uploadGroupAvatar } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        file: { mimetype: 'application/pdf', originalname: 'doc.pdf' },
+      } as any);
+      const res = createMockResponse();
+      await uploadGroupAvatar(req, res);
+      expect(res._statusCode).toBe(400);
+    });
+
+    it('should store image and return public avatarUrl', async () => {
+      const { uploadGroupAvatar } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        file: { mimetype: 'image/webp', originalname: 'avatar.webp', path: '/tmp/avatar.webp' },
+      } as any);
+      const res = createMockResponse();
+      await uploadGroupAvatar(req, res);
+      expect(res._statusCode).toBe(200);
+      expect(res._jsonBody).toEqual(expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          avatarUrl: '/api/public/space/uploads/group-avatar.webp',
+        }),
+      }));
+    });
+  });
+
+  describe('updateGroup', () => {
+    it('should update type, maxMembers, and clear avatarUrl when null is passed', async () => {
+      const GroupMember = (await import('../../src/models/GroupMember')).default;
+      (GroupMember.hasPermission as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+      const mockGroup = {
+        id: 'group123',
+        name: 'Old Name',
+        description: 'Old desc',
+        type: 'private',
+        maxMembers: 200,
+        memberCount: 3,
+        avatarUrl: 'https://example.com/old.png',
+        isActive: true,
+        save: vi.fn().mockResolvedValue(undefined),
+      };
+      const Group = (await import('../../src/models/Group')).default;
+      (Group.findByPk as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockGroup);
+
+      const { updateService } = await import('../../src/services/updateService');
+      const { updateGroup } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { groupId: 'group123' },
+        body: {
+          name: 'Updated Group',
+          type: 'public',
+          maxMembers: 500,
+          avatarUrl: null,
+        },
+      });
+      const res = createMockResponse();
+      await updateGroup(req, res);
+
+      expect(res._statusCode).toBe(200);
+      expect(mockGroup.name).toBe('Updated Group');
+      expect(mockGroup.type).toBe('public');
+      expect(mockGroup.maxMembers).toBe(500);
+      expect(mockGroup.avatarUrl).toBeNull();
+      expect(mockGroup.save).toHaveBeenCalledTimes(1);
+      expect(updateService.appendUpdates).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            action: 'group_updated',
+            type: 'public',
+            maxMembers: 500,
+            avatarUrl: null,
+          }),
+        })
+      );
+    });
+
+    it('should return 400 when maxMembers is below current memberCount', async () => {
+      const GroupMember = (await import('../../src/models/GroupMember')).default;
+      (GroupMember.hasPermission as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+      const mockGroup = {
+        id: 'group123',
+        name: 'Large Group',
+        memberCount: 25,
+        maxMembers: 200,
+        isActive: true,
+        save: vi.fn(),
+      };
+      const Group = (await import('../../src/models/Group')).default;
+      (Group.findByPk as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockGroup);
+
+      const { updateGroup } = await import('../../src/controllers/groupController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        params: { groupId: 'group123' },
+        body: { maxMembers: 10 },
+      });
+      const res = createMockResponse();
+      await updateGroup(req, res);
+
+      expect(res._statusCode).toBe(400);
+      expect(mockGroup.save).not.toHaveBeenCalled();
     });
   });
 
@@ -339,6 +497,55 @@ describe('GroupController', () => {
       const res = createMockResponse();
       await searchGroups(req, res);
       expect(res._statusCode).toBe(200);
+    });
+  });
+
+  describe('groupSchemas contract', () => {
+    it('accepts safe relative upload path, https URL, and null while rejecting dangerous URLs', async () => {
+      const { createGroupSchema, updateGroupSchema } = await import('../../src/schemas/groupSchemas');
+
+      expect(
+        createGroupSchema.parse({
+          name: 'Product Squad',
+          description: 'Weekly sync',
+          type: 'public',
+          maxMembers: 500,
+          avatarUrl: '/api/public/space/uploads/test.webp',
+        })
+      ).toEqual(
+        expect.objectContaining({
+          name: 'Product Squad',
+          type: 'public',
+          maxMembers: 500,
+          avatarUrl: '/api/public/space/uploads/test.webp',
+        })
+      );
+
+      expect(
+        updateGroupSchema.parse({
+          type: 'private',
+          maxMembers: 100,
+          avatarUrl: 'https://storage.googleapis.com/demo/avatar.webp',
+        })
+      ).toEqual(
+        expect.objectContaining({
+          type: 'private',
+          maxMembers: 100,
+          avatarUrl: 'https://storage.googleapis.com/demo/avatar.webp',
+        })
+      );
+
+      expect(updateGroupSchema.parse({ avatarUrl: null }).avatarUrl).toBeNull();
+
+      expect(() =>
+        createGroupSchema.parse({ name: 'Bad', avatarUrl: 'javascript:alert(1)' })
+      ).toThrow();
+      expect(() =>
+        updateGroupSchema.parse({ avatarUrl: '../etc/passwd' })
+      ).toThrow();
+      expect(() =>
+        createGroupSchema.parse({ name: 'Bad', avatarUrl: '/api/public/space/uploads/../secret.png' })
+      ).toThrow();
     });
   });
 });
