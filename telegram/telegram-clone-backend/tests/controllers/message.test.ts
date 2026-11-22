@@ -72,6 +72,7 @@ vi.mock('../../src/services/messageWriteService', () => ({
 vi.mock('../../src/services/realtimeProtocol/displayPlaneContract', () => ({
   buildRoomMessageDisplayEnvelope: vi.fn().mockReturnValue({}),
   publishRoomMessageDisplay: vi.fn(),
+  publishReadReceiptDisplay: vi.fn(),
 }));
 
 vi.mock('../../src/services/updateService', () => ({
@@ -413,6 +414,7 @@ describe('MessageController', () => {
     it('deduplicates UpdateLog read events when seq does not advance', async () => {
       const ChatMemberState = (await import('../../src/models/ChatMemberState')).default as any;
       const { updateService } = await import('../../src/services/updateService');
+      const { publishReadReceiptDisplay } = await import('../../src/services/realtimeProtocol/displayPlaneContract');
       ChatMemberState.findOne = vi.fn()
         .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(null) })
         .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue({ lastReadSeq: 5 }) })
@@ -420,7 +422,7 @@ describe('MessageController', () => {
 
       const { markChatAsRead } = await import('../../src/controllers/messageController');
 
-      // 首次标记 seq=5 应写入 read Update
+      // 首次标记 seq=5 应写入 read Update 并实时广播 readReceipt
       const req1 = createMockRequest({
         user: { id: 'user1', username: 'testuser' },
         params: { chatId: 'p:user1:user2' },
@@ -430,8 +432,13 @@ describe('MessageController', () => {
       await markChatAsRead(req1, res1);
       expect(res1._statusCode).toBe(200);
       expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+      expect(publishReadReceiptDisplay).toHaveBeenCalledTimes(1);
+      expect(publishReadReceiptDisplay).toHaveBeenCalledWith(
+        [{ kind: 'user', id: 'user2' }],
+        { chatId: 'p:user1:user2', seq: 5, readCount: 1, readerId: 'user1' },
+      );
 
-      // 重复相同 seq=5 不应再写 Update
+      // 重复相同 seq=5 不应再写 Update 或广播
       const req2 = createMockRequest({
         user: { id: 'user1', username: 'testuser' },
         params: { chatId: 'p:user1:user2' },
@@ -442,8 +449,9 @@ describe('MessageController', () => {
       expect(res2._statusCode).toBe(200);
       expect((res2._jsonBody as any).data.deduplicated).toBe(true);
       expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+      expect(publishReadReceiptDisplay).toHaveBeenCalledTimes(1);
 
-      // 更低 seq=3 也不应再写 Update
+      // 更低 seq=3 也不应再写 Update 或广播
       const req3 = createMockRequest({
         user: { id: 'user1', username: 'testuser' },
         params: { chatId: 'p:user1:user2' },
@@ -453,6 +461,7 @@ describe('MessageController', () => {
       await markChatAsRead(req3, res3);
       expect(res3._statusCode).toBe(200);
       expect(updateService.appendUpdate).toHaveBeenCalledTimes(1);
+      expect(publishReadReceiptDisplay).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -6,6 +6,7 @@ import { getAllowedOrigins } from '../../config/allowedOrigins';
 import { realtimeSessionRegistry } from '../realtimeProtocol/realtimeSessionRegistry';
 import { realtimeOps } from '../realtimeProtocol/realtimeOps';
 import {
+  registerReadReceiptDisplayDispatcher,
   registerRoomMessageDisplayDispatcher,
 } from '../realtimeProtocol/displayPlaneContract';
 import { createRealtimeEventEnvelope } from '../realtimeProtocol/eventBusContracts';
@@ -287,23 +288,32 @@ export class SocketService {
     });
   }
 
+  private dispatchRealtimeEventByTarget(
+    target: RealtimeDeliveryTarget,
+    event: RealtimeBatchEvent,
+  ): void {
+    switch (target.kind) {
+      case 'user':
+        if (target.id) this.dispatcher.emitToUser(target.id, event);
+        break;
+      case 'room':
+        if (target.id) this.dispatcher.emitToRoom(target.id, event);
+        break;
+      case 'socket':
+        if (target.id) this.dispatcher.emitToSocket(target.id, event);
+        break;
+      case 'broadcast':
+        this.dispatcher.emitBroadcast(event);
+        break;
+    }
+  }
+
   private registerDisplayDispatcher(): void {
     registerRoomMessageDisplayDispatcher((target, payload) => {
-      const event = { type: 'message' as const, payload };
-      switch (target.kind) {
-        case 'user':
-          if (target.id) this.dispatcher.emitToUser(target.id, event);
-          break;
-        case 'room':
-          if (target.id) this.dispatcher.emitToRoom(target.id, event);
-          break;
-        case 'socket':
-          if (target.id) this.dispatcher.emitToSocket(target.id, event);
-          break;
-        case 'broadcast':
-          this.dispatcher.emitBroadcast(event);
-          break;
-      }
+      this.dispatchRealtimeEventByTarget(target, { type: 'message', payload });
+    });
+    registerReadReceiptDisplayDispatcher((target, payload) => {
+      this.dispatchRealtimeEventByTarget(target, { type: 'readReceipt', payload });
     });
   }
 

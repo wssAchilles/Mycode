@@ -139,12 +139,30 @@ export function translateDisplayEnvelopeToCompatMessage(payload: unknown): unkno
   };
 }
 
+export interface ReadReceiptDisplayPayload {
+  chatId: string;
+  seq: number;
+  readCount: number;
+  readerId: string;
+}
+
 type DisplayDispatcher = (target: RealtimeDeliveryTarget, payload: RoomMessageDisplayEnvelope) => void;
+type ReadReceiptDisplayDispatcher = (
+  target: RealtimeDeliveryTarget,
+  payload: ReadReceiptDisplayPayload,
+) => void;
 
 let displayDispatcher: DisplayDispatcher | null = null;
+let readReceiptDisplayDispatcher: ReadReceiptDisplayDispatcher | null = null;
 
 export function registerRoomMessageDisplayDispatcher(dispatcher: DisplayDispatcher): void {
   displayDispatcher = dispatcher;
+}
+
+export function registerReadReceiptDisplayDispatcher(
+  dispatcher: ReadReceiptDisplayDispatcher,
+): void {
+  readReceiptDisplayDispatcher = dispatcher;
 }
 
 export function publishRoomMessageDisplay(
@@ -158,5 +176,19 @@ export function publishRoomMessageDisplay(
   for (const target of targets) {
     if (!target?.kind) continue;
     displayDispatcher(target, payload);
+  }
+}
+
+export function publishReadReceiptDisplay(
+  targets: RealtimeDeliveryTarget[],
+  payload: ReadReceiptDisplayPayload,
+): void {
+  if (!readReceiptDisplayDispatcher) {
+    return;
+  }
+
+  for (const target of targets) {
+    if (!target?.kind) continue;
+    readReceiptDisplayDispatcher(target, payload);
   }
 }

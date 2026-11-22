@@ -10,6 +10,7 @@ import { createAndFanoutMessage } from '../services/messageWriteService';
 import { getCachedGroupMeta, getCachedUserExists } from '../services/chatDelivery/writePathCache';
 import {
   buildRoomMessageDisplayEnvelope,
+  publishReadReceiptDisplay,
   publishRoomMessageDisplay,
 } from '../services/realtimeProtocol/displayPlaneContract';
 import { updateService } from '../services/updateService';
@@ -759,15 +760,29 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
     }
   }
 
-  // 原子推进当前用户已读序列，仅在 seq 实际增大时下发 Update 事件
+  // 原子推进当前用户已读序列，仅在 seq 实际增大时下发 Update 事件与实时 readReceipt 推送
   const seqAdvanced = await advanceChatLastReadSeq(canonicalChatId, userId, seq);
 
   let readCount = 1;
   if (parsed.type === 'group' && parsed.groupId) {
     readCount = await computeGroupReadCountAtSeq(canonicalChatId, seq);
+    if (seqAdvanced) {
+      publishReadReceiptDisplay([{ kind: 'room', id: parsed.groupId }], {
+        chatId: canonicalChatId,
+        seq,
+        readCount,
+        readerId: userId,
+      });
+    }
   } else if (parsed.type === 'private' && seqAdvanced) {
     const otherUserId = getPrivateOtherUserId(canonicalChatId, userId);
     if (otherUserId) {
+      publishReadReceiptDisplay([{ kind: 'user', id: otherUserId }], {
+        chatId: canonicalChatId,
+        seq,
+        readCount: 1,
+        readerId: userId,
+      });
       await updateService.appendUpdate({
         userId: otherUserId,
         type: 'read',
