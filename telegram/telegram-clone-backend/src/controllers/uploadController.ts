@@ -12,7 +12,7 @@ import SpaceProfile from '../models/SpaceProfile';
 import NewsArticle from '../models/NewsArticle';
 import User from '../models/User';
 import SpaceUpload from '../models/SpaceUpload';
-import Group, { GroupType } from '../models/Group';
+import Group from '../models/Group';
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
@@ -528,7 +528,7 @@ const persistSpaceUploadToMongo = async (args: {
   }
 };
 
-const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
+export const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
   const escaped = escapeRegExp(filename);
   // Allow query strings (some clients may store signed/public URLs with ?v=...).
   const regex = new RegExp(`${escaped}(\\?.*)?$`);
@@ -560,11 +560,11 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
     log.warn({ err: error }, '⚠️ Space 公共文件校验(User.avatarUrl)失败');
   }
 
+  // 群组头像采用随机 UUID 文件名且供 <img> 标签直接加载，因此活跃群组（包含私有群与公开群）头像均允许读取
   try {
     const likePattern = `%${filename}%`;
     const groupMatch = await Group.findOne({
       where: {
-        type: GroupType.PUBLIC,
         isActive: true,
         avatarUrl: { [Op.like]: likePattern },
       },
