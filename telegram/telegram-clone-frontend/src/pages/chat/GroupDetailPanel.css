@@ -851,3 +851,9 @@
 .group-action-btn.danger:hover {
     background: #FEE2E2;
 }
+
+@media (max-width: 768px) {
+    .group-detail-panel {
+        width: 100%;
+    }
+}

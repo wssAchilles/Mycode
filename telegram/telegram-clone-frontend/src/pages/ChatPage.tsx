@@ -822,7 +822,7 @@ const ChatPage: React.FC = () => {
       )}
 
       {/* 3.5 Group Detail Panel */}
-      {!isMobileLayout && showGroupDetailPanel && isGroupChatMode && (
+      {showGroupDetailPanel && isGroupChatMode && (
         <Suspense fallback={null}>
           <GroupDetailPanel
             isOpen
