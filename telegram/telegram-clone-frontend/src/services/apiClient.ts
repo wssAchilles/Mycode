@@ -518,12 +518,29 @@ export const contactAPI = {
 
 // 群组 API
 export const groupAPI = {
+  // 上传群组头像（返回可持久化到群组的 URL）
+  uploadGroupAvatar: async (file: File): Promise<string> => {
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      const response = await apiClient.post('/api/groups/avatar', formData);
+      const avatarUrl = response.data?.data?.avatarUrl || response.data?.avatarUrl;
+      if (typeof avatarUrl !== 'string' || !avatarUrl.trim()) {
+        throw new Error('群组头像上传未返回有效地址');
+      }
+      return avatarUrl.trim();
+    } catch (error: unknown) {
+      throw new Error(getErrorMessage(error, '上传群组头像失败'));
+    }
+  },
+
   // 创建群组
   createGroup: async (data: {
     name: string;
     description?: string;
     type?: 'public' | 'private';
     maxMembers?: number;
+    avatarUrl?: string | null;
   }) => {
     try {
       const response = await apiClient.post('/api/groups', data);
@@ -595,7 +612,16 @@ export const groupAPI = {
   },
 
   // 更新群组信息
-  updateGroup: async (groupId: string, data: { name?: string; description?: string; type?: 'public' | 'private'; avatarUrl?: string }) => {
+  updateGroup: async (
+    groupId: string,
+    data: {
+      name?: string;
+      description?: string;
+      type?: 'public' | 'private';
+      maxMembers?: number;
+      avatarUrl?: string | null;
+    }
+  ) => {
     try {
       const response = await apiClient.put(`/api/groups/${groupId}`, data);
       return response.data;

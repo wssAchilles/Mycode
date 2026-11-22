@@ -1,49 +1,81 @@
 /**
- * CreateGroupModal Styles v6.0 (Telegram Light 纯白弹窗)
+ * CreateGroupModal Styles v7.0
+ * 原生 <dialog> 顶层模态 + Apple Bento 分组表单 + 品牌一致性表单控件
  */
 
-.create-group-modal {
-    width: 420px;
-    height: 520px;
+.create-group-dialog {
+    width: min(420px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: min(88vh, 660px);
+    margin: auto;
+    padding: 0;
+    border: 1px solid rgba(15, 20, 25, 0.08);
+    border-radius: 22px;
+    background: #FFFFFF;
+    color: #0F1419;
+    box-shadow: 0 24px 60px rgba(15, 20, 25, 0.22);
+    overflow: hidden;
+    transition: width 0.22s ease;
+}
+
+/* 遵循 modern-web-guidance/dialog：绝不无条件设置 display，仅在 [open] 时启用布局 */
+.create-group-dialog[open] {
     display: flex;
     flex-direction: column;
 }
 
-.modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 20, 25, 0.45);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
+.create-group-dialog.is-step-info {
+    width: min(490px, calc(100vw - 24px));
 }
 
-.modal-content {
-    background: #FFFFFF;
-    border: 1px solid #EFF3F4;
-    border-radius: 20px;
-    box-shadow: 0 20px 50px rgba(15, 20, 25, 0.18);
+.create-group-dialog:modal {
+    overscroll-behavior: contain;
+}
+
+.create-group-dialog::backdrop {
     overflow: hidden;
-    color: #0F1419;
+    overscroll-behavior: contain;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+.create-group-surface {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: min(88vh, 660px);
+    background: #FFFFFF;
 }
 
 .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 18px;
+    padding: 13px 16px;
     border-bottom: 1px solid #EFF3F4;
     background: #FFFFFF;
+    flex-shrink: 0;
+}
+
+.modal-header-title-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
 }
 
 .modal-header h2 {
     margin: 0;
-    font-size: 17px;
+    font-size: 16.5px;
     font-weight: 800;
     color: #0F1419;
+}
+
+.modal-step-indicator {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748B;
 }
 
 .modal-close,
@@ -51,47 +83,104 @@
     background: transparent;
     border: none;
     cursor: pointer;
-    font-size: 14.5px;
-    color: #1D9BF0;
+    font-size: 14px;
+    color: #2563EB;
     font-weight: 700;
     padding: 6px 12px;
     border-radius: 9999px;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .modal-close {
     color: #536471;
 }
 
-.modal-close:hover {
+.modal-close:hover:not(:disabled) {
     background: #EFF3F4;
     color: #0F1419;
 }
 
 .modal-next:hover:not(:disabled) {
-    background: rgba(29, 155, 240, 0.10);
+    background: rgba(37, 99, 235, 0.10);
 }
 
+.modal-close:disabled,
 .modal-next:disabled {
     opacity: 0.45;
     cursor: not-allowed;
     color: #64748B;
 }
 
+.modal-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.group-modal-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 16px 0;
+    padding: 9px 12px;
+    border-radius: 12px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #B91C1C;
+    font-size: 12.5px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* 第一步：选择初始联系人 */
+.group-members-step {
+    display: flex;
+    flex-direction: column;
+    min-height: 360px;
+}
+
 .search-bar {
-    padding: 12px 16px;
+    padding: 12px 16px 8px;
+}
+
+.search-input-shell {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-input-icon {
+    position: absolute;
+    left: 14px;
+    color: #64748B;
+    pointer-events: none;
 }
 
 .search-bar input {
     width: 100%;
-    padding: 10px 16px;
+    padding: 9px 14px 9px 36px;
     border-radius: 9999px;
     border: 1px solid #CFD9DE;
     background: #F7F9F9;
     color: #0F1419;
-    font-size: 14.5px;
+    font-size: 14px;
     outline: none;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .search-bar input::placeholder {
@@ -99,21 +188,58 @@
 }
 
 .search-bar input:focus {
-    border-color: #1D9BF0;
+    border-color: #2563EB;
     background: #FFFFFF;
-    box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.14);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.selected-contacts-strip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 16px 10px;
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.selected-contact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px 3px 4px;
+    border-radius: 9999px;
+    border: 1px solid rgba(37, 99, 235, 0.25);
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background-color 0.14s ease;
+}
+
+.selected-contact-chip:hover {
+    background: #DBEAFE;
 }
 
 .contact-list-select {
     flex: 1;
     overflow-y: auto;
-    padding: 0 10px 12px;
+    padding: 0 10px 14px;
+}
+
+.group-contact-empty {
+    padding: 44px 20px;
+    text-align: center;
+    font-size: 13px;
+    color: #64748B;
 }
 
 .contact-item {
     display: flex;
     align-items: center;
-    padding: 10px 12px;
+    padding: 9px 12px;
     cursor: pointer;
     border-radius: 12px;
     transition: background-color 0.15s ease;
@@ -130,8 +256,8 @@
 }
 
 .contact-item.selected {
-    background: rgba(29, 155, 240, 0.10);
-    border-color: rgba(29, 155, 240, 0.22);
+    background: rgba(37, 99, 235, 0.08);
+    border-color: rgba(37, 99, 235, 0.22);
 }
 
 .contact-avatar-wrapper {
@@ -145,14 +271,12 @@
     right: -2px;
     width: 20px;
     height: 20px;
-    background-color: #1D9BF0;
+    background-color: #2563EB;
     color: #FFFFFF;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
     border: 2px solid #FFFFFF;
 }
 
@@ -163,76 +287,341 @@
 .contact-name {
     font-weight: 700;
     color: #0F1419;
-    font-size: 14.5px;
+    font-size: 14px;
 }
 
 .contact-status {
-    font-size: 12.5px;
+    font-size: 12px;
     color: #536471;
 }
 
-/* 第二步：输入群名称 */
+/* 第二步：群组信息 Apple Bento 表单 */
 .group-info-step {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    padding: 36px 24px;
+    gap: 12px;
+    padding: 14px 16px 18px;
 }
 
-.group-avatar-upload {
-    width: 96px;
-    height: 96px;
-    border-radius: 50%;
-    background: #0F1419;
+.group-bento-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: #F5F5F7;
+    border: 1px solid rgba(15, 20, 25, 0.06);
+}
+
+.group-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.group-field-label {
     display: flex;
     align-items: center;
-    justify-content: center;
-    margin-bottom: 24px;
-    cursor: pointer;
-    transition: transform 0.15s ease;
-    position: relative;
-    overflow: hidden;
+    justify-content: space-between;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #1E293B;
 }
 
-.group-avatar-upload:hover {
-    transform: scale(1.04);
+.group-field-required {
+    font-style: normal;
+    color: #DC2626;
+    margin-left: 2px;
 }
 
-.camera-icon {
-    font-size: 32px;
-    color: #FFFFFF;
-    z-index: 2;
+.group-field-optional {
+    font-style: normal;
+    font-weight: 500;
+    color: #64748B;
+    margin-left: 4px;
 }
 
-.group-name-input {
+.group-field-counter {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #64748B;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-text-input,
+.group-textarea-input {
     width: 100%;
-    font-size: 18px;
-    padding: 10px 12px;
-    border: none;
-    border-bottom: 2px solid #1D9BF0;
-    outline: none;
-    text-align: center;
-    margin-bottom: 20px;
-    background: transparent;
+    border-radius: 12px;
+    border: 1px solid #DCE3EA;
+    background: #FFFFFF;
     color: #0F1419;
+    padding: 9px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.group-textarea-input {
+    resize: vertical;
+    min-height: 74px;
+    line-height: 1.5;
+}
+
+.group-text-input:focus,
+.group-textarea-input:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.group-template-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.group-template-chip {
+    padding: 4px 10px;
+    border-radius: 9999px;
+    border: 1px solid rgba(15, 20, 25, 0.08);
+    background: #FFFFFF;
+    color: #475569;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.group-template-chip:hover:not(:disabled) {
+    background: #EFF6FF;
+    border-color: rgba(37, 99, 235, 0.3);
+    color: #1D4ED8;
+}
+
+.group-visibility-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.group-visibility-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 11px;
+    border-radius: 12px;
+    border: 1.5px solid #DCE3EA;
+    background: #FFFFFF;
+    color: #334155;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.group-visibility-card:hover:not(:disabled) {
+    border-color: #93C5FD;
+}
+
+.group-visibility-card.is-active {
+    border-color: #2563EB;
+    background: #EFF6FF;
+    color: #0F1419;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.10);
+}
+
+.group-visibility-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
     font-weight: 700;
 }
 
-.group-name-input::placeholder {
-    color: #64748B;
-    font-weight: 400;
+.group-visibility-card.is-active .group-visibility-head {
+    color: #1D4ED8;
 }
 
-.member-count {
-    color: #536471;
-    font-size: 13.5px;
+.group-visibility-card p {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: #64748B;
+}
+
+.group-limit-badge {
+    padding: 2px 9px;
+    border-radius: 9999px;
+    background: #DBEAFE;
+    color: #1D4ED8;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-limit-presets {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.group-limit-chip {
+    padding: 6px 4px;
+    border-radius: 10px;
+    border: 1px solid #DCE3EA;
+    background: #FFFFFF;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.group-limit-chip:hover:not(:disabled) {
+    border-color: #93C5FD;
+    color: #0F1419;
+}
+
+.group-limit-chip.is-active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: #FFFFFF;
+}
+
+/* 遵循 modern-web-guidance/brand-consistent-forms：使用高对比 accent-color 并提供 @supports not 降级 */
+.group-range-input {
+    width: 100%;
+    margin: 4px 0 0;
+    cursor: pointer;
+    accent-color: #2563EB;
+}
+
+@supports not (accent-color: auto) {
+    .group-range-input {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 6px;
+        border-radius: 9999px;
+        background: #CBD5E1;
+    }
+
+    .group-range-input::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #2563EB;
+        border: 2px solid #FFFFFF;
+        box-shadow: 0 1px 4px rgba(15, 20, 25, 0.25);
+    }
+
+    .group-range-input::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #2563EB;
+        border: 2px solid #FFFFFF;
+        box-shadow: 0 1px 4px rgba(15, 20, 25, 0.25);
+    }
+}
+
+.group-range-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #64748B;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-members-summary {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 11px 14px;
+}
+
+.group-summary-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.group-avatar-stack {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.group-avatar-stack > * + * {
+    margin-left: -8px;
+    box-shadow: 0 0 0 2px #F5F5F7;
+}
+
+.group-summary-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    color: #475569;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.group-summary-text {
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.35;
+}
+
+.group-summary-adjust-btn {
+    padding: 5px 10px;
+    border-radius: 9999px;
+    border: 1px solid #DCE3EA;
+    background: #FFFFFF;
+    color: #2563EB;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 0.14s ease;
+}
+
+.group-summary-adjust-btn:hover:not(:disabled) {
+    background: #EFF6FF;
 }
 
 .modal-close:focus-visible,
 .modal-next:focus-visible,
 .contact-item:focus-visible,
-.group-name-input:focus-visible,
-.search-bar input:focus-visible {
-    outline: 2px solid var(--tg-blue);
+.selected-contact-chip:focus-visible,
+.group-template-chip:focus-visible,
+.group-visibility-card:focus-visible,
+.group-limit-chip:focus-visible,
+.group-summary-adjust-btn:focus-visible,
+.group-range-input:focus-visible {
+    outline: 2px solid #2563EB;
     outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+    .group-visibility-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .group-members-summary {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .create-group-dialog {
+        transition: none;
+    }
 }

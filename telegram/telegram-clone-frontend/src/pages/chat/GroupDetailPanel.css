@@ -168,17 +168,123 @@
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 11px;
     text-align: left;
 }
 
-.group-edit-label {
+.group-edit-field {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
+}
+
+.group-edit-label-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+}
+
+.group-edit-counter {
+    font-size: 11px;
     font-weight: 600;
     color: #64748B;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-edit-limit-badge {
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: #DBEAFE;
+    color: #1D4ED8;
+    font-size: 11.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-edit-limit-presets {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.group-edit-limit-chip {
+    padding: 5px 4px;
+    border-radius: 8px;
+    border: 1px solid #E2E8F0;
+    background: #F8FAFC;
+    color: #475569;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.group-edit-limit-chip:hover:not(:disabled) {
+    border-color: #93C5FD;
+    color: #0F1419;
+}
+
+.group-edit-limit-chip.is-active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: #FFFFFF;
+}
+
+.group-edit-limit-chip:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* 遵循 modern-web-guidance/brand-consistent-forms：高对比 accent-color 与 @supports not 降级 */
+.group-detail-range {
+    width: 100%;
+    margin: 2px 0 0;
+    cursor: pointer;
+    accent-color: #2563EB;
+}
+
+@supports not (accent-color: auto) {
+    .group-detail-range {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 6px;
+        border-radius: 9999px;
+        background: #CBD5E1;
+    }
+
+    .group-detail-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 17px;
+        height: 17px;
+        border-radius: 50%;
+        background: #2563EB;
+        border: 2px solid #FFFFFF;
+    }
+}
+
+.group-detail-range-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #64748B;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-detail-edit .group-avatar-presets {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 220px;
+    gap: 10px;
+}
+
+.group-edit-limit-chip:focus-visible,
+.group-detail-range:focus-visible,
+.group-segmented-btn:focus-visible {
+    outline: 2px solid #2563EB;
+    outline-offset: 2px;
 }
 
 .group-detail-input,

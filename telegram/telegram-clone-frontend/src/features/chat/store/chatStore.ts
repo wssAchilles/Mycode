@@ -211,7 +211,16 @@ interface ChatState {
     loadContacts: () => Promise<void>;
     loadPendingRequests: () => Promise<void>;
     handleContactRequest: (requestId: string, action: 'accept' | 'reject') => Promise<void>;
-    createGroup: (name: string, description: string, memberIds: string[]) => Promise<void>;
+    createGroup: (
+        name: string,
+        description: string,
+        memberIds: string[],
+        options?: {
+            type?: 'public' | 'private';
+            maxMembers?: number;
+            avatarUrl?: string | null;
+        }
+    ) => Promise<Group | null>;
 
     // 群组操作
     loadGroupDetails: (groupId: string) => Promise<void>;  // 新增
@@ -397,21 +406,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     // 创建群组
-    createGroup: async (name: string, description: string, memberIds: string[]) => {
-        set({ isLoading: true });
+    createGroup: async (name, description, memberIds, options) => {
+        set({ isLoading: true, error: null });
         try {
             // 1. 创建群组
             const response = await groupAPI.createGroup({
-                name,
-                description,
-                type: 'private' // 默认为私有群
+                name: name.trim(),
+                description: description.trim() || undefined,
+                type: options?.type ?? 'private',
+                maxMembers: options?.maxMembers ?? 200,
+                avatarUrl: options?.avatarUrl ?? undefined,
             });
 
-            // 2. 添加成员
-            if (memberIds && memberIds.length > 0) {
+            const createdGroup: Group | null = response?.data?.group || response?.group || null;
+            const groupId = createdGroup?.id;
+
+            // 2. 添加成员（兼容后端标准 { success, data: { group } } 响应壳）
+            if (groupId && memberIds && memberIds.length > 0) {
                 try {
-                    // 使用上一步创建的群组 ID 添加成员
-                    const groupId = response.group.id;
                     await groupAPI.addMembers(groupId, memberIds);
                 } catch (addMemberError) {
                     console.error('添加群组成员部分失败:', addMemberError);
@@ -419,11 +431,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
             }
 
-            // 3. 刷新列表
+            // 3. 刷新列表并自动打开新建群组
             await get().loadChats();
+            if (groupId) {
+                await get().loadGroupDetails(groupId);
+            }
+            set({ isLoading: false });
+            return createdGroup;
         } catch (error: unknown) {
             console.error('创建群组失败:', error);
             set({ error: getErrorDetail(error), isLoading: false });
+            throw error;
         }
     },
 

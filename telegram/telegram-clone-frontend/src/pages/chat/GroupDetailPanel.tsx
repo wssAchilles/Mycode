@@ -35,6 +35,12 @@ import { useChatStore, type Group, type GroupMember } from '../../features/chat/
 import { Avatar } from '../../components/common';
 import { authUtils, groupAPI } from '../../services/apiClient';
 import { showToast } from '../../components/ui/Toast';
+import {
+    GROUP_MEMBER_LIMIT_PRESETS,
+    GroupAvatarPicker,
+    resolveGroupAvatarUrlForSubmit,
+    type GroupAvatarSelection,
+} from '../../features/chat/components/group';
 import './GroupDetailPanel.css';
 
 interface GroupDetailPanelProps {
@@ -88,10 +94,16 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
     const canManage = currentRole === 'owner' || currentRole === 'admin';
 
     const [isEditing, setIsEditing] = useState(false);
+    const [avatarSelection, setAvatarSelection] = useState<GroupAvatarSelection>({
+        mode: 'existing',
+        url: group?.avatarUrl || null,
+    });
     const [nameDraft, setNameDraft] = useState(group?.name || '');
     const [descDraft, setDescDraft] = useState(group?.description || '');
     const [typeDraft, setTypeDraft] = useState<'public' | 'private'>(group?.type === 'private' ? 'private' : 'public');
-    const [isSaving, setIsSaving] = useState(false);
+    const [maxMembersDraft, setMaxMembersDraft] = useState<number>(group?.maxMembers || 200);
+    const [savingStage, setSavingStage] = useState<'idle' | 'uploading' | 'saving'>('idle');
+    const isSaving = savingStage !== 'idle';
 
     const [isMuted, setIsMuted] = useState(() => readGroupMuted(group?.id));
     const [inviteOpen, setInviteOpen] = useState(false);
@@ -106,9 +118,11 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
     const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
 
     useEffect(() => {
+        setAvatarSelection({ mode: 'existing', url: group?.avatarUrl || null });
         setNameDraft(group?.name || '');
         setDescDraft(group?.description || '');
         setTypeDraft(group?.type === 'private' ? 'private' : 'public');
+        setMaxMembersDraft(group?.maxMembers && group.maxMembers >= 2 ? group.maxMembers : 200);
         setIsMuted(readGroupMuted(group?.id));
         setIsEditing(false);
         setInviteOpen(false);
@@ -117,12 +131,14 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
         setMemberFilter('all');
         setConfirmLeaveOpen(false);
         setPendingTransferMember(null);
-    }, [group?.id, group?.name, group?.description, group?.type]);
+    }, [group?.id, group?.name, group?.description, group?.type, group?.avatarUrl, group?.maxMembers]);
 
     const resetDrafts = () => {
+        setAvatarSelection({ mode: 'existing', url: group?.avatarUrl || null });
         setNameDraft(group?.name || '');
         setDescDraft(group?.description || '');
         setTypeDraft(group?.type === 'private' ? 'private' : 'public');
+        setMaxMembersDraft(group?.maxMembers && group.maxMembers >= 2 ? group.maxMembers : 200);
     };
 
     const handleToggleMute = () => {
@@ -150,12 +166,26 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
             showToast('群组名称不能为空', 'error');
             return;
         }
-        setIsSaving(true);
+        const minAllowedMembers = Math.max(2, group.memberCount || 2);
+        if (maxMembersDraft < minAllowedMembers || maxMembersDraft > 1000) {
+            showToast(`成员上限需在 ${minAllowedMembers} 到 1000 之间`, 'error');
+            return;
+        }
+
+        const needsAvatarUpload = avatarSelection.mode === 'file' || avatarSelection.mode === 'preset';
+        setSavingStage(needsAvatarUpload ? 'uploading' : 'saving');
         try {
+            const resolvedAvatarUrl = await resolveGroupAvatarUrlForSubmit(
+                avatarSelection,
+                groupAPI.uploadGroupAvatar,
+            );
+            setSavingStage('saving');
             await groupAPI.updateGroup(group.id, {
                 name: trimmedName,
                 description: descDraft.trim(),
                 type: typeDraft,
+                maxMembers: maxMembersDraft,
+                ...(resolvedAvatarUrl !== undefined ? { avatarUrl: resolvedAvatarUrl } : {}),
             });
             await Promise.all([loadGroupDetails(group.id), loadChats()]);
             setIsEditing(false);
@@ -164,13 +194,13 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
             const msg = error instanceof Error ? error.message : '更新群组失败';
             showToast(msg, 'error');
         } finally {
-            setIsSaving(false);
+            setSavingStage('idle');
         }
     };
 
     const handleQuickTypeSwitch = async (nextType: 'public' | 'private') => {
         if (!group || !canManage || group.type === nextType || isSaving) return;
-        setIsSaving(true);
+        setSavingStage('saving');
         try {
             await groupAPI.updateGroup(group.id, { type: nextType });
             await Promise.all([loadGroupDetails(group.id), loadChats()]);
@@ -179,7 +209,7 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
             const msg = error instanceof Error ? error.message : '切换群类型失败';
             showToast(msg, 'error');
         } finally {
-            setIsSaving(false);
+            setSavingStage('idle');
         }
     };
 
@@ -354,39 +384,59 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
                     <div className="group-detail-scroll">
                         {/* 1. 群组档案卡片 */}
                         <section className="group-inset-card group-detail-info">
-                            <div className="group-detail-avatar">
-                                <Avatar name={group.name} src={group.avatarUrl} size="lg" />
-                            </div>
+                            {!isEditing && (
+                                <div className="group-detail-avatar">
+                                    <Avatar name={group.name} src={group.avatarUrl} size="lg" />
+                                </div>
+                            )}
 
                             {isEditing ? (
                                 <div className="group-detail-edit">
-                                    <label className="group-edit-label">
-                                        <span>群组名称</span>
+                                    <GroupAvatarPicker
+                                        inputId="edit-group-avatar-input"
+                                        groupName={nameDraft.trim() || group.name}
+                                        selection={avatarSelection}
+                                        onChange={setAvatarSelection}
+                                        disabled={isSaving}
+                                    />
+                                    <div className="group-edit-field">
+                                        <label className="group-edit-label-head" htmlFor="edit-group-name">
+                                            <span>群组名称</span>
+                                            <span className="group-edit-counter">{nameDraft.length}/100</span>
+                                        </label>
                                         <input
+                                            id="edit-group-name"
                                             className="group-detail-input"
                                             value={nameDraft}
                                             onChange={(e) => setNameDraft(e.target.value)}
                                             placeholder="输入群组名称"
-                                            maxLength={60}
+                                            maxLength={100}
+                                            disabled={isSaving}
                                         />
-                                    </label>
-                                    <label className="group-edit-label">
-                                        <span>群组简介</span>
+                                    </div>
+                                    <div className="group-edit-field">
+                                        <label className="group-edit-label-head" htmlFor="edit-group-desc">
+                                            <span>群组简介</span>
+                                            <span className="group-edit-counter">{descDraft.length}/500</span>
+                                        </label>
                                         <textarea
+                                            id="edit-group-desc"
                                             className="group-detail-textarea"
                                             value={descDraft}
                                             onChange={(e) => setDescDraft(e.target.value)}
                                             placeholder="向成员介绍本群用途与规则..."
-                                            maxLength={240}
+                                            maxLength={500}
+                                            disabled={isSaving}
                                         />
-                                    </label>
-                                    <div className="group-edit-label">
-                                        <span>群组可见性</span>
+                                    </div>
+                                    <div className="group-edit-field">
+                                        <span className="group-edit-label-head">群组可见性</span>
                                         <div className="group-segmented" role="group" aria-label="群组可见性">
                                             <button
                                                 type="button"
                                                 className={`group-segmented-btn ${typeDraft === 'public' ? 'is-active' : ''}`}
                                                 onClick={() => setTypeDraft('public')}
+                                                disabled={isSaving}
                                             >
                                                 <Globe size={13} />
                                                 <span>公开群组</span>
@@ -395,10 +445,49 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
                                                 type="button"
                                                 className={`group-segmented-btn ${typeDraft === 'private' ? 'is-active' : ''}`}
                                                 onClick={() => setTypeDraft('private')}
+                                                disabled={isSaving}
                                             >
                                                 <Lock size={13} />
                                                 <span>私有群组</span>
                                             </button>
+                                        </div>
+                                    </div>
+                                    <div className="group-edit-field">
+                                        <label className="group-edit-label-head" htmlFor="edit-group-max-members">
+                                            <span>成员人数上限</span>
+                                            <span className="group-edit-limit-badge">{maxMembersDraft} 人</span>
+                                        </label>
+                                        <div className="group-edit-limit-presets" role="group" aria-label="人数上限快捷档位">
+                                            {GROUP_MEMBER_LIMIT_PRESETS.map((presetLimit) => {
+                                                const minAllowed = Math.max(2, group.memberCount || 2);
+                                                const isDisabled = isSaving || presetLimit < minAllowed;
+                                                return (
+                                                    <button
+                                                        key={presetLimit}
+                                                        type="button"
+                                                        className={`group-edit-limit-chip ${maxMembersDraft === presetLimit ? 'is-active' : ''}`}
+                                                        disabled={isDisabled}
+                                                        onClick={() => setMaxMembersDraft(presetLimit)}
+                                                    >
+                                                        {presetLimit} 人
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <input
+                                            id="edit-group-max-members"
+                                            type="range"
+                                            min={Math.max(2, group.memberCount || 2)}
+                                            max={1000}
+                                            step={1}
+                                            value={Math.max(maxMembersDraft, Math.max(2, group.memberCount || 2))}
+                                            onChange={(e) => setMaxMembersDraft(Number(e.target.value))}
+                                            className="group-detail-range"
+                                            disabled={isSaving}
+                                        />
+                                        <div className="group-detail-range-scale" aria-hidden="true">
+                                            <span>{Math.max(2, group.memberCount || 2)} 人</span>
+                                            <span>1000 人</span>
                                         </div>
                                     </div>
                                     <div className="group-detail-edit-actions">
@@ -406,9 +495,13 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
                                             type="button"
                                             className="group-edit-btn primary"
                                             onClick={handleSaveGroup}
-                                            disabled={isSaving}
+                                            disabled={isSaving || !nameDraft.trim()}
                                         >
-                                            {isSaving ? '保存中...' : '保存更改'}
+                                            {savingStage === 'uploading'
+                                                ? '上传头像中...'
+                                                : savingStage === 'saving'
+                                                  ? '保存中...'
+                                                  : '保存更改'}
                                         </button>
                                         <button
                                             type="button"
