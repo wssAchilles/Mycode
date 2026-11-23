@@ -16,6 +16,7 @@ import { createChildLogger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 import { saveSpaceUpload } from './uploadController';
+import { normalizeUploadedAvatarFile } from '../services/media';
 const log = createChildLogger('controllers:groupController');
 
 // 扩展请求接口
@@ -89,7 +90,8 @@ export const uploadGroupAvatar = catchAsync(async (req: AuthenticatedRequest, re
     return errors.badRequest(res, '群组头像仅支持图片格式');
   }
 
-  const stored = await saveSpaceUpload(file);
+  const optimizedFile = await normalizeUploadedAvatarFile(file);
+  const stored = await saveSpaceUpload(optimizedFile);
   return sendSuccess(
     res,
     {

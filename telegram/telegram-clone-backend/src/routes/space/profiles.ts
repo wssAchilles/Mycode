@@ -9,6 +9,7 @@ import Contact, { ContactStatus } from '../../models/Contact';
 import User from '../../models/User';
 import UserSettings from '../../models/UserSettings';
 import { SPACE_PUBLIC_UPLOAD_BASE } from '../../controllers/uploadController';
+import { normalizeUploadedAvatarFile } from '../../services/media';
 import {
     log,
     isValidUuid,
@@ -221,7 +222,8 @@ router.put('/users/:id/avatar', handleAvatarUpload, async (req: Request, res: Re
         const file = (req as Request & { file?: Express.Multer.File }).file;
         if (!file) return res.status(400).json({ error: 'avatar 文件不能为空' });
 
-        const stored = await saveSpaceUpload(file);
+        const optimizedFile = await normalizeUploadedAvatarFile(file);
+        const stored = await saveSpaceUpload(optimizedFile);
         const user = await User.findByPk(id);
         if (!user) return res.status(404).json({ error: '用户不存在' });
         (user as any).avatarUrl = stored.url;

@@ -16,6 +16,13 @@ import Group from '../models/Group';
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
+import {
+  fetchLegacyPublicGcsObject,
+  getCachedPublicAssetAllowed,
+  getOrCreateAvatarVariant,
+  parseAvatarWidthParam,
+  setCachedPublicAssetAllowed,
+} from '../services/media';
 const log = createChildLogger('controllers:uploadController');
 
 // 路径安全解析，防止目录穿越
@@ -188,6 +195,7 @@ const uploadSpaceObject = async (key: string, body: Buffer, contentType: string)
       Key: key,
       Body: body,
       ContentType: contentType,
+      CacheControl: 'public, max-age=31536000, immutable',
     })
   );
 };
@@ -529,6 +537,11 @@ const persistSpaceUploadToMongo = async (args: {
 };
 
 export const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
+  if (!filename) return false;
+  if (getCachedPublicAssetAllowed(filename)) {
+    return true;
+  }
+
   const escaped = escapeRegExp(filename);
   // Allow query strings (some clients may store signed/public URLs with ?v=...).
   const regex = new RegExp(`${escaped}(\\?.*)?$`);
@@ -541,10 +554,16 @@ export const isSpacePublicAsset = async (filename: string): Promise<boolean> => 
     ],
   });
 
-  if (postMatch) return true;
+  if (postMatch) {
+    setCachedPublicAssetAllowed(filename);
+    return true;
+  }
 
   const profileMatch = await SpaceProfile.exists({ coverUrl: { $regex: regex } });
-  if (profileMatch) return true;
+  if (profileMatch) {
+    setCachedPublicAssetAllowed(filename);
+    return true;
+  }
 
   // User avatarUrl lives in PostgreSQL; include it so avatar uploads are publicly retrievable.
   try {
@@ -555,7 +574,10 @@ export const isSpacePublicAsset = async (filename: string): Promise<boolean> => 
       },
       attributes: ['id'],
     });
-    if (userMatch) return true;
+    if (userMatch) {
+      setCachedPublicAssetAllowed(filename);
+      return true;
+    }
   } catch (error) {
     log.warn({ err: error }, '⚠️ Space 公共文件校验(User.avatarUrl)失败');
   }
@@ -570,7 +592,10 @@ export const isSpacePublicAsset = async (filename: string): Promise<boolean> => 
       },
       attributes: ['id'],
     });
-    if (groupMatch) return true;
+    if (groupMatch) {
+      setCachedPublicAssetAllowed(filename);
+      return true;
+    }
   } catch (error) {
     log.warn({ err: error }, '⚠️ Space 公共文件校验(Group.avatarUrl)失败');
   }
@@ -620,7 +645,19 @@ const coerceMongoBinaryToBuffer = (value: any): Buffer | null => {
   return null;
 };
 
-// 公共 Space 媒体下载处理器
+// 异步回写源图至本地磁盘，避免同一文件反复穿库查询 MongoDB / 回源外部存储
+const cacheSpaceAssetToDisk = (spaceRoot: string, safeName: string, buffer: Buffer): void => {
+  const targetPath = safeResolve(spaceRoot, safeName);
+  if (!targetPath || !buffer.length) return;
+  fs.promises
+    .mkdir(spaceRoot, { recursive: true })
+    .then(() => fs.promises.writeFile(targetPath, buffer))
+    .catch((err) => {
+      log.warn({ err, targetPath }, '⚠️ Space 公共文件回写磁盘缓存失败');
+    });
+};
+
+// 公共 Space 媒体下载处理器（支持可选 ?w= 头像按需 WebP 缩放与多级缓存）
 export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Response) => {
   const { filename } = req.params;
   const isAllowed = await isSpacePublicAsset(filename);
@@ -628,21 +665,76 @@ export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Re
     return errors.notFound(res, '文件');
   }
 
+  const safeName = path.basename(filename);
   const spaceRoot = path.join(__dirname, '../../uploads/space');
   const defaultRoot = path.join(__dirname, '../../uploads');
+  const variantCacheDir = path.join(spaceRoot, 'avatars');
 
-  const spacePath = safeResolve(spaceRoot, path.basename(filename));
-  const defaultPath = safeResolve(defaultRoot, path.basename(filename));
+  const spacePath = safeResolve(spaceRoot, safeName);
+  const defaultPath = safeResolve(defaultRoot, safeName);
   const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
+  const requestedWidth = parseAvatarWidthParam(req.query?.w);
+
+  // 若携带受控宽度参数，走“内存 LRU -> 磁盘变体 -> 并发合并 -> sharp WebP 转码”极速通道
+  if (requestedWidth !== null) {
+    const variant = await getOrCreateAvatarVariant({
+      filename: safeName,
+      width: requestedWidth,
+      cacheDir: variantCacheDir,
+      loadSourceBuffer: async () => {
+        if (existing) {
+          try {
+            return await fs.promises.readFile(existing);
+          } catch {
+            // 若盘读取失败则继续走下游兜底
+          }
+        }
+
+        try {
+          const doc = (await SpaceUpload.findOne({ filename: safeName }).lean()) as any;
+          const mongoBuf = coerceMongoBinaryToBuffer(doc?.data);
+          if (mongoBuf && mongoBuf.length > 0) {
+            cacheSpaceAssetToDisk(spaceRoot, safeName, mongoBuf);
+            return mongoBuf;
+          }
+        } catch (mongoErr) {
+          log.warn({ err: mongoErr }, '⚠️ Space 头像变体读取 MongoDB 原图失败');
+        }
+
+        // 回源历史 GCS 公开头像并自动落盘与持久入库，实现后续零跨云延迟
+        const legacyBuf = await fetchLegacyPublicGcsObject(safeName);
+        if (legacyBuf && legacyBuf.length > 0) {
+          cacheSpaceAssetToDisk(spaceRoot, safeName, legacyBuf);
+          persistSpaceUploadToMongo({
+            filename: safeName,
+            contentType: safeName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+            data: legacyBuf,
+          }).catch(() => undefined);
+          return legacyBuf;
+        }
+        return null;
+      },
+    });
+
+    if (variant) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Content-Type', variant.contentType);
+      return res.status(200).send(variant.buffer);
+    }
+  }
 
   if (!existing) {
     // Durable fallback: serve from Mongo if present (covers Render restarts even when S3 is broken).
     try {
-      const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
+      const doc = (await SpaceUpload.findOne({ filename: safeName }).lean()) as any;
       const buf = coerceMongoBinaryToBuffer(doc?.data);
       if (buf) {
+        cacheSpaceAssetToDisk(spaceRoot, safeName, buf);
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Vary', 'Origin');
         res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
         return res.status(200).send(buf);
       }
@@ -658,6 +750,7 @@ export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Re
 
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Vary', 'Origin');
   res.sendFile(existing);
 });
 
