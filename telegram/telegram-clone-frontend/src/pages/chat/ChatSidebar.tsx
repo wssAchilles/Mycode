@@ -102,6 +102,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         src={currentUser?.avatarUrl}
                         size="md"
                         online={isConnected}
+                        priority="high"
                     />
                     <div className="user-details-container">
                         <h3 className="user-username">{currentUser?.username}</h3>

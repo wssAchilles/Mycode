@@ -17,6 +17,7 @@
 }
 
 .tg-message-avatar {
+    position: relative;
     width: 30px;
     height: 30px;
     border-radius: 50%;
@@ -31,9 +32,17 @@
 }
 
 .tg-message-avatar img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+}
+
+.tg-message-avatar img.is-loaded {
+    opacity: 1;
 }
 
 .tg-message-avatar span {

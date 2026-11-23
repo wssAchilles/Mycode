@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getAvatarGradient, getInitials } from '../../lib/colorUtils';
-import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
+import { resolveMediaCrossOrigin, withApiBase } from '../../utils/apiUrl';
+import { isAvatarUrlLoaded, markAvatarUrlLoaded, resolveAvatarUrl } from '../../utils/media';
 import './Avatar.css';
 
 export interface AvatarProps {
-    id?: string | number; // Used for gradient generation
-    src?: string; // Image URL
-    name?: string; // Used for initials
-    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | number; // Preset or pixel value
-    isSavedMessages?: boolean; // Special case for "Saved Messages"
+    id?: string | number; // 用于生成默认渐变底色
+    src?: string; // 原始头像链接
+    name?: string; // 用于生成首字占位
+    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | number; // 预设尺寸或具体像素
+    isSavedMessages?: boolean; // 收藏夹特殊图标
     onClick?: () => void;
     className?: string;
-    online?: boolean; // Online status indicator
+    online?: boolean; // 在线状态指示点
+    priority?: 'high' | 'normal' | 'low'; // 加载优先级（遵循 optimize-image-priority）
 }
 
 const Avatar: React.FC<AvatarProps> = ({
@@ -23,30 +25,41 @@ const Avatar: React.FC<AvatarProps> = ({
     onClick,
     className = '',
     online = false,
+    priority = 'normal',
 }) => {
+    const primarySrc = useMemo(() => resolveAvatarUrl(src, size), [src, size]);
+    const fallbackSrc = useMemo(() => withApiBase(src) ?? undefined, [src]);
+
+    const [useFallbackSrc, setUseFallbackSrc] = useState(false);
     const [imgFailed, setImgFailed] = useState(false);
+    const [imgLoaded, setImgLoaded] = useState(false);
 
-    // If the src changes (e.g., user updates avatar), allow a new load attempt.
+    // 头像地址变更时重置状态，允许重新加载并触发新图片解码
     useEffect(() => {
+        setUseFallbackSrc(false);
         setImgFailed(false);
-    }, [src]);
+        setImgLoaded(false);
+    }, [primarySrc]);
 
-    // Determine dimensions
+    const activeSrc = useFallbackSrc ? fallbackSrc : primarySrc;
+    const isAlreadyCached = Boolean(activeSrc && isAvatarUrlLoaded(activeSrc));
+    const effectiveLoaded = imgLoaded || isAlreadyCached;
+    const showImage = Boolean(activeSrc && !imgFailed && !isSavedMessages);
+    const showInitials = !isSavedMessages && (!showImage || !effectiveLoaded);
+
     const sizeStyle = useMemo(() => {
         if (typeof size === 'number') {
             return { width: size, height: size, fontSize: size * 0.4 };
         }
-        // Class names will handle presets, but we might need inline for font size adjustments 
-        // if we want perfect fluid scaling. For now, rely on CSS classes for presets.
         return {};
     }, [size]);
 
-    // Determine background
     const backgroundStyle = useMemo(() => {
-        // Only suppress the gradient when the image is actually usable.
-        if ((src && !imgFailed) || isSavedMessages) return {};
+        if (isSavedMessages || (showImage && effectiveLoaded)) {
+            return {};
+        }
         return { background: getAvatarGradient(id || 0) };
-    }, [id, src, imgFailed, isSavedMessages]);
+    }, [effectiveLoaded, id, isSavedMessages, showImage]);
 
     const initials = useMemo(() => getInitials(name || ''), [name]);
 
@@ -57,6 +70,26 @@ const Avatar: React.FC<AvatarProps> = ({
         }
     };
 
+    const handleLoad = () => {
+        if (activeSrc) {
+            markAvatarUrlLoaded(activeSrc);
+        }
+        setImgLoaded(true);
+    };
+
+    const handleError = () => {
+        if (!useFallbackSrc && fallbackSrc && fallbackSrc !== primarySrc) {
+            setUseFallbackSrc(true);
+            setImgLoaded(false);
+            return;
+        }
+        setImgFailed(true);
+    };
+
+    // 严格遵守 optimize-image-priority：high 使用 eager+high；normal 仅 eager；low 仅 lazy 不叠 low
+    const loadingAttr = priority === 'low' ? 'lazy' : 'eager';
+    const fetchPriorityAttr = priority === 'high' ? 'high' : undefined;
+
     return (
         <div
             className={`tg-avatar tg-avatar-${typeof size === 'string' ? size : 'custom'} ${className}`}
@@ -65,23 +98,27 @@ const Avatar: React.FC<AvatarProps> = ({
         >
             {isSavedMessages ? (
                 <div className="tg-avatar-saved-icon">
-                    {/* Simple bookmark icon for Saved Messages */}
                     <svg viewBox="0 0 24 24" fill="white" width="60%" height="60%">
                         <path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z" />
                     </svg>
                 </div>
-            ) : src && !imgFailed ? (
-                <img
-                    src={src}
-                    alt={name || 'Avatar'}
-                    crossOrigin={resolveMediaCrossOrigin(src)}
-                    className="tg-avatar-img"
-                    loading="lazy"
-                    decoding="async"
-                    onError={() => setImgFailed(true)}
-                />
             ) : (
-                <span className="tg-avatar-initials">{initials}</span>
+                <>
+                    {showInitials && <span className="tg-avatar-initials">{initials}</span>}
+                    {showImage && activeSrc && (
+                        <img
+                            src={activeSrc}
+                            alt={name || 'Avatar'}
+                            crossOrigin={resolveMediaCrossOrigin(activeSrc)}
+                            className={`tg-avatar-img ${effectiveLoaded ? 'is-loaded' : ''}`}
+                            loading={loadingAttr}
+                            fetchPriority={fetchPriorityAttr}
+                            decoding="async"
+                            onLoad={handleLoad}
+                            onError={handleError}
+                        />
+                    )}
+                </>
             )}
 
             {online && <span className="tg-avatar-online" />}

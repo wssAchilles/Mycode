@@ -124,6 +124,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                         name={displayChat.title}
                         online={displayChat.online}
                         size="md"
+                        priority="high"
                     />
                     <div className="chat-header__details">
                         <div className="chat-header__name">{displayChat.title}</div>
@@ -147,6 +148,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                         name={displayChat.title}
                         online={displayChat.online}
                         size="md"
+                        priority="high"
                     />
                     <div className="chat-header__details">
                         <div className="chat-header__name">{displayChat.title}</div>

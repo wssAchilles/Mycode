@@ -1,5 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
+import { resolveMediaCrossOrigin, withApiBase } from '../../utils/apiUrl';
+import { isAvatarUrlLoaded, markAvatarUrlLoaded, resolveAvatarUrl } from '../../utils/media';
 import './MessageBubble.css';
 
 export interface MessageBubbleProps {
@@ -53,6 +55,23 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     const showIncomingMeta = !isOut && showSenderMeta;
     const hasReadCountBadge = isOut && !resolvedIsFailed && resolvedStatus !== 'pending' && typeof readCount === 'number' && readCount > 0;
     const senderInitial = (senderName || '?').trim().charAt(0).toUpperCase() || '?';
+
+    const primaryAvatarSrc = useMemo(() => resolveAvatarUrl(senderAvatarUrl, 32), [senderAvatarUrl]);
+    const fallbackAvatarSrc = useMemo(() => withApiBase(senderAvatarUrl) ?? undefined, [senderAvatarUrl]);
+    const [useFallbackAvatar, setUseFallbackAvatar] = useState(false);
+    const [avatarFailed, setAvatarFailed] = useState(false);
+    const [avatarLoaded, setAvatarLoaded] = useState(false);
+
+    useEffect(() => {
+        setUseFallbackAvatar(false);
+        setAvatarFailed(false);
+        setAvatarLoaded(false);
+    }, [primaryAvatarSrc]);
+
+    const activeAvatarSrc = useFallbackAvatar ? fallbackAvatarSrc : primaryAvatarSrc;
+    const isAvatarCached = Boolean(activeAvatarSrc && isAvatarUrlLoaded(activeAvatarSrc));
+    const effectiveAvatarLoaded = avatarLoaded || isAvatarCached;
+    const showAvatarImg = Boolean(activeAvatarSrc && !avatarFailed);
     const bubbleMotion = useAnimeScope<HTMLDivElement, { attention: () => void }>(
         ({ root, reducedMotion, duration }) => ({
             attention: () => {
@@ -82,10 +101,28 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div className={`tg-message-row ${isOut ? 'is-out' : 'is-in'} ${showIncomingMeta ? 'has-sender-meta' : ''} ${hasReadCountBadge ? 'has-readcount' : ''} ${isMedia ? 'is-media-row' : ''}`}>
             {showIncomingMeta && (
                 <div className="tg-message-avatar" aria-hidden="true">
-                    {senderAvatarUrl ? (
-                        <img src={senderAvatarUrl} alt="" loading="lazy" decoding="async" />
-                    ) : (
-                        <span>{senderInitial}</span>
+                    {(!showAvatarImg || !effectiveAvatarLoaded) && <span>{senderInitial}</span>}
+                    {showAvatarImg && activeAvatarSrc && (
+                        <img
+                            src={activeAvatarSrc}
+                            alt=""
+                            crossOrigin={resolveMediaCrossOrigin(activeAvatarSrc)}
+                            className={effectiveAvatarLoaded ? 'is-loaded' : ''}
+                            loading="eager"
+                            decoding="async"
+                            onLoad={() => {
+                                markAvatarUrlLoaded(activeAvatarSrc);
+                                setAvatarLoaded(true);
+                            }}
+                            onError={() => {
+                                if (!useFallbackAvatar && fallbackAvatarSrc && fallbackAvatarSrc !== primaryAvatarSrc) {
+                                    setUseFallbackAvatar(true);
+                                    setAvatarLoaded(false);
+                                    return;
+                                }
+                                setAvatarFailed(true);
+                            }}
+                        />
                     )}
                 </div>
             )}

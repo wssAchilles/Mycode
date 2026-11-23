@@ -3,6 +3,7 @@ import type { ChatSummary } from '../types';
 import { contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
+import { preloadAvatarUrls } from '../../../utils/media';
 import { chatListSnapshotCache } from '../../../services/db';
 
 // ---- API response shapes (untyped backend payloads) ----
@@ -324,7 +325,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
             const cached = await chatListSnapshotCache.load();
             if (cached?.length) {
-                set({ chats: cached.map(refreshChatSummaryTime) });
+                const refreshed = cached.map(refreshChatSummaryTime);
+                set({ chats: refreshed });
+                preloadAvatarUrls(refreshed.map((chat) => chat.avatarUrl), 'md');
             }
         } catch {
             // 静默失败，不影响主流程
@@ -396,6 +399,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
 
             set({ chats: allChats, isLoading: false });
+            preloadAvatarUrls(allChats.map((chat) => chat.avatarUrl), 'md');
 
             // 异步保存到 IDB（冷启动用）
             chatListSnapshotCache.save(allChats);
@@ -470,6 +474,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }));
 
                 set({ contacts, isLoadingContacts: false });
+                preloadAvatarUrls(contacts.map((contact) => contact.avatarUrl), 'md');
             } catch (error: unknown) {
                 set({ error: getErrorDetail(error), isLoadingContacts: false });
             } finally {
@@ -602,6 +607,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 isGroupChatMode: true,
                 isLoadingGroupDetails: false
             });
+            preloadAvatarUrls(
+                [group.avatarUrl, ...(group.members || []).map((member) => member.avatarUrl)],
+                'md',
+            );
             // 工业级：进入群聊即视为“已查看”，本地未读立即清零
             get().resetUnread(group.id);
         } catch (error: unknown) {
