@@ -82,6 +82,7 @@ const ChatPage: React.FC = () => {
   const chats = useChatStore((state) => state.chats);
   const contacts = useChatStore((state) => state.contacts);
   const pendingRequests = useChatStore((state) => state.pendingRequests);
+  const loadChats = useChatStore((state) => state.loadChats);
   const loadContacts = useChatStore((state) => state.loadContacts);
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
   const selectContact = useChatStore((state) => state.selectContact);
@@ -126,8 +127,10 @@ const ChatPage: React.FC = () => {
     [canSendMessages, isBrowserOnline, socketConnected, syncPhase],
   );
   const lastPresenceResyncAtRef = useRef(0);
+  const lastPendingRequestsSyncAtRef = useRef(0);
   const [newMessage, setNewMessage] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [addContactInitialTab, setAddContactInitialTab] = useState<'search' | 'requests' | 'sent'>('search');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
   const [searchParams] = useSearchParams();
@@ -251,6 +254,41 @@ const ChatPage: React.FC = () => {
       window.removeEventListener('online', triggerPresenceResync);
     };
   }, [presenceTargetIdsStr, currentUser?.id, subscribePresence]);
+
+  // 好友申请前台同步与轻量化轮询：切回前台、网络恢复或每 30 秒拉取待处理好友申请
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (!currentUser?.id) return;
+
+    const PENDING_RESYNC_DEBOUNCE_MS = 5_000;
+    const PENDING_POLL_INTERVAL_MS = 30_000;
+
+    const syncPendingRequests = (force = false) => {
+      if (document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (!force && now - lastPendingRequestsSyncAtRef.current < PENDING_RESYNC_DEBOUNCE_MS) {
+        return;
+      }
+      lastPendingRequestsSyncAtRef.current = now;
+      void loadPendingRequests();
+    };
+
+    const handleVisibilityOrOnline = () => {
+      syncPendingRequests(false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrOnline);
+    window.addEventListener('online', handleVisibilityOrOnline);
+    const intervalId = window.setInterval(() => {
+      syncPendingRequests(true);
+    }, PENDING_POLL_INTERVAL_MS);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
+      window.removeEventListener('online', handleVisibilityOrOnline);
+      window.clearInterval(intervalId);
+    };
+  }, [currentUser?.id, loadPendingRequests]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {
@@ -735,7 +773,10 @@ const ChatPage: React.FC = () => {
         pendingRequests={pendingRequests}
         onSelectAiChat={handleSelectAiChat}
         onOpenGroupModal={() => setIsGroupModalOpen(true)}
-        onOpenAddContactModal={() => setShowAddContactModal(true)}
+        onOpenAddContactModal={(initialTab = 'search') => {
+          setAddContactInitialTab(initialTab);
+          setShowAddContactModal(true);
+        }}
         onChatSelected={() => {
           if (isMobileLayout) setMobilePane('chat');
         }}
@@ -870,12 +911,45 @@ const ChatPage: React.FC = () => {
       {/* 4. Modals */}
       <ChatModals
         showAddContactModal={showAddContactModal}
+        addContactInitialTab={addContactInitialTab}
         isGroupModalOpen={isGroupModalOpen}
         onCloseAddContact={() => setShowAddContactModal(false)}
         onCloseGroupModal={() => setIsGroupModalOpen(false)}
         onContactAdded={() => {
-          loadContacts();
+          void loadContacts();
+          void loadPendingRequests();
+          void loadChats();
+        }}
+        onStartChatWithContact={(userId) => {
           setShowAddContactModal(false);
+          const existing = useChatStore.getState().contacts.find((c) => c.userId === userId);
+          if (existing) {
+            selectContact(existing);
+            if (isMobileLayout) setMobilePane('chat');
+            return;
+          }
+          void spaceAPI.getUserProfile(userId)
+            .then((profile) => {
+              selectContact({
+                id: profile.id,
+                userId: profile.id,
+                username: profile.username,
+                avatarUrl: profile.avatarUrl || undefined,
+                status: 'accepted',
+                isOnline: !!profile.isOnline,
+                lastSeen: profile.lastSeen || undefined,
+                unreadCount: 0,
+              });
+              if (isMobileLayout) setMobilePane('chat');
+            })
+            .catch(() => {
+              showToast('打开会话失败，请稍后重试', 'error');
+            });
+        }}
+        onOpenAddContactFromGroup={() => {
+          setIsGroupModalOpen(false);
+          setAddContactInitialTab('search');
+          setShowAddContactModal(true);
         }}
         onGroupCreated={() => { }}
       />

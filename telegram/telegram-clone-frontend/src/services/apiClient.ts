@@ -492,7 +492,19 @@ export const contactAPI = {
   getPendingRequests: async () => {
     try {
       const response = await apiClient.get('/api/contacts/pending-requests');
-      return response.data;
+      const payload = response.data;
+      const list = Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.pendingRequests)
+          ? payload.pendingRequests
+          : Array.isArray(payload?.requests)
+            ? payload.requests
+            : [];
+      return {
+        ...payload,
+        pendingRequests: list,
+        data: list,
+      };
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error, '获取待处理请求失败'));
     }

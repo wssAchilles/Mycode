@@ -43,12 +43,13 @@ interface GroupApiResponse {
     lastMessage?: { content?: string; timestamp?: string; seq?: number };
 }
 
-/** Shape returned by contactAPI.getPendingRequests().pendingRequests[] */
+/** Shape returned by contactAPI.getPendingRequests() */
 interface PendingRequestApiResponse {
     id: string;
     userId: string;
     alias?: string;
     status: string;
+    addedAt?: string;
     user?: {
         username?: string;
         email?: string;
@@ -234,6 +235,7 @@ export interface Contact {
     status: 'accepted' | 'pending' | 'blocked' | 'rejected';
     isOnline: boolean;
     lastSeen?: string;
+    addedAt?: string;
     lastMessage?: Message;
     unreadCount: number;
 }
@@ -674,7 +676,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ isLoadingPendingRequests: true, error: null });
         try {
             const response = await contactAPI.getPendingRequests();
-            const requestsArray = response?.pendingRequests || response?.requests || [];
+            const requestsArray = response?.pendingRequests || response?.data || response?.requests || [];
 
             if (!Array.isArray(requestsArray)) {
                 console.warn('待处理请求数据不是数组:', requestsArray);
@@ -692,11 +694,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 status: request.status as Contact['status'],
                 isOnline: false,
                 lastSeen: request.user?.lastSeen,
+                addedAt: request.addedAt,
                 lastMessage: undefined,
                 unreadCount: 0,
             }));
 
             set({ pendingRequests, isLoadingPendingRequests: false });
+            preloadAvatarUrls(pendingRequests.map((req) => req.avatarUrl), 'sm');
         } catch (error: unknown) {
             console.error('加载待处理请求失败:', error);
             set({ error: getErrorDetail(error), pendingRequests: [], isLoadingPendingRequests: false });
@@ -707,13 +711,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     handleContactRequest: async (requestId, action) => {
         try {
             await contactAPI.handleRequest(requestId, action);
-            // 重新加载数据
-            get().loadContacts();
-            get().loadPendingRequests();
-            get().loadChats();
+            // 同步等待刷新联系人、待处理请求与会话列表，确保界面状态与反馈提示一致
+            await Promise.all([
+                get().loadContacts(),
+                get().loadPendingRequests(),
+                get().loadChats(),
+            ]);
         } catch (error: unknown) {
             console.error(`处理联系人请求失败 (${action}):`, error);
             set({ error: getErrorDetail(error) });
+            throw error;
         }
     },
 

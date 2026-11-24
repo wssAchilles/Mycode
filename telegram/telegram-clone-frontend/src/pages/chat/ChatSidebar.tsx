@@ -3,13 +3,15 @@
  * 包含：用户信息、导航、AI入口、联系人列表、待处理请求
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Bell, Check, UserPlus, Users, X } from 'lucide-react';
 import { authAPI } from '../../services/apiClient';
-import { useChatStore } from '../../features/chat/store/chatStore';
+import { formatChatListTimestamp, useChatStore } from '../../features/chat/store/chatStore';
 import { useMessageStore } from '../../features/chat/store/messageStore';
 import { Sidebar } from '../../components/layout';
 import { Avatar } from '../../components/common';
+import { showToast } from '../../components/ui/Toast';
 import ChatListContainer from '../../features/chat/ChatListContainer';
 import { ArrowLeftIcon, LogoutIcon } from '../../components/icons/SpaceIcons';
 import type { User } from '../../types/auth';
@@ -18,8 +20,11 @@ import { buildGroupChatId, buildPrivateChatId } from '../../utils/chat';
 
 interface PendingRequest {
     id: string;
+    userId?: string;
     username: string;
     alias?: string;
+    avatarUrl?: string;
+    addedAt?: string;
 }
 
 interface ChatSidebarProps {
@@ -31,7 +36,7 @@ interface ChatSidebarProps {
     pendingRequests: PendingRequest[];
     onSelectAiChat: () => void;
     onOpenGroupModal: () => void;
-    onOpenAddContactModal: () => void;
+    onOpenAddContactModal: (initialTab?: 'search' | 'requests' | 'sent') => void;
     onChatSelected?: () => void;
 }
 
@@ -54,6 +59,24 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const selectContact = useChatStore((state) => state.selectContact);
     const handleContactRequest = useChatStore((state) => state.handleContactRequest);
     const resetUnread = useChatStore((state) => state.resetUnread);
+    const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
+
+    const processPendingRequest = async (req: PendingRequest, action: 'accept' | 'reject') => {
+        if (busyRequestId) return;
+        setBusyRequestId(req.id);
+        const displayName = req.alias || req.username;
+        try {
+            await handleContactRequest(req.id, action);
+            showToast(
+                action === 'accept' ? `已同意 ${displayName} 的好友申请` : `已拒绝 ${displayName} 的好友申请`,
+                action === 'accept' ? 'success' : 'info',
+            );
+        } catch {
+            showToast('处理好友申请失败，请稍后重试', 'error');
+        } finally {
+            setBusyRequestId(null);
+        }
+    };
 
     const handleLogout = async () => {
         await authAPI.logout();
@@ -140,28 +163,23 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     title="新建群组"
                     aria-label="新建群组"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="9" cy="7" r="4"></circle>
-                        <line x1="23" y1="11" x2="17" y2="11"></line>
-                        <line x1="20" y1="8" x2="20" y2="14"></line>
-                    </svg>
+                    <Users size={15} strokeWidth={2.2} aria-hidden="true" />
                     <span>新建群组</span>
                 </button>
                 <button
                     type="button"
-                    onClick={onOpenAddContactModal}
+                    onClick={() => onOpenAddContactModal(pendingRequests.length > 0 ? 'requests' : 'search')}
                     className="add-contact-btn"
-                    title="添加联系人"
+                    title={pendingRequests.length > 0 ? `查看 ${pendingRequests.length} 条待处理好友申请` : '添加联系人'}
                     aria-label="添加联系人"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="8.5" cy="7" r="4"></circle>
-                        <line x1="20" y1="8" x2="20" y2="14"></line>
-                        <line x1="23" y1="11" x2="17" y2="11"></line>
-                    </svg>
+                    <UserPlus size={15} strokeWidth={2.2} aria-hidden="true" />
                     <span>添加联系人</span>
+                    {pendingRequests.length > 0 && (
+                        <span className="action-badge" aria-label={`${pendingRequests.length} 条待处理好友申请`}>
+                            {pendingRequests.length > 99 ? '99+' : pendingRequests.length}
+                        </span>
+                    )}
                 </button>
             </div>
 
@@ -198,36 +216,67 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </div>
             </button>
 
-            {/* Pending Requests */}
-            {pendingRequests.map(req => (
-                <div key={req.id} className="pending-request">
-                    <div className="pending-request__info">
-                        <Avatar name={req.username} size="sm" />
-                        <div className="pending-request__details">
-                            <div className="pending-request__name">{req.alias || req.username}</div>
-                            <div className="pending-request__label">请求添加好友</div>
-                        </div>
-                    </div>
-                    <div className="pending-request__actions">
+            {/* 新的朋友 / 待处理好友申请 */}
+            {pendingRequests.length > 0 && (
+                <section className="pending-requests-section" aria-label="新的朋友与好友申请">
+                    <div className="pending-requests-header">
+                        <span className="pending-requests-title">
+                            <Bell size={13} aria-hidden="true" />
+                            <span>新的朋友</span>
+                            <span className="pending-requests-count">{pendingRequests.length}</span>
+                        </span>
                         <button
                             type="button"
-                            onClick={() => handleContactRequest(req.id, 'accept')}
-                            className="pending-request__btn pending-request__btn--accept"
-                            aria-label={`接受 ${req.alias || req.username} 的好友请求`}
+                            className="pending-requests-more"
+                            onClick={() => onOpenAddContactModal('requests')}
                         >
-                            接受
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleContactRequest(req.id, 'reject')}
-                            className="pending-request__btn pending-request__btn--reject"
-                            aria-label={`拒绝 ${req.alias || req.username} 的好友请求`}
-                        >
-                            拒绝
+                            全部管理
                         </button>
                     </div>
-                </div>
-            ))}
+                    <div className="pending-requests-list">
+                        {pendingRequests.map((req) => {
+                            const displayName = req.alias || req.username;
+                            const isBusy = busyRequestId === req.id;
+                            const timeLabel = req.addedAt ? formatChatListTimestamp(req.addedAt) : '';
+                            return (
+                                <div key={req.id} className="pending-request">
+                                    <div className="pending-request__info">
+                                        <Avatar src={req.avatarUrl} name={displayName} size="sm" priority="high" />
+                                        <div className="pending-request__details">
+                                            <div className="pending-request__name">{displayName}</div>
+                                            <div className="pending-request__label">
+                                                请求添加你为好友{timeLabel ? ` · ${timeLabel}` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="pending-request__actions">
+                                        <button
+                                            type="button"
+                                            disabled={!!busyRequestId}
+                                            onClick={() => void processPendingRequest(req, 'accept')}
+                                            className="pending-request__btn pending-request__btn--accept"
+                                            aria-label={`接受 ${displayName} 的好友请求`}
+                                        >
+                                            <Check size={12} strokeWidth={2.5} aria-hidden="true" />
+                                            <span>{isBusy ? '处理中' : '同意'}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={!!busyRequestId}
+                                            onClick={() => void processPendingRequest(req, 'reject')}
+                                            className="pending-request__btn pending-request__btn--reject"
+                                            aria-label={`拒绝 ${displayName} 的好友请求`}
+                                            title="拒绝"
+                                        >
+                                            <X size={12} strokeWidth={2.3} aria-hidden="true" />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
 
             {/* Contact List */}
             <div className="contact-list-container">

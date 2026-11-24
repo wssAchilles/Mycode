@@ -276,69 +276,160 @@
 }
 
 /* =========================================
-   好友请求卡片
+   好友申请区块与卡片
    ========================================= */
+.pending-requests-section {
+  margin: 6px 10px;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #F0F9FF 0%, #F8FAFC 100%);
+  border: 1px solid #BAE6FD;
+  flex-shrink: 0;
+}
+
+.pending-requests-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.pending-requests-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0369A1;
+}
+
+.pending-requests-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: #EF4444;
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pending-requests-more {
+  border: none;
+  background: transparent;
+  color: #0284C7;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.pending-requests-more:hover {
+  background: rgba(2, 132, 199, 0.10);
+}
+
+.pending-requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
 .pending-request {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  background: #F0F9FF;
-  margin: 6px 10px;
-  border-radius: 12px;
-  border: 1px solid #BAE6FD;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #FFFFFF;
+  border-radius: 11px;
+  border: 1px solid #E2E8F0;
 }
 
 .pending-request__info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pending-request__details {
+  min-width: 0;
+  flex: 1;
 }
 
 .pending-request__name {
   font-weight: 700;
   color: #0F1419;
-  font-size: 14px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pending-request__label {
-  font-size: 12px;
-  color: #0369A1;
+  font-size: 11.5px;
+  color: #536471;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pending-request__actions {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .pending-request__btn {
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 10px;
   border-radius: 9999px;
   border: none;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.pending-request__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .pending-request__btn--accept {
-  background: #0F1419;
+  background: #2563EB;
   color: #FFFFFF;
 }
 
-.pending-request__btn--accept:hover {
-  background: #272C30;
+.pending-request__btn--accept:hover:not(:disabled) {
+  background: #1D4ED8;
 }
 
 .pending-request__btn--reject {
-  background: #FFFFFF;
-  color: #536471;
-  border: 1px solid #CFD9DE;
+  padding: 5px 7px;
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
 }
 
-.pending-request__btn--reject:hover {
-  background: #EFF3F4;
-  color: #0F1419;
+.pending-request__btn--reject:hover:not(:disabled) {
+  background: #FEE2E2;
+  color: #DC2626;
+  border-color: #FECACA;
 }
 
 /* =========================================
@@ -353,12 +444,13 @@
 
 .new-group-btn,
 .add-contact-btn {
+  position: relative;
   width: 100%;
   height: 36px;
   padding: 0 10px;
-  border-radius: 9999px;
-  border: 1px solid #EFF3F4;
-  background: #F7F9F9;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+  background: #F8FAFC;
   color: #0F1419;
   cursor: pointer;
   font-size: 13px;
@@ -368,17 +460,32 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   box-shadow: none;
-  position: static;
 }
 
 .new-group-btn:hover,
 .add-contact-btn:hover {
-  background: #EFF3F4;
-  border-color: #CFD9DE;
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1D4ED8;
   transform: none;
   box-shadow: none;
+}
+
+.action-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: #EF4444;
+  color: #FFFFFF;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .back-to-space-btn:focus-visible,
