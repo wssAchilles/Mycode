@@ -8,5 +8,6 @@ export {
   loadSyncPts,
   saveMessage,
   saveMessages,
+  deleteMessages,
   saveSyncPts,
 } from './runtimePersistence';

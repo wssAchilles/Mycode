@@ -384,6 +384,36 @@ export const messageCache = {
     },
 
     /**
+     * 按消息 ID 批量删除本地缓存消息并更新会话元信息
+     */
+    async deleteMessages(ids: string[]): Promise<void> {
+        const cleanIds = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.trim().length > 0)));
+        if (!cleanIds.length) return;
+
+        const existing = await db.messages.bulkGet(cleanIds);
+        const affectedChats = new Set<string>();
+        for (const msg of existing) {
+            if (!msg) continue;
+            const cid = resolveMessageChatId(msg);
+            if (cid) affectedChats.add(cid);
+        }
+
+        await db.messages.bulkDelete(cleanIds);
+
+        for (const chatId of affectedChats) {
+            const count = await db.messages.where('chatId').equals(chatId).count();
+            const existingMeta = await db.chatMeta.get(chatId);
+            if (existingMeta) {
+                await db.chatMeta.put({
+                    ...existingMeta,
+                    messageCount: count,
+                    lastFetched: Date.now(),
+                });
+            }
+        }
+    },
+
+    /**
      * 本地搜索消息
      */
     async searchMessages(query: string, limit = 50): Promise<Message[]> {

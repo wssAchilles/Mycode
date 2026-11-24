@@ -1,5 +1,10 @@
 import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from './realtime';
+import type {
+  ContactRealtimePayload,
+  SocialNotificationRealtimePayload,
+  SyncStateRealtimePayload,
+} from '../../features/realtime/contracts';
 
 export type ChatId = string;
 export type LoadSeq = number;
@@ -244,13 +249,13 @@ export type ChatPatch =
         id: string;
         status?: Message['status'];
         readCount?: number;
+        content?: string;
+        editedAt?: string;
       }>;
     }
   | {
-      // Chat list meta updates (last message preview, unread, presence).
-      // Note: `chatId` here refers to the sidebar "list id":
-      // - private: other user's id
-      // - group: group id (without the `g:` prefix)
+      // 聊天列表与全域领域元信息更新（最后一条消息、未读数、在线态、联系人、多端已读与社交通知）
+      // 注意：`chatId` 此处指侧边栏列表 ID（私聊为对方 userId，群聊为去除 `g:` 前缀的 groupId）
       kind: 'meta';
       lastMessages?: Array<{ chatId: string; message: Message }>;
       unreadDeltas?: Array<{ chatId: string; delta: number }>;
@@ -264,6 +269,10 @@ export type ChatPatch =
         memberCount?: number;
       }>;
       chatRemovals?: Array<{ chatId: string }>;
+      contactEvents?: ContactRealtimePayload[];
+      selfReadSyncs?: SyncStateRealtimePayload[];
+      socialNotifications?: SocialNotificationRealtimePayload[];
+      groupRefreshIds?: string[];
     }
   | {
       kind: 'sync';

@@ -56,6 +56,7 @@ export interface SqlitePersistenceBackend {
   loadMessagesByIds(chatId: string, ids: string[]): Promise<Message[]>;
   saveMessages(messages: Message[]): Promise<void>;
   saveMessage(message: Message): Promise<void>;
+  deleteMessages?(ids: string[]): Promise<void>;
   loadHotChatCandidates(limit?: number): Promise<HotChatCandidate[]>;
   loadSyncPts(userId: string): Promise<number>;
   saveSyncPts(userId: string, pts: number): Promise<void>;
@@ -377,6 +378,24 @@ class SqliteOpfsPersistenceBackend implements SqlitePersistenceBackend {
 
   async saveMessage(message: Message): Promise<void> {
     await this.saveMessages([message]);
+  }
+
+  async deleteMessages(ids: string[]): Promise<void> {
+    const cleanIds = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.trim().length > 0)));
+    if (!cleanIds.length) return;
+    const placeholders = cleanIds.map((_id, index) => `?${index + 1}`).join(', ');
+    const rows = this.execRows<{ chat_id: string }>(
+      `SELECT DISTINCT chat_id FROM messages WHERE id IN (${placeholders})`,
+      cleanIds,
+    );
+    const affectedChatIds = rows.map((row) => row.chat_id).filter(Boolean);
+
+    this.withTransaction(() => {
+      this.deleteIds(cleanIds);
+      for (const chatId of affectedChatIds) {
+        this.updateChatMeta(chatId);
+      }
+    });
   }
 
   async loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {
@@ -808,6 +827,13 @@ export async function createSqliteOpfsDriver(
       if (shadowIdb) {
         await fallbackDriver.saveMessage(message);
         shadowState.shadowMessageWrites += 1;
+      }
+    },
+    async deleteMessages(ids: string[]): Promise<void> {
+      if (!ids.length) return;
+      await backend.deleteMessages?.(ids);
+      if (shadowIdb && fallbackDriver.deleteMessages) {
+        await fallbackDriver.deleteMessages(ids);
       }
     },
     async loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {

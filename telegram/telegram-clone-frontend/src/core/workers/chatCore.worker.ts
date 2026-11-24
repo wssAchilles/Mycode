@@ -25,6 +25,7 @@ import { ChatCoreStore } from '../chat/store/chatCoreStore';
 import {
   chatPersistence,
   configureChatPersistence,
+  deleteMessages,
   loadHotChatCandidates,
   loadMessagesBeforeSeq,
   loadMessagesByIds,
@@ -40,6 +41,19 @@ import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
 import { SearchBridge, type SearchBridgeContext } from './chatCore/searchBridge';
 import { SocketBridge, type SocketBridgeContext } from './chatCore/socketBridge';
+import { SeqGapGuard } from './chatCore/seqGapGuard';
+import {
+  type DomainEventWorkerContext,
+  processContactRealtimePayload,
+  processMessageMutationPayload,
+  processSocialNotificationPayload,
+  processSyncStatePayload,
+} from './chatCore/domainEventHandlers';
+import type {
+  ContactRealtimePayload,
+  SocialNotificationRealtimePayload,
+  SyncStateRealtimePayload,
+} from '../../features/realtime/contracts';
 import {
   type RawSyncMessage,
   type RawGroupEvent,
@@ -337,7 +351,7 @@ const REALTIME_EVENTS_PER_INGEST_SLICE = runtimeFlags.workerRealtimeBatchSize;
 const REALTIME_QUEUE_HARD_MAX = runtimeFlags.workerRealtimeQueueHardMax;
 const REALTIME_QUEUE_WARN_AT = runtimeFlags.workerRealtimeQueueWarnAt;
 
-// Chat list meta updates (coalesced per tick).
+// 会话列表与跨端全域元信息批队列（每帧合并下发）
 const pendingMeta = {
   lastMessages: new Map<string, Message>(),
   unreadDelta: new Map<string, number>(),
@@ -345,6 +359,10 @@ const pendingMeta = {
   aiMessages: new Map<string, Message>(),
   chatUpserts: new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>(),
   chatRemovals: new Set<string>(),
+  contactEvents: new Map<string, ContactRealtimePayload>(),
+  selfReadSyncs: new Map<string, SyncStateRealtimePayload>(),
+  socialNotifications: new Map<string, SocialNotificationRealtimePayload>(),
+  groupRefreshIds: new Set<string>(),
 };
 
 const remoteSearchAbortByChat = new Map<string, { key: string; controller: AbortController }>();
@@ -382,6 +400,57 @@ const socketBridgeCtx: SocketBridgeContext = {
   setWorkerSocketAuthBlocked: (blocked: boolean) => { workerSocketAuthBlocked = blocked; },
 };
 const socketBridge = new SocketBridge(socketBridgeCtx);
+
+// 500ms 活跃会话跳号补洞器（对标 Telegram TDLib / Web A 的短延迟空洞自愈）
+const seqGapGuard = new SeqGapGuard({
+  waitMs: 500,
+  maxSpan: 200,
+  onGapTimeout: async (chatId, afterSeq) => {
+    if (!isInited || isShuttingDown || !currentUserId) return;
+    try {
+      const result = await fetchChatMessagesUnified(chatId, { afterSeq, limit: 50 });
+      if (result?.messages?.length) {
+        await ingestMessagesInternal(result.messages);
+      }
+    } catch {
+      // 补洞失败静默兜底，后续周期同步/重连差量将再次追平
+    }
+  },
+});
+
+const seenDomainNotificationIds = new Set<string>();
+function rememberDomainEventOnce(eventId: string, limit = 256): boolean {
+  if (!eventId) return true;
+  if (seenDomainNotificationIds.has(eventId)) return false;
+  seenDomainNotificationIds.add(eventId);
+  if (seenDomainNotificationIds.size > limit) {
+    const oldest = seenDomainNotificationIds.values().next().value;
+    if (oldest) seenDomainNotificationIds.delete(oldest);
+  }
+  return true;
+}
+
+function getDomainEventContext(): DomainEventWorkerContext {
+  return {
+    getCurrentUserId: () => currentUserId,
+    store,
+    searchService,
+    searchBridge,
+    withApiBase,
+    chatListIdFromChatId,
+    saveMessages,
+    deleteMessages,
+    emitPatch,
+    emitDelete,
+    queueLastMessageMeta,
+    queueContactEventMeta,
+    queueSocialNotificationMeta: (event) => {
+      if (!rememberDomainEventOnce(event.eventId)) return;
+      queueSocialNotificationMeta(event);
+    },
+    queueSelfReadSyncMeta,
+  };
+}
 
 function resetTelemetryCounters() {
   telemetry.patchQueuePeak = 0;
@@ -461,6 +530,7 @@ store.setOnChatEvicted((chat) => {
   searchService.clearChat(chat.chatId);
   searchBridge.removeChat(chat.chatId);
   dropPrefetchTarget(chat.chatId);
+  seqGapGuard.clearChat(chat.chatId);
 });
 
 const flushPatches = throttleWithTickEnd(() => {
@@ -470,7 +540,11 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.online.size > 0 ||
     pendingMeta.aiMessages.size > 0 ||
     pendingMeta.chatUpserts.size > 0 ||
-    pendingMeta.chatRemovals.size > 0;
+    pendingMeta.chatRemovals.size > 0 ||
+    pendingMeta.contactEvents.size > 0 ||
+    pendingMeta.selfReadSyncs.size > 0 ||
+    pendingMeta.socialNotifications.size > 0 ||
+    pendingMeta.groupRefreshIds.size > 0;
   if (hasMeta) {
     const lastMessages =
       pendingMeta.lastMessages.size > 0
@@ -496,6 +570,22 @@ const flushPatches = throttleWithTickEnd(() => {
       pendingMeta.chatRemovals.size > 0
         ? Array.from(pendingMeta.chatRemovals.values()).map((chatId) => ({ chatId }))
         : undefined;
+    const contactEvents =
+      pendingMeta.contactEvents.size > 0
+        ? Array.from(pendingMeta.contactEvents.values())
+        : undefined;
+    const selfReadSyncs =
+      pendingMeta.selfReadSyncs.size > 0
+        ? Array.from(pendingMeta.selfReadSyncs.values())
+        : undefined;
+    const socialNotifications =
+      pendingMeta.socialNotifications.size > 0
+        ? Array.from(pendingMeta.socialNotifications.values())
+        : undefined;
+    const groupRefreshIds =
+      pendingMeta.groupRefreshIds.size > 0
+        ? Array.from(pendingMeta.groupRefreshIds.values())
+        : undefined;
 
     pendingMeta.lastMessages.clear();
     pendingMeta.unreadDelta.clear();
@@ -503,8 +593,24 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
+    pendingMeta.contactEvents.clear();
+    pendingMeta.selfReadSyncs.clear();
+    pendingMeta.socialNotifications.clear();
+    pendingMeta.groupRefreshIds.clear();
 
-    enqueuePatch({ kind: 'meta', lastMessages, unreadDeltas, onlineUpdates, aiMessages, chatUpserts, chatRemovals });
+    enqueuePatch({
+      kind: 'meta',
+      lastMessages,
+      unreadDeltas,
+      onlineUpdates,
+      aiMessages,
+      chatUpserts,
+      chatRemovals,
+      contactEvents,
+      selfReadSyncs,
+      socialNotifications,
+      groupRefreshIds,
+    });
   }
 
   if (queuedPatchCount() === 0) return;
@@ -536,9 +642,14 @@ function normalizeRealtimeBatch(events: SocketRealtimeEvent[]): SocketRealtimeEv
     if (!event || typeof event !== 'object') continue;
     if (
       event.type !== 'message'
+      && event.type !== 'batch_messages'
       && event.type !== 'presence'
       && event.type !== 'readReceipt'
       && event.type !== 'groupUpdate'
+      && event.type !== 'contactUpdate'
+      && event.type !== 'messageMutation'
+      && event.type !== 'socialNotification'
+      && event.type !== 'syncState'
     ) {
       continue;
     }
@@ -573,6 +684,10 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
   const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
   const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number; readerId?: string }>();
   const groupEvents: RawGroupEvent[] = [];
+  const contactEvents: unknown[] = [];
+  const messageMutations: unknown[] = [];
+  const socialNotifications: unknown[] = [];
+  const syncStates: unknown[] = [];
 
   for (const event of events) {
     if (!event) continue;
@@ -621,6 +736,26 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
 
     if (event.type === 'groupUpdate') {
       if (event.payload) groupEvents.push(event.payload);
+      continue;
+    }
+
+    if (event.type === 'contactUpdate') {
+      if (event.payload) contactEvents.push(event.payload);
+      continue;
+    }
+
+    if (event.type === 'messageMutation') {
+      if (event.payload) messageMutations.push(event.payload);
+      continue;
+    }
+
+    if (event.type === 'socialNotification') {
+      if (event.payload) socialNotifications.push(event.payload);
+      continue;
+    }
+
+    if (event.type === 'syncState') {
+      if (event.payload) syncStates.push(event.payload);
     }
   }
 
@@ -639,6 +774,22 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
 
   if (groupEvents.length) {
     await apiImpl.ingestGroupUpdates(groupEvents);
+  }
+
+  if (contactEvents.length || messageMutations.length || socialNotifications.length || syncStates.length) {
+    const domainCtx = getDomainEventContext();
+    for (const payload of messageMutations) {
+      processMessageMutationPayload(payload, domainCtx);
+    }
+    for (const payload of contactEvents) {
+      processContactRealtimePayload(payload, domainCtx);
+    }
+    for (const payload of socialNotifications) {
+      processSocialNotificationPayload(payload, domainCtx);
+    }
+    for (const payload of syncStates) {
+      processSyncStatePayload(payload, domainCtx);
+    }
   }
 }
 
@@ -877,7 +1028,11 @@ function estimatePatchOps(patch: ChatPatch): number {
       (patch.onlineUpdates?.length || 0) +
       (patch.aiMessages?.length || 0) +
       (patch.chatUpserts?.length || 0) +
-      (patch.chatRemovals?.length || 0)
+      (patch.chatRemovals?.length || 0) +
+      (patch.contactEvents?.length || 0) +
+      (patch.selfReadSyncs?.length || 0) +
+      (patch.socialNotifications?.length || 0) +
+      (patch.groupRefreshIds?.length || 0)
     );
   }
   return 1;
@@ -1022,6 +1177,10 @@ function compactPatchBatchForDispatch(batch: ChatPatch[]): ChatPatch[] {
   const metaAiMessages = new Map<string, Message>();
   const metaChatUpserts = new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>();
   const metaChatRemovals = new Set<string>();
+  const metaContactEvents = new Map<string, ContactRealtimePayload>();
+  const metaSelfReadSyncs = new Map<string, SyncStateRealtimePayload>();
+  const metaSocialNotifications = new Map<string, SocialNotificationRealtimePayload>();
+  const metaGroupRefreshIds = new Set<string>();
   const byProjection = new Map<string, MessagePatch[]>();
   const projectionOrder: string[] = [];
 
@@ -1070,6 +1229,32 @@ function compactPatchBatchForDispatch(batch: ChatPatch[]): ChatPatch[] {
           metaChatRemovals.add(item.chatId);
         }
       }
+      if (Array.isArray(patch.contactEvents)) {
+        for (const item of patch.contactEvents) {
+          if (!item?.eventId) continue;
+          metaContactEvents.set(item.eventId, item);
+        }
+      }
+      if (Array.isArray(patch.selfReadSyncs)) {
+        for (const item of patch.selfReadSyncs) {
+          if (!item?.chatId) continue;
+          const prev = metaSelfReadSyncs.get(item.chatId);
+          if (!prev || item.seq >= prev.seq) {
+            metaSelfReadSyncs.set(item.chatId, item);
+          }
+        }
+      }
+      if (Array.isArray(patch.socialNotifications)) {
+        for (const item of patch.socialNotifications) {
+          if (!item?.eventId) continue;
+          metaSocialNotifications.set(item.eventId, item);
+        }
+      }
+      if (Array.isArray(patch.groupRefreshIds)) {
+        for (const groupId of patch.groupRefreshIds) {
+          if (groupId) metaGroupRefreshIds.add(groupId);
+        }
+      }
       continue;
     }
 
@@ -1090,7 +1275,11 @@ function compactPatchBatchForDispatch(batch: ChatPatch[]): ChatPatch[] {
     metaOnline.size ||
     metaAiMessages.size ||
     metaChatUpserts.size ||
-    metaChatRemovals.size
+    metaChatRemovals.size ||
+    metaContactEvents.size ||
+    metaSelfReadSyncs.size ||
+    metaSocialNotifications.size ||
+    metaGroupRefreshIds.size
   ) {
     compacted.push({
       kind: 'meta',
@@ -1110,6 +1299,12 @@ function compactPatchBatchForDispatch(batch: ChatPatch[]): ChatPatch[] {
       chatRemovals: metaChatRemovals.size
         ? Array.from(metaChatRemovals.values()).map((chatId) => ({ chatId }))
         : undefined,
+      contactEvents: metaContactEvents.size ? Array.from(metaContactEvents.values()) : undefined,
+      selfReadSyncs: metaSelfReadSyncs.size ? Array.from(metaSelfReadSyncs.values()) : undefined,
+      socialNotifications: metaSocialNotifications.size
+        ? Array.from(metaSocialNotifications.values())
+        : undefined,
+      groupRefreshIds: metaGroupRefreshIds.size ? Array.from(metaGroupRefreshIds.values()) : undefined,
     });
   }
   if (latestSync) {
@@ -1243,6 +1438,33 @@ function isAiChatId(chatId: string): boolean {
 function queueChatRemovalMeta(chatId: string) {
   pendingMeta.chatUpserts.delete(chatId);
   pendingMeta.chatRemovals.add(chatId);
+  flushPatches();
+}
+
+function queueContactEventMeta(event: ContactRealtimePayload) {
+  if (!event?.eventId) return;
+  pendingMeta.contactEvents.set(event.eventId, event);
+  flushPatches();
+}
+
+function queueSelfReadSyncMeta(event: SyncStateRealtimePayload) {
+  if (!event?.chatId) return;
+  const prev = pendingMeta.selfReadSyncs.get(event.chatId);
+  if (!prev || event.seq >= prev.seq) {
+    pendingMeta.selfReadSyncs.set(event.chatId, event);
+  }
+  flushPatches();
+}
+
+function queueSocialNotificationMeta(event: SocialNotificationRealtimePayload) {
+  if (!event?.eventId) return;
+  pendingMeta.socialNotifications.set(event.eventId, event);
+  flushPatches();
+}
+
+function queueGroupRefreshMeta(groupId: string) {
+  if (!groupId) return;
+  pendingMeta.groupRefreshIds.add(groupId);
   flushPatches();
 }
 
@@ -2382,16 +2604,63 @@ async function processGroupUpdateEvent(raw: RawGroupEvent): Promise<void> {
 
   // Sidebar id for groups is the raw groupId (no g: prefix).
   const listId = groupId;
+  const parsedMemberCount =
+    typeof raw.memberCount === 'number' && Number.isFinite(raw.memberCount) ? raw.memberCount : undefined;
+
+  if (action === 'group_created') {
+    desiredJoinedRooms.add(groupId);
+    emitWorkerSocket('joinRoom', { roomId: groupId }).catch(() => undefined);
+    const payloadTitle =
+      typeof raw.name === 'string'
+        ? raw.name
+        : typeof raw.groupName === 'string'
+          ? raw.groupName
+          : undefined;
+    const payloadAvatar = typeof raw.avatarUrl === 'string' ? withApiBase(raw.avatarUrl) : undefined;
+    if (payloadTitle) {
+      queueChatUpsertMeta(listId, {
+        isGroup: true,
+        title: payloadTitle,
+        avatarUrl: payloadAvatar,
+        memberCount: parsedMemberCount,
+      });
+      return;
+    }
+    try {
+      const meta = await fetchGroupMeta(groupId);
+      queueChatUpsertMeta(listId, {
+        isGroup: true,
+        title: meta?.title || '群聊',
+        avatarUrl: meta?.avatarUrl ?? payloadAvatar,
+        memberCount: meta?.memberCount ?? parsedMemberCount,
+      });
+    } catch {
+      queueChatUpsertMeta(listId, {
+        isGroup: true,
+        title: '群聊',
+        avatarUrl: payloadAvatar,
+        memberCount: parsedMemberCount,
+      });
+    }
+    return;
+  }
 
   if (action === 'group_updated') {
     const title = typeof raw.name === 'string' ? raw.name : typeof raw.groupName === 'string' ? raw.groupName : undefined;
     const avatarUrl = typeof raw.avatarUrl === 'string' ? withApiBase(raw.avatarUrl) : undefined;
-    queueChatUpsertMeta(listId, { isGroup: true, title, avatarUrl });
+    queueChatUpsertMeta(listId, {
+      isGroup: true,
+      title,
+      avatarUrl,
+      memberCount: parsedMemberCount,
+    });
+    queueGroupRefreshMeta(groupId);
     return;
   }
 
   if (action === 'group_deleted') {
     queueChatRemovalMeta(listId);
+    desiredJoinedRooms.delete(groupId);
     return;
   }
 
@@ -2401,6 +2670,11 @@ async function processGroupUpdateEvent(raw: RawGroupEvent): Promise<void> {
       queueChatRemovalMeta(listId);
       desiredJoinedRooms.delete(groupId);
       emitWorkerSocket('leaveRoom', { roomId: groupId }).catch(() => undefined);
+    } else {
+      if (parsedMemberCount !== undefined) {
+        queueChatUpsertMeta(listId, { isGroup: true, memberCount: parsedMemberCount });
+      }
+      queueGroupRefreshMeta(groupId);
     }
     return;
   }
@@ -2412,9 +2686,15 @@ async function processGroupUpdateEvent(raw: RawGroupEvent): Promise<void> {
         ? raw.members.map((m) => String(m?.user?.id || m?.userId || m?.user?.userId || '')).filter(Boolean)
         : [];
 
-    if (!memberIds.includes(currentUserId)) return;
+    if (!memberIds.includes(currentUserId)) {
+      if (parsedMemberCount !== undefined) {
+        queueChatUpsertMeta(listId, { isGroup: true, memberCount: parsedMemberCount });
+      }
+      queueGroupRefreshMeta(groupId);
+      return;
+    }
 
-    // Upsert group into sidebar without a full reload.
+    // 自己被拉入新群组，立即加入 Socket 房间并渲染群聊卡片，无需刷新页面
     desiredJoinedRooms.add(groupId);
     emitWorkerSocket('joinRoom', { roomId: groupId }).catch(() => undefined);
     try {
@@ -2423,12 +2703,20 @@ async function processGroupUpdateEvent(raw: RawGroupEvent): Promise<void> {
         isGroup: true,
         title: meta?.title || '群聊',
         avatarUrl: meta?.avatarUrl,
-        memberCount: meta?.memberCount,
+        memberCount: meta?.memberCount ?? parsedMemberCount,
       });
     } catch {
-      queueChatUpsertMeta(listId, { isGroup: true, title: '群聊' });
+      queueChatUpsertMeta(listId, { isGroup: true, title: '群聊', memberCount: parsedMemberCount });
     }
     return;
+  }
+
+  if (
+    action === 'member_role_updated'
+    || action === 'member_muted'
+    || action === 'owner_transferred'
+  ) {
+    queueGroupRefreshMeta(groupId);
   }
 }
 
@@ -3142,6 +3430,7 @@ async function processSyncPayload(updates: RawSyncUpdate[], rawMessages: RawSync
 
   if (currentUserId && normalizedUpdates.updates.length) {
     const groupTasks: Array<Promise<void>> = [];
+    const domainCtx = getDomainEventContext();
     for (const u of normalizedUpdates.updates) {
       if (u?.type === 'read') {
         const chatId = u?.chatId;
@@ -3159,6 +3448,26 @@ async function processSyncPayload(updates: RawSyncUpdate[], rawMessages: RawSync
         if (!payload) continue;
         groupTasks.push(processGroupUpdateEvent(payload));
         continue;
+      }
+
+      if (u?.type === 'contact_change') {
+        if (u?.payload) {
+          processContactRealtimePayload(u.payload, domainCtx);
+        }
+        continue;
+      }
+
+      if (u?.type === 'message_edit' || u?.type === 'message_delete') {
+        if (u?.payload) {
+          processMessageMutationPayload(u.payload, domainCtx);
+        }
+        continue;
+      }
+
+      if (u?.type === 'social_notification') {
+        if (u?.payload) {
+          processSocialNotificationPayload(u.payload, domainCtx);
+        }
       }
     }
 
@@ -3558,6 +3867,8 @@ const apiImpl: ChatCoreApi = {
     stopReconnectGapRecover();
     stopSyncLoop();
     stopChatFetches();
+    seqGapGuard.clearAll();
+    seenDomainNotificationIds.clear();
     store.clearAll();
     searchService.clearAll();
     prefetchInFlight.clear();
@@ -3655,6 +3966,10 @@ const apiImpl: ChatCoreApi = {
     pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
+    pendingMeta.contactEvents.clear();
+    pendingMeta.selfReadSyncs.clear();
+    pendingMeta.socialNotifications.clear();
+    pendingMeta.groupRefreshIds.clear();
     realtimeIngestGeneration += 1;
     realtimeIngestQueue.length = 0;
     realtimeIngestQueueEvents = 0;
@@ -4380,7 +4695,31 @@ const apiImpl: ChatCoreApi = {
     });
 
     if (!filtered.length) return;
+
+    // 写入前采集各会话本地最新 seq 基线，用于驱动 500ms 乱序补洞检测
+    const seqsByChat = new Map<string, number[]>();
+    const prevMaxSeqByChat = new Map<string, number | null>();
+    for (const msg of filtered) {
+      const chatId = msg.chatId || (msg.groupId ? `g:${msg.groupId}` : '');
+      if (!chatId || typeof msg.seq !== 'number' || !Number.isFinite(msg.seq) || msg.seq <= 0) {
+        continue;
+      }
+      if (!prevMaxSeqByChat.has(chatId)) {
+        prevMaxSeqByChat.set(chatId, store.getChat(chatId)?.maxSeq ?? null);
+      }
+      const list = seqsByChat.get(chatId);
+      if (list) {
+        list.push(msg.seq);
+      } else {
+        seqsByChat.set(chatId, [msg.seq]);
+      }
+    }
+
     await ingestMessagesInternal(filtered);
+
+    for (const [chatId, incomingSeqs] of seqsByChat.entries()) {
+      seqGapGuard.observeIncoming(chatId, prevMaxSeqByChat.get(chatId) ?? null, incomingSeqs);
+    }
   },
 
   async ingestRealtimeEvents(events: SocketRealtimeEvent[]) {
@@ -4510,6 +4849,8 @@ const apiImpl: ChatCoreApi = {
     stopReconnectGapRecover();
     stopSyncLoop();
     stopChatFetches();
+    seqGapGuard.clearAll();
+    seenDomainNotificationIds.clear();
     store.clearAll();
     searchService.clearAll();
     searchBridge.clearAll();
@@ -4532,6 +4873,10 @@ const apiImpl: ChatCoreApi = {
     pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
+    pendingMeta.contactEvents.clear();
+    pendingMeta.selfReadSyncs.clear();
+    pendingMeta.socialNotifications.clear();
+    pendingMeta.groupRefreshIds.clear();
     pendingSafetyChecks.clear();
     recentSafetyChecks.clear();
     safetyCheckInFlight = false;

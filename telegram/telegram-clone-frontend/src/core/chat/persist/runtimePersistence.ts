@@ -146,6 +146,15 @@ export class ChatPersistenceRuntime {
     await this.run((driver) => driver.saveMessage(message));
   }
 
+  async deleteMessages(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    await this.run(async (driver) => {
+      if (driver.deleteMessages) {
+        await driver.deleteMessages(ids);
+      }
+    });
+  }
+
   async loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {
     return this.run((driver) => driver.loadHotChatCandidates(limit));
   }
@@ -198,6 +207,10 @@ export async function saveMessages(messages: Message[]): Promise<void> {
 
 export async function saveMessage(message: Message): Promise<void> {
   await chatPersistence.saveMessage(message);
+}
+
+export async function deleteMessages(ids: string[]): Promise<void> {
+  await chatPersistence.deleteMessages(ids);
 }
 
 export async function loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {

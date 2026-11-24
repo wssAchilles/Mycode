@@ -1,3 +1,10 @@
+import type {
+  ContactRealtimePayload,
+  MessageMutationRealtimePayload,
+  SocialNotificationRealtimePayload,
+  SyncStateRealtimePayload,
+} from '../features/realtime/contracts';
+
 // 消息相关类型定义
 export interface Message {
   id: string;
@@ -6,6 +13,7 @@ export interface Message {
   chatType: 'private' | 'group';
   seq?: number;
   content: string;
+  editedAt?: string;
   senderId: string;      // 兼容旧的属性名
   senderUsername: string; // 兼容旧的属性名
   userId: string;        // 新的属性名
@@ -45,13 +53,18 @@ export interface GroupUpdatePayload {
   avatarUrl?: string;
   previousOwnerId?: string;
   groupName?: string;
+  memberCount?: number;
 }
 
 export type RealtimeBatchEvent =
   | { type: 'message'; payload: Message }
   | { type: 'presence'; payload: { userId: string; isOnline: boolean; lastSeen?: string } }
   | { type: 'readReceipt'; payload: { chatId: string; seq: number; readCount: number; readerId?: string } }
-  | { type: 'groupUpdate'; payload: GroupUpdatePayload };
+  | { type: 'groupUpdate'; payload: GroupUpdatePayload }
+  | { type: 'contactUpdate'; payload: ContactRealtimePayload }
+  | { type: 'messageMutation'; payload: MessageMutationRealtimePayload }
+  | { type: 'socialNotification'; payload: SocialNotificationRealtimePayload }
+  | { type: 'syncState'; payload: SyncStateRealtimePayload };
 
 // Socket.IO 事件类型
 export interface SocketMessage {

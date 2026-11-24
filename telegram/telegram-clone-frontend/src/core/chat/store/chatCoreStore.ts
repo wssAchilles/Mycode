@@ -104,6 +104,13 @@ export class ChatCoreStore {
     return this.getOrCreate(this.activeChatId, this.activeIsGroup);
   }
 
+  /**
+   * 仅读取已缓存的会话状态，不触发 LRU 创建新占位项
+   */
+  getChat(chatId: string): ChatCacheState | undefined {
+    return this.chats.get(chatId);
+  }
+
   private applyKnownReadWatermarksToMessage(chat: ChatCacheState, raw: Message): Message {
     const seq = normalizePositiveSeq(raw?.seq);
     if (seq === null) return raw;
@@ -575,6 +582,56 @@ export class ChatCoreStore {
       if (hit) out.push(hit);
     }
     return out;
+  }
+
+  /**
+   * 原地更新内存缓存中的单条消息正文与编辑时间戳
+   */
+  updateMessageContent(chatId: string, messageId: string, content: string, editedAt?: string): Message | null {
+    const chat = this.chats.get(chatId);
+    if (!chat || !messageId) return null;
+    const existing = chat.entityById.get(messageId);
+    if (!existing) return null;
+
+    const updated: Message = {
+      ...existing,
+      content,
+      editedAt: editedAt || existing.editedAt || new Date().toISOString(),
+    };
+    chat.entityById.set(messageId, updated);
+    const idx = chat.messages.findIndex((m) => m.id === messageId);
+    if (idx >= 0) {
+      chat.messages[idx] = updated;
+    }
+    return updated;
+  }
+
+  /**
+   * 从内存缓存中移除被撤回/删除的单条消息，并重算序号范围与最新一条消息
+   */
+  removeMessage(chatId: string, messageId: string): { removed: boolean; nextLastMessage: Message | null } {
+    const chat = this.chats.get(chatId);
+    if (!chat || !messageId) {
+      return { removed: false, nextLastMessage: null };
+    }
+    const existing = chat.entityById.get(messageId);
+    if (!existing) {
+      const last = chat.messages.length ? chat.messages[chat.messages.length - 1] : null;
+      return { removed: false, nextLastMessage: last };
+    }
+
+    chat.entityById.delete(messageId);
+    chat.ids.delete(messageId);
+    const seq = normalizePositiveSeq(existing.seq);
+    if (seq !== null) {
+      chat.seqSet.delete(seq);
+    }
+    chat.messages = chat.messages.filter((m) => m.id !== messageId);
+    ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+    chat.seqList = extractSortedPositiveSeqs(chat.messages);
+
+    const nextLastMessage = chat.messages.length ? chat.messages[chat.messages.length - 1] : null;
+    return { removed: true, nextLastMessage };
   }
 }
 

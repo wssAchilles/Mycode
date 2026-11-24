@@ -23,6 +23,7 @@ export interface RawSyncMessage {
   receiver?: string;
   userId?: string;
   content?: string;
+  editedAt?: string;
   timestamp?: string;
   seq?: number;
   type?: number | string;
@@ -49,6 +50,7 @@ export interface RawGroupEvent {
   name?: string;
   groupName?: string;
   avatarUrl?: string;
+  memberCount?: number;
   memberIds?: string[];
   members?: Array<{ user?: { id?: string; userId?: string }; userId?: string }>;
   [key: string]: unknown;
@@ -119,6 +121,7 @@ export function normalizeSyncMessage(raw: RawSyncMessage): Message | null {
     chatType,
     seq,
     content: String(raw.content ?? ''),
+    editedAt: typeof raw.editedAt === 'string' && raw.editedAt ? raw.editedAt : undefined,
     senderId,
     senderUsername,
     userId: senderId,

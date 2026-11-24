@@ -72,6 +72,8 @@ function patchSignature(patches: MessagePatch[]): string {
           id: update.id,
           status: update.status,
           readCount: update.readCount,
+          content: update.content,
+          editedAt: update.editedAt,
         })),
       };
     }),
@@ -86,7 +88,13 @@ export function compactMessagePatchesWithRuntime(
   } = {},
 ): MessagePatchCompactionRuntimeResult {
   const jsBaseline = compactMessagePatches(patches);
-  if (!options.wasmPatchCompactor) {
+  // 若更新补丁中包含消息正文编辑（content/editedAt），跳过未覆盖新字段的 WASM 合并器以防丢失内容
+  const hasContentMutation = patches.some(
+    (patch) =>
+      patch.kind === 'update' &&
+      patch.updates.some((u) => u.content !== undefined || u.editedAt !== undefined),
+  );
+  if (!options.wasmPatchCompactor || hasContentMutation) {
     return {
       patches: jsBaseline,
       usedWasm: false,
@@ -173,7 +181,10 @@ function mergeAdjacentPatches(prev: MessagePatch, next: MessagePatch): MessagePa
   }
 
   if (prev.kind === 'update' && next.kind === 'update') {
-    const byId = new Map<string, { id: string; status?: Message['status']; readCount?: number }>();
+    const byId = new Map<
+      string,
+      { id: string; status?: Message['status']; readCount?: number; content?: string; editedAt?: string }
+    >();
     for (const u of prev.updates) byId.set(u.id, u);
     for (const u of next.updates) {
       const cur = byId.get(u.id);

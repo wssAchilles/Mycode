@@ -44,6 +44,9 @@ export const idbChatPersistenceDriver: ChatPersistenceDriver = {
   async saveMessage(message: Message): Promise<void> {
     await messageCache.saveMessage(message);
   },
+  async deleteMessages(ids: string[]): Promise<void> {
+    await messageCache.deleteMessages(ids);
+  },
   async loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {
     const rows: HotChatMeta[] = await messageCache.getHotChats(limit);
     return rows.map((row) => ({

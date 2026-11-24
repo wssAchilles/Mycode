@@ -95,6 +95,7 @@ export interface ChatPersistenceDriver {
   loadMessagesByIds(chatId: string, ids: string[]): Promise<Message[]>;
   saveMessages(messages: Message[]): Promise<void>;
   saveMessage(message: Message): Promise<void>;
+  deleteMessages?(ids: string[]): Promise<void>;
   loadHotChatCandidates(limit?: number): Promise<HotChatCandidate[]>;
   loadSyncPts(userId: string): Promise<number>;
   saveSyncPts(userId: string, pts: number): Promise<void>;
