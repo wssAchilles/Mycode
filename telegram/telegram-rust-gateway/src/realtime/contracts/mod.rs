@@ -28,6 +28,10 @@ pub enum RealtimeDeliveryTopic {
     Typing,
     ReadReceipt,
     GroupUpdate,
+    ContactUpdate,
+    MessageMutation,
+    SocialNotification,
+    SyncState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -302,8 +306,8 @@ mod tests {
     use super::{
         GatewayRealtimeRuntime, GatewayRealtimeSocketIoCompatTransport,
         GatewayRealtimeSummaryResponse, GatewayRealtimeSyncLongPollTransport,
-        GatewayRealtimeTransportCatalog, RealtimeCatalogTransportName, RealtimeFanoutOwner,
-        RealtimeRolloutStage, RealtimeSocketTerminator,
+        GatewayRealtimeTransportCatalog, RealtimeCatalogTransportName, RealtimeDeliveryEnvelopeV1,
+        RealtimeDeliveryTopic, RealtimeFanoutOwner, RealtimeRolloutStage, RealtimeSocketTerminator,
     };
 
     #[test]
@@ -354,5 +358,37 @@ mod tests {
         assert_eq!(serialized["maxOutboundQueueSize"], json!(5));
         assert_eq!(serialized["droppedEventCount"], json!(3));
         assert_eq!(serialized["resumeGapCount"], json!(1));
+    }
+
+    #[test]
+    fn delivery_envelope_decodes_domain_sync_topics() {
+        let cases = [
+            ("contact_update", RealtimeDeliveryTopic::ContactUpdate),
+            ("message_mutation", RealtimeDeliveryTopic::MessageMutation),
+            ("social_notification", RealtimeDeliveryTopic::SocialNotification),
+            ("sync_state", RealtimeDeliveryTopic::SyncState),
+        ];
+
+        for (raw_topic, expected_topic) in cases {
+            let raw = json!({
+                "specVersion": "realtime.delivery.v1",
+                "deliveryId": "del-1",
+                "topic": raw_topic,
+                "emittedAt": "2026-11-24T12:00:00Z",
+                "traceId": "trace-1",
+                "source": "node_socket_io_compat",
+                "target": {
+                    "kind": "user",
+                    "id": "user-1"
+                },
+                "payload": {
+                    "action": "test"
+                }
+            })
+            .to_string();
+
+            let decoded = RealtimeDeliveryEnvelopeV1::decode(&raw).expect("decode domain topic");
+            assert_eq!(decoded.topic, expected_topic);
+        }
     }
 }

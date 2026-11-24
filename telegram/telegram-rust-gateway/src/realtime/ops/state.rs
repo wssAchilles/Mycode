@@ -183,6 +183,10 @@ fn delivery_topic_name(topic: RealtimeDeliveryTopic) -> String {
         RealtimeDeliveryTopic::Typing => "typing",
         RealtimeDeliveryTopic::ReadReceipt => "read_receipt",
         RealtimeDeliveryTopic::GroupUpdate => "group_update",
+        RealtimeDeliveryTopic::ContactUpdate => "contact_update",
+        RealtimeDeliveryTopic::MessageMutation => "message_mutation",
+        RealtimeDeliveryTopic::SocialNotification => "social_notification",
+        RealtimeDeliveryTopic::SyncState => "sync_state",
     }
     .to_string()
 }

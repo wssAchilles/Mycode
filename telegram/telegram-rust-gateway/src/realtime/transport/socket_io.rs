@@ -154,6 +154,10 @@ fn batch_event_name(topic: RealtimeDeliveryTopic) -> &'static str {
         RealtimeDeliveryTopic::Typing => "typing",
         RealtimeDeliveryTopic::ReadReceipt => "readReceipt",
         RealtimeDeliveryTopic::GroupUpdate => "groupUpdate",
+        RealtimeDeliveryTopic::ContactUpdate => "contactUpdate",
+        RealtimeDeliveryTopic::MessageMutation => "messageMutation",
+        RealtimeDeliveryTopic::SocialNotification => "socialNotification",
+        RealtimeDeliveryTopic::SyncState => "syncState",
     }
 }
 
@@ -236,7 +240,7 @@ mod tests {
 
     use crate::realtime_contracts::RealtimeDeliveryTopic;
 
-    use super::translate_delivery_payload;
+    use super::{batch_event_name, translate_delivery_payload};
 
     #[test]
     fn translates_room_message_payload_to_frontend_shape() {
@@ -281,6 +285,26 @@ mod tests {
                 .get("clientTempId")
                 .and_then(|value| value.as_str()),
             Some("temp-1")
+        );
+    }
+
+    #[test]
+    fn maps_domain_topics_to_frontend_batch_event_names() {
+        assert_eq!(
+            batch_event_name(RealtimeDeliveryTopic::ContactUpdate),
+            "contactUpdate"
+        );
+        assert_eq!(
+            batch_event_name(RealtimeDeliveryTopic::MessageMutation),
+            "messageMutation"
+        );
+        assert_eq!(
+            batch_event_name(RealtimeDeliveryTopic::SocialNotification),
+            "socialNotification"
+        );
+        assert_eq!(
+            batch_event_name(RealtimeDeliveryTopic::SyncState),
+            "syncState"
         );
     }
 }
