@@ -29,6 +29,7 @@ type AuthSnapshot = {
 };
 
 export const AUTH_TOKENS_UPDATED_EVENT = 'auth:tokens-updated';
+export const AUTH_SESSION_CLEARED_EVENT = 'auth:session-cleared';
 
 export type AuthTokensUpdatedDetail = {
   accessToken: string;
@@ -216,6 +217,15 @@ const emitTokensUpdated = (detail: AuthTokensUpdatedDetail) => {
   }
 };
 
+const emitSessionCleared = () => {
+  if (!isBrowser) return;
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT));
+  } catch {
+    // ignore
+  }
+};
+
 const resolveSnapshot = (): AuthSnapshot | null => {
   if (!isBrowser || !PRIMARY) return null;
 
@@ -312,5 +322,6 @@ export const authStorage = {
   clear() {
     clearPrimary();
     clearSecondary();
+    emitSessionCleared();
   },
 };

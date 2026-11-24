@@ -179,6 +179,7 @@
 }
 
 .space-page__nav-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 15px;
@@ -211,6 +212,40 @@
 
 .space-page__nav-item span {
     white-space: nowrap;
+}
+
+.space-page__nav-badge {
+    margin-left: auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+}
+
+.space-page__bottom-item {
+    position: relative;
+}
+
+.space-page__bottom-badge {
+    position: absolute;
+    top: 4px;
+    right: 16%;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    text-align: center;
 }
 
 .space-page__nav-item:hover {

@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { PostData } from '../components/space';
+import type { SocialNotificationRealtimePayload } from '../features/realtime/contracts';
 import { spaceAPI, type CreatePostOptions } from '../services/spaceApi';
 import { authStorage } from '../utils/authStorage';
 
@@ -114,8 +115,15 @@ interface SpaceState {
     // 发帖状态
     isCreatingPost: boolean;
 
+    // 社交通知未读计数与实时事件去重状态
+    unreadNotificationsCount: number;
+
     // 错误
     error: string | null;
+
+    // 社交通知实时操作
+    receiveRealtimeNotification: (event: SocialNotificationRealtimePayload) => void;
+    clearUnreadNotifications: () => void;
 
     // Feed 操作
     fetchFeed: (refresh?: boolean) => Promise<void>;
@@ -186,6 +194,8 @@ const mutatePostAcrossLists = (
 const initialAllFeed = createInitialScopeState('all');
 const initialFriendsFeed = createInitialScopeState('friends');
 
+const seenRealtimeNotificationIds = new Set<string>();
+
 export const useSpaceStore = create<SpaceState>()(
     immer((set, get) => ({
         // 初始状态
@@ -194,6 +204,7 @@ export const useSpaceStore = create<SpaceState>()(
         hasMore: initialAllFeed.hasMore,
         nextCursor: initialAllFeed.nextCursor,
         newPostsCount: 0,
+        unreadNotificationsCount: 0,
         isMLEnhanced: false,
         inNetworkOnly: false,
         allFeed: initialAllFeed,
@@ -667,6 +678,25 @@ export const useSpaceStore = create<SpaceState>()(
         resetNewPostsCount: () =>
             set((s) => {
                 s.newPostsCount = 0;
+            }),
+
+        receiveRealtimeNotification: (event) =>
+            set((s) => {
+                const eventId = event?.eventId;
+                if (eventId) {
+                    if (seenRealtimeNotificationIds.has(eventId)) return;
+                    seenRealtimeNotificationIds.add(eventId);
+                    if (seenRealtimeNotificationIds.size > 200) {
+                        const oldest = seenRealtimeNotificationIds.values().next().value;
+                        if (oldest) seenRealtimeNotificationIds.delete(oldest);
+                    }
+                }
+                s.unreadNotificationsCount += 1;
+            }),
+
+        clearUnreadNotifications: () =>
+            set((s) => {
+                s.unreadNotificationsCount = 0;
             }),
 
         markSeen: (postId) => {

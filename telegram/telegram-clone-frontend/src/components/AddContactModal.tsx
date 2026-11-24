@@ -14,6 +14,10 @@ import {
 import { contactAPI, getErrorMessage } from '../services/apiClient';
 import { formatChatListTimestamp, useChatStore } from '../features/chat/store/chatStore';
 import { withApiBase } from '../utils/apiUrl';
+import {
+  APP_CONTACT_REALTIME_EVENT,
+  type ContactRealtimePayload,
+} from '../features/realtime/contracts';
 import { Avatar } from './common';
 import { showToast } from './ui/Toast';
 import { motionDurations, useAnimeScope, waapi } from '../core/animation';
@@ -216,6 +220,28 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
 
     return () => window.clearTimeout(timer);
   }, [activeTab, isOpen, runSearch, searchQuery]);
+
+  // 弹窗打开期间监听全局联系人实时推送，自动刷新“已发出”申请状态，无需手动刷新
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const handleContactRealtime = (event: Event) => {
+      const custom = event as CustomEvent<ContactRealtimePayload>;
+      const action = custom?.detail?.action;
+      if (
+        action === 'request_sent'
+        || action === 'request_accepted'
+        || action === 'request_rejected'
+        || action === 'contact_removed'
+        || action === 'contact_blocked'
+      ) {
+        void loadSentRequests();
+      }
+    };
+    window.addEventListener(APP_CONTACT_REALTIME_EVENT, handleContactRealtime);
+    return () => {
+      window.removeEventListener(APP_CONTACT_REALTIME_EVENT, handleContactRealtime);
+    };
+  }, [isOpen, loadSentRequests]);
 
   const acceptedContactIds = useMemo(
     () => new Set(contacts.map((c) => c.userId)),

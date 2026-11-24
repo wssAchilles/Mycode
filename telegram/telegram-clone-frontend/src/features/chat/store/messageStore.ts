@@ -15,6 +15,12 @@ import { markChatSwitchEnd, markSyncPhaseTransition } from '../../../perf/marks'
 import { useChatStore } from './chatStore';
 import { compactMessagePatches, type MessagePatch } from './patchCompactor';
 import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
+import {
+  applyRealtimeDomainMeta,
+  type ContactRealtimePayload,
+  type SocialNotificationRealtimePayload,
+  type SyncStateRealtimePayload,
+} from '../../realtime';
 import { API_BASE_URL, SOCKET_URL } from '../../../utils/apiUrl';
 import type { MessageState } from './messageTypes';
 import {
@@ -99,7 +105,10 @@ export const useMessageStore = create<MessageState>((set, get) => {
       snapshot: ReturnType<ReturnType<typeof useChatStore.getState>['applyOptimisticLastMessage']>;
     }
   >();
-  const deferredEntityUpdates = new Map<string, { status?: Message['status']; readCount?: number }>();
+  const deferredEntityUpdates = new Map<
+    string,
+    { status?: Message['status']; readCount?: number; content?: string; editedAt?: string }
+  >();
   let resolveMissingInFlight = false;
   let resolveMissingQueue = new Set<string>();
   let projectionToken = 0;
@@ -145,6 +154,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
         ...next,
         status: next.status === 'read' ? 'read' : (deferred.status ?? next.status),
         readCount: Math.max(next.readCount ?? 0, deferred.readCount ?? 0) || deferred.readCount || next.readCount,
+        content: deferred.content ?? next.content,
+        editedAt: deferred.editedAt ?? next.editedAt,
       };
       deferredEntityUpdates.delete(raw.id);
     }
@@ -457,6 +468,10 @@ export const useMessageStore = create<MessageState>((set, get) => {
       { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }
     >();
     const metaChatRemovals = new Set<string>();
+    const metaContactEvents = new Map<string, ContactRealtimePayload>();
+    const metaSelfReadSyncs = new Map<string, SyncStateRealtimePayload>();
+    const metaSocialNotifications = new Map<string, SocialNotificationRealtimePayload>();
+    const metaGroupRefreshIds = new Set<string>();
     let latestSync: Extract<ChatPatch, { kind: 'sync' }> | null = null;
 
     for (const p of patches) {
@@ -507,6 +522,32 @@ export const useMessageStore = create<MessageState>((set, get) => {
           metaChatRemovals.add(r.chatId);
         }
       }
+      if (Array.isArray(p.contactEvents)) {
+        for (const ev of p.contactEvents) {
+          if (!ev?.eventId) continue;
+          metaContactEvents.set(ev.eventId, ev);
+        }
+      }
+      if (Array.isArray(p.selfReadSyncs)) {
+        for (const s of p.selfReadSyncs) {
+          if (!s?.chatId) continue;
+          const prev = metaSelfReadSyncs.get(s.chatId);
+          if (!prev || s.seq >= prev.seq) {
+            metaSelfReadSyncs.set(s.chatId, s);
+          }
+        }
+      }
+      if (Array.isArray(p.socialNotifications)) {
+        for (const n of p.socialNotifications) {
+          if (!n?.eventId) continue;
+          metaSocialNotifications.set(n.eventId, n);
+        }
+      }
+      if (Array.isArray(p.groupRefreshIds)) {
+        for (const groupId of p.groupRefreshIds) {
+          if (groupId) metaGroupRefreshIds.add(groupId);
+        }
+      }
     }
 
     if (metaLast.size || metaUnread.size || metaOnline.size || metaChatUpserts.size || metaChatRemovals.size) {
@@ -526,6 +567,20 @@ export const useMessageStore = create<MessageState>((set, get) => {
         chatRemovals: metaChatRemovals.size
           ? Array.from(metaChatRemovals.values()).map((chatId) => ({ chatId }))
           : undefined,
+      });
+    }
+
+    if (
+      metaContactEvents.size ||
+      metaSelfReadSyncs.size ||
+      metaSocialNotifications.size ||
+      metaGroupRefreshIds.size
+    ) {
+      applyRealtimeDomainMeta({
+        contactEvents: metaContactEvents.size ? Array.from(metaContactEvents.values()) : undefined,
+        selfReadSyncs: metaSelfReadSyncs.size ? Array.from(metaSelfReadSyncs.values()) : undefined,
+        socialNotifications: metaSocialNotifications.size ? Array.from(metaSocialNotifications.values()) : undefined,
+        groupRefreshIds: metaGroupRefreshIds.size ? Array.from(metaGroupRefreshIds.values()) : undefined,
       });
     }
 
@@ -686,11 +741,22 @@ export const useMessageStore = create<MessageState>((set, get) => {
           if (current) {
             const nextStatus = u.status ?? current.status;
             const nextReadCount = u.readCount ?? current.readCount;
-            if (nextStatus === current.status && nextReadCount === current.readCount) continue;
+            const nextContent = u.content !== undefined ? u.content : current.content;
+            const nextEditedAt = u.editedAt !== undefined ? u.editedAt : current.editedAt;
+            if (
+              nextStatus === current.status &&
+              nextReadCount === current.readCount &&
+              nextContent === current.content &&
+              nextEditedAt === current.editedAt
+            ) {
+              continue;
+            }
             touchEntityCache({
               ...current,
               status: nextStatus,
               readCount: nextReadCount,
+              content: nextContent,
+              editedAt: nextEditedAt,
             });
             didEntityChange = true;
             continue;
@@ -700,6 +766,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
           const nextDeferred = {
             status: u.status ?? prevDeferred?.status,
             readCount: u.readCount ?? prevDeferred?.readCount,
+            content: u.content !== undefined ? u.content : prevDeferred?.content,
+            editedAt: u.editedAt !== undefined ? u.editedAt : prevDeferred?.editedAt,
           };
           deferredEntityUpdates.set(u.id, nextDeferred);
         }
@@ -738,6 +806,10 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const metaAiMessages = new Map<string, Message>();
     const metaChatUpserts = new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>();
     const metaChatRemovals = new Set<string>();
+    const metaContactEvents = new Map<string, ContactRealtimePayload>();
+    const metaSelfReadSyncs = new Map<string, SyncStateRealtimePayload>();
+    const metaSocialNotifications = new Map<string, SocialNotificationRealtimePayload>();
+    const metaGroupRefreshIds = new Set<string>();
 
     const byProjection = new Map<string, MessagePatch[]>();
     const projectionOrder: string[] = [];
@@ -788,6 +860,32 @@ export const useMessageStore = create<MessageState>((set, get) => {
             metaChatRemovals.add(item.chatId);
           }
         }
+        if (Array.isArray(patch.contactEvents)) {
+          for (const item of patch.contactEvents) {
+            if (!item?.eventId) continue;
+            metaContactEvents.set(item.eventId, item);
+          }
+        }
+        if (Array.isArray(patch.selfReadSyncs)) {
+          for (const item of patch.selfReadSyncs) {
+            if (!item?.chatId) continue;
+            const prev = metaSelfReadSyncs.get(item.chatId);
+            if (!prev || item.seq >= prev.seq) {
+              metaSelfReadSyncs.set(item.chatId, item);
+            }
+          }
+        }
+        if (Array.isArray(patch.socialNotifications)) {
+          for (const item of patch.socialNotifications) {
+            if (!item?.eventId) continue;
+            metaSocialNotifications.set(item.eventId, item);
+          }
+        }
+        if (Array.isArray(patch.groupRefreshIds)) {
+          for (const groupId of patch.groupRefreshIds) {
+            if (groupId) metaGroupRefreshIds.add(groupId);
+          }
+        }
         continue;
       }
 
@@ -809,7 +907,11 @@ export const useMessageStore = create<MessageState>((set, get) => {
       metaOnline.size ||
       metaAiMessages.size ||
       metaChatUpserts.size ||
-      metaChatRemovals.size
+      metaChatRemovals.size ||
+      metaContactEvents.size ||
+      metaSelfReadSyncs.size ||
+      metaSocialNotifications.size ||
+      metaGroupRefreshIds.size
     ) {
       compacted.push({
         kind: 'meta',
@@ -831,6 +933,12 @@ export const useMessageStore = create<MessageState>((set, get) => {
         chatRemovals: metaChatRemovals.size
           ? Array.from(metaChatRemovals.values()).map((chatId) => ({ chatId }))
           : undefined,
+        contactEvents: metaContactEvents.size ? Array.from(metaContactEvents.values()) : undefined,
+        selfReadSyncs: metaSelfReadSyncs.size ? Array.from(metaSelfReadSyncs.values()) : undefined,
+        socialNotifications: metaSocialNotifications.size
+          ? Array.from(metaSocialNotifications.values())
+          : undefined,
+        groupRefreshIds: metaGroupRefreshIds.size ? Array.from(metaGroupRefreshIds.values()) : undefined,
       });
     }
 

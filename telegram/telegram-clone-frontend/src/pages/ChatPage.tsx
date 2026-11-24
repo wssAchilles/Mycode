@@ -100,7 +100,6 @@ const ChatPage: React.FC = () => {
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
   const connectRealtime = useMessageStore((state) => state.connectRealtime);
-  const disconnectRealtime = useMessageStore((state) => state.disconnectRealtime);
   const subscribePresence = useMessageStore((state) => state.subscribePresence);
   const socketConnected = useMessageStore((state) => state.socketConnected);
   const syncPhase = useMessageStore((state) => state.syncPhase);
@@ -255,7 +254,7 @@ const ChatPage: React.FC = () => {
     };
   }, [presenceTargetIdsStr, currentUser?.id, subscribePresence]);
 
-  // 好友申请前台同步与轻量化轮询：切回前台、网络恢复或每 30 秒拉取待处理好友申请
+  // 好友申请前台同步与断连兜底轮询：长连接在线时依赖实时推送秒级刷新，仅在断连或切回前台时兜底同步
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (!currentUser?.id) return;
@@ -279,16 +278,20 @@ const ChatPage: React.FC = () => {
 
     document.addEventListener('visibilitychange', handleVisibilityOrOnline);
     window.addEventListener('online', handleVisibilityOrOnline);
-    const intervalId = window.setInterval(() => {
-      syncPendingRequests(true);
-    }, PENDING_POLL_INTERVAL_MS);
+    const intervalId = !isLiveRealtime
+      ? window.setInterval(() => {
+          syncPendingRequests(true);
+        }, PENDING_POLL_INTERVAL_MS)
+      : null;
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
       window.removeEventListener('online', handleVisibilityOrOnline);
-      window.clearInterval(intervalId);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
     };
-  }, [currentUser?.id, loadPendingRequests]);
+  }, [currentUser?.id, isLiveRealtime, loadPendingRequests]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {
@@ -415,17 +418,12 @@ const ChatPage: React.FC = () => {
     joinedGroupRoomsRef.current = nextGroupIds;
   }, [chats, joinRealtimeRoom, leaveRealtimeRoom]);
 
-  // 组件卸载清理
+  // 组件卸载仅释放当前视图本地房间引用；全局 WebSocket 长连接由 RealtimeSessionBridge 常驻维护，切到 Space 期间不断连
   useEffect(() => {
     return () => {
-      console.log('🧹 ChatPage 组件卸载，清理资源...');
-      for (const groupId of joinedGroupRoomsRef.current) {
-        leaveRealtimeRoom(groupId);
-      }
       joinedGroupRoomsRef.current = new Set();
-      disconnectRealtime();
     };
-  }, [disconnectRealtime, leaveRealtimeRoom]);
+  }, []);
 
   // 视口同步：移动端使用单栏（sidebar/chat 切换）
   useEffect(() => {

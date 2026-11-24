@@ -4,6 +4,7 @@ import { BrowserRouter as Router } from 'react-router-dom';
 import AppRoutes from './routes';
 import ErrorBoundary from './components/ErrorBoundary';
 import { TooltipProvider } from './components/ui/shadcn/tooltip';
+import { RealtimeSessionBridge } from './features/realtime';
 import { authUtils } from './services/apiClient';
 import { getExperimentAssignments } from './services/experimentService';
 import './App.css';
@@ -23,6 +24,7 @@ function App() {
     <ErrorBoundary>
       <TooltipProvider>
         <Router>
+          <RealtimeSessionBridge />
           <div className="app">
             <AppRoutes />
           </div>

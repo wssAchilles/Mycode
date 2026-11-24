@@ -84,6 +84,13 @@ export const SpacePage: React.FC = () => {
         }
     }, [location.search]);
 
+    // 停留在通知面板时自动清空未读通知徽章
+    useEffect(() => {
+        if (activeSection === 'notifications' && unreadNotificationsCount > 0) {
+            clearUnreadNotifications();
+        }
+    }, [activeSection, unreadNotificationsCount, clearUnreadNotifications]);
+
     useEffect(() => {
         asideWidthRef.current = asideWidth;
     }, [asideWidth]);
@@ -105,6 +112,7 @@ export const SpacePage: React.FC = () => {
     const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
     const searchResults = useSpaceStore((state) => state.searchResults);
     const spaceError = useSpaceStore((state) => state.error);
+    const unreadNotificationsCount = useSpaceStore((state) => state.unreadNotificationsCount);
 
     // 获取操作
     const fetchFeed = useSpaceStore((state) => state.fetchFeed);
@@ -116,6 +124,7 @@ export const SpacePage: React.FC = () => {
     const unlikePost = useSpaceStore((state) => state.unlikePost);
     const repostPost = useSpaceStore((state) => state.repostPost);
     const unrepostPost = useSpaceStore((state) => state.unrepostPost);
+    const clearUnreadNotifications = useSpaceStore((state) => state.clearUnreadNotifications);
     const loadContacts = useChatStore((state) => state.loadContacts);
     const contacts = useChatStore((state) => state.contacts);
 
@@ -428,6 +437,11 @@ export const SpacePage: React.FC = () => {
                     >
                         <NotificationIcon active={activeSection === 'notifications'} />
                         <span>通知</span>
+                        {unreadNotificationsCount > 0 && (
+                            <span className="space-page__nav-badge" aria-label={`未读通知 ${unreadNotificationsCount}`}>
+                                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                            </span>
+                        )}
                     </button>
                     <button
                         type="button"
@@ -592,6 +606,11 @@ export const SpacePage: React.FC = () => {
                 >
                     <NotificationIcon />
                     <span>通知</span>
+                    {unreadNotificationsCount > 0 && (
+                        <span className="space-page__bottom-badge" aria-label={`未读通知 ${unreadNotificationsCount}`}>
+                            {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                        </span>
+                    )}
                 </button>
                 <button
                     type="button"

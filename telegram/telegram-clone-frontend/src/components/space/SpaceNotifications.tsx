@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { spaceAPI, type NotificationItem } from '../../services/spaceApi';
+import { APP_SOCIAL_NOTIFICATION_EVENT } from '../../features/realtime/contracts';
 import './SpaceNotifications.css';
 
 export interface SpaceNotificationsProps {
@@ -42,25 +43,44 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [hasMore, setHasMore] = useState(true);
 
-    const loadNotifications = async (reset: boolean = false) => {
-        setLoading(true);
-        setError(null);
+    const loadNotifications = async (reset: boolean = false, silent: boolean = false) => {
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+        }
         try {
             const result = await spaceAPI.getNotifications(20, reset ? undefined : cursor);
             setItems((prev) => dedupeNotifications(reset ? result.items : [...prev, ...result.items]));
             setHasMore(result.hasMore);
             setCursor(result.nextCursor);
         } catch (error) {
-            console.error('加载通知失败:', error);
-            setError('通知加载失败，请稍后重试');
-            setHasMore(false);
+            if (!silent) {
+                console.error('加载通知失败:', error);
+                setError('通知加载失败，请稍后重试');
+                setHasMore(false);
+            }
         } finally {
-            setLoading(false);
+            if (!silent) {
+                setLoading(false);
+            }
         }
     };
 
     useEffect(() => {
         loadNotifications(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // 收到实时社交互动推送时自动静默刷新列表，免手动点击刷新
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const handleSocialNotification = () => {
+            void loadNotifications(true, true);
+        };
+        window.addEventListener(APP_SOCIAL_NOTIFICATION_EVENT, handleSocialNotification);
+        return () => {
+            window.removeEventListener(APP_SOCIAL_NOTIFICATION_EVENT, handleSocialNotification);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

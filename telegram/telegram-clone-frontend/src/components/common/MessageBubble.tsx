@@ -8,6 +8,7 @@ export interface MessageBubbleProps {
     isOut?: boolean; // 是否为我方发出消息
     children: React.ReactNode;
     time?: string;
+    isEdited?: boolean; // 消息是否被编辑过
     status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
     isRead?: boolean; // 双勾已读
     isSent?: boolean; // 单勾已送达（为 false 时显示时钟发送中）
@@ -26,6 +27,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     isOut = false,
     children,
     time,
+    isEdited = false,
     status,
     isRead = false,
     isSent = true,
@@ -138,6 +140,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     {children}
 
                     <div className={`tg-message-meta ${isMedia ? 'is-media-meta' : ''}`}>
+                        {isEdited && <span className="tg-message-edited">已编辑</span>}
                         <span className="tg-message-time">{time}</span>
                         {isOut && (
                             <span

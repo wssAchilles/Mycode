@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import type { ChatSummary } from '../types';
-import { contactAPI, groupAPI } from '../../../services/apiClient';
+import { authUtils, contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
 import { preloadAvatarUrls } from '../../../utils/media';
 import { chatListSnapshotCache } from '../../../services/db';
 import { resolveMergedPresence, type PresenceRecord } from '../presence/presenceState';
+import type { ContactRealtimePayload } from '../../realtime/contracts';
 
 // ---- API response shapes (untyped backend payloads) ----
 
@@ -323,6 +324,11 @@ interface ChatState {
     updateContactLastMessage: (userId: string, message: Message) => void;
     incrementUnread: (chatId: string) => void;
     resetUnread: (chatId: string) => void;
+    applyContactRequestReceived: (payload: ContactRealtimePayload) => void;
+    applyContactRequestAccepted: (payload: ContactRealtimePayload) => void;
+    applyContactRequestRejected: (payload: ContactRealtimePayload) => void;
+    applyContactRemoved: (payload: ContactRealtimePayload, currentUserId?: string | null) => void;
+    applyContactAliasUpdated: (payload: ContactRealtimePayload) => void;
 
     // 发送瞬间同步更新左侧会话卡片预览并返回回滚快照，确保与气泡同帧刷新
     applyOptimisticLastMessage: (
@@ -1157,7 +1163,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 selectedGroup = syncGroupMembersPresence(selectedGroup, presenceByUserId, updatedUserIds);
             }
 
-            // 2) Unread deltas.
+            // 2) Unread deltas (记录未建卡新会话在本批的未读增量，供下方首次建卡复用).
+            const pendingUnreadForNewChats = new Map<string, number>();
             if (hasUnread) {
                 for (const d of batch.unreadDeltas!) {
                     const chatId = d?.chatId;
@@ -1172,6 +1179,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             unreadCount: (chat.unreadCount || 0) + delta,
                             unreadPulseSeq: delta > 0 ? (chat.unreadPulseSeq || 0) + 1 : chat.unreadPulseSeq,
                         };
+                    } else if (delta > 0) {
+                        pendingUnreadForNewChats.set(chatId, (pendingUnreadForNewChats.get(chatId) || 0) + delta);
                     }
 
                     const cIdx = contactIdxByUserId.get(chatId);
@@ -1182,7 +1191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
             }
 
-            // 3) Last message updates + reorder chats (move updated chats to top, preserving rest order).
+            // 3) Last message updates + reorder chats (若新私聊收到首条消息但列表中尚未建卡，自动建卡置顶).
             if (hasLast) {
                 const updatedById = new Map<string, typeof chats[number]>();
 
@@ -1195,8 +1204,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
                     const time = formatChatListTimestamp(lastMessageTimestamp);
 
-                    const chIdx = chatIdxById.get(chatId);
-                    if (chIdx === undefined) continue;
+                    let chIdx = chatIdxById.get(chatId);
+                    if (chIdx === undefined) {
+                        const isGroupMsg = Boolean(
+                            message.isGroupChat || message.chatType === 'group' || message.chatId?.startsWith('g:'),
+                        );
+                        const cIdx = !isGroupMsg ? contactIdxByUserId.get(chatId) : undefined;
+                        const matchedContact = cIdx !== undefined ? contacts[cIdx] : undefined;
+                        const senderDisplay =
+                            !isGroupMsg && message.senderId === chatId
+                                ? (message.senderUsername || message.username)
+                                : undefined;
+                        const unreadCarry = pendingUnreadForNewChats.get(chatId) || 0;
+                        const newSummary: ChatSummary = {
+                            id: chatId,
+                            title: isGroupMsg
+                                ? '群聊'
+                                : (matchedContact?.alias || matchedContact?.username || senderDisplay || '新对话'),
+                            avatarUrl: matchedContact?.avatarUrl,
+                            lastMessage: message.content,
+                            time,
+                            lastMessageTimestamp,
+                            lastMessageSeq: typeof message.seq === 'number' ? message.seq : undefined,
+                            unreadCount: unreadCarry,
+                            unreadPulseSeq: unreadCarry > 0 ? 1 : 0,
+                            isGroup: isGroupMsg,
+                            online: !isGroupMsg ? ((state.presenceByUserId || {})[chatId]?.isOnline ?? matchedContact?.isOnline ?? false) : undefined,
+                        };
+                        chats.push(newSummary);
+                        chIdx = chats.length - 1;
+                        chatIdxById.set(chatId, chIdx);
+                        if (matchedContact && cIdx !== undefined) {
+                            contacts[cIdx] = { ...matchedContact, lastMessage: message };
+                        }
+                        updatedById.set(chatId, newSummary);
+                        continue;
+                    }
+
                     const prev = chats[chIdx];
                     const freshness = compareSummaryLastMessage(prev, message, lastMessageTimestamp);
                     if (freshness < 0) continue;
@@ -1319,6 +1363,197 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 contacts[cIdx] = { ...contacts[cIdx], lastMessage: snapshot.contactLastMessage };
             }
             return { chats, contacts };
+        });
+    },
+
+    applyContactRequestReceived: (payload) => {
+        if (!payload) return;
+        const userId = payload.request?.userId || payload.userId || payload.actorId;
+        if (!userId) return;
+        const requestId = payload.request?.id || payload.requestId || userId;
+        const avatarUrl = withApiBase(payload.request?.avatarUrl) ?? undefined;
+
+        set((state) => {
+            const online = state.presenceByUserId?.[userId]?.isOnline ?? false;
+            const nextReq: Contact = {
+                id: requestId,
+                userId,
+                username: payload.request?.username || '未知用户',
+                avatarUrl,
+                alias: payload.request?.alias || undefined,
+                status: 'pending',
+                isOnline: online,
+            };
+
+            const existingIdx = state.pendingRequests.findIndex(
+                (req) => req.id === requestId || req.userId === userId,
+            );
+            const pendingRequests = state.pendingRequests.slice();
+            if (existingIdx >= 0) {
+                pendingRequests[existingIdx] = { ...pendingRequests[existingIdx], ...nextReq };
+            } else {
+                pendingRequests.unshift(nextReq);
+            }
+            return { pendingRequests };
+        });
+
+        if (avatarUrl) {
+            preloadAvatarUrls([avatarUrl], 'sm');
+        }
+    },
+
+    applyContactRequestAccepted: (payload) => {
+        if (!payload) return;
+        const targetUserId = payload.contact?.userId || payload.userId || payload.contactId || payload.actorId;
+        const requestId = payload.requestId;
+        const avatarUrl = withApiBase(payload.contact?.avatarUrl) ?? undefined;
+
+        set((state) => {
+            const pendingRequests = state.pendingRequests.filter(
+                (req) => req.id !== requestId && (!targetUserId || req.userId !== targetUserId),
+            );
+
+            if (!payload.contact || !targetUserId) {
+                return pendingRequests.length === state.pendingRequests.length
+                    ? state
+                    : { pendingRequests };
+            }
+
+            const online = state.presenceByUserId?.[targetUserId]?.isOnline ?? !!payload.contact.isOnline;
+            const acceptedContact: Contact = {
+                id: payload.contact.id || requestId || targetUserId,
+                userId: targetUserId,
+                username: payload.contact.username || '未知用户',
+                avatarUrl,
+                alias: payload.contact.alias || undefined,
+                status: 'accepted',
+                isOnline: online,
+            };
+
+            const contacts = state.contacts.slice();
+            const existingContactIdx = contacts.findIndex((c) => c.userId === targetUserId);
+            if (existingContactIdx >= 0) {
+                contacts[existingContactIdx] = {
+                    ...contacts[existingContactIdx],
+                    ...acceptedContact,
+                };
+            } else {
+                contacts.unshift(acceptedContact);
+            }
+
+            let chats = state.chats;
+            const hasPrivateChat = chats.some((c) => !c.isGroup && c.id === targetUserId);
+            if (!hasPrivateChat) {
+                const nowMs = Date.now();
+                const summary: ChatSummary = {
+                    id: targetUserId,
+                    title: acceptedContact.alias || acceptedContact.username,
+                    avatarUrl: acceptedContact.avatarUrl,
+                    lastMessage: '',
+                    time: '',
+                    lastMessageTimestamp: nowMs,
+                    unreadCount: 0,
+                    online,
+                    isGroup: false,
+                };
+                chats = [summary, ...chats];
+            }
+
+            const selectedContact =
+                state.selectedContact?.userId === targetUserId
+                    ? { ...state.selectedContact, ...acceptedContact }
+                    : state.selectedContact;
+
+            return { pendingRequests, contacts, chats, selectedContact };
+        });
+
+        if (avatarUrl) {
+            preloadAvatarUrls([avatarUrl], 'sm');
+        }
+    },
+
+    applyContactRequestRejected: (payload) => {
+        if (!payload) return;
+        const requestId = payload.requestId;
+        const targetUserId = payload.userId || payload.actorId;
+        set((state) => {
+            const pendingRequests = state.pendingRequests.filter(
+                (req) => req.id !== requestId && (!targetUserId || req.userId !== targetUserId),
+            );
+            return pendingRequests.length === state.pendingRequests.length ? state : { pendingRequests };
+        });
+    },
+
+    applyContactRemoved: (payload, currentUserId) => {
+        if (!payload) return;
+        const me = currentUserId || authUtils.getCurrentUser()?.id || '';
+        const candidates = [payload.contact?.userId, payload.contactId, payload.userId, payload.actorId]
+            .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+        const targetUserId = candidates.find((id) => !me || id !== me) || candidates[0];
+        if (!targetUserId && !payload.requestId) return;
+
+        set((state) => {
+            const contacts = state.contacts.filter(
+                (c) => (targetUserId ? c.userId !== targetUserId : true) && (payload.requestId ? c.id !== payload.requestId : true),
+            );
+            const pendingRequests = state.pendingRequests.filter(
+                (req) => (targetUserId ? req.userId !== targetUserId : true) && (payload.requestId ? req.id !== payload.requestId : true),
+            );
+            const chats = targetUserId
+                ? state.chats.filter((c) => c.isGroup || c.id !== targetUserId)
+                : state.chats;
+
+            const clearingSelected = Boolean(
+                targetUserId
+                && !state.isGroupChatMode
+                && (state.selectedContact?.userId === targetUserId || state.selectedChatId === targetUserId),
+            );
+
+            return {
+                contacts,
+                pendingRequests,
+                chats,
+                selectedContact: clearingSelected ? null : state.selectedContact,
+                selectedChatId: clearingSelected ? undefined : state.selectedChatId,
+            };
+        });
+    },
+
+    applyContactAliasUpdated: (payload) => {
+        if (!payload) return;
+        const targetUserId = payload.contact?.userId || payload.contactId || payload.userId;
+        if (!targetUserId) return;
+        const nextAlias =
+            typeof payload.alias === 'string' && payload.alias.trim()
+                ? payload.alias.trim()
+                : typeof payload.contact?.alias === 'string' && payload.contact.alias.trim()
+                    ? payload.contact.alias.trim()
+                    : undefined;
+
+        set((state) => {
+            const contacts = state.contacts.slice();
+            const cIdx = contacts.findIndex((c) => c.userId === targetUserId);
+            let fallbackUsername = '未知用户';
+            if (cIdx >= 0) {
+                fallbackUsername = contacts[cIdx].username || fallbackUsername;
+                contacts[cIdx] = { ...contacts[cIdx], alias: nextAlias };
+            }
+
+            const chats = state.chats.slice();
+            const chIdx = chats.findIndex((c) => !c.isGroup && c.id === targetUserId);
+            if (chIdx >= 0) {
+                chats[chIdx] = {
+                    ...chats[chIdx],
+                    title: nextAlias || (cIdx >= 0 ? fallbackUsername : chats[chIdx].title),
+                };
+            }
+
+            const selectedContact =
+                state.selectedContact?.userId === targetUserId
+                    ? { ...state.selectedContact, alias: nextAlias }
+                    : state.selectedContact;
+
+            return { contacts, chats, selectedContact };
         });
     },
 }));

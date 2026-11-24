@@ -105,6 +105,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
     <MessageBubble
       isOut={isOut}
       time={time}
+      isEdited={Boolean(msg.editedAt)}
       status={msg.status}
       isRead={msg.status === 'read'}
       isSent={msg.status !== 'failed' && msg.status !== 'pending'}
@@ -714,6 +715,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                 <MessageBubble
                   isOut={isOut}
                   time={time}
+                  isEdited={Boolean(msg.editedAt)}
                   isRead={msg.status === 'read'}
                   isSent={msg.status !== 'failed' && msg.status !== 'pending'}
                   readCount={msg.readCount}

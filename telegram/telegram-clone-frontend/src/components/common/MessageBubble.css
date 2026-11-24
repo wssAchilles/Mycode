@@ -163,6 +163,12 @@
     color: rgba(255, 255, 255, 0.88);
 }
 
+.tg-message-edited {
+    font-size: 10.5px;
+    opacity: 0.78;
+    font-style: italic;
+}
+
 .tg-message-status {
     display: inline-flex;
     align-items: center;
