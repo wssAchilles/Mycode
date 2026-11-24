@@ -161,6 +161,22 @@ export const createGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
       ]
     });
 
+    // 提交成功后向群主在线标签页推送建群事件，使多端自动入房并上屏新群卡片
+    await broadcastGroupUpdate({
+      groupId: group.id,
+      actorId: userId,
+      action: 'group_created',
+      includeUserIds: [userId],
+      payload: {
+        name: group.name,
+        description: group.description,
+        avatarUrl: group.avatarUrl,
+        type: group.type,
+        maxMembers: group.maxMembers,
+        memberCount: 1,
+      },
+    });
+
     sendCreated(res, { group: groupWithMembers }, '群组创建成功');
   } catch (error) {
     await transaction.rollback();
@@ -526,7 +542,7 @@ export const addGroupMember = catchAsync(async (req: AuthenticatedRequest, res: 
       groupId,
       actorId: userId,
       action: 'member_added',
-      payload: { members: results, memberIds: addedUserIds },
+      payload: { members: results, memberIds: addedUserIds, memberCount: group.memberCount },
       includeUserIds: addedUserIds
     });
   }
@@ -615,7 +631,7 @@ export const removeGroupMember = catchAsync(async (req: AuthenticatedRequest, re
     actorId: userId,
     action: 'member_removed',
     targetId: memberId,
-    payload: { role: memberToRemove.role },
+    payload: { role: memberToRemove.role, memberCount: group?.memberCount },
     includeUserIds: [memberId]
   });
 
@@ -926,7 +942,7 @@ export const leaveGroup = catchAsync(async (req: AuthenticatedRequest, res: Resp
     actorId: userId,
     action: 'member_left',
     targetId: userId,
-    payload: { role: member.role },
+    payload: { role: member.role, memberCount: group?.memberCount },
     includeUserIds: [userId]
   });
 
@@ -995,7 +1011,8 @@ export const updateGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
       description: group.description,
       avatarUrl: group.avatarUrl,
       type: group.type,
-      maxMembers: group.maxMembers
+      maxMembers: group.maxMembers,
+      memberCount: group.memberCount
     }
   });
 
@@ -1164,7 +1181,7 @@ export const transferOwnership = catchAsync(async (req: AuthenticatedRequest, re
       actorId: userId,
       action: 'ownership_transferred',
       targetId: newOwnerId,
-      payload: { previousOwnerId: userId }
+      payload: { previousOwnerId: userId, memberCount: group.memberCount }
     });
 
     sendSuccess(res, null, { message: '群主身份转让成功' });

@@ -33,7 +33,11 @@ export type RealtimeDeliveryTopic =
   | 'presence'
   | 'typing'
   | 'read_receipt'
-  | 'group_update';
+  | 'group_update'
+  | 'contact_update'
+  | 'message_mutation'
+  | 'social_notification'
+  | 'sync_state';
 
 export type RealtimeDeliveryTargetKind = 'socket' | 'user' | 'room' | 'broadcast';
 

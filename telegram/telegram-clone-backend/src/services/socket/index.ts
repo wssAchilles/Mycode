@@ -150,6 +150,26 @@ export class SocketService {
     });
   }
 
+  /** 向指定单个用户的全部在线设备推送统一批处理实时事件 */
+  public emitRealtimeToUser(userId: string, event: RealtimeBatchEvent): void {
+    if (!userId) return;
+    this.dispatcher.emitToUser(userId, event);
+  }
+
+  /** 向指定用户集合去重后逐个推送实时事件 */
+  public emitRealtimeToUsers(userIds: string[], event: RealtimeBatchEvent): void {
+    const deduped = Array.from(new Set((userIds || []).filter(Boolean)));
+    for (const userId of deduped) {
+      this.dispatcher.emitToUser(userId, event);
+    }
+  }
+
+  /** 向指定群组房间推送实时事件 */
+  public emitRealtimeToRoom(groupId: string, event: RealtimeBatchEvent): void {
+    if (!groupId) return;
+    this.dispatcher.emitToRoom(groupId, event);
+  }
+
   public async isUserOnline(userId: string): Promise<boolean> { return this.presenceManager.isUserOnline(userId); }
 
   public async getUserLastSeen(userId: string): Promise<string | null> { return this.presenceManager.getUserLastSeen(userId); }

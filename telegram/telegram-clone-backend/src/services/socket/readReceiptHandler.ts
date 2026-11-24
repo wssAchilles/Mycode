@@ -3,8 +3,9 @@ import GroupMember, { MemberStatus } from '../../models/GroupMember';
 import { waitForMongoReady } from '../../config/db';
 import { updateService } from '../updateService';
 import { chatRuntimeMetrics } from '../chatRuntimeMetrics';
-import { parseChatId, getPrivateOtherUserId } from '../../utils/chat';
+import { parseChatId, getPrivateOtherUserId, buildGroupChatId, buildPrivateChatId } from '../../utils/chat';
 import { advanceChatLastReadSeq, computeGroupReadCountAtSeq } from '../../utils/chatReadState';
+import { broadcastSelfReadSync } from '../realtimeEvents';
 import { Op } from 'sequelize';
 import { createChildLogger } from '../../utils/logger';
 import type { TypedSocketIOServer, TypedSocket, RealtimeBatchEvent } from './types';
@@ -45,11 +46,21 @@ export class ReadReceiptHandler {
       return;
     }
 
+    const canonicalChatId =
+      parsed.type === 'private' && parsed.userIds?.length === 2
+        ? buildPrivateChatId(parsed.userIds[0], parsed.userIds[1])
+        : parsed.type === 'group' && parsed.groupId
+          ? buildGroupChatId(parsed.groupId)
+          : chatId;
+
     if (parsed.type === 'group' && parsed.groupId) {
-      await this.handleGroupReadReceipt(parsed.groupId, chatId, seq, userId);
+      await this.handleGroupReadReceipt(parsed.groupId, canonicalChatId, seq, userId);
     } else if (parsed.type === 'private') {
-      await this.handlePrivateReadReceipt(chatId, seq, userId);
+      await this.handlePrivateReadReceipt(canonicalChatId, seq, userId);
     }
+
+    // 同步推进当前账号其余在线端已读水位，消除切换标签后红点残留
+    broadcastSelfReadSync(userId, canonicalChatId, seq);
 
     chatRuntimeMetrics.observeDuration('socket.readChat.latencyMs', Date.now() - startedAt);
   }

@@ -18,6 +18,18 @@ type RealtimeOpsEventKind =
   | 'compat_fallback_emitted'
   | 'sync_wake';
 
+export type RealtimeOpsEventType =
+  | 'message'
+  | 'batch_messages'
+  | 'presence'
+  | 'readReceipt'
+  | 'groupUpdate'
+  | 'typing'
+  | 'contactUpdate'
+  | 'messageMutation'
+  | 'socialNotification'
+  | 'syncState';
+
 interface RealtimeOpsEvent {
   id: string;
   kind: RealtimeOpsEventKind;
@@ -26,7 +38,7 @@ interface RealtimeOpsEvent {
   socketId?: string;
   roomId?: string;
   target?: 'user' | 'room' | 'socket' | 'broadcast';
-  eventType?: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing';
+  eventType?: RealtimeOpsEventType;
   eventCount?: number;
   wakeSource?: 'event' | 'poll' | 'initial' | 'timeout';
   eventSource?: 'local' | 'pubsub';
@@ -100,7 +112,7 @@ export class RealtimeOps {
 
   recordRealtimeEmit(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
     eventCount: number,
     dispatchSource: 'local' | 'compat_dispatch' | 'fallback' = 'local',
   ): void {
@@ -111,7 +123,7 @@ export class RealtimeOps {
 
   recordDeliveryRequested(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
   ): void {
     this.counters.deliveryRequested += 1;
     this.recordEvent('delivery_requested', { target, eventType, dispatchSource: 'local' });
@@ -119,7 +131,7 @@ export class RealtimeOps {
 
   recordDeliveryPublished(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
   ): void {
     this.counters.deliveryPublished += 1;
     this.recordEvent('delivery_published', { target, eventType, dispatchSource: 'local' });
@@ -127,14 +139,14 @@ export class RealtimeOps {
 
   recordDeliveryPublishFailed(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
   ): void {
     this.counters.deliveryPublishErrors += 1;
     this.recordEvent('delivery_publish_failed', { target, eventType, dispatchSource: 'fallback' });
   }
 
   recordCompatDispatchReceived(
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
     eventCount: number,
   ): void {
     this.counters.compatDispatchReceived += 1;
@@ -147,7 +159,7 @@ export class RealtimeOps {
   }
 
   recordCompatDispatchEmitted(
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
     eventCount: number,
   ): void {
     this.counters.compatDispatchEmitted += 1;
@@ -161,7 +173,7 @@ export class RealtimeOps {
 
   recordCompatFallbackEmit(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventType: RealtimeOpsEventType,
   ): void {
     this.counters.compatFallbackEmitted += 1;
     this.recordEvent('compat_fallback_emitted', {

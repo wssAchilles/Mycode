@@ -11,6 +11,7 @@ import { createChildLogger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 import { cacheService } from '../services/cacheService';
+import { broadcastContactEvent } from '../services/realtimeEvents';
 const log = createChildLogger('controllers:contactController');
 
 // 扩展请求接口
@@ -37,8 +38,11 @@ export const addContact = catchAsync(async (req: AuthenticatedRequest, res: Resp
     return errors.badRequest(res, '不能添加自己为联系人');
   }
 
-  // 验证联系人用户是否存在
-  const contactUser = await User.findByPk(contactId);
+  // 验证联系人用户是否存在，并查询发起人公开资料供实时推送摘要复用
+  const [contactUser, actorUser] = await Promise.all([
+    User.findByPk(contactId, { attributes: ['id', 'username', 'avatarUrl'] }),
+    User.findByPk(userId, { attributes: ['id', 'username', 'avatarUrl'] }),
+  ]);
   if (!contactUser) {
     return errors.notFound(res, '用户');
   }
@@ -79,6 +83,50 @@ export const addContact = catchAsync(async (req: AuthenticatedRequest, res: Resp
         attributes: ['id', 'username', 'avatarUrl']
       }
     ]
+  });
+
+  const addedAtIso =
+    newContact.addedAt instanceof Date ? newContact.addedAt.toISOString() : new Date().toISOString();
+
+  // 提交成功后双端实时推送：接收方收到新朋友红点卡片，发起方其余标签页同步「已发出」列表
+  await broadcastContactEvent({
+    deliveries: [
+      {
+        userId: contactId,
+        payload: {
+          action: 'request_received',
+          actorId: userId,
+          requestId: newContact.id,
+          userId,
+          contactId,
+          request: {
+            id: newContact.id,
+            userId,
+            username: actorUser?.username || '未知用户',
+            avatarUrl: actorUser?.avatarUrl ?? null,
+            status: 'pending',
+            addedAt: addedAtIso,
+          },
+        },
+      },
+      {
+        userId,
+        payload: {
+          action: 'request_sent',
+          actorId: userId,
+          requestId: newContact.id,
+          userId,
+          contactId,
+          sentRequest: {
+            id: newContact.id,
+            contactId,
+            username: contactUser.username,
+            avatarUrl: contactUser.avatarUrl ?? null,
+            addedAt: addedAtIso,
+          },
+        },
+      },
+    ],
   });
 
   sendCreated(res, { contact: contactWithUser }, '联系人请求已发送');
@@ -253,11 +301,97 @@ export const handleContactRequest = catchAsync(async (req: AuthenticatedRequest,
     return errors.notFound(res, '联系人请求');
   }
 
+  const requesterId = String(contactRequest.userId);
+  const addedAtIso =
+    contactRequest.addedAt instanceof Date
+      ? contactRequest.addedAt.toISOString()
+      : new Date().toISOString();
+
   if (action === 'accept') {
     await contactRequest.accept();
+
+    const [requesterUser, recipientUser, onlineMap] = await Promise.all([
+      User.findByPk(requesterId, { attributes: ['id', 'username', 'avatarUrl'] }),
+      User.findByPk(userId, { attributes: ['id', 'username', 'avatarUrl'] }),
+      cacheService.areUsersOnline([requesterId, userId]),
+    ]);
+
+    await broadcastContactEvent({
+      deliveries: [
+        {
+          userId: requesterId,
+          payload: {
+            action: 'request_accepted',
+            actorId: userId,
+            requestId: contactRequest.id,
+            userId: requesterId,
+            contactId: userId,
+            contact: {
+              id: contactRequest.id,
+              userId,
+              contactId: userId,
+              username: recipientUser?.username || '未知用户',
+              avatarUrl: recipientUser?.avatarUrl ?? null,
+              alias: null,
+              status: 'accepted',
+              isOnline: onlineMap.get(userId) ?? false,
+              addedAt: addedAtIso,
+            },
+          },
+        },
+        {
+          userId,
+          payload: {
+            action: 'request_accepted',
+            actorId: userId,
+            requestId: contactRequest.id,
+            userId: requesterId,
+            contactId: userId,
+            contact: {
+              id: contactRequest.id,
+              userId: requesterId,
+              contactId: requesterId,
+              username: requesterUser?.username || '未知用户',
+              avatarUrl: requesterUser?.avatarUrl ?? null,
+              alias: contactRequest.alias ?? null,
+              status: 'accepted',
+              isOnline: onlineMap.get(requesterId) ?? false,
+              addedAt: addedAtIso,
+            },
+          },
+        },
+      ],
+    });
+
     sendSuccess(res, { contact: contactRequest }, { message: '联系人请求已接受' });
   } else {
     await contactRequest.reject();
+
+    await broadcastContactEvent({
+      deliveries: [
+        {
+          userId: requesterId,
+          payload: {
+            action: 'request_rejected',
+            actorId: userId,
+            requestId: contactRequest.id,
+            userId: requesterId,
+            contactId: userId,
+          },
+        },
+        {
+          userId,
+          payload: {
+            action: 'request_rejected',
+            actorId: userId,
+            requestId: contactRequest.id,
+            userId: requesterId,
+            contactId: userId,
+          },
+        },
+      ],
+    });
+
     sendSuccess(res, { contact: contactRequest }, { message: '联系人请求已拒绝' });
   }
 });
@@ -296,6 +430,29 @@ export const removeContact = catchAsync(async (req: AuthenticatedRequest, res: R
     }
   });
 
+  await broadcastContactEvent({
+    deliveries: [
+      {
+        userId,
+        payload: {
+          action: 'contact_removed',
+          actorId: userId,
+          userId,
+          contactId,
+        },
+      },
+      {
+        userId: contactId,
+        payload: {
+          action: 'contact_removed',
+          actorId: userId,
+          userId,
+          contactId,
+        },
+      },
+    ],
+  });
+
   sendSuccess(res, null, { message: '联系人已删除' });
 });
 
@@ -326,6 +483,29 @@ export const blockContact = catchAsync(async (req: AuthenticatedRequest, res: Re
   // 屏蔽联系人
   contact.status = ContactStatus.BLOCKED;
   await contact.save();
+
+  await broadcastContactEvent({
+    deliveries: [
+      {
+        userId,
+        payload: {
+          action: 'contact_blocked',
+          actorId: userId,
+          userId,
+          contactId,
+        },
+      },
+      {
+        userId: contactId,
+        payload: {
+          action: 'contact_blocked',
+          actorId: userId,
+          userId,
+          contactId,
+        },
+      },
+    ],
+  });
 
   sendSuccess(res, { contact }, { message: '联系人已屏蔽' });
 });
@@ -408,6 +588,21 @@ export const updateContactAlias = catchAsync(async (req: AuthenticatedRequest, r
   // 更新备注
   contact.alias = alias?.trim() || null;
   await contact.save();
+
+  await broadcastContactEvent({
+    deliveries: [
+      {
+        userId,
+        payload: {
+          action: 'alias_updated',
+          actorId: userId,
+          userId,
+          contactId,
+          alias: contact.alias ?? null,
+        },
+      },
+    ],
+  });
 
   sendSuccess(res, { contact }, { message: '联系人备注已更新' });
 });

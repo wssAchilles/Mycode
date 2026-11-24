@@ -7,6 +7,10 @@ import { Router, Request, Response } from 'express';
 import { spaceService } from '../../services/spaceService';
 import User from '../../models/User';
 import {
+  broadcastSocialNotification,
+  type SocialNotificationAction,
+} from '../../services/realtimeEvents';
+import {
     log,
     transformPostToResponse,
     extractPostKeywords,
@@ -19,6 +23,46 @@ import {
 } from './shared';
 
 const router = Router();
+
+/**
+ * 异步广播 Space 动态互动实时通知（best-effort，不阻塞主 HTTP 响应）
+ */
+async function notifyPostAuthorAsync(params: {
+  postId: string;
+  actorId: string;
+  action: SocialNotificationAction;
+  knownAuthorId?: string;
+  knownActor?: { id: string; username: string; avatarUrl?: string | null };
+  commentId?: string;
+  previewText?: string;
+}): Promise<void> {
+  try {
+    const [post, actor] = await Promise.all([
+      params.knownAuthorId
+        ? Promise.resolve({ authorId: params.knownAuthorId, content: params.previewText })
+        : spaceService.getPost(params.postId, params.actorId),
+      params.knownActor
+        ? Promise.resolve(params.knownActor)
+        : User.findByPk(params.actorId, { attributes: ['id', 'username', 'avatarUrl'] }),
+    ]);
+
+    const recipientId = post?.authorId ? String(post.authorId) : '';
+    if (!recipientId || recipientId === params.actorId) return;
+
+    broadcastSocialNotification({
+      recipientId,
+      actor: actor
+        ? { id: actor.id, username: actor.username, avatarUrl: actor.avatarUrl }
+        : { id: params.actorId, username: '未知用户' },
+      action: params.action,
+      postId: params.postId,
+      commentId: params.commentId,
+      previewText: params.previewText || (typeof post?.content === 'string' ? post.content : undefined),
+    });
+  } catch (error) {
+    log.warn({ err: error, postId: params.postId, action: params.action }, '异步派发动态通知失败');
+  }
+}
 
 // ---------------------------------------------------------------------------
 // POST /posts/:id/like
@@ -33,6 +77,7 @@ router.post('/posts/:id/like', async (req: Request, res: Response) => {
         const success = await spaceService.likePost(id, userId);
         if (success) {
             logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST });
+            void notifyPostAuthorAsync({ postId: id, actorId: userId, action: 'like' });
         }
         return res.json({ success, liked: success });
     } catch (error) {
@@ -82,6 +127,13 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
         if (!repostedPost) return res.status(400).json({ error: '转发失败或已转发' });
 
         logSignal({ userId, signalType: SignalType.RETWEET, targetId: id, targetType: TargetType.POST });
+        void notifyPostAuthorAsync({
+            postId: id,
+            actorId: userId,
+            action: 'repost',
+            knownAuthorId: repostedPost.authorId ? String(repostedPost.authorId) : undefined,
+            previewText: typeof repostedPost.content === 'string' ? repostedPost.content : undefined,
+        });
 
         const transformed = await transformPostToResponse(repostedPost);
         return res.json(transformed);
@@ -281,6 +333,16 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
         logSignal({ userId, signalType: SignalType.REPLY, targetId: id, targetType: TargetType.POST });
 
         const author = await User.findByPk(userId, { attributes: ['id', 'username', 'avatarUrl'] });
+        void notifyPostAuthorAsync({
+            postId: id,
+            actorId: userId,
+            action: 'comment',
+            knownActor: author
+                ? { id: author.id, username: author.username, avatarUrl: author.avatarUrl }
+                : undefined,
+            commentId: comment._id?.toString(),
+            previewText: comment.content,
+        });
 
         return res.status(201).json({
             id: comment._id?.toString(),

@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import User from '../../models/User';
 import Contact, { ContactStatus } from '../../models/Contact';
 import { recsysStreamPublisher } from '../../services/recommendation/realtime';
+import { broadcastSocialNotification } from '../../services/realtimeEvents';
 import {
     log,
     logSignal,
@@ -26,7 +27,10 @@ router.post('/users/:id/follow', async (req: Request, res: Response) => {
         if (!userId) return res.status(401).json({ error: '未授权' });
         if (userId === targetId) return res.status(400).json({ error: '不能关注自己' });
 
-        const targetUser = await User.findByPk(targetId, { attributes: ['id'] });
+        const [targetUser, actorUser] = await Promise.all([
+            User.findByPk(targetId, { attributes: ['id'] }),
+            User.findByPk(userId, { attributes: ['id', 'username', 'avatarUrl'] }),
+        ]);
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
 
         const [contact] = await Contact.findOrCreate({
@@ -40,6 +44,13 @@ router.post('/users/:id/follow', async (req: Request, res: Response) => {
 
         logSignal({ userId, signalType: SignalType.FOLLOW, targetId, targetType: TargetType.USER });
         recsysStreamPublisher.publishGraphEdgeDelta({ sourceUserId: userId, targetUserId: targetId, edgeOp: 'follow' });
+        broadcastSocialNotification({
+            recipientId: targetId,
+            actor: actorUser
+                ? { id: actorUser.id, username: actorUser.username, avatarUrl: actorUser.avatarUrl }
+                : { id: userId, username: '未知用户' },
+            action: 'follow',
+        });
         return res.json({ success: true, followed: true });
     } catch (error) {
         log.error({ err: error }, '关注失败');

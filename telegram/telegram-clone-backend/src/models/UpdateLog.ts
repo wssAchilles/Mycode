@@ -1,6 +1,15 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export type UpdateType = 'message' | 'read' | 'delivered' | 'member_change' | 'system';
+export type UpdateType =
+  | 'message'
+  | 'read'
+  | 'delivered'
+  | 'member_change'
+  | 'contact_change'
+  | 'message_edit'
+  | 'message_delete'
+  | 'social_notification'
+  | 'system';
 
 export interface IUpdateLog extends Document {
   userId: string;

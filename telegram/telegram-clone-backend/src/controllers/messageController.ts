@@ -14,6 +14,11 @@ import {
   publishRoomMessageDisplay,
 } from '../services/realtimeProtocol/displayPlaneContract';
 import { updateService } from '../services/updateService';
+import {
+  broadcastMessageDeleted,
+  broadcastMessageEdited,
+  broadcastSelfReadSync,
+} from '../services/realtimeEvents';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
@@ -773,6 +778,7 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
         readCount,
         readerId: userId,
       });
+      broadcastSelfReadSync(userId, canonicalChatId, seq);
     }
   } else if (parsed.type === 'private' && seqAdvanced) {
     const otherUserId = getPrivateOtherUserId(canonicalChatId, userId);
@@ -791,6 +797,7 @@ export const markChatAsRead = catchAsync(async (req: AuthenticatedRequest, res: 
         payload: { readerId: userId, readCount: 1 }
       });
     }
+    broadcastSelfReadSync(userId, canonicalChatId, seq);
   }
 
   sendSuccess(res, { chatId: canonicalChatId, seq, readCount, deduplicated: !seqAdvanced });
@@ -831,6 +838,7 @@ export const deleteMessage = catchAsync(async (req: AuthenticatedRequest, res: R
 
   // 软删除消息
   await message.softDelete();
+  await broadcastMessageDeleted(message, userId);
 
   sendSuccess(res, null, { message: '消息已删除' });
 });
@@ -864,6 +872,7 @@ export const editMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
 
   // 编辑消息
   await message.editContent(content.trim());
+  await broadcastMessageEdited(message, userId);
 
   sendSuccess(res, message, { message: '消息已编辑' });
 });

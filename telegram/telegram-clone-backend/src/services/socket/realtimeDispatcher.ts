@@ -249,18 +249,36 @@ export class RealtimeDispatcher {
       case 'typing': return 'typing';
       case 'readReceipt': return 'read_receipt';
       case 'groupUpdate': return 'group_update';
+      case 'contactUpdate': return 'contact_update';
+      case 'messageMutation': return 'message_mutation';
+      case 'socialNotification': return 'social_notification';
+      case 'syncState': return 'sync_state';
     }
   }
 
   private dispatchEventTypeFromTopic(
     topic: RealtimeDeliveryTopic,
-  ): 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing' {
+  ):
+    | 'message'
+    | 'batch_messages'
+    | 'presence'
+    | 'readReceipt'
+    | 'groupUpdate'
+    | 'typing'
+    | 'contactUpdate'
+    | 'messageMutation'
+    | 'socialNotification'
+    | 'syncState' {
     switch (topic) {
       case 'message': return 'message';
       case 'presence': return 'presence';
       case 'typing': return 'typing';
       case 'read_receipt': return 'readReceipt';
       case 'group_update': return 'groupUpdate';
+      case 'contact_update': return 'contactUpdate';
+      case 'message_mutation': return 'messageMutation';
+      case 'social_notification': return 'socialNotification';
+      case 'sync_state': return 'syncState';
     }
   }
 }
