@@ -13,6 +13,7 @@ import { Avatar } from '../../components/common';
 import ChatListContainer from '../../features/chat/ChatListContainer';
 import { ArrowLeftIcon, LogoutIcon } from '../../components/icons/SpaceIcons';
 import type { User } from '../../types/auth';
+import type { SelfPresenceStatus } from '../../features/chat/presence/presenceState';
 import { buildGroupChatId, buildPrivateChatId } from '../../utils/chat';
 
 interface PendingRequest {
@@ -24,6 +25,8 @@ interface PendingRequest {
 interface ChatSidebarProps {
     currentUser: User | null;
     isConnected: boolean;
+    connectionStatus?: SelfPresenceStatus;
+    connectionLabel?: string;
     isAiChatMode: boolean;
     pendingRequests: PendingRequest[];
     onSelectAiChat: () => void;
@@ -35,6 +38,8 @@ interface ChatSidebarProps {
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
     currentUser,
     isConnected,
+    connectionStatus,
+    connectionLabel,
     isAiChatMode,
     pendingRequests,
     onSelectAiChat,
@@ -54,6 +59,9 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         await authAPI.logout();
         navigate('/login');
     };
+
+    const effectiveStatus: SelfPresenceStatus = connectionStatus ?? (isConnected ? 'online' : 'offline');
+    const effectiveLabel = connectionLabel ?? (isConnected ? '在线' : '离线');
 
     const handleChatSelected = (chatId: string) => {
         const chat = useChatStore.getState().chats.find(c => c.id === chatId);
@@ -101,13 +109,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         name={currentUser?.username || '?'}
                         src={currentUser?.avatarUrl}
                         size="md"
-                        online={isConnected}
+                        online={effectiveStatus === 'online'}
                         priority="high"
                     />
                     <div className="user-details-container">
                         <h3 className="user-username">{currentUser?.username}</h3>
-                        <span className={`status ${isConnected ? 'online' : 'offline'}`}>
-                            {isConnected ? '在线' : '离线'}
+                        <span className={`status ${effectiveStatus}`}>
+                            {effectiveLabel}
                         </span>
                     </div>
                 </div>

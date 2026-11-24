@@ -5,6 +5,7 @@ import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
 import { preloadAvatarUrls } from '../../../utils/media';
 import { chatListSnapshotCache } from '../../../services/db';
+import { resolveMergedPresence, type PresenceRecord } from '../presence/presenceState';
 
 // ---- API response shapes (untyped backend payloads) ----
 
@@ -110,6 +111,93 @@ function refreshChatSummaryTime(chat: ChatSummary): ChatSummary {
     return nextTime === chat.time ? chat : { ...chat, time: nextTime };
 }
 
+/**
+ * 根据权威在线状态表同步群成员的在线标识，仅在存在实际变化时返回新 Group 引用。
+ */
+function syncGroupMembersPresence(
+    group: Group | null,
+    presenceByUserId: Record<string, PresenceRecord>,
+    updatedUserIds?: ReadonlySet<string>,
+): Group | null {
+    if (!group?.members?.length) return group;
+    let changed = false;
+    const nextMembers = group.members.map((member) => {
+        if (updatedUserIds && !updatedUserIds.has(member.userId)) {
+            return member;
+        }
+        const record = presenceByUserId[member.userId];
+        if (!record || member.isOnline === record.isOnline) {
+            return member;
+        }
+        changed = true;
+        return { ...member, isOnline: record.isOnline };
+    });
+    return changed ? { ...group, members: nextMembers } : group;
+}
+
+/**
+ * 将权威在线状态表的变更同步到联系人、私聊会话、当前选中联系人与当前群成员列表中。
+ */
+function applyPresenceRecordsToCollections(params: {
+    contacts: Contact[];
+    chats: ChatSummary[];
+    selectedContact: Contact | null;
+    selectedGroup: Group | null;
+    presenceByUserId: Record<string, PresenceRecord>;
+    userIds: ReadonlySet<string>;
+}): {
+    contacts: Contact[];
+    chats: ChatSummary[];
+    selectedContact: Contact | null;
+    selectedGroup: Group | null;
+} {
+    let contactsChanged = false;
+    const nextContacts = params.contacts.map((contact) => {
+        if (!params.userIds.has(contact.userId)) return contact;
+        const record = params.presenceByUserId[contact.userId];
+        if (!record) return contact;
+        const nextLastSeen = record.lastSeen ?? contact.lastSeen;
+        if (contact.isOnline === record.isOnline && contact.lastSeen === nextLastSeen) {
+            return contact;
+        }
+        contactsChanged = true;
+        return { ...contact, isOnline: record.isOnline, lastSeen: nextLastSeen };
+    });
+
+    let chatsChanged = false;
+    const nextChats = params.chats.map((chat) => {
+        if (chat.isGroup || !params.userIds.has(chat.id)) return chat;
+        const record = params.presenceByUserId[chat.id];
+        if (!record || chat.online === record.isOnline) return chat;
+        chatsChanged = true;
+        return { ...chat, online: record.isOnline };
+    });
+
+    let nextSelectedContact = params.selectedContact;
+    if (nextSelectedContact && params.userIds.has(nextSelectedContact.userId)) {
+        const record = params.presenceByUserId[nextSelectedContact.userId];
+        if (record) {
+            const nextLastSeen = record.lastSeen ?? nextSelectedContact.lastSeen;
+            if (nextSelectedContact.isOnline !== record.isOnline || nextSelectedContact.lastSeen !== nextLastSeen) {
+                nextSelectedContact = { ...nextSelectedContact, isOnline: record.isOnline, lastSeen: nextLastSeen };
+            }
+        }
+    }
+
+    const nextSelectedGroup = syncGroupMembersPresence(
+        params.selectedGroup,
+        params.presenceByUserId,
+        params.userIds,
+    );
+
+    return {
+        contacts: contactsChanged ? nextContacts : params.contacts,
+        chats: chatsChanged ? nextChats : params.chats,
+        selectedContact: nextSelectedContact,
+        selectedGroup: nextSelectedGroup,
+    };
+}
+
 function compareSummaryLastMessage(
     chat: ChatSummary,
     message: Message,
@@ -191,6 +279,7 @@ interface ChatState {
     selectedGroup: Group | null;  // 新增：选中的群组
     selectedChatId: string | undefined;
     isGroupChatMode: boolean;     // 新增：是否处于群聊模式
+    presenceByUserId: Record<string, PresenceRecord>;
 
     // 加载状态
     isLoading: boolean;
@@ -278,6 +367,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     selectedGroup: null,          // 新增
     selectedChatId: undefined,
     isGroupChatMode: false,       // 新增
+    presenceByUserId: {},
     isLoading: false,
     isLoadingContacts: false,
     isLoadingPendingRequests: false,
@@ -292,18 +382,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     selectContact: (contact) => {
         // Cancel any in-flight group details request to avoid stale UI overwrites.
         const nextGroupDetailsSeq = get().groupDetailsSeq + 1;
+        const knownPresence = contact?.userId ? (get().presenceByUserId || {})[contact.userId] : undefined;
+        const hydratedContact = contact && knownPresence
+            ? {
+                ...contact,
+                isOnline: knownPresence.isOnline,
+                lastSeen: knownPresence.lastSeen ?? contact.lastSeen,
+            }
+            : contact;
 
         // 选择联系人时，清除群组选中
         set({
-            selectedContact: contact,
+            selectedContact: hydratedContact,
             selectedGroup: null,
-            selectedChatId: contact?.userId,
+            selectedChatId: hydratedContact?.userId,
             isGroupChatMode: false,
             isLoadingGroupDetails: false,
             groupDetailsSeq: nextGroupDetailsSeq,
         });
-        if (contact?.userId) {
-            get().resetUnread(contact.userId);
+        if (hydratedContact?.userId) {
+            get().resetUnread(hydratedContact.userId);
         }
     },
 
@@ -325,7 +423,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
             const cached = await chatListSnapshotCache.load();
             if (cached?.length) {
-                const refreshed = cached.map(refreshChatSummaryTime);
+                const presenceByUserId = get().presenceByUserId || {};
+                const refreshed = cached.map((chat) => {
+                    const base = refreshChatSummaryTime(chat);
+                    if (base.isGroup) return base;
+                    const known = presenceByUserId[base.id];
+                    // 本地缓存快照中的旧在线状态可能已过期，未收到实时态前统一以离线展示
+                    return { ...base, online: known ? known.isOnline : false };
+                });
                 set({ chats: refreshed });
                 preloadAvatarUrls(refreshed.map((chat) => chat.avatarUrl), 'md');
             }
@@ -343,66 +448,103 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 contactAPI.getContacts('accepted'),
                 groupAPI.getUserGroups()
             ]);
-            const existingChatsById = new Map(get().chats.map((chat) => [chat.id, chat]));
 
-            // 1. 映射联系人 (Ensure we map ALL accepted contacts)
-            const contactChats: ChatSummary[] = contactsRes.contacts.map((c: ContactApiResponse) => {
-                const chatId = c.contactId || c.userId;
-                const existingChat = existingChatsById.get(chatId);
-                const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
-                const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
+            let savedChats: ChatSummary[] = [];
+            set((state) => {
+                const existingChatsById = new Map(state.chats.map((chat) => [chat.id, chat]));
+                const nowMs = Date.now();
+                const nextPresenceByUserId: Record<string, PresenceRecord> = { ...(state.presenceByUserId || {}) };
+                const touchedUserIds = new Set<string>();
+
+                // 1. 映射联系人 (Ensure we map ALL accepted contacts)
+                const contactChats: ChatSummary[] = contactsRes.contacts.map((c: ContactApiResponse) => {
+                    const chatId = c.contactId || c.userId;
+                    const existingChat = existingChatsById.get(chatId);
+                    const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
+                    const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
+                    const mergedPresence = resolveMergedPresence(
+                        nextPresenceByUserId[chatId],
+                        {
+                            isOnline: !!c.isOnline,
+                            lastSeen: c.contact?.lastSeen,
+                            source: 'snapshot',
+                        },
+                        nowMs,
+                    );
+                    nextPresenceByUserId[chatId] = mergedPresence;
+                    touchedUserIds.add(chatId);
+
+                    return {
+                        id: chatId, // Ensure we get the correct User ID
+                        title: c.alias || c.contact?.username || c.username || '未知用户',
+                        avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
+                        lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '', // Empty string for no message, handled in UI
+                        time: c.lastMessage
+                            ? formatChatListTimestamp(c.lastMessage.timestamp)
+                            : existingChat?.time || '',
+                        lastMessageTimestamp,
+                        lastMessageSeq: typeof c.lastMessage?.seq === 'number'
+                            ? c.lastMessage.seq
+                            : existingChat?.lastMessageSeq,
+                        unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
+                        online: mergedPresence.isOnline,
+                        isGroup: false,
+                    };
+                });
+
+                // 2. 映射群组
+                const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: GroupApiResponse) => {
+                    const existingChat = existingChatsById.get(g.id);
+                    const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
+                    const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
+                    return {
+                        id: g.id,
+                        title: g.name,
+                        avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
+                        lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
+                        time: g.lastMessage?.timestamp
+                            ? formatChatListTimestamp(g.lastMessage.timestamp)
+                            : existingChat?.time || '',
+                        lastMessageTimestamp,
+                        lastMessageSeq: typeof g.lastMessage?.seq === 'number'
+                            ? g.lastMessage.seq
+                            : existingChat?.lastMessageSeq,
+                        unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
+                        isGroup: true,
+                        online: false, // 群组不显示在线状态
+                        memberCount: g.memberCount || g.members?.length || 0,
+                    };
+                });
+
+                // 3. 合并并排序 (按最后消息时间倒序)
+                const allChats = [...contactChats, ...groupChats].sort((a, b) => {
+                    return (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0);
+                });
+
+                const synced = applyPresenceRecordsToCollections({
+                    contacts: state.contacts,
+                    chats: allChats,
+                    selectedContact: state.selectedContact,
+                    selectedGroup: state.selectedGroup,
+                    presenceByUserId: nextPresenceByUserId,
+                    userIds: touchedUserIds,
+                });
+                savedChats = synced.chats;
+
                 return {
-                    id: chatId, // Ensure we get the correct User ID
-                    title: c.alias || c.contact?.username || c.username || '未知用户',
-                    avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
-                    lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '', // Empty string for no message, handled in UI
-                    time: c.lastMessage
-                        ? formatChatListTimestamp(c.lastMessage.timestamp)
-                        : existingChat?.time || '',
-                    lastMessageTimestamp,
-                    lastMessageSeq: typeof c.lastMessage?.seq === 'number'
-                        ? c.lastMessage.seq
-                        : existingChat?.lastMessageSeq,
-                    unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
-                    online: c.isOnline || false,
-                    isGroup: false,
+                    chats: synced.chats,
+                    contacts: synced.contacts,
+                    selectedContact: synced.selectedContact,
+                    selectedGroup: synced.selectedGroup,
+                    presenceByUserId: nextPresenceByUserId,
+                    isLoading: false,
                 };
             });
 
-            // 2. 映射群组
-            const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: GroupApiResponse) => {
-                const existingChat = existingChatsById.get(g.id);
-                const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
-                const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
-                return {
-                    id: g.id,
-                    title: g.name,
-                    avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
-                    lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
-                    time: g.lastMessage?.timestamp
-                        ? formatChatListTimestamp(g.lastMessage.timestamp)
-                        : existingChat?.time || '',
-                    lastMessageTimestamp,
-                    lastMessageSeq: typeof g.lastMessage?.seq === 'number'
-                        ? g.lastMessage.seq
-                        : existingChat?.lastMessageSeq,
-                    unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
-                    isGroup: true,
-                    online: false, // 群组不显示在线状态
-                    memberCount: g.memberCount || g.members?.length || 0,
-                };
-            });
-
-            // 3. 合并并排序 (按最后消息时间倒序)
-            const allChats = [...contactChats, ...groupChats].sort((a, b) => {
-                return (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0);
-            });
-
-            set({ chats: allChats, isLoading: false });
-            preloadAvatarUrls(allChats.map((chat) => chat.avatarUrl), 'md');
+            preloadAvatarUrls(savedChats.map((chat) => chat.avatarUrl), 'md');
 
             // 异步保存到 IDB（冷启动用）
-            chatListSnapshotCache.save(allChats);
+            chatListSnapshotCache.save(savedChats);
         } catch (error: unknown) {
             console.error('加载聊天列表失败:', error);
             set({ isLoading: false, error: getErrorDetail(error) });
@@ -459,22 +601,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set({ isLoadingContacts: true, error: null });
             try {
                 const response = await contactAPI.getContacts('accepted');
-                const contacts: Contact[] = response.contacts.map((contact: ContactApiResponse) => ({
-                    id: contact.id,
-                    userId: contact.contactId,
-                    username: contact.contact?.username || '未知用户',
-                    email: contact.contact?.email,
-                    avatarUrl: withApiBase(contact.contact?.avatarUrl || contact.avatarUrl) ?? undefined,
-                    alias: contact.alias,
-                    status: contact.status,
-                    isOnline: !!contact.isOnline,
-                    lastSeen: contact.contact?.lastSeen,
-                    lastMessage: contact.lastMessage || undefined,
-                    unreadCount: typeof contact.unreadCount === 'number' ? contact.unreadCount : 0,
-                }));
+                let loadedContacts: Contact[] = [];
+                set((state) => {
+                    const nowMs = Date.now();
+                    const nextPresenceByUserId: Record<string, PresenceRecord> = { ...(state.presenceByUserId || {}) };
+                    const touchedUserIds = new Set<string>();
 
-                set({ contacts, isLoadingContacts: false });
-                preloadAvatarUrls(contacts.map((contact) => contact.avatarUrl), 'md');
+                    const contacts: Contact[] = response.contacts.map((contact: ContactApiResponse) => {
+                        const userId = contact.contactId;
+                        const mergedPresence = resolveMergedPresence(
+                            nextPresenceByUserId[userId],
+                            {
+                                isOnline: !!contact.isOnline,
+                                lastSeen: contact.contact?.lastSeen,
+                                source: 'snapshot',
+                            },
+                            nowMs,
+                        );
+                        nextPresenceByUserId[userId] = mergedPresence;
+                        touchedUserIds.add(userId);
+
+                        return {
+                            id: contact.id,
+                            userId,
+                            username: contact.contact?.username || '未知用户',
+                            email: contact.contact?.email,
+                            avatarUrl: withApiBase(contact.contact?.avatarUrl || contact.avatarUrl) ?? undefined,
+                            alias: contact.alias,
+                            status: contact.status,
+                            isOnline: mergedPresence.isOnline,
+                            lastSeen: mergedPresence.lastSeen ?? contact.contact?.lastSeen,
+                            lastMessage: contact.lastMessage || undefined,
+                            unreadCount: typeof contact.unreadCount === 'number' ? contact.unreadCount : 0,
+                        };
+                    });
+
+                    const synced = applyPresenceRecordsToCollections({
+                        contacts,
+                        chats: state.chats,
+                        selectedContact: state.selectedContact,
+                        selectedGroup: state.selectedGroup,
+                        presenceByUserId: nextPresenceByUserId,
+                        userIds: touchedUserIds,
+                    });
+                    loadedContacts = synced.contacts;
+
+                    return {
+                        contacts: synced.contacts,
+                        chats: synced.chats,
+                        selectedContact: synced.selectedContact,
+                        selectedGroup: synced.selectedGroup,
+                        presenceByUserId: nextPresenceByUserId,
+                        isLoadingContacts: false,
+                    };
+                });
+                preloadAvatarUrls(loadedContacts.map((contact) => contact.avatarUrl), 'md');
             } catch (error: unknown) {
                 set({ error: getErrorDetail(error), isLoadingContacts: false });
             } finally {
@@ -571,48 +752,70 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const groupData = response.group;
             const memberList = response.members || groupData.members || [];
 
-            // 构造 Group 对象
-            const group: Group = {
-                id: groupData.id,
-                name: groupData.name,
-                description: groupData.description,
-                ownerId: groupData.ownerId,
-                type: groupData.type,
-                avatarUrl: withApiBase(groupData.avatarUrl) ?? undefined,
-                memberCount: response.memberCount ?? groupData.memberCount,
-                maxMembers: groupData.maxMembers,
-                currentUserRole: groupData.currentUserRole,
-                currentUserStatus: groupData.currentUserStatus,
-                createdAt: groupData.createdAt,
-                isActive: groupData.isActive,
-                members: memberList.map((m: GroupMemberApiResponse) => ({
-                    id: m.id,
-                    userId: m.userId,
-                    username: m.user?.username || '未知用户',
-                    avatarUrl: withApiBase(m.user?.avatarUrl) ?? undefined,
-                    role: m.role,
-                    status: m.status,
-                    mutedUntil: m.mutedUntil || null,
-                    joinedAt: m.joinedAt,
-                    isOnline: false
-                }))
-            };
+            let hydratedGroup: Group | null = null;
+            set((state) => {
+                if (state.groupDetailsSeq !== requestSeq) return state;
 
-            if (get().groupDetailsSeq !== requestSeq) return;
+                const presenceMap = state.presenceByUserId || {};
+                const contactByUserId = new Map(state.contacts.map((c) => [c.userId, c]));
+                const chatByUserId = new Map(
+                    state.chats.filter((c) => !c.isGroup).map((c) => [c.id, c]),
+                );
 
-            set({
-                selectedGroup: group,
-                selectedContact: null,
-                selectedChatId: group.id,
-                isGroupChatMode: true,
-                isLoadingGroupDetails: false
+                // 构造 Group 对象，群成员在线态优先对齐权威在线状态表与已有联系人/私聊状态
+                const group: Group = {
+                    id: groupData.id,
+                    name: groupData.name,
+                    description: groupData.description,
+                    ownerId: groupData.ownerId,
+                    type: groupData.type,
+                    avatarUrl: withApiBase(groupData.avatarUrl) ?? undefined,
+                    memberCount: response.memberCount ?? groupData.memberCount,
+                    maxMembers: groupData.maxMembers,
+                    currentUserRole: groupData.currentUserRole,
+                    currentUserStatus: groupData.currentUserStatus,
+                    createdAt: groupData.createdAt,
+                    isActive: groupData.isActive,
+                    members: memberList.map((m: GroupMemberApiResponse) => {
+                        const knownPresence = presenceMap[m.userId];
+                        const knownContact = contactByUserId.get(m.userId);
+                        const knownChat = chatByUserId.get(m.userId);
+                        const isOnline = knownPresence
+                            ? knownPresence.isOnline
+                            : (knownContact?.isOnline ?? knownChat?.online ?? false);
+                        return {
+                            id: m.id,
+                            userId: m.userId,
+                            username: m.user?.username || '未知用户',
+                            avatarUrl: withApiBase(m.user?.avatarUrl) ?? undefined,
+                            role: m.role,
+                            status: m.status,
+                            mutedUntil: m.mutedUntil || null,
+                            joinedAt: m.joinedAt,
+                            isOnline,
+                        };
+                    }),
+                };
+
+                hydratedGroup = group;
+                return {
+                    selectedGroup: group,
+                    selectedContact: null,
+                    selectedChatId: group.id,
+                    isGroupChatMode: true,
+                    isLoadingGroupDetails: false,
+                };
             });
+
+            if (!hydratedGroup || get().groupDetailsSeq !== requestSeq) return;
+            const resolvedGroup: Group = hydratedGroup;
+
             preloadAvatarUrls(
-                [group.avatarUrl, ...(group.members || []).map((member) => member.avatarUrl)],
+                [resolvedGroup.avatarUrl, ...(resolvedGroup.members || []).map((member) => member.avatarUrl)],
                 'md',
             );
             // 工业级：进入群聊即视为“已查看”，本地未读立即清零
-            get().resetUnread(group.id);
+            get().resetUnread(resolvedGroup.id);
         } catch (error: unknown) {
             console.error('加载群组详情失败:', error);
             if (get().groupDetailsSeq !== requestSeq) return;
@@ -640,24 +843,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 更新联系人在线状态
     updateContactOnlineStatus: (userId, isOnline, lastSeen) => {
+        if (!userId) return;
         set((state) => {
-            const contacts = state.contacts.slice();
-            const contactIdx = contacts.findIndex((c) => c.userId === userId);
-            if (contactIdx >= 0) {
-                contacts[contactIdx] = { ...contacts[contactIdx], isOnline, lastSeen };
-            }
+            const currentPresenceMap = state.presenceByUserId || {};
+            const merged = resolveMergedPresence(currentPresenceMap[userId], {
+                isOnline: !!isOnline,
+                lastSeen,
+                source: 'realtime',
+            });
+            const nextPresenceByUserId = {
+                ...currentPresenceMap,
+                [userId]: merged,
+            };
 
-            const chats = state.chats.slice();
-            const chatIdx = chats.findIndex((c) => c.id === userId && !c.isGroup);
-            if (chatIdx >= 0) {
-                chats[chatIdx] = { ...chats[chatIdx], online: isOnline };
-            }
+            const synced = applyPresenceRecordsToCollections({
+                contacts: state.contacts,
+                chats: state.chats,
+                selectedContact: state.selectedContact,
+                selectedGroup: state.selectedGroup,
+                presenceByUserId: nextPresenceByUserId,
+                userIds: new Set([userId]),
+            });
 
-            const selectedContact = state.selectedContact?.userId === userId
-                ? { ...state.selectedContact, isOnline, lastSeen }
-                : state.selectedContact;
-
-            return { contacts, chats, selectedContact };
+            return {
+                contacts: synced.contacts,
+                chats: synced.chats,
+                selectedContact: synced.selectedContact,
+                selectedGroup: synced.selectedGroup,
+                presenceByUserId: nextPresenceByUserId,
+            };
         });
     },
 
@@ -835,7 +1049,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                             lastMessageTimestamp: 0,
                             unreadCount: 0,
                             isGroup: !!u.isGroup,
-                            online: !u.isGroup ? false : undefined,
+                            online: !u.isGroup ? ((state.presenceByUserId || {})[chatId]?.isOnline ?? false) : undefined,
                             memberCount: nextMemberCount,
                         });
 
@@ -886,26 +1100,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 chatIdxById.set(chats[i].id, i);
             }
 
-            // 1) Online status (private chats + contacts).
+            // 1) Online status (private chats + contacts + active group members).
+            let presenceByUserId = state.presenceByUserId || {};
             if (hasOnline) {
+                const nextPresenceByUserId: Record<string, PresenceRecord> = { ...presenceByUserId };
+                const updatedUserIds = new Set<string>();
+                const nowMs = Date.now();
+
                 for (const u of batch.onlineUpdates!) {
                     const userId = u?.userId;
                     if (!userId) continue;
 
+                    const merged = resolveMergedPresence(
+                        nextPresenceByUserId[userId],
+                        {
+                            isOnline: !!u.isOnline,
+                            lastSeen: u.lastSeen,
+                            source: 'realtime',
+                        },
+                        nowMs,
+                    );
+                    nextPresenceByUserId[userId] = merged;
+                    updatedUserIds.add(userId);
+
                     const cIdx = contactIdxByUserId.get(userId);
                     if (cIdx !== undefined) {
-                        contacts[cIdx] = { ...contacts[cIdx], isOnline: u.isOnline, lastSeen: u.lastSeen };
+                        contacts[cIdx] = {
+                            ...contacts[cIdx],
+                            isOnline: merged.isOnline,
+                            lastSeen: merged.lastSeen,
+                        };
                     }
 
                     if (selectedContact?.userId === userId) {
-                        selectedContact = { ...selectedContact, isOnline: u.isOnline, lastSeen: u.lastSeen };
+                        selectedContact = {
+                            ...selectedContact,
+                            isOnline: merged.isOnline,
+                            lastSeen: merged.lastSeen,
+                        };
                     }
 
                     const chIdx = chatIdxById.get(userId);
                     if (chIdx !== undefined && !chats[chIdx].isGroup) {
-                        chats[chIdx] = { ...chats[chIdx], online: u.isOnline };
+                        chats[chIdx] = { ...chats[chIdx], online: merged.isOnline };
                     }
                 }
+
+                presenceByUserId = nextPresenceByUserId;
+                selectedGroup = syncGroupMembersPresence(selectedGroup, presenceByUserId, updatedUserIds);
             }
 
             // 2) Unread deltas.
@@ -980,6 +1222,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
 
             const partial: Partial<ChatState> = { contacts, chats };
+            if (presenceByUserId !== state.presenceByUserId) partial.presenceByUserId = presenceByUserId;
             if (selectedContact !== state.selectedContact) partial.selectedContact = selectedContact;
             if (selectedGroup !== state.selectedGroup) partial.selectedGroup = selectedGroup;
             if (selectedChatId !== state.selectedChatId) partial.selectedChatId = selectedChatId;

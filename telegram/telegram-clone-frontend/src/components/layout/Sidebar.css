@@ -133,6 +133,10 @@
     color: #00BA7C;
 }
 
+.user-details .status.connecting {
+    color: #D97706;
+}
+
 .user-details .status.offline {
     color: #536471;
 }

@@ -18,6 +18,10 @@ import { API_BASE_URL } from '../utils/apiUrl';
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
 import { useMessageStore } from '../features/chat/store/messageStore';
+import {
+  collectPresenceTargetUserIds,
+  deriveSelfPresence,
+} from '../features/chat/presence/presenceState';
 
 // 核心 UI 组件
 import { ChatArea } from '../components/layout';
@@ -97,6 +101,8 @@ const ChatPage: React.FC = () => {
   const connectRealtime = useMessageStore((state) => state.connectRealtime);
   const disconnectRealtime = useMessageStore((state) => state.disconnectRealtime);
   const subscribePresence = useMessageStore((state) => state.subscribePresence);
+  const socketConnected = useMessageStore((state) => state.socketConnected);
+  const syncPhase = useMessageStore((state) => state.syncPhase);
   const sendRealtimeMessage = useMessageStore((state) => state.sendRealtimeMessage);
   const joinRealtimeRoom = useMessageStore((state) => state.joinRealtimeRoom);
   const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
@@ -110,7 +116,16 @@ const ChatPage: React.FC = () => {
   const [isBrowserOnline, setIsBrowserOnline] = useState(
     typeof navigator === 'undefined' ? true : navigator.onLine
   );
-  const isUserSessionOnline = canSendMessages && isBrowserOnline;
+  const selfPresence = useMemo(
+    () => deriveSelfPresence({
+      hasUser: canSendMessages,
+      isBrowserOnline,
+      socketConnected,
+      syncPhase,
+    }),
+    [canSendMessages, isBrowserOnline, socketConnected, syncPhase],
+  );
+  const lastPresenceResyncAtRef = useRef(0);
   const [newMessage, setNewMessage] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -190,34 +205,52 @@ const ChatPage: React.FC = () => {
     initializeUser();
   }, [navigate, connectRealtime, loadContacts, loadPendingRequests]);
 
-  const contactUserIdsStr = useMemo(() => {
-    const selfId = currentUser?.id ? String(currentUser.id).trim() : '';
-    const idSet = new Set<string>();
-    const addCandidate = (rawId?: string | null) => {
-      const clean = typeof rawId === 'string' ? rawId.trim() : '';
-      if (!clean || clean === 'ai' || (selfId && clean === selfId)) return;
-      idSet.add(clean);
+  const presenceTargetIds = useMemo(
+    () => collectPresenceTargetUserIds({
+      contacts,
+      chats,
+      selectedContact,
+      selectedGroup,
+      currentUserId: currentUser?.id,
+    }),
+    [contacts, chats, selectedContact, selectedGroup, currentUser?.id],
+  );
+  const presenceTargetIdsStr = useMemo(
+    () => presenceTargetIds.join(','),
+    [presenceTargetIds],
+  );
+
+  const isLiveRealtime = socketConnected && syncPhase === 'live';
+
+  // 目标列表变更或实时链路进入活跃态时主动对齐一次在线状态快照
+  useEffect(() => {
+    if (!currentUser?.id || !presenceTargetIdsStr) return;
+    const userIds = presenceTargetIdsStr.split(',');
+    lastPresenceResyncAtRef.current = Date.now();
+    subscribePresence(userIds);
+  }, [presenceTargetIdsStr, currentUser?.id, isLiveRealtime, subscribePresence]);
+
+  // 页面切回前台或网络恢复时节流重订阅，防止切屏休眠期间丢失在线态变更
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (!currentUser?.id || !presenceTargetIdsStr) return;
+
+    const PRESENCE_RESYNC_DEBOUNCE_MS = 1_500;
+    const triggerPresenceResync = () => {
+      if (document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (now - lastPresenceResyncAtRef.current < PRESENCE_RESYNC_DEBOUNCE_MS) return;
+      lastPresenceResyncAtRef.current = now;
+      subscribePresence(presenceTargetIdsStr.split(','));
     };
 
-    // 汇总联系人、非群聊会话列表对象以及当前选中的私聊对象（覆盖 ?dm= 非好友入口）
-    for (const contact of contacts) {
-      addCandidate(contact.userId);
-    }
-    for (const chat of chats) {
-      if (!chat.isGroup) {
-        addCandidate(chat.id);
-      }
-    }
-    addCandidate(selectedContact?.userId);
-
-    return Array.from(idSet).sort().join(',');
-  }, [contacts, chats, selectedContact?.userId, currentUser?.id]);
-
-  useEffect(() => {
-    if (!currentUser?.id || !contactUserIdsStr) return;
-    const userIds = contactUserIdsStr.split(',');
-    subscribePresence(userIds);
-  }, [contactUserIdsStr, currentUser?.id, subscribePresence]);
+    document.addEventListener('visibilitychange', triggerPresenceResync);
+    window.addEventListener('online', triggerPresenceResync);
+    return () => {
+      document.removeEventListener('visibilitychange', triggerPresenceResync);
+      window.removeEventListener('online', triggerPresenceResync);
+    };
+  }, [presenceTargetIdsStr, currentUser?.id, subscribePresence]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {
@@ -695,7 +728,9 @@ const ChatPage: React.FC = () => {
       {/* 1. Sidebar */}
         <ChatSidebar
           currentUser={currentUser}
-          isConnected={isUserSessionOnline}
+          isConnected={selfPresence.isOnline}
+          connectionStatus={selfPresence.status}
+          connectionLabel={selfPresence.label}
         isAiChatMode={isAiChatMode}
         pendingRequests={pendingRequests}
         onSelectAiChat={handleSelectAiChat}

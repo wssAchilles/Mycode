@@ -154,6 +154,15 @@
   text-shadow: none;
 }
 
+.status.connecting {
+  color: #D97706;
+  font-weight: 600;
+}
+
+.status.offline {
+  color: #536471;
+}
+
 .logout-button {
   background: transparent;
   border: 1px solid #EFF3F4;
