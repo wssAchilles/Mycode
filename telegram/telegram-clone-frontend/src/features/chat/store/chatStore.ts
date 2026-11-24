@@ -4,6 +4,7 @@ import { authUtils, contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
 import { preloadAvatarUrls } from '../../../utils/media';
+import { formatChatListTimestamp } from '../../../utils/dateTime';
 import { chatListSnapshotCache } from '../../../services/db';
 import { resolveMergedPresence, type PresenceRecord } from '../presence/presenceState';
 import type { ContactRealtimePayload } from '../../realtime/contracts';
@@ -82,30 +83,7 @@ function getErrorDetail(error: unknown): string {
     return String(error);
 }
 
-function padDatePart(value: number): string {
-    return String(value).padStart(2, '0');
-}
-
-export function formatChatListTimestamp(timestamp: string | number | Date | undefined, now = new Date()): string {
-    if (!timestamp) return '';
-
-    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-    if (!Number.isFinite(date.getTime())) return '';
-
-    const sameYear = date.getFullYear() === now.getFullYear();
-    const sameDay =
-        sameYear &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate();
-
-    if (sameDay) {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-
-    const monthDay = `${padDatePart(date.getMonth() + 1)}/${padDatePart(date.getDate())}`;
-    if (sameYear) return monthDay;
-    return `${date.getFullYear()}/${monthDay}`;
-}
+export { formatChatListTimestamp };
 
 function refreshChatSummaryTime(chat: ChatSummary): ChatSummary {
     if (!chat.lastMessageTimestamp) return chat;

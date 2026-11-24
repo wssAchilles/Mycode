@@ -151,6 +151,8 @@
     font-size: 11px;
     height: 14px;
     line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
     user-select: none;
     font-variant-numeric: tabular-nums;
 }

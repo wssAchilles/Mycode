@@ -13,6 +13,7 @@ import { useAiChatStore } from '../features/chat/store/aiChatStore';
 import { useMessageStore } from '../features/chat/store/messageStore';
 import { aiChatAPI } from '../services/aiChatAPI';
 import { buildPrivateChatId } from '../utils/chat';
+import { formatMessageTimestamp } from '../utils/dateTime';
 import { showToast } from './ui/Toast';
 
 interface AiChatComponentProps {
@@ -330,8 +331,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   };
 
   const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatMessageTimestamp(timestamp);
   };
 
   const handleCopyText = async (text: string, msgKey: string) => {

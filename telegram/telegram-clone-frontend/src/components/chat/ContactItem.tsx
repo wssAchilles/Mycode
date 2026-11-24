@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import type { Contact } from '../../types/store';
+import { formatChatListTimestamp } from '../../utils/dateTime';
 import './ContactItem.css';
 
 interface ContactItemProps {
@@ -13,27 +14,9 @@ interface ContactItemProps {
     formatTime?: (timestamp: string) => string;
 }
 
-// 默认时间格式化
+// 默认时间格式化（复用统一本日/周几/日期规则）
 const defaultFormatTime = (timestamp: string): string => {
-    try {
-        const date = new Date(timestamp);
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
-
-        if (isToday) {
-            return date.toLocaleTimeString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit',
-            });
-        }
-
-        return date.toLocaleDateString('zh-CN', {
-            month: 'numeric',
-            day: 'numeric',
-        });
-    } catch {
-        return '';
-    }
+    return formatChatListTimestamp(timestamp);
 };
 
 export const ContactItem: React.FC<ContactItemProps> = ({

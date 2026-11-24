@@ -6,6 +6,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAiChatStore } from '../features/chat/store/aiChatStore';
+import { formatChatListTimestamp } from '../utils/dateTime';
 import './AiConversationList.css';
 
 interface AiConversationListProps {
@@ -50,22 +51,9 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
         }
     };
 
-    // 格式化会话更新时间
+    // 格式化会话更新时间（本日时分、本周周几、非本周具体日期）
     const formatTime = (timestamp: string) => {
-        const date = new Date(timestamp);
-        const now = new Date();
-        const diff = now.getTime() - date.getTime();
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-        if (days === 0) {
-            return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-        } else if (days === 1) {
-            return '昨天';
-        } else if (days < 7) {
-            return `${days} 天前`;
-        } else {
-            return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-        }
+        return formatChatListTimestamp(timestamp);
     };
 
     return (

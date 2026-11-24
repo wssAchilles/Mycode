@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MessageBubble, ProgressiveImage } from '../../../components/common';
 import type { Message } from '../../../types/chat';
+import { formatMessageTimestamp } from '../../../utils/dateTime';
 import { useMessageStore } from '../store/messageStore';
 import { useChatStore } from '../store/chatStore';
 import './ChatHistory.css';
@@ -38,7 +39,6 @@ interface StoreMessageBubbleProps {
   currentUserId: string;
   highlightConfig: HighlightConfig;
   highlightSeq?: number;
-  timeFormatter: Intl.DateTimeFormat;
   showGroupSenderMeta: boolean;
   resolveSenderMeta: (msg: Message) => SenderMeta;
 }
@@ -54,7 +54,6 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   currentUserId,
   highlightConfig,
   highlightSeq,
-  timeFormatter,
   showGroupSenderMeta,
   resolveSenderMeta,
 }) => {
@@ -92,12 +91,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
     });
   };
 
-  let time = '';
-  try {
-    time = timeFormatter.format(new Date(msg.timestamp));
-  } catch {
-    // ignore
-  }
+  const time = formatMessageTimestamp(msg.timestamp);
 
   const senderMeta = showGroupSenderMeta && !isOut ? resolveSenderMeta(msg) : {};
 
@@ -167,11 +161,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   latestCountRef.current = count;
   const scrollRafRef = useRef<number | null>(null);
   const loadMoreAnchorRafRef = useRef<number | null>(null);
-
-  const timeFormatter = useMemo(
-    () => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }),
-    [],
-  );
 
   const groupMemberByUserId = useMemo(() => {
     const map = new Map<string, { username?: string; avatarUrl?: string }>();
@@ -635,7 +624,6 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                     currentUserId={currentUserId}
                     highlightConfig={highlightConfig}
                     highlightSeq={highlightSeq}
-                    timeFormatter={timeFormatter}
                     showGroupSenderMeta={isGroupChatMode}
                     resolveSenderMeta={resolveSenderMeta}
                   />
@@ -678,12 +666,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
               });
             };
 
-            let time = '';
-            try {
-              time = timeFormatter.format(new Date(msg.timestamp));
-            } catch {
-              // ignore
-            }
+            const time = formatMessageTimestamp(msg.timestamp);
 
             const senderMeta = isGroupChatMode && !isOut ? resolveSenderMeta(msg) : {};
 

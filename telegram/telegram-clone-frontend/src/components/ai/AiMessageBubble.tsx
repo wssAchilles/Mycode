@@ -3,6 +3,7 @@
  * AI 专用消息气泡，支持 Markdown 代码块高对比展示与一键复制工具栏
  */
 import React, { useState } from 'react';
+import { formatMessageTimestamp } from '../../utils/dateTime';
 import './AiMessageBubble.css';
 
 interface AiMessageBubbleProps {
@@ -40,12 +41,7 @@ export const AiMessageBubble: React.FC<AiMessageBubbleProps> = ({
     const [copied, setCopied] = useState(false);
 
     const formatTime = (ts: string) => {
-        try {
-            const date = new Date(ts);
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } catch {
-            return '';
-        }
+        return formatMessageTimestamp(ts);
     };
 
     const handleCopy = async (textToCopy: string) => {

@@ -7,6 +7,7 @@ import type { Message } from '../../types/store';
 import { MessageStatusIcon, type MessageStatusType } from '../icons/MessageStatusIcon';
 import { FileTypeIcon, getFileIconType } from '../icons/FileTypeIcon';
 import { API_BASE_URL, withApiBase } from '../../utils/apiUrl';
+import { formatMessageTimestamp } from '../../utils/dateTime';
 import './MessageBubble.css';
 
 interface MessageBubbleProps {
@@ -45,17 +46,9 @@ const formatFileSize = (bytes: number): string => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-// 格式化时间
+// 格式化时间（本日时分，本周附加周几，非本周附加日期）
 const formatTime = (timestamp: string): string => {
-    try {
-        const date = new Date(timestamp);
-        return date.toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    } catch {
-        return '';
-    }
+    return formatMessageTimestamp(timestamp);
 };
 
 // 使用 FileTypeIcon 组件替代 emoji 图标 (见 getFileIconType)
