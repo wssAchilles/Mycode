@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, Globe, Lock, Search, Users, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, Globe, Lock, Search, UserPlus, Users, X } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { Avatar } from '../../../components/common';
 import { showToast } from '../../../components/ui/Toast';
@@ -18,6 +18,7 @@ interface CreateGroupModalProps {
     isOpen: boolean;
     onClose: () => void;
     onGroupCreated: () => void;
+    onOpenAddContact?: () => void;
 }
 
 const DEFAULT_MAX_MEMBERS = 200;
@@ -26,6 +27,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     isOpen,
     onClose,
     onGroupCreated,
+    onOpenAddContact,
 }) => {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
@@ -34,6 +36,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const [step, setStep] = useState<1 | 2>(1);
     const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [memberFilter, setMemberFilter] = useState<'all' | 'online'>('all');
 
     // Step 2：完整群组配置表单状态
     const [avatarSelection, setAvatarSelection] = useState<GroupAvatarSelection>({
@@ -53,15 +56,30 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const loadContacts = useChatStore((state) => state.loadContacts);
     const createGroup = useChatStore((state) => state.createGroup);
 
+    const onlineContactCount = useMemo(
+        () => contacts.filter((c) => c.isOnline).length,
+        [contacts],
+    );
+
     const filteredContacts = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
-        if (!q) return contacts;
-        return contacts.filter(
-            (contact) =>
+        return contacts.filter((contact) => {
+            if (memberFilter === 'online' && !contact.isOnline) {
+                return false;
+            }
+            if (!q) return true;
+            return (
                 contact.username.toLowerCase().includes(q) ||
-                (contact.alias && contact.alias.toLowerCase().includes(q)),
-        );
-    }, [contacts, searchQuery]);
+                (contact.alias && contact.alias.toLowerCase().includes(q))
+            );
+        });
+    }, [contacts, memberFilter, searchQuery]);
+
+    const areAllFilteredSelected = useMemo(() => {
+        if (filteredContacts.length === 0) return false;
+        const selectedSet = new Set(selectedContactIds);
+        return filteredContacts.every((c) => selectedSet.has(c.userId));
+    }, [filteredContacts, selectedContactIds]);
 
     const selectedContacts = useMemo(() => {
         const selectedSet = new Set(selectedContactIds);
@@ -77,7 +95,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     >(
         ({ root, reducedMotion, duration }) => ({
             enter: () => {
-                if (reducedMotion || !root) return;
+                if (reducedMotion || !root || typeof root.animate !== 'function') return;
                 waapi.animate(root, {
                     opacity: [0, 1],
                     y: ['10px', '0px'],
@@ -89,7 +107,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             step: () => {
                 if (reducedMotion || !root) return;
                 const body = root.querySelector('.modal-body');
-                if (!body) return;
+                if (!body || typeof body.animate !== 'function') return;
                 waapi.animate(body, {
                     opacity: [0, 1],
                     x: ['8px', '0px'],
@@ -105,6 +123,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         setStep(1);
         setSelectedContactIds([]);
         setSearchQuery('');
+        setMemberFilter('all');
         setAvatarSelection({ mode: 'existing', url: null });
         setGroupName('');
         setDescription('');
@@ -114,7 +133,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         setFormError(null);
     }, []);
 
-    // 通过原生 dialog.showModal() / dialog.close() 控制顶层模态打开与焦点归还
+    // 通过原生 dialog.showModal() / dialog.close() 控制顶层模态打开与焦点归还（兼容 JSDOM）
     useEffect(() => {
         const dialog = dialogRef.current;
         if (!dialog) return;
@@ -122,12 +141,20 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         if (isOpen) {
             loadContacts();
             resetForm();
-            if (!dialog.open) {
-                dialog.showModal();
+            if (typeof dialog.showModal === 'function') {
+                if (!dialog.open) {
+                    dialog.showModal();
+                }
+            } else {
+                dialog.setAttribute('open', '');
             }
             groupModalMotion.run('enter');
-        } else if (dialog.open) {
-            dialog.close();
+        } else if (typeof dialog.close === 'function') {
+            if (dialog.open) {
+                dialog.close();
+            }
+        } else {
+            dialog.removeAttribute('open');
         }
     }, [groupModalMotion, isOpen, loadContacts, resetForm]);
 
@@ -148,8 +175,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const handleRequestClose = useCallback(() => {
         if (isCreating) return;
         const dialog = dialogRef.current;
-        if (dialog?.open) {
-            dialog.close();
+        if (dialog) {
+            if (typeof dialog.close === 'function') {
+                if (dialog.open) dialog.close();
+            } else {
+                dialog.removeAttribute('open');
+            }
         }
         onClose();
     }, [isCreating, onClose]);
@@ -158,6 +189,17 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         setSelectedContactIds((prev) =>
             prev.includes(contactId) ? prev.filter((id) => id !== contactId) : [...prev, contactId],
         );
+    };
+
+    const handleToggleAllFiltered = () => {
+        if (filteredContacts.length === 0) return;
+        const filteredIds = filteredContacts.map((c) => c.userId);
+        if (areAllFilteredSelected) {
+            const filteredSet = new Set(filteredIds);
+            setSelectedContactIds((prev) => prev.filter((id) => !filteredSet.has(id)));
+        } else {
+            setSelectedContactIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
+        }
     };
 
     const handleCreate = async (event?: React.FormEvent) => {
@@ -241,7 +283,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             ? '上传头像中...'
             : submitStage === 'creating'
               ? '创建中...'
-              : '创建';
+              : '创建群组';
 
     return (
         <dialog
@@ -264,53 +306,47 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         >
             <div ref={groupModalMotion.rootRef} className="create-group-surface">
                 <div className="modal-header">
-                    <button
-                        type="button"
-                        className="modal-close"
-                        disabled={isCreating}
-                        onClick={
-                            step === 1
-                                ? handleRequestClose
-                                : () => {
-                                      setFormError(null);
-                                      setStep(1);
-                                  }
-                        }
-                        aria-label={step === 1 ? '关闭新建群组弹窗' : '返回上一步'}
-                    >
-                        {step === 1 ? '取消' : '返回'}
-                    </button>
-
-                    <div className="modal-header-title-wrap">
-                        <h2 id="create-group-title">{step === 1 ? '新建群组' : '群组信息'}</h2>
-                        <span className="modal-step-indicator">步骤 {step} / 2</span>
+                    <div className="modal-header-brand">
+                        <span className="modal-header-badge" aria-hidden="true">
+                            <Users size={17} strokeWidth={2.2} />
+                        </span>
+                        <div className="modal-header-title-wrap">
+                            <h2 id="create-group-title">
+                                {step === 1 ? '新建群组' : '完善群组信息'}
+                            </h2>
+                            <div className="modal-steps-bar" aria-label="创建步骤">
+                                <button
+                                    type="button"
+                                    className={`modal-step-pill ${step === 1 ? 'is-current' : 'is-done'}`}
+                                    disabled={isCreating}
+                                    onClick={() => {
+                                        if (step === 2) {
+                                            setFormError(null);
+                                            setStep(1);
+                                        }
+                                    }}
+                                >
+                                    <span className="modal-step-num">1</span>
+                                    <span>选择成员</span>
+                                </button>
+                                <span className="modal-step-divider" aria-hidden="true" />
+                                <span className={`modal-step-pill ${step === 2 ? 'is-current' : ''}`}>
+                                    <span className="modal-step-num">2</span>
+                                    <span>群组设置</span>
+                                </span>
+                            </div>
+                        </div>
                     </div>
 
-                    {step === 1 ? (
-                        <button
-                            type="button"
-                            className="modal-next"
-                            onClick={() => {
-                                setFormError(null);
-                                setStep(2);
-                            }}
-                            aria-label="进入群组信息配置"
-                        >
-                            {selectedContactIds.length > 0
-                                ? `下一步 (${selectedContactIds.length})`
-                                : '跳过'}
-                        </button>
-                    ) : (
-                        <button
-                            type="button"
-                            className="modal-next"
-                            disabled={isCreating || !groupName.trim()}
-                            onClick={() => handleCreate()}
-                            aria-label="创建群组"
-                        >
-                            {submitLabel}
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        className="modal-icon-close"
+                        disabled={isCreating}
+                        onClick={handleRequestClose}
+                        aria-label="关闭新建群组弹窗"
+                    >
+                        <X size={18} />
+                    </button>
                 </div>
 
                 <div className="modal-body">
@@ -338,8 +374,60 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                         aria-label="搜索联系人"
                                     />
+                                    {searchQuery && (
+                                        <button
+                                            type="button"
+                                            className="search-clear-btn"
+                                            onClick={() => setSearchQuery('')}
+                                            aria-label="清空搜索"
+                                        >
+                                            <X size={13} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
+
+                            {contacts.length > 0 && (
+                                <div className="group-member-toolbar">
+                                    <div className="group-member-filters" role="group" aria-label="联系人筛选">
+                                        <button
+                                            type="button"
+                                            className={`group-filter-chip ${memberFilter === 'all' ? 'is-active' : ''}`}
+                                            onClick={() => setMemberFilter('all')}
+                                        >
+                                            全部 ({contacts.length})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`group-filter-chip ${memberFilter === 'online' ? 'is-active' : ''}`}
+                                            onClick={() => setMemberFilter('online')}
+                                        >
+                                            仅看在线 ({onlineContactCount})
+                                        </button>
+                                    </div>
+
+                                    <div className="group-member-batch-actions">
+                                        {filteredContacts.length > 0 && (
+                                            <button
+                                                type="button"
+                                                className="group-toolbar-link"
+                                                onClick={handleToggleAllFiltered}
+                                            >
+                                                {areAllFilteredSelected ? '取消全选' : '全选当前'}
+                                            </button>
+                                        )}
+                                        {selectedContactIds.length > 0 && (
+                                            <button
+                                                type="button"
+                                                className="group-toolbar-link is-muted"
+                                                onClick={() => setSelectedContactIds([])}
+                                            >
+                                                清空 ({selectedContactIds.length})
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             {selectedContacts.length > 0 && (
                                 <div className="selected-contacts-strip" aria-label="已选初始成员">
@@ -365,13 +453,36 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             <div className="contact-list-select">
                                 {filteredContacts.length === 0 ? (
                                     <div className="group-contact-empty">
-                                        {contacts.length === 0
-                                            ? '暂无联系人，可直接点击右上角“跳过”创建群组'
-                                            : '未找到匹配的联系人'}
+                                        <div className="group-empty-icon" aria-hidden="true">
+                                            <Users size={26} strokeWidth={1.6} />
+                                        </div>
+                                        <p className="group-empty-title">
+                                            {contacts.length === 0
+                                                ? '暂无已添加的联系人'
+                                                : memberFilter === 'online' && !searchQuery.trim()
+                                                  ? '当前没有在线联系人'
+                                                  : '未找到匹配的联系人'}
+                                        </p>
+                                        <p className="group-empty-desc">
+                                            {contacts.length === 0
+                                                ? '可先添加好友，或直接点击右下角“跳过并继续”建群后再邀请'
+                                                : '试试切换“全部”筛选或更换搜索关键词'}
+                                        </p>
+                                        {contacts.length === 0 && onOpenAddContact && (
+                                            <button
+                                                type="button"
+                                                className="group-empty-action-btn"
+                                                onClick={onOpenAddContact}
+                                            >
+                                                <UserPlus size={14} aria-hidden="true" />
+                                                <span>先去添加联系人</span>
+                                            </button>
+                                        )}
                                     </div>
                                 ) : (
                                     filteredContacts.map((contact) => {
                                         const displayName = contact.alias || contact.username;
+                                        const hasAlias = Boolean(contact.alias && contact.alias !== contact.username);
                                         const isSelected = selectedContactIds.includes(contact.userId);
                                         return (
                                             <button
@@ -383,19 +494,32 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                                                 aria-label={`${isSelected ? '取消选择' : '选择'}联系人 ${displayName}`}
                                             >
                                                 <div className="contact-avatar-wrapper">
-                                                    <Avatar src={contact.avatarUrl} name={displayName} size="md" />
-                                                    {isSelected && (
-                                                        <div className="selection-badge">
-                                                            <Check size={11} strokeWidth={3} />
-                                                        </div>
-                                                    )}
+                                                    <Avatar
+                                                        src={contact.avatarUrl}
+                                                        name={displayName}
+                                                        size="md"
+                                                        online={contact.isOnline}
+                                                    />
                                                 </div>
                                                 <div className="contact-info">
-                                                    <div className="contact-name">{displayName}</div>
-                                                    <div className="contact-status">
+                                                    <div className="contact-name">
+                                                        <span>{displayName}</span>
+                                                        {hasAlias && (
+                                                            <span className="contact-username-sub">
+                                                                @{contact.username}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className={`contact-status ${contact.isOnline ? 'is-online' : ''}`}>
                                                         {contact.isOnline ? '在线' : '离线'}
                                                     </div>
                                                 </div>
+                                                <span
+                                                    className={`contact-check-ring ${isSelected ? 'is-checked' : ''}`}
+                                                    aria-hidden="true"
+                                                >
+                                                    {isSelected && <Check size={12} strokeWidth={3} />}
+                                                </span>
                                             </button>
                                         );
                                     })
@@ -592,6 +716,56 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                                 </button>
                             </section>
                         </form>
+                    )}
+                </div>
+
+                {/* 底部固定操作栏 */}
+                <div className="create-group-footer">
+                    {step === 1 ? (
+                        <>
+                            <span className="create-group-footer-hint">
+                                {selectedContactIds.length > 0
+                                    ? `已选 ${selectedContactIds.length} 位初始成员`
+                                    : '未选成员也可建群'}
+                            </span>
+                            <button
+                                type="button"
+                                className="create-group-primary-btn"
+                                onClick={() => {
+                                    setFormError(null);
+                                    setStep(2);
+                                }}
+                                aria-label="进入群组信息配置"
+                            >
+                                {selectedContactIds.length > 0
+                                    ? `下一步 (${selectedContactIds.length})`
+                                    : '跳过并继续'}
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <button
+                                type="button"
+                                className="create-group-secondary-btn"
+                                disabled={isCreating}
+                                onClick={() => {
+                                    setFormError(null);
+                                    setStep(1);
+                                }}
+                            >
+                                <ArrowLeft size={14} aria-hidden="true" />
+                                <span>上一步</span>
+                            </button>
+                            <button
+                                type="button"
+                                className="create-group-primary-btn"
+                                disabled={isCreating || !groupName.trim()}
+                                onClick={() => handleCreate()}
+                                aria-label="创建群组"
+                            >
+                                {submitLabel}
+                            </button>
+                        </>
                     )}
                 </div>
             </div>
