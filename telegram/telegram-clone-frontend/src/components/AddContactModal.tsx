@@ -565,7 +565,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                       {incomingReq ? (
                         <button
                           type="button"
-                          className="add-contact-btn add-contact-btn--accept"
+                          className="add-contact-action-btn add-contact-action-btn--accept"
                           disabled={!!busyRequestId}
                           onClick={() =>
                             void handleProcessIncomingRequest(
@@ -583,7 +583,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                         onStartChatWithContact ? (
                           <button
                             type="button"
-                            className="add-contact-btn add-contact-btn--chat"
+                            className="add-contact-action-btn add-contact-action-btn--chat"
                             onClick={() => onStartChatWithContact(user.id)}
                           >
                             <MessageSquare size={13} aria-hidden="true" />
@@ -605,7 +605,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                       ) : (
                         <button
                           type="button"
-                          className="add-contact-btn add-contact-btn--primary"
+                          className="add-contact-action-btn add-contact-action-btn--primary"
                           disabled={addingContactId === user.id}
                           onClick={() => void handleAddContact(user)}
                           aria-label={`添加联系人 ${user.username}`}
@@ -676,7 +676,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                         <div className="add-contact-card-actions">
                           <button
                             type="button"
-                            className="add-contact-btn add-contact-btn--accept"
+                            className="add-contact-action-btn add-contact-action-btn--accept"
                             disabled={!!busyRequestId}
                             onClick={() =>
                               void handleProcessIncomingRequest(req.id, displayName, 'accept', req.userId)
@@ -688,7 +688,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                           </button>
                           <button
                             type="button"
-                            className="add-contact-btn add-contact-btn--ghost"
+                            className="add-contact-action-btn add-contact-action-btn--ghost"
                             disabled={!!busyRequestId}
                             onClick={() =>
                               void handleProcessIncomingRequest(req.id, displayName, 'reject', req.userId)
@@ -742,7 +742,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                     <p className="add-contact-empty-desc">你发出的好友请求在对方同意前会列在此处</p>
                     <button
                       type="button"
-                      className="add-contact-btn add-contact-btn--primary"
+                      className="add-contact-action-btn add-contact-action-btn--primary"
                       onClick={() => setActiveTab('search')}
                     >
                       <Search size={13} aria-hidden="true" />

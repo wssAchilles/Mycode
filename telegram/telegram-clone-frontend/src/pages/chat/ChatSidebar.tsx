@@ -245,7 +245,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                                         <div className="pending-request__details">
                                             <div className="pending-request__name">{displayName}</div>
                                             <div className="pending-request__label">
-                                                请求添加你为好友{timeLabel ? ` · ${timeLabel}` : ''}
+                                                请求加为好友{timeLabel ? ` · ${timeLabel}` : ''}
                                             </div>
                                         </div>
                                     </div>

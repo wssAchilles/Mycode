@@ -418,7 +418,7 @@
     flex-shrink: 0;
 }
 
-.add-contact-btn {
+.add-contact-action-btn {
     height: 31px;
     padding: 0 12px;
     border-radius: 9999px;
@@ -434,46 +434,46 @@
     transition: background-color 0.15s ease, opacity 0.15s ease;
 }
 
-.add-contact-btn:disabled {
+.add-contact-action-btn:disabled {
     opacity: 0.55;
     cursor: not-allowed;
 }
 
-.add-contact-btn--primary {
+.add-contact-action-btn--primary {
     background: #0F172A;
     color: #FFFFFF;
 }
 
-.add-contact-btn--primary:hover:not(:disabled) {
+.add-contact-action-btn--primary:hover:not(:disabled) {
     background: #1E293B;
 }
 
-.add-contact-btn--accept {
+.add-contact-action-btn--accept {
     background: #2563EB;
     color: #FFFFFF;
 }
 
-.add-contact-btn--accept:hover:not(:disabled) {
+.add-contact-action-btn--accept:hover:not(:disabled) {
     background: #1D4ED8;
 }
 
-.add-contact-btn--chat {
+.add-contact-action-btn--chat {
     background: #EFF6FF;
     color: #1D4ED8;
     border: 1px solid #BFDBFE;
 }
 
-.add-contact-btn--chat:hover:not(:disabled) {
+.add-contact-action-btn--chat:hover:not(:disabled) {
     background: #DBEAFE;
 }
 
-.add-contact-btn--ghost {
+.add-contact-action-btn--ghost {
     background: #FFFFFF;
     color: #475569;
     border: 1px solid #CBD5E1;
 }
 
-.add-contact-btn--ghost:hover:not(:disabled) {
+.add-contact-action-btn--ghost:hover:not(:disabled) {
     background: #FEF2F2;
     color: #DC2626;
     border-color: #FECACA;
@@ -546,7 +546,7 @@
 .add-contact-tab:focus-visible,
 .add-contact-input:focus-visible,
 .add-contact-search-submit:focus-visible,
-.add-contact-btn:focus-visible,
+.add-contact-action-btn:focus-visible,
 .add-contact-refresh-btn:focus-visible {
     outline: 2px solid #2563EB;
     outline-offset: 2px;
