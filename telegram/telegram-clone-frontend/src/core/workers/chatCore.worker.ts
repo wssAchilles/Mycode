@@ -134,6 +134,7 @@ let syncAuthError = false;
 let syncAbort: AbortController | null = null;
 let syncTask: Promise<void> | null = null;
 let syncPhase: ChatSyncPhase = 'idle';
+let lastEmittedSocketConnected: boolean | null = null;
 
 // Abort controllers for chat history fetches to avoid wasted work during fast chat switching / paging.
 let chatLatestAbort: AbortController | null = null;
@@ -2106,8 +2107,10 @@ async function flushPendingReadReceipts(): Promise<void> {
 }
 
 function setSyncPhase(next: ChatSyncPhase, reason?: string) {
-  if (syncPhase === next) return;
+  // syncPhase 或 socketConnected 任一变化都必须通知主线程，防止 gap_recovered 先设 live 后吞掉 Socket 连上的状态切换
+  if (syncPhase === next && lastEmittedSocketConnected === socketConnected) return;
   syncPhase = next;
+  lastEmittedSocketConnected = socketConnected;
   emitPatch({
     kind: 'sync',
     phase: syncPhase,
@@ -3566,6 +3569,7 @@ const apiImpl: ChatCoreApi = {
     }
     syncAuthError = false;
     workerSocketAuthBlocked = false;
+    lastEmittedSocketConnected = null;
 
     apiBaseUrl = params.apiBaseUrl.replace(/\/$/, '');
     accessToken = params.accessToken;
@@ -3831,6 +3835,7 @@ const apiImpl: ChatCoreApi = {
     const hadAuthError = syncAuthError || workerSocketAuthBlocked;
     syncAuthError = false;
     workerSocketAuthBlocked = false;
+    lastEmittedSocketConnected = null;
 
     if (workerSocketEnabled) {
       try {
@@ -3905,9 +3910,9 @@ const apiImpl: ChatCoreApi = {
   async connectRealtime() {
     if (!workerSocketEnabled) return;
     await connectWorkerSocketInternal(true);
-    if (workerSocket?.connected && accessToken) {
-      workerSocketAuthenticated = false;
-      workerSocket.emit('authenticate', { token: accessToken });
+    if (workerSocket?.connected && accessToken && !socketBridge.isAuthBlocked()) {
+      await socketBridge.handleTokensUpdated(accessToken);
+      workerSocket = socketBridge.getSocket();
     }
   },
 
