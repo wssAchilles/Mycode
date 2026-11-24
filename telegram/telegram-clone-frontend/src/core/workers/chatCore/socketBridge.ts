@@ -53,10 +53,15 @@ export class SocketBridge {
   private socketLastConnectAttemptAt = 0;
   private workerSocketAuthBlocked = false;
   private workerSocketAuthenticated = false;
+  private lastAuthTokenSent: string | null = null;
+  private previousAuthToken: string | null = null;
+  private lastTokenRotateAt = 0;
+  private pendingAuthTokens: string[] = [];
   private readonly desiredPresenceUserIds = new Set<string>();
 
   private readonly SOCKET_CONNECT_THROTTLE_MS = 1_000;
   private readonly MAX_PRESENCE_SUBSCRIBE_BATCH = 200;
+  private readonly STALE_AUTH_ERROR_GRACE_MS = 5_000;
 
   constructor(private readonly ctx: SocketBridgeContext) {}
 
@@ -94,7 +99,27 @@ export class SocketBridge {
     this.socketHandlersBound = false;
     this.socketConnectRequested = false;
     this.workerSocketAuthenticated = false;
+    this.lastAuthTokenSent = null;
+    this.previousAuthToken = null;
+    this.lastTokenRotateAt = 0;
+    this.pendingAuthTokens = [];
     this.socketLastConnectAttemptAt = 0;
+  }
+
+  private emitAuthenticate(socket: Socket, token: string): void {
+    const cleanToken = token.trim();
+    if (!cleanToken) return;
+    if (this.lastAuthTokenSent && this.lastAuthTokenSent !== cleanToken) {
+      this.previousAuthToken = this.lastAuthTokenSent;
+      this.lastTokenRotateAt = Date.now();
+    }
+    this.lastAuthTokenSent = cleanToken;
+    this.workerSocketAuthenticated = false;
+    this.pendingAuthTokens.push(cleanToken);
+    if (this.pendingAuthTokens.length > 16) {
+      this.pendingAuthTokens.splice(0, this.pendingAuthTokens.length - 16);
+    }
+    socket.emit('authenticate', { token: cleanToken });
   }
 
   requestWorkerSocketConnect(force = false): void {
@@ -118,12 +143,13 @@ export class SocketBridge {
       this.ctx.markTelemetryUpdate();
       this.workerSocketAuthBlocked = false;
       this.workerSocketAuthenticated = false;
+      this.pendingAuthTokens = [];
       this.ctx.setWorkerSocketAuthBlocked(false);
       this.socketConnectRequested = true;
       this.socketLastConnectAttemptAt = Date.now();
       const token = this.ctx.getAccessToken();
       if (token) {
-        socket.emit('authenticate', { token });
+        this.emitAuthenticate(socket, token);
       }
       void this.ctx.setConnectivityFromSocket(true, 'worker_socket_connected');
     });
@@ -142,6 +168,7 @@ export class SocketBridge {
     });
 
     socket.on('authenticated', () => {
+      this.pendingAuthTokens.shift();
       this.ctx.setSyncAuthError(false);
       this.workerSocketAuthBlocked = false;
       this.workerSocketAuthenticated = true;
@@ -158,6 +185,35 @@ export class SocketBridge {
     });
 
     socket.on('authError', () => {
+      const shiftedToken = this.pendingAuthTokens.shift();
+      const failedToken = shiftedToken ?? this.lastAuthTokenSent;
+      const latestToken = this.ctx.getAccessToken()?.trim() || null;
+
+      // 若上下文中已有更新的令牌，说明当前 authError 是旧令牌的迟到响应，直接用新令牌重认证而不阻断会话
+      if (latestToken && failedToken && latestToken !== failedToken) {
+        this.workerSocketAuthBlocked = false;
+        this.ctx.setWorkerSocketAuthBlocked(false);
+        this.emitAuthenticate(socket, latestToken);
+        return;
+      }
+
+      // 若队列中仍有更新一次发出的认证请求尚未返回，保留连接等待最新认证结果
+      if (this.pendingAuthTokens.length > 0) {
+        this.workerSocketAuthBlocked = false;
+        this.ctx.setWorkerSocketAuthBlocked(false);
+        return;
+      }
+
+      // 乱序竞态保护：若刚刚完成了令牌轮换且当前已处于 authenticated 状态，忽略一次旧令牌的迟到失败回报
+      if (
+        this.workerSocketAuthenticated
+        && this.previousAuthToken
+        && Date.now() - this.lastTokenRotateAt < this.STALE_AUTH_ERROR_GRACE_MS
+      ) {
+        this.previousAuthToken = null;
+        return;
+      }
+
       this.ctx.setSyncAuthError(true);
       this.workerSocketAuthBlocked = true;
       this.workerSocketAuthenticated = false;
@@ -291,11 +347,13 @@ export class SocketBridge {
   async handleTokensUpdated(nextAccessToken: string): Promise<void> {
     this.workerSocketAuthBlocked = false;
     this.ctx.setWorkerSocketAuthBlocked(false);
-    if (!this.ctx.getWorkerSocketEnabled() || !nextAccessToken) return;
+    const cleanToken = nextAccessToken.trim();
+    if (!this.ctx.getWorkerSocketEnabled() || !cleanToken) return;
     await this.connectWorkerSocketInternal(true);
     if (this.socket?.connected) {
-      this.workerSocketAuthenticated = false;
-      this.socket.emit('authenticate', { token: nextAccessToken });
+      if (!this.workerSocketAuthenticated || this.lastAuthTokenSent !== cleanToken) {
+        this.emitAuthenticate(this.socket, cleanToken);
+      }
     }
   }
 

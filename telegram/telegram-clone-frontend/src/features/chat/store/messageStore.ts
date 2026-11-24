@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Message } from '../../../types/chat';
-import { authUtils } from '../../../services/apiClient';
+import { authAPI, authUtils } from '../../../services/apiClient';
 import {
   AUTH_TOKENS_UPDATED_EVENT,
   authStorage,
@@ -537,6 +537,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
         syncPts: latestSync.pts,
         syncUpdatedAt: latestSync.updatedAt,
       });
+      if (latestSync.phase === 'auth_error') {
+        triggerSocketAuthRecovery();
+      }
     }
 
     if (metaAiMessages.size) {
@@ -975,6 +978,41 @@ export const useMessageStore = create<MessageState>((set, get) => {
     window.addEventListener(AUTH_TOKENS_UPDATED_EVENT, syncWorkerTokensAfterAuthRefresh);
   }
 
+  const AUTH_RECOVERY_COOLDOWN_MS = 5_000;
+  let authRecoveryInFlight = false;
+  let lastAuthRecoveryAttemptAt = 0;
+
+  // 当 Worker Socket 进入 auth_error 阻断态时，由主线程执行单飞令牌刷新并触发重连自愈
+  const triggerSocketAuthRecovery = () => {
+    if (authRecoveryInFlight) return;
+    if (!authUtils.getCurrentUser()?.id) return;
+    const refreshToken = authStorage.getRefreshToken?.();
+    if (!refreshToken) return;
+    const now = Date.now();
+    if (now - lastAuthRecoveryAttemptAt < AUTH_RECOVERY_COOLDOWN_MS) return;
+
+    authRecoveryInFlight = true;
+    lastAuthRecoveryAttemptAt = now;
+
+    void Promise.resolve()
+      .then(() => authAPI?.refreshToken?.())
+      .then((tokens) => {
+        if (tokens?.accessToken && coreReadyPromise) {
+          return coreReadyPromise
+            .catch(() => undefined)
+            .then(() => chatCoreClient.updateTokens(tokens.accessToken, tokens.refreshToken));
+        }
+        return undefined;
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[message-store] socket auth recovery refresh failed:', err);
+      })
+      .finally(() => {
+        authRecoveryInFlight = false;
+      });
+  };
+
   // Reduce Comlink overhead by batching high-frequency ingests on tick-end.
   const ingestQueue: Message[] = [];
   let ingestQueueDropWarned = false;
@@ -1101,6 +1139,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     setWorkerRealtimeMode: (active: boolean) => { workerRealtimeModeActive = active; },
     clearRealtimeQueue: () => { realtimeQueue.length = 0; realtimeInFlight = false; },
     shouldBridgeLegacyRealtime,
+    onSocketAuthError: triggerSocketAuthRecovery,
     prefetchInFlight,
     prefetchLastAt,
   };

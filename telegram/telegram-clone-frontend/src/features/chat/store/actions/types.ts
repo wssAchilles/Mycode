@@ -35,6 +35,7 @@ export interface MessageStoreDeps {
   setWorkerRealtimeMode: (active: boolean) => void;
   clearRealtimeQueue: () => void;
   shouldBridgeLegacyRealtime: () => boolean;
+  onSocketAuthError?: () => void;
 
   // Prefetch
   prefetchInFlight: Set<string>;

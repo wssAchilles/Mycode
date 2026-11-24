@@ -46,6 +46,9 @@ export function createRealtimeActions(
                 syncUpdatedAt: runtime.connection?.updatedAt || state.syncUpdatedAt,
                 error: connected ? null : state.error,
               }));
+              if (phase === 'auth_error') {
+                deps.onSocketAuthError?.();
+              }
             }
           } catch {
             // ignore runtime snapshot failures
@@ -62,6 +65,9 @@ export function createRealtimeActions(
             syncPhase: reason === 'AUTH_ERROR' ? 'auth_error' : 'disconnected',
             error: `实时连接失败: ${reason}`,
           });
+          if (reason === 'AUTH_ERROR') {
+            deps.onSocketAuthError?.();
+          }
           // eslint-disable-next-line no-console
           console.error('[message-store] connectRealtime failed:', reason);
         }

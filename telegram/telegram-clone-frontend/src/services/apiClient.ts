@@ -99,6 +99,13 @@ function requestTokensSingleFlight(): Promise<{ accessToken: string; refreshToke
   return refreshTokenResultPromise;
 }
 
+/**
+ * 全局单飞刷新访问令牌，供 Socket 鉴权失效恢复与请求拦截器复用
+ */
+export function refreshAccessTokenSingleFlight(): Promise<{ accessToken: string; refreshToken: string }> {
+  return requestTokensSingleFlight();
+}
+
 // 请求拦截器 - 自动添加认证头
 apiClient.interceptors.request.use(
   (config) => {
