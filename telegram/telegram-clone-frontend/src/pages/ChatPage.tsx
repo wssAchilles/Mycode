@@ -183,6 +183,79 @@ const ChatPage: React.FC = () => {
     setDetailLightboxMedia(null);
   }, [selectedChatId, isAiChatMode, selectedGroup, selectedContact, sendTypingIndicator]);
 
+  // 全局 Escape 分级关闭快捷键（不干扰已被灯箱捕获的事件）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+
+      if (detailLightboxMedia) {
+        setDetailLightboxMedia(null);
+        return;
+      }
+      if (pendingDeleteMessage) {
+        if (!isDeletingMessage) setPendingDeleteMessage(null);
+        return;
+      }
+      if (showAddContactModal) {
+        setShowAddContactModal(false);
+        return;
+      }
+      if (isGroupModalOpen) {
+        setIsGroupModalOpen(false);
+        return;
+      }
+      if (showDetailPanel || showGroupDetailPanel) {
+        setShowDetailPanel(false);
+        setShowGroupDetailPanel(false);
+        return;
+      }
+      if (isSearchMode || isContextMode) {
+        void clearSearch();
+        return;
+      }
+      if (editingMessage || replyingMessage) {
+        setEditingMessage(null);
+        setReplyingMessage(null);
+        return;
+      }
+
+      const activeEl = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+      const isNonEmptyInput =
+        activeEl
+        && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')
+        && activeEl.value.trim().length > 0;
+      if (isNonEmptyInput) return;
+
+      if (isAiChatMode) {
+        setIsAiChatMode(false);
+      } else if (selectedContact || selectedGroup) {
+        selectContact(null);
+        selectGroup(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    detailLightboxMedia,
+    pendingDeleteMessage,
+    isDeletingMessage,
+    showAddContactModal,
+    isGroupModalOpen,
+    showDetailPanel,
+    showGroupDetailPanel,
+    isSearchMode,
+    isContextMode,
+    editingMessage,
+    replyingMessage,
+    isAiChatMode,
+    selectedContact,
+    selectedGroup,
+    selectContact,
+    selectGroup,
+  ]);
+
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dmHandledRef = useRef<string | null>(null);

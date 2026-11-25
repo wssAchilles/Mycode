@@ -5,10 +5,13 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, UserPlus, Users, X } from 'lucide-react';
+import { Bell, BellOff, Check, UserPlus, Users, X } from 'lucide-react';
 import { authAPI } from '../../services/apiClient';
 import { formatChatListTimestamp, useChatStore } from '../../features/chat/store/chatStore';
 import { useMessageStore } from '../../features/chat/store/messageStore';
+import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
+import { requestDesktopNotificationPermission } from '../../features/realtime/browserNotifier';
+import { useSpaceStore } from '../../stores';
 import { Sidebar } from '../../components/layout';
 import { Avatar } from '../../components/common';
 import { showToast } from '../../components/ui/Toast';
@@ -59,7 +62,14 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const selectContact = useChatStore((state) => state.selectContact);
     const handleContactRequest = useChatStore((state) => state.handleContactRequest);
     const resetUnread = useChatStore((state) => state.resetUnread);
+    const spaceUnreadCount = useSpaceStore((state) => state.unreadNotificationsCount);
+    const desktopNotifyEnabled = useChatUiPrefsStore((state) => state.desktopNotifyEnabled);
+    const soundNotifyEnabled = useChatUiPrefsStore((state) => state.soundNotifyEnabled);
+    const setDesktopNotifyEnabled = useChatUiPrefsStore((state) => state.setDesktopNotifyEnabled);
+    const setSoundNotifyEnabled = useChatUiPrefsStore((state) => state.setSoundNotifyEnabled);
     const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
 
     const processPendingRequest = async (req: PendingRequest, action: 'accept' | 'reject') => {
         if (busyRequestId) return;
@@ -78,9 +88,35 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         }
     };
 
-    const handleLogout = async () => {
-        await authAPI.logout();
-        navigate('/login');
+    const handleConfirmLogout = async () => {
+        if (isLoggingOut) return;
+        setIsLoggingOut(true);
+        try {
+            await authAPI.logout();
+            setShowLogoutConfirm(false);
+            navigate('/login');
+        } catch {
+            showToast('退出登录失败，请稍后重试', 'error');
+        } finally {
+            setIsLoggingOut(false);
+        }
+    };
+
+    const isNotificationsOn = desktopNotifyEnabled || soundNotifyEnabled;
+    const handleToggleNotifications = async () => {
+        const next = !isNotificationsOn;
+        setSoundNotifyEnabled(next);
+        setDesktopNotifyEnabled(next);
+        if (next) {
+            const permission = await requestDesktopNotificationPermission();
+            if (permission === 'denied') {
+                showToast('已开启提示音；浏览器桌面通知已被禁用，请在地址栏权限设置中允许', 'info');
+            } else {
+                showToast('已开启新消息桌面通知与提示音', 'success');
+            }
+        } else {
+            showToast('已关闭新消息弹窗与提示音', 'info');
+        }
     };
 
     const effectiveStatus: SelfPresenceStatus = connectionStatus ?? (isConnected ? 'online' : 'offline');
@@ -122,9 +158,14 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     className="back-to-space-btn"
                     onClick={() => navigate('/space')}
                     title="返回 Space"
-                    aria-label="返回 Space 首页"
+                    aria-label={spaceUnreadCount > 0 ? `返回 Space 首页（${spaceUnreadCount} 条未读动态通知）` : '返回 Space 首页'}
                 >
                     <ArrowLeftIcon />
+                    {spaceUnreadCount > 0 && (
+                        <span className="back-to-space-badge" aria-hidden="true">
+                            {spaceUnreadCount > 99 ? '99+' : spaceUnreadCount}
+                        </span>
+                    )}
                 </button>
 
                 <div className="user-info">
@@ -145,8 +186,18 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
                 <button
                     type="button"
+                    className={`sidebar-notify-button ${isNotificationsOn ? '' : 'is-muted'}`}
+                    onClick={() => void handleToggleNotifications()}
+                    title={isNotificationsOn ? '点击关闭消息提示音与桌面通知' : '点击开启消息提示音与桌面通知'}
+                    aria-label={isNotificationsOn ? '关闭消息通知' : '开启消息通知'}
+                >
+                    {isNotificationsOn ? <Bell size={16} /> : <BellOff size={16} />}
+                </button>
+
+                <button
+                    type="button"
                     className="logout-button"
-                    onClick={handleLogout}
+                    onClick={() => setShowLogoutConfirm(true)}
                     title="退出登录"
                     aria-label="退出登录"
                 >
@@ -282,6 +333,43 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <div className="contact-list-container">
                 <ChatListContainer onChatSelected={handleChatSelected} />
             </div>
+
+            {showLogoutConfirm && (
+                <div
+                    className="chat-confirm-backdrop"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="chat-logout-confirm-title"
+                    onClick={() => !isLoggingOut && setShowLogoutConfirm(false)}
+                >
+                    <div className="chat-confirm-dialog" onClick={(event) => event.stopPropagation()}>
+                        <h3 id="chat-logout-confirm-title" className="chat-confirm-dialog__title">
+                            确认退出当前账号？
+                        </h3>
+                        <p className="chat-confirm-dialog__desc">
+                            退出后将断开当前实时会话连接，并清除本机的临时登录令牌。
+                        </p>
+                        <div className="chat-confirm-dialog__actions">
+                            <button
+                                type="button"
+                                className="chat-confirm-dialog__btn"
+                                disabled={isLoggingOut}
+                                onClick={() => setShowLogoutConfirm(false)}
+                            >
+                                取消
+                            </button>
+                            <button
+                                type="button"
+                                className="chat-confirm-dialog__btn is-danger"
+                                disabled={isLoggingOut}
+                                onClick={() => void handleConfirmLogout()}
+                            >
+                                {isLoggingOut ? '正在退出...' : '确认退出'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Sidebar>
     );
 };

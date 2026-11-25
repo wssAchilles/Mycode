@@ -127,6 +127,12 @@ export const SpacePage: React.FC = () => {
     const clearUnreadNotifications = useSpaceStore((state) => state.clearUnreadNotifications);
     const loadContacts = useChatStore((state) => state.loadContacts);
     const contacts = useChatStore((state) => state.contacts);
+    const chats = useChatStore((state) => state.chats);
+    const pendingRequestsCount = useChatStore((state) => state.pendingRequests.length);
+    const chatUnreadBadgeCount = useMemo(
+        () => chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0) + pendingRequestsCount,
+        [chats, pendingRequestsCount],
+    );
 
     // 获取当前用户
     const currentUser = authUtils.getCurrentUser();
@@ -450,6 +456,11 @@ export const SpacePage: React.FC = () => {
                     >
                         <MessageIcon active={location.pathname === '/chat'} />
                         <span>消息</span>
+                        {chatUnreadBadgeCount > 0 && (
+                            <span className="space-page__nav-badge" aria-label={`未读消息 ${chatUnreadBadgeCount}`}>
+                                {chatUnreadBadgeCount > 99 ? '99+' : chatUnreadBadgeCount}
+                            </span>
+                        )}
                     </button>
                 </nav>
 
@@ -619,6 +630,11 @@ export const SpacePage: React.FC = () => {
                 >
                     <MessageIcon />
                     <span>消息</span>
+                    {chatUnreadBadgeCount > 0 && (
+                        <span className="space-page__bottom-badge" aria-label={`未读消息 ${chatUnreadBadgeCount}`}>
+                            {chatUnreadBadgeCount > 99 ? '99+' : chatUnreadBadgeCount}
+                        </span>
+                    )}
                 </button>
             </nav>
 

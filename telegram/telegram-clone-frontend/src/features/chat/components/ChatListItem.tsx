@@ -72,6 +72,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
                     name={chat.title}
                     src={chat.avatarUrl}
                     size={54}
+                    priority="low"
                     online={!chat.isGroup && chat.online}
                 />
             </div>
