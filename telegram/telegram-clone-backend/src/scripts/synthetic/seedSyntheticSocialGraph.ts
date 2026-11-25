@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 
 import {
   cleanupDemoCohort,
@@ -268,14 +269,22 @@ async function main(): Promise<void> {
       throw new Error(`post stats integrity verification failed: mismatchedCount=${mismatchedPostCount}`);
     }
   } finally {
+    mongoose.connection.removeAllListeners('disconnected');
+    mongoose.connection.removeAllListeners('error');
     await disconnectDemoStores();
   }
 }
 
 if (require.main === module) {
-  main().catch(async (error) => {
-    console.error('[synthetic:seed] failed:', error);
-    await disconnectDemoStores();
-    process.exit(1);
-  });
+  main()
+    .then(() => {
+      process.exit(0);
+    })
+    .catch(async (error) => {
+      console.error('[synthetic:seed] failed:', error);
+      mongoose.connection.removeAllListeners('disconnected');
+      mongoose.connection.removeAllListeners('error');
+      await disconnectDemoStores();
+      process.exit(1);
+    });
 }
