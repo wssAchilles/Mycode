@@ -33,6 +33,12 @@ export interface SocketBridgeContext {
 
   // Realtime callback
   enqueueRealtimeEventsForIngest: (events: SocketRealtimeEvent[], source: 'socket' | 'api') => void;
+  enqueueTypingUpdate?: (update: {
+    chatId: string;
+    userId: string;
+    username: string;
+    isTyping: boolean;
+  }) => void;
 
   // Shared mutable state (owned by worker, referenced by bridge)
   desiredJoinedRooms: Set<string>;
@@ -227,6 +233,20 @@ export class SocketBridge {
     socket.on('realtimeBatch', (events: SocketRealtimeEvent[]) => {
       this.ctx.enqueueRealtimeEventsForIngest(events, 'socket');
     });
+
+    const handleTypingEvent = (isTyping: boolean) => (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return;
+      const data = raw as { userId?: unknown; username?: unknown; groupId?: unknown };
+      const userId = typeof data.userId === 'string' ? data.userId.trim() : '';
+      if (!userId || userId === this.ctx.getCurrentUserId()) return;
+      const rawGroupId = typeof data.groupId === 'string' ? data.groupId.trim().replace(/^g:/, '') : '';
+      const chatId = rawGroupId || userId;
+      const username = typeof data.username === 'string' && data.username.trim() ? data.username.trim() : '对方';
+      this.ctx.enqueueTypingUpdate?.({ chatId, userId, username, isTyping });
+    };
+
+    socket.on('typingStart', handleTypingEvent(true));
+    socket.on('typingStop', handleTypingEvent(false));
   }
 
   async connectWorkerSocketInternal(force = false): Promise<void> {

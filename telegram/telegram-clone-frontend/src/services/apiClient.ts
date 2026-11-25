@@ -533,7 +533,34 @@ export const contactAPI = {
       const errorMessage = getErrorMessage(error, '搜索用户失败');
       throw new Error(errorMessage);
     }
-  }
+  },
+
+  // 更新联系人备注名
+  updateAlias: async (contactId: string, alias: string): Promise<void> => {
+    try {
+      await apiClient.put(`/api/contacts/${contactId}/alias`, { alias });
+    } catch (error: unknown) {
+      throw new Error(getErrorMessage(error, '修改备注失败'));
+    }
+  },
+
+  // 删除联系人
+  removeContact: async (contactId: string): Promise<void> => {
+    try {
+      await apiClient.delete(`/api/contacts/${contactId}`);
+    } catch (error: unknown) {
+      throw new Error(getErrorMessage(error, '删除联系人失败'));
+    }
+  },
+
+  // 屏蔽联系人
+  blockContact: async (contactId: string): Promise<void> => {
+    try {
+      await apiClient.post(`/api/contacts/${contactId}/block`);
+    } catch (error: unknown) {
+      throw new Error(getErrorMessage(error, '屏蔽联系人失败'));
+    }
+  },
 };
 
 // 群组 API

@@ -29,6 +29,7 @@ import { ChatArea } from '../components/layout';
 import ChatHeader from '../features/chat/components/ChatHeader';
 import MessageInput from '../features/chat/components/MessageInput';
 import ChatHistory from '../features/chat/components/ChatHistory';
+import { ChatImageLightbox } from '../features/chat/components/media/ChatImageLightbox';
 import AiChatComponent from '../components/AiChatComponent';
 
 // 拆分的子组件
@@ -105,6 +106,7 @@ const ChatPage: React.FC = () => {
   const socketConnected = useMessageStore((state) => state.socketConnected);
   const syncPhase = useMessageStore((state) => state.syncPhase);
   const sendRealtimeMessage = useMessageStore((state) => state.sendRealtimeMessage);
+  const sendTypingIndicator = useMessageStore((state) => state.sendTypingIndicator);
   const joinRealtimeRoom = useMessageStore((state) => state.joinRealtimeRoom);
   const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
   const markRealtimeRead = useMessageStore((state) => state.markChatRead);
@@ -153,17 +155,33 @@ const ChatPage: React.FC = () => {
   const [contextMessages, setContextMessages] = useState<Message[]>([]);
   const [contextHighlightSeq, setContextHighlightSeq] = useState<number | undefined>(undefined);
 
-  // 消息上下文状态（引用回复 / 编辑 / 撤回确认）
+  // 消息上下文状态（引用回复 / 编辑 / 撤回确认 / 详情大图灯箱）
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [replyingMessage, setReplyingMessage] = useState<Message | null>(null);
   const [pendingDeleteMessage, setPendingDeleteMessage] = useState<Message | null>(null);
   const [isDeletingMessage, setIsDeletingMessage] = useState(false);
+  const [detailLightboxMedia, setDetailLightboxMedia] = useState<{ src: string; fileName?: string } | null>(null);
+
+  const lastTypingEmitAtRef = useRef(0);
+  const typingActiveRef = useRef(false);
+  const typingTargetRef = useRef<{ receiverId?: string; groupId?: string } | null>(null);
 
   useEffect(() => {
+    // 切换会话前如仍处于正在输入状态，先向旧目标补发停止输入
+    if (typingActiveRef.current && typingTargetRef.current) {
+      sendTypingIndicator({ ...typingTargetRef.current, isTyping: false });
+      typingActiveRef.current = false;
+    }
+    typingTargetRef.current = selectedGroup
+      ? { groupId: selectedGroup.id }
+      : selectedContact && !isAiChatMode
+        ? { receiverId: selectedContact.userId }
+        : null;
     setEditingMessage(null);
     setReplyingMessage(null);
     setPendingDeleteMessage(null);
-  }, [selectedChatId, isAiChatMode]);
+    setDetailLightboxMedia(null);
+  }, [selectedChatId, isAiChatMode, selectedGroup, selectedContact, sendTypingIndicator]);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -839,6 +857,32 @@ const ChatPage: React.FC = () => {
     })();
   };
 
+  const handleTypingChange = (isTyping: boolean) => {
+    if (isAiChatMode || !canSendMessages) return;
+    const target = selectedGroup
+      ? { groupId: selectedGroup.id }
+      : selectedContact
+        ? { receiverId: selectedContact.userId }
+        : null;
+    if (!target) return;
+
+    if (!isTyping) {
+      if (typingActiveRef.current) {
+        typingActiveRef.current = false;
+        lastTypingEmitAtRef.current = 0;
+        sendTypingIndicator({ ...target, isTyping: false });
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (!typingActiveRef.current || now - lastTypingEmitAtRef.current >= 2200) {
+      typingActiveRef.current = true;
+      lastTypingEmitAtRef.current = now;
+      sendTypingIndicator({ ...target, isTyping: true });
+    }
+  };
+
   const handleSelectAiChat = () => {
     setIsAiChatMode(true);
     selectContact(null);
@@ -853,6 +897,16 @@ const ChatPage: React.FC = () => {
 
   // Derived Data
   const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : null;
+  const sharedMediaMessages = useMemo(() => {
+    if (isGroupChatMode || !showDetailPanel || !selectedContact) return [];
+    const { messageIds, entities } = useMessageStore.getState();
+    const list: Message[] = [];
+    for (const id of messageIds) {
+      const msg = entities.get(id);
+      if (msg) list.push(msg);
+    }
+    return list;
+  }, [isGroupChatMode, showDetailPanel, selectedContact, messageIdsVersion]);
   const selectedChatSummary = selectedChatId ? chats.find((chat) => chat.id === selectedChatId) : undefined;
   const selectedHistoryChatId = currentUser
     ? selectedGroup
@@ -971,6 +1025,7 @@ const ChatPage: React.FC = () => {
               }}
               onSaveEdit={handleSaveEdit}
               onEditLastOwnMessage={handleEditLastOwnMessage}
+              onTypingChange={isAiChatMode ? undefined : handleTypingChange}
             />
           }
           showEmptyState={!selectedContact && !selectedGroup}
@@ -1039,6 +1094,17 @@ const ChatPage: React.FC = () => {
           isOpen
           onClose={() => setShowDetailPanel(false)}
           selectedContact={selectedContact}
+          sharedMediaMessages={sharedMediaMessages}
+          onPreviewImage={setDetailLightboxMedia}
+          onContactUpdated={() => {
+            void loadContacts();
+            void loadChats();
+          }}
+          onContactRemoved={(removedUserId) => {
+            if (selectedContact?.userId === removedUserId) {
+              selectContact(null);
+            }
+          }}
         />
       )}
 
@@ -1137,6 +1203,12 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ChatImageLightbox
+        src={detailLightboxMedia?.src ?? null}
+        fileName={detailLightboxMedia?.fileName}
+        onClose={() => setDetailLightboxMedia(null)}
+      />
     </motion.div>
   );
 };

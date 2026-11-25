@@ -44,6 +44,7 @@ export interface MessageState {
   subscribePresence: (userIds: string[]) => void;
   setSocketConnected: (connected: boolean) => void;
   sendRealtimeMessage: (payload: SocketMessageSendPayload) => Promise<{ success: boolean; messageId?: string; seq?: number; error?: string }>;
+  sendTypingIndicator: (payload: { receiverId?: string; groupId?: string; isTyping: boolean }) => void;
   joinRealtimeRoom: (roomId: string) => void;
   leaveRealtimeRoom: (roomId: string) => void;
   markChatRead: (chatId: string, seq: number) => void;

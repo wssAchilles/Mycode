@@ -391,6 +391,11 @@ class ChatCoreClient {
     return this.executeWithRecovery('sendSocketMessage', (api) => api.sendSocketMessage(payload));
   }
 
+  async sendTyping(payload: { receiverId?: string; groupId?: string; isTyping: boolean }): Promise<void> {
+    if (!this.api) return;
+    await this.api.sendTyping(payload).catch(() => undefined);
+  }
+
   async joinRoom(roomId: string): Promise<void> {
     await this.executeWithRecovery('joinRoom', (api) => api.joinRoom(roomId));
   }

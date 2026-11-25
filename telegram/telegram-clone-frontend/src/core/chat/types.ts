@@ -273,6 +273,12 @@ export type ChatPatch =
       selfReadSyncs?: SyncStateRealtimePayload[];
       socialNotifications?: SocialNotificationRealtimePayload[];
       groupRefreshIds?: string[];
+      typingUpdates?: Array<{
+        chatId: string;
+        userId: string;
+        username: string;
+        isTyping: boolean;
+      }>;
     }
   | {
       kind: 'sync';
@@ -371,6 +377,7 @@ export interface ChatCoreApi {
     currentUserId: string,
   ): Promise<void>;
   sendSocketMessage(payload: SocketMessageSendPayload): Promise<SocketMessageSendAck>;
+  sendTyping(payload: { receiverId?: string; groupId?: string; isTyping: boolean }): Promise<void>;
   joinRoom(roomId: string): Promise<void>;
   leaveRoom(roomId: string): Promise<void>;
   markChatRead(chatId: ChatId, seq: number): Promise<void>;

@@ -104,6 +104,22 @@
     text-shadow: none;
 }
 
+.chat-header__typing-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: #00BA7C;
+    vertical-align: middle;
+    animation: chatHeaderTypingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chatHeaderTypingPulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
 .chat-header__actions {
     display: flex;
     align-items: center;

@@ -4,6 +4,7 @@ import { Avatar } from '../../../components/common';
 import type { ChatSummary } from '../types';
 import { useMessageStore } from '../store/messageStore';
 import { useChatUiPrefsStore } from '../state/chatUiPrefsStore';
+import { formatTypingSummary, useTypingStore } from '../state/typingStore';
 import { motionDurations, useAnimeScope, waapi } from '../../../core/animation';
 import './ChatListItem.css';
 
@@ -20,6 +21,8 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
     const draftText = useChatUiPrefsStore((state) => state.draftByChatId[chat.id] || '');
     const isPinned = useChatUiPrefsStore((state) => state.pinnedChatIds.includes(chat.id));
     const isMuted = useChatUiPrefsStore((state) => state.mutedChatIds.includes(chat.id));
+    const typingEntries = useTypingStore((state) => state.byChatId[chat.id]);
+    const typingSummary = formatTypingSummary(typingEntries, !!chat.isGroup);
     const hasDraft = draftText.trim().length > 0 && !isSelected;
     const prevUnreadPulseSeqRef = useRef(chat.unreadPulseSeq || 0);
     const itemMotion = useAnimeScope<HTMLButtonElement, {
@@ -91,7 +94,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
 
                 <div className="tg-chat-item-bottom">
                     <p className="tg-chat-item-message">
-                        {hasDraft ? (
+                        {typingSummary ? (
+                            <span className="tg-chat-item-typing">{typingSummary}</span>
+                        ) : hasDraft ? (
                             <>
                                 <span className="tg-chat-item-draft">[草稿] </span>
                                 <span>{draftText}</span>

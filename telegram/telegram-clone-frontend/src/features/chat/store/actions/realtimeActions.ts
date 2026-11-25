@@ -23,6 +23,7 @@ export function createRealtimeActions(
   | 'subscribePresence'
   | 'setSocketConnected'
   | 'sendRealtimeMessage'
+  | 'sendTypingIndicator'
   | 'joinRealtimeRoom'
   | 'leaveRealtimeRoom'
   | 'markChatRead'
@@ -274,6 +275,11 @@ export function createRealtimeActions(
           void messageAPI.markChatRead(chatId, seq).catch(() => undefined);
         }
       })();
+    },
+
+    sendTypingIndicator: (payload: { receiverId?: string; groupId?: string; isTyping: boolean }) => {
+      if (!payload || (!payload.receiverId && !payload.groupId)) return;
+      void chatCoreClient.sendTyping(payload).catch(() => undefined);
     },
   };
 }

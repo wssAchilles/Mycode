@@ -13,6 +13,7 @@ import { runtimeFlags } from '../../../core/chat/runtimeFlags';
 import { throttleWithTickEnd } from '../../../core/workers/schedulers';
 import { markChatSwitchEnd, markSyncPhaseTransition } from '../../../perf/marks';
 import { useChatStore } from './chatStore';
+import { useTypingStore } from '../state/typingStore';
 import { compactMessagePatches, type MessagePatch } from './patchCompactor';
 import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
 import {
@@ -472,6 +473,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const metaSelfReadSyncs = new Map<string, SyncStateRealtimePayload>();
     const metaSocialNotifications = new Map<string, SocialNotificationRealtimePayload>();
     const metaGroupRefreshIds = new Set<string>();
+    const metaTypingUpdates = new Map<string, { chatId: string; userId: string; username: string; isTyping: boolean }>();
     let latestSync: Extract<ChatPatch, { kind: 'sync' }> | null = null;
 
     for (const p of patches) {
@@ -548,6 +550,12 @@ export const useMessageStore = create<MessageState>((set, get) => {
           if (groupId) metaGroupRefreshIds.add(groupId);
         }
       }
+      if (Array.isArray(p.typingUpdates)) {
+        for (const item of p.typingUpdates) {
+          if (!item?.chatId || !item?.userId) continue;
+          metaTypingUpdates.set(`${item.chatId}:${item.userId}`, item);
+        }
+      }
     }
 
     if (metaLast.size || metaUnread.size || metaOnline.size || metaChatUpserts.size || metaChatRemovals.size) {
@@ -582,6 +590,15 @@ export const useMessageStore = create<MessageState>((set, get) => {
         socialNotifications: metaSocialNotifications.size ? Array.from(metaSocialNotifications.values()) : undefined,
         groupRefreshIds: metaGroupRefreshIds.size ? Array.from(metaGroupRefreshIds.values()) : undefined,
       });
+    }
+
+    if (metaTypingUpdates.size) {
+      const myUserId = authUtils.getCurrentUser()?.id;
+      const typingStore = useTypingStore.getState();
+      for (const item of metaTypingUpdates.values()) {
+        if (myUserId && item.userId === myUserId) continue;
+        typingStore.setTyping(item.chatId, item.userId, item.username, item.isTyping);
+      }
     }
 
     if (latestSync) {
@@ -810,6 +827,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const metaSelfReadSyncs = new Map<string, SyncStateRealtimePayload>();
     const metaSocialNotifications = new Map<string, SocialNotificationRealtimePayload>();
     const metaGroupRefreshIds = new Set<string>();
+    const metaTypingUpdates = new Map<string, { chatId: string; userId: string; username: string; isTyping: boolean }>();
 
     const byProjection = new Map<string, MessagePatch[]>();
     const projectionOrder: string[] = [];
@@ -886,6 +904,12 @@ export const useMessageStore = create<MessageState>((set, get) => {
             if (groupId) metaGroupRefreshIds.add(groupId);
           }
         }
+        if (Array.isArray(patch.typingUpdates)) {
+          for (const item of patch.typingUpdates) {
+            if (!item?.chatId || !item?.userId) continue;
+            metaTypingUpdates.set(`${item.chatId}:${item.userId}`, item);
+          }
+        }
         continue;
       }
 
@@ -911,7 +935,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
       metaContactEvents.size ||
       metaSelfReadSyncs.size ||
       metaSocialNotifications.size ||
-      metaGroupRefreshIds.size
+      metaGroupRefreshIds.size ||
+      metaTypingUpdates.size
     ) {
       compacted.push({
         kind: 'meta',
@@ -939,6 +964,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
           ? Array.from(metaSocialNotifications.values())
           : undefined,
         groupRefreshIds: metaGroupRefreshIds.size ? Array.from(metaGroupRefreshIds.values()) : undefined,
+        typingUpdates: metaTypingUpdates.size ? Array.from(metaTypingUpdates.values()) : undefined,
       });
     }
 

@@ -363,6 +363,7 @@ const pendingMeta = {
   selfReadSyncs: new Map<string, SyncStateRealtimePayload>(),
   socialNotifications: new Map<string, SocialNotificationRealtimePayload>(),
   groupRefreshIds: new Set<string>(),
+  typingUpdates: new Map<string, { chatId: string; userId: string; username: string; isTyping: boolean }>(),
 };
 
 const remoteSearchAbortByChat = new Map<string, { key: string; controller: AbortController }>();
@@ -394,6 +395,10 @@ const socketBridgeCtx: SocketBridgeContext = {
   requestReadSyncFlush: (delayMs: number) => requestReadSyncFlush(delayMs),
   setConnectivityFromSocket: (connected: boolean, reason: string) => void setConnectivityFromSocket(connected, reason),
   enqueueRealtimeEventsForIngest: (events: SocketRealtimeEvent[], source: 'socket' | 'api') => enqueueRealtimeEventsForIngest(events, source),
+  enqueueTypingUpdate: (update) => {
+    pendingMeta.typingUpdates.set(`${update.chatId}:${update.userId}`, update);
+    flushPatches();
+  },
   desiredJoinedRooms,
   setSyncAuthError: (error: boolean) => { syncAuthError = error; },
   setSocketConnected: (connected: boolean) => { socketConnected = connected; },
@@ -544,7 +549,8 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.contactEvents.size > 0 ||
     pendingMeta.selfReadSyncs.size > 0 ||
     pendingMeta.socialNotifications.size > 0 ||
-    pendingMeta.groupRefreshIds.size > 0;
+    pendingMeta.groupRefreshIds.size > 0 ||
+    pendingMeta.typingUpdates.size > 0;
   if (hasMeta) {
     const lastMessages =
       pendingMeta.lastMessages.size > 0
@@ -586,6 +592,10 @@ const flushPatches = throttleWithTickEnd(() => {
       pendingMeta.groupRefreshIds.size > 0
         ? Array.from(pendingMeta.groupRefreshIds.values())
         : undefined;
+    const typingUpdates =
+      pendingMeta.typingUpdates.size > 0
+        ? Array.from(pendingMeta.typingUpdates.values())
+        : undefined;
 
     pendingMeta.lastMessages.clear();
     pendingMeta.unreadDelta.clear();
@@ -597,6 +607,7 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.selfReadSyncs.clear();
     pendingMeta.socialNotifications.clear();
     pendingMeta.groupRefreshIds.clear();
+    pendingMeta.typingUpdates.clear();
 
     enqueuePatch({
       kind: 'meta',
@@ -610,6 +621,7 @@ const flushPatches = throttleWithTickEnd(() => {
       selfReadSyncs,
       socialNotifications,
       groupRefreshIds,
+      typingUpdates,
     });
   }
 
@@ -4809,6 +4821,16 @@ const apiImpl: ChatCoreApi = {
       ...payload,
       chatType,
     });
+  },
+
+  async sendTyping(payload: { receiverId?: string; groupId?: string; isTyping: boolean }) {
+    if (!workerSocketEnabled || !workerSocket?.connected || !workerSocketAuthenticated) return;
+    const eventName = payload.isTyping ? 'typingStart' : 'typingStop';
+    const body = payload.groupId
+      ? { groupId: payload.groupId }
+      : { receiverId: payload.receiverId };
+    if (!body.groupId && !body.receiverId) return;
+    await emitWorkerSocket(eventName, body).catch(() => undefined);
   },
 
   async joinRoom(roomId: string) {

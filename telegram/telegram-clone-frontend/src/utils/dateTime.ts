@@ -149,3 +149,41 @@ export function formatChatDateDivider(
   }
   return `${date.getFullYear()}年${month}月${day}日`;
 }
+
+/**
+ * 人性化格式化联系人最后上线时间
+ * - 1 分钟内 -> 刚刚在线
+ * - 60 分钟内 -> N 分钟前在线
+ * - 本日更早 -> 今天 HH:mm 在线
+ * - 昨天 -> 昨天 HH:mm 在线
+ * - 更早 -> M月D日 在线（跨年带年份）
+ */
+export function formatLastSeen(
+  lastSeen: string | number | Date | null | undefined,
+  now = new Date(),
+): string {
+  if (!lastSeen) return '离线';
+  const date = toValidDate(lastSeen);
+  if (!date) return '离线';
+
+  const diffMs = Math.max(0, now.getTime() - date.getTime());
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return '刚刚在线';
+  if (diffMin < 60) return `${diffMin} 分钟前在线`;
+
+  if (isSameCalendarDay(date, now)) {
+    return `今天 ${formatHourMinute(date)} 在线`;
+  }
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameCalendarDay(date, yesterday)) {
+    return `昨天 ${formatHourMinute(date)} 在线`;
+  }
+
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${month}月${day}日 在线`;
+  }
+  return `${date.getFullYear()}年${month}月${day}日 在线`;
+}

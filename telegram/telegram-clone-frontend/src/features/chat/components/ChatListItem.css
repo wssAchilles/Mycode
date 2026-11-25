@@ -112,6 +112,11 @@
     font-weight: 600;
 }
 
+.tg-chat-item-typing {
+    color: #00BA7C;
+    font-weight: 600;
+}
+
 .tg-chat-item-badge.is-muted {
     background: #94A3B8;
     box-shadow: none;

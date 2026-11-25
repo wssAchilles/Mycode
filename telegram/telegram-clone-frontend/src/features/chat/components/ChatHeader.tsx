@@ -1,5 +1,7 @@
 import React, { useRef } from 'react';
 import { Avatar } from '../../../components/common';
+import { formatLastSeen } from '../../../utils/dateTime';
+import { formatTypingSummary, useTypingStore } from '../state/typingStore';
 import { useChatStore } from '../store/chatStore';
 import './ChatHeader.css';
 
@@ -39,6 +41,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     const selectedChatId = useChatStore((state) => state.selectedChatId);
     const chats = useChatStore((state) => state.chats);
     const selectedContact = useChatStore((state) => state.selectedContact);
+    const typingEntries = useTypingStore((state) => (selectedChatId ? state.byChatId[selectedChatId] : undefined));
     const selectedChat = chats.find((c) => c.id === selectedChatId);
     const fallbackChat = selectedContact ? {
         id: selectedContact.userId,
@@ -49,6 +52,14 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         memberCount: 0,
     } : null;
     const displayChat = selectedChat || fallbackChat;
+    const typingText = displayChat ? formatTypingSummary(typingEntries, !!displayChat.isGroup) : '';
+    const offlineLabel = formatLastSeen(selectedContact?.lastSeen);
+    const resolvedStatusText = typingText
+        ? typingText
+        : displayChat?.isGroup
+            ? `${displayChat.memberCount || 0} 位成员`
+            : (displayChat?.online ? '在线' : offlineLabel);
+    const isOnlineHighlight = Boolean(typingText || (displayChat && !displayChat.isGroup && displayChat.online));
 
     // AI 模式头部
     if (isAiMode) {
@@ -129,15 +140,10 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <div className="chat-header__details">
                         <div className="chat-header__name">{displayChat.title}</div>
                         <div
-                            className={`chat-header__status ${!displayChat.isGroup && displayChat.online
-                                ? 'chat-header__status--online'
-                                : ''
-                                }`}
+                            className={`chat-header__status ${isOnlineHighlight ? 'chat-header__status--online' : ''}`}
                         >
-                            {displayChat.isGroup
-                                ? `${displayChat.memberCount || 0} 位成员`
-                                : (displayChat.online ? '在线' : '离线')
-                            }
+                            {typingText && <span className="chat-header__typing-dot" aria-hidden="true" />}
+                            {resolvedStatusText}
                         </div>
                     </div>
                 </button>
@@ -153,15 +159,10 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <div className="chat-header__details">
                         <div className="chat-header__name">{displayChat.title}</div>
                         <div
-                            className={`chat-header__status ${!displayChat.isGroup && displayChat.online
-                                ? 'chat-header__status--online'
-                                : ''
-                                }`}
+                            className={`chat-header__status ${isOnlineHighlight ? 'chat-header__status--online' : ''}`}
                         >
-                            {displayChat.isGroup
-                                ? `${displayChat.memberCount || 0} 位成员`
-                                : (displayChat.online ? '在线' : '离线')
-                            }
+                            {typingText && <span className="chat-header__typing-dot" aria-hidden="true" />}
+                            {resolvedStatusText}
                         </div>
                     </div>
                 </div>
