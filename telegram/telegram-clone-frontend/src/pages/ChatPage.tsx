@@ -18,6 +18,7 @@ import { API_BASE_URL } from '../utils/apiUrl';
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
 import { useMessageStore } from '../features/chat/store/messageStore';
+import { useChatUiPrefsStore } from '../features/chat/state/chatUiPrefsStore';
 import {
   collectPresenceTargetUserIds,
   deriveSelfPresence,
@@ -182,6 +183,7 @@ const ChatPage: React.FC = () => {
         const localUser = authUtils.getCurrentUser();
         if (localUser) {
           setCurrentUser(localUser);
+          useChatUiPrefsStore.getState().hydrateForUser(localUser.id);
           console.log('🎉 ChatPage 成功渲染，当前用户:', localUser.username);
           connectRealtime();
           loadContacts();
@@ -563,8 +565,7 @@ const ChatPage: React.FC = () => {
     return false;
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const uploadAndSendFile = async (file: File, caption?: string) => {
     if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !canSendMessages) return;
 
     setIsUploading(true);
@@ -575,7 +576,7 @@ const ChatPage: React.FC = () => {
           quality: 0.84,
         });
         const aiMessageData = {
-          content: newMessage || '请分析这张图片',
+          content: caption || newMessage || '请分析这张图片',
           imageData: {
             mimeType: prepared.mimeType,
             base64Data: prepared.base64Data,
@@ -617,8 +618,9 @@ const ChatPage: React.FC = () => {
         const uploadedName = uploaded.fileName || file.name || 'upload.bin';
         const uploadedType: Message['type'] = (uploaded.fileType as Message['type'] | undefined) || 'file';
         const uploadedUrl = uploaded.fileUrl || undefined;
+        let sentOk = false;
         if (selectedGroup) {
-          await emitRealtimeMessage({
+          sentOk = await emitRealtimeMessage({
             chatType: 'group',
             groupId: selectedGroup.id,
             content: uploadedName,
@@ -630,7 +632,7 @@ const ChatPage: React.FC = () => {
             thumbnailUrl: uploaded.thumbnailUrl,
           }, '群聊文件消息发送失败');
         } else if (selectedContact) {
-          await emitRealtimeMessage({
+          sentOk = await emitRealtimeMessage({
             chatType: 'private',
             receiverId: selectedContact.userId,
             content: uploadedName,
@@ -642,6 +644,11 @@ const ChatPage: React.FC = () => {
             thumbnailUrl: uploaded.thumbnailUrl,
           }, '私聊文件消息发送失败');
         }
+        // 若用户同时填写了图片/文件附言，上传成功后紧随发送附言文本
+        const cleanCaption = caption?.trim();
+        if (sentOk && cleanCaption) {
+          await handleSendMessage(cleanCaption);
+        }
       } else {
         throw new Error(result.message || '文件上传失败');
       }
@@ -650,8 +657,14 @@ const ChatPage: React.FC = () => {
       showToast('文件上传失败，请稍后重试', 'error');
     } finally {
       setIsUploading(false);
-      event.target.value = '';
     }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await uploadAndSendFile(file);
+    event.target.value = '';
   };
 
   const handleSendMessage = (content?: string) => {
@@ -817,14 +830,10 @@ const ChatPage: React.FC = () => {
           }
           footer={
             <MessageInput
+              chatId={selectedChatId}
               onSendMessage={handleSendMessage}
-              onFileUpload={(file) => {
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-                if (fileInputRef.current) {
-                  fileInputRef.current.files = dataTransfer.files;
-                  fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
-                }
+              onFileUpload={(file, caption) => {
+                void uploadAndSendFile(file, caption);
               }}
               isConnected={canSendMessages}
               isUploading={isUploading}

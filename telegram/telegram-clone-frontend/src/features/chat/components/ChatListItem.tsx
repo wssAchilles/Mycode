@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
+import { BellOff, Pin } from 'lucide-react';
 import { Avatar } from '../../../components/common';
 import type { ChatSummary } from '../types';
 import { useMessageStore } from '../store/messageStore';
+import { useChatUiPrefsStore } from '../state/chatUiPrefsStore';
 import { motionDurations, useAnimeScope, waapi } from '../../../core/animation';
 import './ChatListItem.css';
 
@@ -10,10 +12,15 @@ interface ChatListItemProps {
     isSelected?: boolean;
     isNew?: boolean;
     onClick: (chat: ChatSummary) => void;
+    onContextMenu?: (chat: ChatSummary, event: React.MouseEvent) => void;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = false, onClick }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = false, onClick, onContextMenu }) => {
     const prefetchChat = useMessageStore((state) => state.prefetchChat);
+    const draftText = useChatUiPrefsStore((state) => state.draftByChatId[chat.id] || '');
+    const isPinned = useChatUiPrefsStore((state) => state.pinnedChatIds.includes(chat.id));
+    const isMuted = useChatUiPrefsStore((state) => state.mutedChatIds.includes(chat.id));
+    const hasDraft = draftText.trim().length > 0 && !isSelected;
     const prevUnreadPulseSeqRef = useRef(chat.unreadPulseSeq || 0);
     const itemMotion = useAnimeScope<HTMLButtonElement, {
         unread: () => void;
@@ -48,6 +55,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
             type="button"
             className={`tg-chat-item ${isSelected ? 'is-selected' : ''} ${isNew ? 'is-new' : ''}`}
             onClick={() => onClick(chat)}
+            onContextMenu={onContextMenu ? (event) => onContextMenu(chat, event) : undefined}
             onMouseEnter={() => prefetchChat(chat.id, !!chat.isGroup)}
             onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}
             title={chat.title}
@@ -67,34 +75,43 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
 
             <div className="tg-chat-item-content">
                 <div className="tg-chat-item-top">
-                    <h3 className="tg-chat-item-title">{chat.title}</h3>
+                    <h3 className="tg-chat-item-title">
+                        {isPinned && (
+                            <Pin size={12} className="tg-chat-item-flag is-pin" aria-label="已置顶" />
+                        )}
+                        {chat.title}
+                        {isMuted && (
+                            <BellOff size={12} className="tg-chat-item-flag is-mute" aria-label="已免打扰" />
+                        )}
+                    </h3>
                     <div className="tg-chat-item-meta">
-                        {/* If has read status, show icon here? Usually status is next to last msg for out, OR unread count */}
                         <span className="tg-chat-item-time">{chat.time}</span>
                     </div>
                 </div>
 
                 <div className="tg-chat-item-bottom">
                     <p className="tg-chat-item-message">
-                        {/* If sent by me, would show sender name or 'You:' */}
-                        <span className={`tg-text-preview ${!chat.lastMessage ? 'tg-text-placeholder' : ''}`}>
-                            {chat.lastMessage || '点击开始聊天'}
-                        </span>
+                        {hasDraft ? (
+                            <>
+                                <span className="tg-chat-item-draft">[草稿] </span>
+                                <span>{draftText}</span>
+                            </>
+                        ) : (
+                            <span className={`tg-text-preview ${!chat.lastMessage ? 'tg-text-placeholder' : ''}`}>
+                                {chat.lastMessage || '点击开始聊天'}
+                            </span>
+                        )}
                     </p>
 
                     {chat.unreadCount > 0 && (
-                        <div className="tg-chat-item-badge">
+                        <div className={`tg-chat-item-badge ${isMuted ? 'is-muted' : ''}`}>
                             {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
                         </div>
                     )}
-
-                    {/* If no unread and out, show tick? Not implemented in types yet */}
                 </div>
             </div>
 
-            <div className="tg-chat-item-ripple-container">
-                {/* Native ripple or our component if wrapped */}
-            </div>
+            <div className="tg-chat-item-ripple-container" />
         </button>
     );
 };

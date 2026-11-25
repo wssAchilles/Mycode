@@ -85,6 +85,9 @@
 }
 
 .tg-chat-item-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-size: 14.5px;
     font-weight: 700;
     margin: 0;
@@ -93,6 +96,25 @@
     text-overflow: ellipsis;
     color: #0F1419;
     line-height: 1.3;
+}
+
+.tg-chat-item-flag {
+    flex-shrink: 0;
+    color: #64748B;
+}
+
+.tg-chat-item-flag.is-pin {
+    color: #1D9BF0;
+}
+
+.tg-chat-item-draft {
+    color: #F43F5E;
+    font-weight: 600;
+}
+
+.tg-chat-item-badge.is-muted {
+    background: #94A3B8;
+    box-shadow: none;
 }
 
 .tg-chat-item-meta {

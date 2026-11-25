@@ -8,7 +8,9 @@ interface ChatListProps {
   chats: ChatSummary[];
   selectedChatId?: string;
   onSelectChat: (chat: ChatSummary) => void;
+  onChatContextMenu?: (chat: ChatSummary, event: React.MouseEvent) => void;
   isLoading?: boolean;
+  emptyMessage?: string;
 }
 
 const ESTIMATED_CHAT_ITEM_HEIGHT = 80;
@@ -16,7 +18,14 @@ const CHAT_ITEM_GAP = 8;
 const CHAT_LIST_OVERSCAN = 6;
 const FALLBACK_VIEWPORT_RECT = { width: 320, height: 640 };
 
-const ChatList: React.FC<ChatListProps> = ({ chats, selectedChatId, onSelectChat, isLoading }) => {
+const ChatList: React.FC<ChatListProps> = ({
+  chats,
+  selectedChatId,
+  onSelectChat,
+  onChatContextMenu,
+  isLoading,
+  emptyMessage = '暂无聊天',
+}) => {
   const initializedRef = useRef(false);
   const seenChatIdsRef = useRef<Set<string>>(new Set());
   const nextNewChatIdsRef = useRef<Set<string>>(new Set());
@@ -148,7 +157,7 @@ const ChatList: React.FC<ChatListProps> = ({ chats, selectedChatId, onSelectChat
   if (chats.length === 0) {
     return (
       <div className="tg-chat-list-empty">
-        <p>暂无聊天</p>
+        <p>{emptyMessage}</p>
       </div>
     );
   }
@@ -190,6 +199,7 @@ const ChatList: React.FC<ChatListProps> = ({ chats, selectedChatId, onSelectChat
                 isSelected={chat.id === selectedChatId}
                 isNew={nextNewChatIdsRef.current.has(chat.id)}
                 onClick={onSelectChat}
+                onContextMenu={onChatContextMenu}
               />
             </div>
           );

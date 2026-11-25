@@ -81,7 +81,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <div className="chat-header__details">
                         <div className="chat-header__name">AI 助手</div>
                         <div className="chat-header__status chat-header__status--online">
-                            Online • 个性化问答
+                            在线 • 个性化问答
                         </div>
                     </div>
                 </div>
