@@ -62,6 +62,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const pointerDownOutsideRef = useRef(false);
   const searchSeqRef = useRef(0);
+  const searchDebounceTimerRef = useRef<number | null>(null);
 
   const [activeTab, setActiveTab] = useState<AddContactModalTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,8 +97,14 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     [],
   );
 
-  const loadSentRequests = useCallback(async () => {
-    setIsLoadingSent(true);
+  const wasOpenRef = useRef(false);
+  const lastSentSyncAtRef = useRef(0);
+
+  const loadSentRequests = useCallback(async (options?: { silent?: boolean }) => {
+    const showLoading = !options?.silent && sentRequests.length === 0;
+    if (showLoading) {
+      setIsLoadingSent(true);
+    }
     try {
       const response = await contactAPI.getContacts('pending');
       const rawList = Array.isArray(response?.contacts) ? response.contacts : [];
@@ -108,13 +115,16 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
         avatarUrl: withApiBase(item.contact?.avatarUrl || item.avatarUrl) ?? undefined,
         addedAt: item.addedAt,
       }));
+      lastSentSyncAtRef.current = Date.now();
       setSentRequests(mapped);
     } catch {
       // 静默兜底，避免打断当前查找与审批操作
     } finally {
-      setIsLoadingSent(false);
+      if (showLoading) {
+        setIsLoadingSent(false);
+      }
     }
-  }, []);
+  }, [sentRequests.length]);
 
   const resetModalState = useCallback(() => {
     searchSeqRef.current += 1;
@@ -127,43 +137,55 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     setFeedback(null);
   }, []);
 
-  // 使用原生 dialog.showModal() / close() 控制模态生命周期（兼容 JSDOM 测试环境）
+  // 使用原生 dialog.showModal() / close() 控制模态生命周期；仅在从关到开过渡时重置态与动效，避免后台刷新打断输入
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
     if (isOpen) {
-      resetModalState();
-      setActiveTab(initialTab);
-      void loadPendingRequests();
-      void loadSentRequests();
+      const justOpened = !wasOpenRef.current;
+      wasOpenRef.current = true;
 
-      if (typeof dialog.showModal === 'function') {
-        if (!dialog.open) {
-          dialog.showModal();
+      if (justOpened) {
+        resetModalState();
+        setActiveTab(initialTab);
+        void loadPendingRequests({ silent: true });
+        void loadSentRequests({ silent: true });
+
+        if (typeof dialog.showModal === 'function') {
+          if (!dialog.open) {
+            dialog.showModal();
+          }
+        } else {
+          dialog.setAttribute('open', '');
         }
-      } else {
-        dialog.setAttribute('open', '');
-      }
-      modalMotion.run('enter');
+        modalMotion.run('enter');
 
-      if (initialTab === 'search') {
-        const timer = window.setTimeout(() => {
-          searchInputRef.current?.focus();
-        }, 40);
-        return () => window.clearTimeout(timer);
-      }
-    } else if (typeof dialog.close === 'function') {
-      if (dialog.open) {
-        dialog.close();
+        if (initialTab === 'search') {
+          const timer = window.setTimeout(() => {
+            searchInputRef.current?.focus();
+          }, 40);
+          return () => window.clearTimeout(timer);
+        }
       }
     } else {
-      dialog.removeAttribute('open');
+      wasOpenRef.current = false;
+      if (typeof dialog.close === 'function') {
+        if (dialog.open) {
+          dialog.close();
+        }
+      } else {
+        dialog.removeAttribute('open');
+      }
     }
     return undefined;
   }, [initialTab, isOpen, loadPendingRequests, loadSentRequests, modalMotion, resetModalState]);
 
   const runSearch = useCallback(async (rawQuery: string) => {
+    if (searchDebounceTimerRef.current !== null) {
+      window.clearTimeout(searchDebounceTimerRef.current);
+      searchDebounceTimerRef.current = null;
+    }
     const trimmed = rawQuery.trim();
     if (!trimmed) {
       searchSeqRef.current += 1;
@@ -214,11 +236,17 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
       return;
     }
 
-    const timer = window.setTimeout(() => {
+    searchDebounceTimerRef.current = window.setTimeout(() => {
+      searchDebounceTimerRef.current = null;
       void runSearch(trimmed);
     }, SEARCH_DEBOUNCE_MS);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (searchDebounceTimerRef.current !== null) {
+        window.clearTimeout(searchDebounceTimerRef.current);
+        searchDebounceTimerRef.current = null;
+      }
+    };
   }, [activeTab, isOpen, runSearch, searchQuery]);
 
   // 弹窗打开期间监听全局联系人实时推送，自动刷新“已发出”申请状态，无需手动刷新
@@ -234,7 +262,10 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
         || action === 'contact_removed'
         || action === 'contact_blocked'
       ) {
-        void loadSentRequests();
+        if (action === 'request_sent' && Date.now() - lastSentSyncAtRef.current < 1200) {
+          return;
+        }
+        void loadSentRequests({ silent: true });
       }
     };
     window.addEventListener(APP_CONTACT_REALTIME_EVENT, handleContactRealtime);
@@ -273,34 +304,48 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     setAddingContactId(user.id);
     setFeedback(null);
 
+    const prevStatus = user.contactStatus ?? null;
+    const optimisticSentId = `local-${user.id}`;
+    lastSentSyncAtRef.current = Date.now();
+
+    // 0ms 乐观写入：先切换按钮状态、补入已发出列表并立刻展示反馈气泡
+    setSearchResults((prev) =>
+      prev.map((item) =>
+        item.id === user.id ? { ...item, contactStatus: 'pending' } : item,
+      ),
+    );
+    setSentRequests((prev) => {
+      if (prev.some((item) => item.contactId === user.id)) return prev;
+      return [
+        {
+          id: optimisticSentId,
+          contactId: user.id,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+          addedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ];
+    });
+    setFeedback({
+      text: `已向 ${user.username} 发送好友申请`,
+      type: 'success',
+    });
+    showToast(`已向 ${user.username} 发送好友申请`, 'success');
+
     try {
       await contactAPI.addContact(user.id);
+      void loadSentRequests({ silent: true });
+    } catch (error: unknown) {
+      // 发送失败时精准回滚乐观写入状态
       setSearchResults((prev) =>
         prev.map((item) =>
-          item.id === user.id ? { ...item, contactStatus: 'pending' } : item,
+          item.id === user.id ? { ...item, contactStatus: prevStatus } : item,
         ),
       );
-      setSentRequests((prev) => {
-        if (prev.some((item) => item.contactId === user.id)) return prev;
-        return [
-          {
-            id: `local-${user.id}`,
-            contactId: user.id,
-            username: user.username,
-            avatarUrl: user.avatarUrl,
-            addedAt: new Date().toISOString(),
-          },
-          ...prev,
-        ];
-      });
-      setFeedback({
-        text: `已向 ${user.username} 发送好友申请`,
-        type: 'success',
-      });
-      showToast(`已向 ${user.username} 发送好友申请`, 'success');
-      onContactAdded();
-      void loadSentRequests();
-    } catch (error: unknown) {
+      setSentRequests((prev) =>
+        prev.filter((item) => item.id !== optimisticSentId),
+      );
       const errorMsg = getErrorMessage(error, '添加联系人失败');
       setFeedback({ text: `添加失败: ${errorMsg}`, type: 'error' });
       showToast(errorMsg, 'error');
@@ -319,6 +364,13 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     setBusyRequestId(requestId);
     setFeedback(null);
 
+    const msg =
+      action === 'accept'
+        ? `已同意 ${displayName} 的好友申请`
+        : `已拒绝 ${displayName} 的好友申请`;
+    setFeedback({ text: msg, type: 'success' });
+    showToast(msg, action === 'accept' ? 'success' : 'info');
+
     try {
       await handleContactRequest(requestId, action);
       if (userId) {
@@ -330,13 +382,6 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
           ),
         );
       }
-      const msg =
-        action === 'accept'
-          ? `已同意 ${displayName} 的好友申请`
-          : `已拒绝 ${displayName} 的好友申请`;
-      setFeedback({ text: msg, type: 'success' });
-      showToast(msg, action === 'accept' ? 'success' : 'info');
-      onContactAdded();
     } catch (error: unknown) {
       const errorMsg = getErrorMessage(error, '处理好友申请失败');
       setFeedback({ text: errorMsg, type: 'error' });

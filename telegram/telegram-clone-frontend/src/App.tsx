@@ -4,6 +4,7 @@ import { BrowserRouter as Router } from 'react-router-dom';
 import AppRoutes from './routes';
 import ErrorBoundary from './components/ErrorBoundary';
 import { TooltipProvider } from './components/ui/shadcn/tooltip';
+import { SwUpdateBanner } from './components/ui/SwUpdateBanner';
 import { RealtimeSessionBridge } from './features/realtime';
 import { authUtils } from './services/apiClient';
 import { getExperimentAssignments } from './services/experimentService';
@@ -31,6 +32,7 @@ function App() {
           <Suspense fallback={null}>
             <CommandPalette />
           </Suspense>
+          <SwUpdateBanner />
         </Router>
       </TooltipProvider>
     </ErrorBoundary>

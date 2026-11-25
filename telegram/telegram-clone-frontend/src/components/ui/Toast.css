@@ -12,6 +12,17 @@
     pointer-events: none;
 }
 
+.tg-toast-container[popover] {
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    inset: auto auto 26px 50%;
+    transform: translateX(-50%);
+    overflow: visible;
+    max-width: calc(100vw - 32px);
+}
+
 .tg-toast {
     background: rgba(15, 20, 25, 0.88);
     backdrop-filter: saturate(180%) blur(18px);

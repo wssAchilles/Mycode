@@ -178,6 +178,39 @@ function applyPresenceRecordsToCollections(params: {
     };
 }
 
+function isChatSummaryEqual(a: ChatSummary, b: ChatSummary): boolean {
+    return (
+        a.id === b.id
+        && a.title === b.title
+        && a.avatarUrl === b.avatarUrl
+        && a.lastMessage === b.lastMessage
+        && a.time === b.time
+        && a.lastMessageTimestamp === b.lastMessageTimestamp
+        && a.lastMessageSeq === b.lastMessageSeq
+        && a.unreadCount === b.unreadCount
+        && a.online === b.online
+        && a.isGroup === b.isGroup
+        && a.memberCount === b.memberCount
+        && a.unreadPulseSeq === b.unreadPulseSeq
+    );
+}
+
+function stabilizeChatList(prevList: ChatSummary[], nextList: ChatSummary[]): ChatSummary[] {
+    if (prevList.length === 0) return nextList;
+    const prevById = new Map(prevList.map((chat) => [chat.id, chat]));
+    const stabilized = nextList.map((nextChat) => {
+        const existing = prevById.get(nextChat.id);
+        return existing && isChatSummaryEqual(existing, nextChat) ? existing : nextChat;
+    });
+    if (
+        stabilized.length === prevList.length
+        && stabilized.every((item, index) => item === prevList[index])
+    ) {
+        return prevList;
+    }
+    return stabilized;
+}
+
 function compareSummaryLastMessage(
     chat: ChatSummary,
     message: Message,
@@ -264,6 +297,8 @@ interface ChatState {
 
     // 加载状态
     isLoading: boolean;
+    hasLoadedChats: boolean;
+    isRevalidatingChats: boolean;
     isLoadingContacts: boolean;
     isLoadingPendingRequests: boolean;
     isLoadingGroupDetails: boolean;  // 新增
@@ -278,9 +313,9 @@ interface ChatState {
 
     // 联系人操作
     loadCachedChats: () => Promise<void>;
-    loadChats: () => Promise<void>;
+    loadChats: (options?: { silent?: boolean }) => Promise<void>;
     loadContacts: () => Promise<void>;
-    loadPendingRequests: () => Promise<void>;
+    loadPendingRequests: (options?: { silent?: boolean }) => Promise<void>;
     handleContactRequest: (requestId: string, action: 'accept' | 'reject') => Promise<void>;
     createGroup: (
         name: string,
@@ -342,8 +377,10 @@ interface ChatState {
     }) => void;
 }
 
-// loadContacts 并发去重锁，避免多组件挂载同时触发重复请求
+// loadContacts / loadChats / loadPendingRequests 并发去重锁，避免多组件挂载同时触发重复请求
 let loadContactsInFlight: Promise<void> | null = null;
+let loadChatsInFlight: Promise<void> | null = null;
+let loadPendingRequestsInFlight: Promise<void> | null = null;
 
 export const useChatStore = create<ChatState>((set, get) => ({
     chats: [],
@@ -355,6 +392,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     isGroupChatMode: false,       // 新增
     presenceByUserId: {},
     isLoading: false,
+    hasLoadedChats: false,
+    isRevalidatingChats: false,
     isLoadingContacts: false,
     isLoadingPendingRequests: false,
     isLoadingGroupDetails: false, // 新增
@@ -417,7 +456,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     // 本地缓存快照中的旧在线状态可能已过期，未收到实时态前统一以离线展示
                     return { ...base, online: known ? known.isOnline : false };
                 });
-                set({ chats: refreshed });
+                // 若网络列表已经抢先回来，避免冷启动快照倒流覆盖最新数据
+                set((state) => (state.chats.length === 0 ? { chats: refreshed } : state));
                 preloadAvatarUrls(refreshed.map((chat) => chat.avatarUrl), 'md');
             }
         } catch {
@@ -425,121 +465,144 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
     },
 
-    // 加载聊天列表（联系人 + 群组）
-    loadChats: async () => {
-        set({ isLoading: true });
-        try {
-            // 并行请求联系人和群组
-            const [contactsRes, groupsRes] = await Promise.all([
-                contactAPI.getContacts('accepted'),
-                groupAPI.getUserGroups()
-            ]);
-
-            let savedChats: ChatSummary[] = [];
-            set((state) => {
-                const existingChatsById = new Map(state.chats.map((chat) => [chat.id, chat]));
-                const nowMs = Date.now();
-                const nextPresenceByUserId: Record<string, PresenceRecord> = { ...(state.presenceByUserId || {}) };
-                const touchedUserIds = new Set<string>();
-
-                // 1. 映射联系人 (Ensure we map ALL accepted contacts)
-                const contactChats: ChatSummary[] = contactsRes.contacts.map((c: ContactApiResponse) => {
-                    const chatId = c.contactId || c.userId;
-                    const existingChat = existingChatsById.get(chatId);
-                    const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
-                    const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
-                    const mergedPresence = resolveMergedPresence(
-                        nextPresenceByUserId[chatId],
-                        {
-                            isOnline: !!c.isOnline,
-                            lastSeen: c.contact?.lastSeen,
-                            source: 'snapshot',
-                        },
-                        nowMs,
-                    );
-                    nextPresenceByUserId[chatId] = mergedPresence;
-                    touchedUserIds.add(chatId);
-
-                    return {
-                        id: chatId, // Ensure we get the correct User ID
-                        title: c.alias || c.contact?.username || c.username || '未知用户',
-                        avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
-                        lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '', // Empty string for no message, handled in UI
-                        time: c.lastMessage
-                            ? formatChatListTimestamp(c.lastMessage.timestamp)
-                            : existingChat?.time || '',
-                        lastMessageTimestamp,
-                        lastMessageSeq: typeof c.lastMessage?.seq === 'number'
-                            ? c.lastMessage.seq
-                            : existingChat?.lastMessageSeq,
-                        unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
-                        online: mergedPresence.isOnline,
-                        isGroup: false,
-                    };
-                });
-
-                // 2. 映射群组
-                const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: GroupApiResponse) => {
-                    const existingChat = existingChatsById.get(g.id);
-                    const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
-                    const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
-                    return {
-                        id: g.id,
-                        title: g.name,
-                        avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
-                        lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
-                        time: g.lastMessage?.timestamp
-                            ? formatChatListTimestamp(g.lastMessage.timestamp)
-                            : existingChat?.time || '',
-                        lastMessageTimestamp,
-                        lastMessageSeq: typeof g.lastMessage?.seq === 'number'
-                            ? g.lastMessage.seq
-                            : existingChat?.lastMessageSeq,
-                        unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
-                        isGroup: true,
-                        online: false, // 群组不显示在线状态
-                        memberCount: g.memberCount || g.members?.length || 0,
-                    };
-                });
-
-                // 3. 合并并排序 (按最后消息时间倒序)
-                const allChats = [...contactChats, ...groupChats].sort((a, b) => {
-                    return (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0);
-                });
-
-                const synced = applyPresenceRecordsToCollections({
-                    contacts: state.contacts,
-                    chats: allChats,
-                    selectedContact: state.selectedContact,
-                    selectedGroup: state.selectedGroup,
-                    presenceByUserId: nextPresenceByUserId,
-                    userIds: touchedUserIds,
-                });
-                savedChats = synced.chats;
-
-                return {
-                    chats: synced.chats,
-                    contacts: synced.contacts,
-                    selectedContact: synced.selectedContact,
-                    selectedGroup: synced.selectedGroup,
-                    presenceByUserId: nextPresenceByUserId,
-                    isLoading: false,
-                };
-            });
-
-            preloadAvatarUrls(savedChats.map((chat) => chat.avatarUrl), 'md');
-
-            // 异步保存到 IDB（冷启动用）
-            chatListSnapshotCache.save(savedChats);
-        } catch (error: unknown) {
-            console.error('加载聊天列表失败:', error);
-            set({ isLoading: false, error: getErrorDetail(error) });
+    // 加载聊天列表（联系人 + 群组）：冷热分离 + 并发单飞 + 结构共享
+    loadChats: async (options) => {
+        if (loadChatsInFlight) {
+            return loadChatsInFlight;
         }
+
+        const task = (async () => {
+            const stateSnapshot = get();
+            const hasExistingChats = stateSnapshot.chats.length > 0 || stateSnapshot.hasLoadedChats;
+            const showBlockingLoading = !options?.silent && !hasExistingChats;
+
+            set(showBlockingLoading ? { isLoading: true } : { isRevalidatingChats: true });
+
+            try {
+                // 并行请求联系人和群组
+                const [contactsRes, groupsRes] = await Promise.all([
+                    contactAPI.getContacts('accepted'),
+                    groupAPI.getUserGroups(),
+                ]);
+
+                let savedChats: ChatSummary[] = [];
+                set((state) => {
+                    const existingChatsById = new Map(state.chats.map((chat) => [chat.id, chat]));
+                    const nowMs = Date.now();
+                    const nextPresenceByUserId: Record<string, PresenceRecord> = { ...(state.presenceByUserId || {}) };
+                    const touchedUserIds = new Set<string>();
+
+                    // 1. 映射联系人
+                    const contactChats: ChatSummary[] = contactsRes.contacts.map((c: ContactApiResponse) => {
+                        const chatId = c.contactId || c.userId;
+                        const existingChat = existingChatsById.get(chatId);
+                        const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
+                        const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
+                        const mergedPresence = resolveMergedPresence(
+                            nextPresenceByUserId[chatId],
+                            {
+                                isOnline: !!c.isOnline,
+                                lastSeen: c.contact?.lastSeen,
+                                source: 'snapshot',
+                            },
+                            nowMs,
+                        );
+                        nextPresenceByUserId[chatId] = mergedPresence;
+                        touchedUserIds.add(chatId);
+
+                        return {
+                            id: chatId,
+                            title: c.alias || c.contact?.username || c.username || '未知用户',
+                            avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
+                            lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '',
+                            time: c.lastMessage
+                                ? formatChatListTimestamp(c.lastMessage.timestamp)
+                                : existingChat?.time || '',
+                            lastMessageTimestamp,
+                            lastMessageSeq: typeof c.lastMessage?.seq === 'number'
+                                ? c.lastMessage.seq
+                                : existingChat?.lastMessageSeq,
+                            unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
+                            online: mergedPresence.isOnline,
+                            isGroup: false,
+                        };
+                    });
+
+                    // 2. 映射群组
+                    const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: GroupApiResponse) => {
+                        const existingChat = existingChatsById.get(g.id);
+                        const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
+                        const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
+                        return {
+                            id: g.id,
+                            title: g.name,
+                            avatarUrl: withApiBase(g.avatarUrl),
+                            lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
+                            time: g.lastMessage?.timestamp
+                                ? formatChatListTimestamp(g.lastMessage.timestamp)
+                                : existingChat?.time || '',
+                            lastMessageTimestamp,
+                            lastMessageSeq: typeof g.lastMessage?.seq === 'number'
+                                ? g.lastMessage.seq
+                                : existingChat?.lastMessageSeq,
+                            unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
+                            isGroup: true,
+                            online: false,
+                            memberCount: g.memberCount || g.members?.length || 0,
+                        };
+                    });
+
+                    // 3. 合并排序并执行结构共享，保持未变对象与整表引用稳定
+                    const sortedChats = [...contactChats, ...groupChats].sort((a, b) => {
+                        return (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0);
+                    });
+
+                    const synced = applyPresenceRecordsToCollections({
+                        contacts: state.contacts,
+                        chats: sortedChats,
+                        selectedContact: state.selectedContact,
+                        selectedGroup: state.selectedGroup,
+                        presenceByUserId: nextPresenceByUserId,
+                        userIds: touchedUserIds,
+                    });
+                    const nextChats = stabilizeChatList(state.chats, synced.chats);
+                    savedChats = nextChats;
+
+                    return {
+                        chats: nextChats,
+                        contacts: synced.contacts,
+                        selectedContact: synced.selectedContact,
+                        selectedGroup: synced.selectedGroup,
+                        presenceByUserId: nextPresenceByUserId,
+                        isLoading: false,
+                        isRevalidatingChats: false,
+                        hasLoadedChats: true,
+                    };
+                });
+
+                preloadAvatarUrls(savedChats.map((chat) => chat.avatarUrl), 'md');
+                chatListSnapshotCache.save(savedChats);
+            } catch (error: unknown) {
+                console.error('加载聊天列表失败:', error);
+                set({
+                    isLoading: false,
+                    isRevalidatingChats: false,
+                    error: getErrorDetail(error),
+                });
+            } finally {
+                if (loadChatsInFlight === task) {
+                    loadChatsInFlight = null;
+                }
+            }
+        })();
+
+        loadChatsInFlight = task;
+        return task;
     },
 
-    // 创建群组
+    // 创建群组：原地增量插入，不触发列表遮罩闪烁
     createGroup: async (name, description, memberIds, options) => {
-        set({ isLoading: true, error: null });
+        set({ error: null });
         try {
             // 1. 创建群组
             const response = await groupAPI.createGroup({
@@ -559,20 +622,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     await groupAPI.addMembers(groupId, memberIds);
                 } catch (addMemberError) {
                     console.error('添加群组成员部分失败:', addMemberError);
-                    // 不中断流程，群组已创建成功
                 }
             }
 
-            // 3. 刷新列表并自动打开新建群组
-            await get().loadChats();
-            if (groupId) {
-                await get().loadGroupDetails(groupId);
+            // 3. 乐观将新群置顶写入列表，随后后台静默校准并打开详情
+            if (createdGroup && groupId) {
+                set((state) => {
+                    if (state.chats.some((c) => c.id === groupId)) return state;
+                    const summary: ChatSummary = {
+                        id: groupId,
+                        title: createdGroup.name,
+                        avatarUrl: withApiBase(createdGroup.avatarUrl),
+                        lastMessage: '',
+                        time: '',
+                        lastMessageTimestamp: Date.now(),
+                        unreadCount: 0,
+                        isGroup: true,
+                        online: false,
+                        memberCount: createdGroup.memberCount || (memberIds?.length ?? 0) + 1,
+                    };
+                    return { chats: [summary, ...state.chats] };
+                });
+                void get().loadGroupDetails(groupId);
             }
-            set({ isLoading: false });
+            void get().loadChats({ silent: true });
             return createdGroup;
         } catch (error: unknown) {
             console.error('创建群组失败:', error);
-            set({ error: getErrorDetail(error), isLoading: false });
+            set({ error: getErrorDetail(error) });
             throw error;
         }
     },
@@ -655,55 +732,105 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return task;
     },
 
-    // 加载待处理请求
-    loadPendingRequests: async () => {
-        set({ isLoadingPendingRequests: true, error: null });
-        try {
-            const response = await contactAPI.getPendingRequests();
-            const requestsArray = response?.pendingRequests || response?.data || response?.requests || [];
-
-            if (!Array.isArray(requestsArray)) {
-                console.warn('待处理请求数据不是数组:', requestsArray);
-                set({ pendingRequests: [], isLoadingPendingRequests: false });
-                return;
-            }
-
-            const pendingRequests: Contact[] = requestsArray.map((request: PendingRequestApiResponse) => ({
-                id: request.id,
-                userId: request.userId,
-                username: request.user?.username || '未知用户',
-                email: request.user?.email,
-                avatarUrl: withApiBase(request.user?.avatarUrl) ?? undefined,
-                alias: request.alias,
-                status: request.status as Contact['status'],
-                isOnline: false,
-                lastSeen: request.user?.lastSeen,
-                addedAt: request.addedAt,
-                lastMessage: undefined,
-                unreadCount: 0,
-            }));
-
-            set({ pendingRequests, isLoadingPendingRequests: false });
-            preloadAvatarUrls(pendingRequests.map((req) => req.avatarUrl), 'sm');
-        } catch (error: unknown) {
-            console.error('加载待处理请求失败:', error);
-            set({ error: getErrorDetail(error), pendingRequests: [], isLoadingPendingRequests: false });
+    // 加载待处理请求：单飞去重 + 静默更新，异常时保留已有快照防闪动
+    loadPendingRequests: async (options) => {
+        if (loadPendingRequestsInFlight) {
+            return loadPendingRequestsInFlight;
         }
+
+        const task = (async () => {
+            const showLoading = !options?.silent && get().pendingRequests.length === 0;
+            if (showLoading) {
+                set({ isLoadingPendingRequests: true, error: null });
+            }
+            try {
+                const response = await contactAPI.getPendingRequests();
+                const requestsArray = response?.pendingRequests || response?.data || response?.requests || [];
+
+                if (!Array.isArray(requestsArray)) {
+                    console.warn('待处理请求数据不是数组:', requestsArray);
+                    set({ isLoadingPendingRequests: false });
+                    return;
+                }
+
+                const pendingRequests: Contact[] = requestsArray.map((request: PendingRequestApiResponse) => ({
+                    id: request.id,
+                    userId: request.userId,
+                    username: request.user?.username || '未知用户',
+                    email: request.user?.email,
+                    avatarUrl: withApiBase(request.user?.avatarUrl) ?? undefined,
+                    alias: request.alias,
+                    status: request.status as Contact['status'],
+                    isOnline: false,
+                    lastSeen: request.user?.lastSeen,
+                    addedAt: request.addedAt,
+                    lastMessage: undefined,
+                    unreadCount: 0,
+                }));
+
+                set({ pendingRequests, isLoadingPendingRequests: false });
+                preloadAvatarUrls(pendingRequests.map((req) => req.avatarUrl), 'sm');
+            } catch (error: unknown) {
+                console.error('加载待处理请求失败:', error);
+                // 静默兜底并保留现有待处理列表，防止网络波动导致界面闪空
+                set({ error: getErrorDetail(error), isLoadingPendingRequests: false });
+            } finally {
+                if (loadPendingRequestsInFlight === task) {
+                    loadPendingRequestsInFlight = null;
+                }
+            }
+        })();
+
+        loadPendingRequestsInFlight = task;
+        return task;
     },
 
-    // 处理联系人请求
+    // 处理联系人请求：0ms 乐观更新 + 失败快照回滚 + 后台静默校准
     handleContactRequest: async (requestId, action) => {
+        const snapshot = get();
+        const prevPendingRequests = snapshot.pendingRequests;
+        const prevContacts = snapshot.contacts;
+        const prevChats = snapshot.chats;
+        const matchedRequest = prevPendingRequests.find((req) => req.id === requestId);
+
+        if (action === 'accept' && matchedRequest) {
+            get().applyContactRequestAccepted({
+                action: 'request_accepted',
+                requestId,
+                userId: matchedRequest.userId,
+                contactId: matchedRequest.userId,
+                contact: {
+                    id: matchedRequest.id,
+                    userId: matchedRequest.userId,
+                    username: matchedRequest.username,
+                    avatarUrl: matchedRequest.avatarUrl,
+                    alias: matchedRequest.alias,
+                    isOnline: matchedRequest.isOnline,
+                },
+            });
+        } else {
+            set((state) => ({
+                pendingRequests: state.pendingRequests.filter((req) => req.id !== requestId),
+            }));
+        }
+
         try {
             await contactAPI.handleRequest(requestId, action);
-            // 同步等待刷新联系人、待处理请求与会话列表，确保界面状态与反馈提示一致
-            await Promise.all([
+            // 后台静默增量对齐权威态，绝不阻塞交互或触发全屏转圈
+            void Promise.all([
                 get().loadContacts(),
-                get().loadPendingRequests(),
-                get().loadChats(),
-            ]);
+                get().loadPendingRequests({ silent: true }),
+                get().loadChats({ silent: true }),
+            ]).catch(() => undefined);
         } catch (error: unknown) {
             console.error(`处理联系人请求失败 (${action}):`, error);
-            set({ error: getErrorDetail(error) });
+            // 请求失败精准回滚到乐观操作前快照
+            set({
+                pendingRequests: prevPendingRequests,
+                contacts: prevContacts,
+                chats: prevChats,
+                error: getErrorDetail(error),
+            });
             throw error;
         }
     },

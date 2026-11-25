@@ -146,7 +146,7 @@ const ChatList: React.FC<ChatListProps> = ({
     [chats.length, safeScrollToChatIndex],
   );
 
-  if (isLoading) {
+  if (isLoading && chats.length === 0) {
     return (
       <div className="tg-chat-list-loading">
         <div className="tg-spinner" />

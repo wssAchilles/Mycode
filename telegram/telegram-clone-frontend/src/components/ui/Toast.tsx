@@ -20,7 +20,7 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
     }>(
         ({ root, reducedMotion, duration: motionDuration }) => ({
             enter: () => {
-                if (reducedMotion || !root) return;
+                if (reducedMotion || !root || typeof root.animate !== 'function') return;
                 waapi.animate(root, {
                     opacity: [0, 1],
                     y: ['20px', '0px'],
@@ -30,7 +30,7 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
                 });
             },
             exit: (done) => {
-                if (reducedMotion || !root) {
+                if (reducedMotion || !root || typeof root.animate !== 'function') {
                     done();
                     return;
                 }
@@ -72,8 +72,40 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
     );
 };
 
-// Singleton toast manager
 let toastContainer: HTMLDivElement | null = null;
+
+function promoteToastContainerToTopLayer(el: HTMLDivElement): void {
+    const popoverEl = el as HTMLDivElement & {
+        showPopover?: () => void;
+        hidePopover?: () => void;
+    };
+    if (typeof popoverEl.showPopover !== 'function') return;
+    if (el.getAttribute('popover') !== 'manual') {
+        el.setAttribute('popover', 'manual');
+    }
+    try {
+        // 先关闭再打开，确保容器位于浏览器 Top Layer 栈最顶端（高于已打开的 showModal 对话框）
+        if (typeof el.matches === 'function' && el.matches(':popover-open')) {
+            popoverEl.hidePopover?.();
+        }
+        popoverEl.showPopover();
+    } catch {
+        // 某些测试环境或旧浏览器不支持时自动回退至普通固定层
+    }
+}
+
+function demoteToastContainerIfEmpty(el: HTMLDivElement): void {
+    if (el.childElementCount > 0) return;
+    const popoverEl = el as HTMLDivElement & { hidePopover?: () => void };
+    if (typeof popoverEl.hidePopover !== 'function') return;
+    try {
+        if (typeof el.matches === 'function' && el.matches(':popover-open')) {
+            popoverEl.hidePopover();
+        }
+    } catch {
+        // 静默忽略
+    }
+}
 
 export const showToast = (message: string, type: ToastProps['type'] = 'info', duration = 2000) => {
     if (!toastContainer || !document.body.contains(toastContainer)) {
@@ -83,17 +115,19 @@ export const showToast = (message: string, type: ToastProps['type'] = 'info', du
         document.body.appendChild(toastContainer);
     }
 
-    const container = document.createElement('div');
-    toastContainer.appendChild(container); // Append wrapper
+    const activeContainer = toastContainer;
+    const wrapper = document.createElement('div');
+    activeContainer.appendChild(wrapper);
+    promoteToastContainerToTopLayer(activeContainer);
 
-    // Render toast into the wrapper
-    const root = createRoot(container);
+    const root = createRoot(wrapper);
 
     const handleClose = () => {
         root.unmount();
-        if (container.parentNode) {
-            container.parentNode.removeChild(container);
+        if (wrapper.parentNode) {
+            wrapper.parentNode.removeChild(wrapper);
         }
+        demoteToastContainerIfEmpty(activeContainer);
     };
 
     root.render(

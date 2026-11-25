@@ -4,9 +4,35 @@ import { getPushSubscription, isPushSupported, savePushSubscription } from './pu
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
- * If the user previously granted notification permission and already has a
- * subscription, re-send it to the backend on app start. This covers token
- * refresh / backend data loss without prompting the user again.
+ * 新版本 Service Worker 就绪广播事件名（供非阻塞更新提示条消费，避免会话途中强刷页面）
+ */
+export const APP_SW_UPDATE_AVAILABLE_EVENT = 'app:sw-update-available';
+
+let pendingUpdateTrigger: ((reloadPage?: boolean) => Promise<void>) | null = null;
+
+/**
+ * 由用户主动确认触发待生效的 Service Worker 更新并刷新页面
+ */
+export async function applyPendingServiceWorkerUpdate(): Promise<void> {
+  const trigger = pendingUpdateTrigger;
+  pendingUpdateTrigger = null;
+  if (!trigger) {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+    return;
+  }
+
+  await import('../core/bridge/chatCoreClient')
+    .then(({ default: chatCoreClient }) => chatCoreClient.shutdown())
+    .catch(() => undefined)
+    .finally(() => {
+      void trigger(true);
+    });
+}
+
+/**
+ * 若用户此前已开启推送权限且存在订阅，启动时静默同步至后端，避免重复弹窗请求权限
  */
 async function resyncExistingPushSubscription(): Promise<void> {
   if (!isPushSupported()) return;
@@ -18,7 +44,7 @@ async function resyncExistingPushSubscription(): Promise<void> {
       await savePushSubscription(subscription);
     }
   } catch {
-    // best-effort — do not block app boot
+    // 后台尽最大努力重同步，不阻断启动流程
   }
 }
 
@@ -37,12 +63,9 @@ export function registerServiceWorker() {
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
-      void import('../core/bridge/chatCoreClient')
-        .then(({ default: chatCoreClient }) => chatCoreClient.shutdown())
-        .catch(() => undefined)
-        .finally(() => {
-          updateSW(true);
-        });
+      // 严禁在聊天或弹窗操作途中静默强制整页重载，改为派发非阻塞更新提醒由用户自主决定时机
+      pendingUpdateTrigger = updateSW;
+      window.dispatchEvent(new CustomEvent(APP_SW_UPDATE_AVAILABLE_EVENT));
     },
     onOfflineReady() {
       // eslint-disable-next-line no-console
@@ -58,7 +81,6 @@ export function registerServiceWorker() {
         r.update().catch(() => undefined);
       };
 
-      // Periodic checks reduce worker/wasm version skew in long-lived tabs.
       window.setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
       window.addEventListener('online', checkForUpdate);
       document.addEventListener('visibilitychange', () => {
@@ -67,7 +89,6 @@ export function registerServiceWorker() {
         }
       });
 
-      // Re-sync any existing push subscription with the backend.
       void resyncExistingPushSubscription();
     },
     onRegisterError(error: unknown) {

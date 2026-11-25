@@ -166,22 +166,25 @@ const ChatPage: React.FC = () => {
   const typingActiveRef = useRef(false);
   const typingTargetRef = useRef<{ receiverId?: string; groupId?: string } | null>(null);
 
+  const selectedContactId = selectedContact?.userId ?? null;
+  const selectedGroupId = selectedGroup?.id ?? null;
+
   useEffect(() => {
     // 切换会话前如仍处于正在输入状态，先向旧目标补发停止输入
     if (typingActiveRef.current && typingTargetRef.current) {
       sendTypingIndicator({ ...typingTargetRef.current, isTyping: false });
       typingActiveRef.current = false;
     }
-    typingTargetRef.current = selectedGroup
-      ? { groupId: selectedGroup.id }
-      : selectedContact && !isAiChatMode
-        ? { receiverId: selectedContact.userId }
+    typingTargetRef.current = selectedGroupId
+      ? { groupId: selectedGroupId }
+      : selectedContactId && !isAiChatMode
+        ? { receiverId: selectedContactId }
         : null;
     setEditingMessage(null);
     setReplyingMessage(null);
     setPendingDeleteMessage(null);
     setDetailLightboxMedia(null);
-  }, [selectedChatId, isAiChatMode, selectedGroup, selectedContact, sendTypingIndicator]);
+  }, [selectedChatId, isAiChatMode, selectedGroupId, selectedContactId, sendTypingIndicator]);
 
   // 全局 Escape 分级关闭快捷键（不干扰已被灯箱捕获的事件）
   useEffect(() => {
@@ -374,7 +377,7 @@ const ChatPage: React.FC = () => {
         return;
       }
       lastPendingRequestsSyncAtRef.current = now;
-      void loadPendingRequests();
+      void loadPendingRequests({ silent: true });
     };
 
     const handleVisibilityOrOnline = () => {
@@ -435,14 +438,14 @@ const ChatPage: React.FC = () => {
     openDm();
   }, [currentUser, searchParams, selectContact]);
 
-  // 同步选中联系人/群组到 messageStore
+  // 同步选中联系人/群组到 messageStore（仅依赖稳定主键，避免后台元数据同步触发重加载）
   useEffect(() => {
-    if (selectedGroup) {
-      setActiveContact(selectedGroup.id, true);
+    if (selectedGroupId) {
+      setActiveContact(selectedGroupId, true);
     } else {
-      setActiveContact(selectedContact?.userId || null, false);
+      setActiveContact(selectedContactId, false);
     }
-  }, [selectedContact, selectedGroup, setActiveContact]);
+  }, [selectedContactId, selectedGroupId, setActiveContact]);
 
   // 冷路径预热：会话列表加载后，优先预取头部若干会话到 Worker。
   useEffect(() => {
@@ -485,10 +488,10 @@ const ChatPage: React.FC = () => {
 
   // 选择聊天后自动退出 AI 模式，修复 AI -> 用户聊天无法显示的问题
   useEffect(() => {
-    if (selectedContact || selectedGroup) {
+    if (selectedContactId || selectedGroupId) {
       setIsAiChatMode(false);
     }
-  }, [selectedContact, selectedGroup]);
+  }, [selectedContactId, selectedGroupId]);
 
   // 群聊被删除/被移除后，确保详情面板关闭（无论来源是 socket 还是 worker sync）。
   useEffect(() => {
@@ -1171,7 +1174,7 @@ const ChatPage: React.FC = () => {
           onPreviewImage={setDetailLightboxMedia}
           onContactUpdated={() => {
             void loadContacts();
-            void loadChats();
+            void loadChats({ silent: true });
           }}
           onContactRemoved={(removedUserId) => {
             if (selectedContact?.userId === removedUserId) {
@@ -1201,8 +1204,8 @@ const ChatPage: React.FC = () => {
         onCloseGroupModal={() => setIsGroupModalOpen(false)}
         onContactAdded={() => {
           void loadContacts();
-          void loadPendingRequests();
-          void loadChats();
+          void loadPendingRequests({ silent: true });
+          void loadChats({ silent: true });
         }}
         onStartChatWithContact={(userId) => {
           setShowAddContactModal(false);

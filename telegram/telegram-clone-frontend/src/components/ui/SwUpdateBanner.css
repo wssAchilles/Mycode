@@ -1,0 +1,65 @@
+.sw-update-banner {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9500;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 9999px;
+  background: rgba(15, 20, 25, 0.92);
+  backdrop-filter: blur(14px);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 28px rgba(15, 20, 25, 0.24);
+  font-size: 13px;
+}
+
+.sw-update-banner__text {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sw-update-banner__btn.is-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9999px;
+  background: #1D9BF0;
+  color: #FFFFFF;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.sw-update-banner__btn.is-primary:hover:not(:disabled) {
+  background: #1A8CD8;
+}
+
+.sw-update-banner__btn.is-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.sw-update-banner__close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sw-update-banner__close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+}
