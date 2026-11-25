@@ -12,6 +12,7 @@
     "migrate:messages": "ts-node src/scripts/migrateMessagesChatFields.ts",
     "seed:clusters": "ts-node src/scripts/seedClusters.ts",
     "seed:all": "ts-node src/scripts/seedAllData.ts",
+    "seed:synthetic": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/synthetic/seedSyntheticSocialGraph.ts",
     "demo:prepare": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/prepareInterviewDemo.ts",
     "demo:repair-recommendation-features": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/repairInterviewDemoRecommendationFeatures.ts",
     "demo:expand-interviewer-social-graph": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/expandDemoInterviewerSocialGraph.ts",
