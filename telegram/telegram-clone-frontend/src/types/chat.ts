@@ -14,6 +14,7 @@ export interface Message {
   seq?: number;
   content: string;
   editedAt?: string;
+  replyTo?: string;
   senderId: string;      // 兼容旧的属性名
   senderUsername: string; // 兼容旧的属性名
   userId: string;        // 新的属性名

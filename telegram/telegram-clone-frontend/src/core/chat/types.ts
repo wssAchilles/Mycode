@@ -316,6 +316,7 @@ export interface SocketMessageSendPayload {
   receiverId?: string;
   groupId?: string;
   type?: Message['type'];
+  replyTo?: string;
   attachments?: Message['attachments'];
   fileUrl?: string;
   fileName?: string;

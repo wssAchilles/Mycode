@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { authAPI, authUtils } from '../services/apiClient';
+import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { spaceAPI } from '../services/spaceApi';
 import { showToast } from '../components/ui/Toast';
 import type { User } from '../types/auth';
@@ -152,6 +152,18 @@ const ChatPage: React.FC = () => {
   const [isContextMode, setIsContextMode] = useState(false);
   const [contextMessages, setContextMessages] = useState<Message[]>([]);
   const [contextHighlightSeq, setContextHighlightSeq] = useState<number | undefined>(undefined);
+
+  // 消息上下文状态（引用回复 / 编辑 / 撤回确认）
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [replyingMessage, setReplyingMessage] = useState<Message | null>(null);
+  const [pendingDeleteMessage, setPendingDeleteMessage] = useState<Message | null>(null);
+  const [isDeletingMessage, setIsDeletingMessage] = useState(false);
+
+  useEffect(() => {
+    setEditingMessage(null);
+    setReplyingMessage(null);
+    setPendingDeleteMessage(null);
+  }, [selectedChatId, isAiChatMode]);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -618,6 +630,7 @@ const ChatPage: React.FC = () => {
         const uploadedName = uploaded.fileName || file.name || 'upload.bin';
         const uploadedType: Message['type'] = (uploaded.fileType as Message['type'] | undefined) || 'file';
         const uploadedUrl = uploaded.fileUrl || undefined;
+        const activeReplyToId = replyingMessage?.id;
         let sentOk = false;
         if (selectedGroup) {
           sentOk = await emitRealtimeMessage({
@@ -630,6 +643,7 @@ const ChatPage: React.FC = () => {
             fileSize: uploaded.fileSize,
             mimeType: uploaded.mimeType,
             thumbnailUrl: uploaded.thumbnailUrl,
+            ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
           }, '群聊文件消息发送失败');
         } else if (selectedContact) {
           sentOk = await emitRealtimeMessage({
@@ -642,7 +656,11 @@ const ChatPage: React.FC = () => {
             fileSize: uploaded.fileSize,
             mimeType: uploaded.mimeType,
             thumbnailUrl: uploaded.thumbnailUrl,
+            ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
           }, '私聊文件消息发送失败');
+        }
+        if (sentOk && activeReplyToId) {
+          setReplyingMessage(null);
         }
         // 若用户同时填写了图片/文件附言，上传成功后紧随发送附言文本
         const cleanCaption = caption?.trim();
@@ -675,10 +693,14 @@ const ChatPage: React.FC = () => {
       return;
     }
 
+    const activeReplyToId = isAiChatMode ? undefined : replyingMessage?.id;
     const shouldClearDraft = !content;
     if (shouldClearDraft) {
       // 点击发送即刻清空输入框，避免干等服务端 ACK 造成输入卡顿体感
       setNewMessage('');
+    }
+    if (activeReplyToId) {
+      setReplyingMessage(null);
     }
 
     void (async () => {
@@ -696,6 +718,7 @@ const ChatPage: React.FC = () => {
           chatType: 'group',
           groupId: selectedGroup.id,
           type: 'text',
+          ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
         }, '群聊消息发送失败');
       } else if (selectedContact) {
         ok = await emitRealtimeMessage({
@@ -703,12 +726,115 @@ const ChatPage: React.FC = () => {
           chatType: 'private',
           receiverId: selectedContact.userId,
           type: 'text',
+          ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
         }, '私聊消息发送失败');
       }
 
       if (!ok && shouldClearDraft) {
         // 发送失败且用户尚未输入新内容时自动恢复草稿，便于直接重试
         setNewMessage((current) => (current ? current : messageContent));
+      }
+    })();
+  };
+
+  const handleReplyMessage = (message: Message) => {
+    setEditingMessage(null);
+    setReplyingMessage(message);
+  };
+
+  const handleEditMessage = (message: Message) => {
+    setReplyingMessage(null);
+    setEditingMessage(message);
+  };
+
+  const handleEditLastOwnMessage = () => {
+    if (!currentUser || isAiChatMode) return;
+    const { messageIds, entities } = useMessageStore.getState();
+    for (let i = messageIds.length - 1; i >= 0; i -= 1) {
+      const msg = entities.get(messageIds[i]);
+      if (!msg) continue;
+      const isOut = msg.userId === currentUser.id || msg.senderId === currentUser.id;
+      if (isOut && msg.type === 'text' && msg.status !== 'failed' && msg.status !== 'pending') {
+        handleEditMessage(msg);
+        return;
+      }
+    }
+  };
+
+  const handleSaveEdit = async (messageId: string, newContent: string): Promise<boolean> => {
+    try {
+      await messageAPI.editMessage(messageId, newContent);
+      // 先就地同步主线程实体内容，实时网关随后广播权威版本
+      useMessageStore.setState((state) => {
+        const existing = state.entities.get(messageId);
+        if (!existing) return state;
+        const nextEntities = new Map(state.entities);
+        nextEntities.set(messageId, {
+          ...existing,
+          content: newContent,
+          editedAt: new Date().toISOString(),
+        });
+        return { entities: nextEntities };
+      });
+      setEditingMessage(null);
+      return true;
+    } catch (error) {
+      console.error('编辑消息失败:', error);
+      showToast(error instanceof Error ? error.message : '编辑消息失败', 'error');
+      return false;
+    }
+  };
+
+  const handleConfirmDeleteMessage = async () => {
+    if (!pendingDeleteMessage || isDeletingMessage) return;
+    const targetId = pendingDeleteMessage.id;
+    setIsDeletingMessage(true);
+    try {
+      await messageAPI.deleteMessage(targetId);
+      setPendingDeleteMessage(null);
+      if (editingMessage?.id === targetId) setEditingMessage(null);
+      if (replyingMessage?.id === targetId) setReplyingMessage(null);
+      showToast('消息已撤回', 'info');
+    } catch (error) {
+      console.error('撤回消息失败:', error);
+      showToast(error instanceof Error ? error.message : '撤回消息失败', 'error');
+    } finally {
+      setIsDeletingMessage(false);
+    }
+  };
+
+  const handleRetryMessage = (message: Message) => {
+    if (!currentUser || isAiChatMode) return;
+    const attachment = message.attachments?.[0];
+    const fileUrl = message.fileUrl || attachment?.fileUrl;
+    const commonExtras = {
+      ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+      ...(fileUrl ? { fileUrl } : {}),
+      ...(message.fileName || attachment?.fileName ? { fileName: message.fileName || attachment?.fileName } : {}),
+      ...(message.fileSize ?? attachment?.fileSize ? { fileSize: message.fileSize ?? attachment?.fileSize } : {}),
+      ...(message.mimeType || attachment?.mimeType ? { mimeType: message.mimeType || attachment?.mimeType } : {}),
+      ...(message.thumbnailUrl || attachment?.thumbnailUrl
+        ? { thumbnailUrl: message.thumbnailUrl || attachment?.thumbnailUrl }
+        : {}),
+    };
+
+    void (async () => {
+      if (selectedGroup) {
+        await emitRealtimeMessage({
+          chatType: 'group',
+          groupId: selectedGroup.id,
+          content: message.content || message.fileName || '',
+          type: message.type,
+          ...commonExtras,
+        }, '重新发送群聊消息失败');
+      } else if (selectedContact) {
+        await emitRealtimeMessage({
+          chatType: 'private',
+          receiverId: selectedContact.userId,
+          content: message.content || message.fileName || '',
+          type: message.type,
+          ...commonExtras,
+        }, '重新发送私聊消息失败');
       }
     })();
   };
@@ -837,6 +963,14 @@ const ChatPage: React.FC = () => {
               }}
               isConnected={canSendMessages}
               isUploading={isUploading}
+              editingMessage={editingMessage}
+              replyingMessage={replyingMessage}
+              onCancelContext={() => {
+                setEditingMessage(null);
+                setReplyingMessage(null);
+              }}
+              onSaveEdit={handleSaveEdit}
+              onEditLastOwnMessage={handleEditLastOwnMessage}
             />
           }
           showEmptyState={!selectedContact && !selectedGroup}
@@ -891,6 +1025,10 @@ const ChatPage: React.FC = () => {
             disableAutoScroll={isSearchMode || isContextMode}
             hasHistoryHint={isResolvingSelectedHistory}
             errorMessage={isSearchMode || isContextMode ? null : messageError}
+            onReplyMessage={isSearchMode || isContextMode ? undefined : handleReplyMessage}
+            onEditMessage={isSearchMode || isContextMode ? undefined : handleEditMessage}
+            onDeleteMessage={isSearchMode || isContextMode ? undefined : (msg) => setPendingDeleteMessage(msg)}
+            onRetryMessage={isSearchMode || isContextMode ? undefined : handleRetryMessage}
           />
         </ChatArea>
       )}
@@ -960,6 +1098,45 @@ const ChatPage: React.FC = () => {
         }}
         onGroupCreated={() => { }}
       />
+
+      {pendingDeleteMessage && (
+        <div
+          className="chat-confirm-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="chat-delete-confirm-title"
+          onClick={() => !isDeletingMessage && setPendingDeleteMessage(null)}
+        >
+          <div className="chat-confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h3 id="chat-delete-confirm-title" className="chat-confirm-dialog__title">
+              撤回这条消息？
+            </h3>
+            <p className="chat-confirm-dialog__desc">
+              {pendingDeleteMessage.content
+                ? `「${pendingDeleteMessage.content.slice(0, 60)}${pendingDeleteMessage.content.length > 60 ? '…' : ''}」将从双方会话中移除。`
+                : '该消息将从双方会话中移除，此操作无法撤销。'}
+            </p>
+            <div className="chat-confirm-dialog__actions">
+              <button
+                type="button"
+                className="chat-confirm-dialog__btn"
+                disabled={isDeletingMessage}
+                onClick={() => setPendingDeleteMessage(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="chat-confirm-dialog__btn is-danger"
+                disabled={isDeletingMessage}
+                onClick={() => void handleConfirmDeleteMessage()}
+              >
+                {isDeletingMessage ? '撤回中...' : '确认撤回'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

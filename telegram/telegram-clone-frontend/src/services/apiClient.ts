@@ -361,6 +361,7 @@ export const messageAPI = {
     type?: string;
     chatType: 'private' | 'group';
     groupId?: string;
+    replyTo?: string;
     fileUrl?: string;
     fileName?: string;
     fileSize?: number;

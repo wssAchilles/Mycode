@@ -267,3 +267,64 @@
     color: #FFFFFF !important;
     opacity: 1;
 }
+
+/* 引用消息预览块 */
+.tg-message-reply {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 5px 9px;
+    margin-bottom: 2px;
+    border: none;
+    border-left: 3px solid #1D9BF0;
+    border-radius: 6px;
+    background: rgba(29, 155, 240, 0.08);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.14s ease;
+    font-family: inherit;
+}
+
+.tg-message-reply:hover {
+    background: rgba(29, 155, 240, 0.14);
+}
+
+.tg-message-bubble.is-out .tg-message-reply {
+    border-left-color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.tg-message-bubble.is-out .tg-message-reply:hover {
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.tg-message-reply__sender {
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #0969DA;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tg-message-bubble.is-out .tg-message-reply__sender {
+    color: #FFFFFF;
+}
+
+.tg-message-reply__text {
+    font-size: 12px;
+    line-height: 1.3;
+    color: #536471;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tg-message-bubble.is-out .tg-message-reply__text {
+    color: rgba(255, 255, 255, 0.88);
+}

@@ -1,4 +1,12 @@
 /* 聊天历史列表 - 淡色高对比极简风 */
+.chat-history__viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
 .chat-history {
     flex: 1;
     overflow-y: auto;
@@ -106,4 +114,183 @@
 
 .chat-history__empty-state--error .chat-history__empty-title {
     color: #DC2626;
+}
+
+/* 日期分割胶囊 */
+.chat-history__date-divider {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0 12px;
+    pointer-events: none;
+}
+
+.chat-history__date-divider span {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 12px;
+    border-radius: 9999px;
+    background: rgba(15, 20, 25, 0.06);
+    color: #536471;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+}
+
+/* 连续消息间距收紧（群聊折叠头像与昵称） */
+.chat-history__item.is-collapsed-sender {
+    padding-bottom: 2px;
+}
+
+/* 单行气泡容器与悬浮快捷操作栏 */
+.chat-history__row {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    width: 100%;
+}
+
+.chat-history__row.is-out {
+    flex-direction: row-reverse;
+}
+
+.chat-history__hover-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 2px 8px rgba(15, 20, 25, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(2px);
+    transition: opacity 0.14s ease, transform 0.14s ease;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.chat-history__row:hover .chat-history__hover-actions,
+.chat-history__row:focus-within .chat-history__hover-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.chat-history__hover-btn {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: #536471;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.chat-history__hover-btn:hover {
+    background: #F1F5F9;
+    color: #1D9BF0;
+}
+
+.chat-history__retry-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid #FECDD3;
+    border-radius: 9999px;
+    background: #FFF1F2;
+    color: #E11D48;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.chat-history__retry-pill:hover {
+    background: #FFE4E6;
+}
+
+/* 图片点击灯箱触发按钮 */
+.chat-history__media-btn {
+    display: block;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    cursor: zoom-in;
+    border-radius: 12px;
+    overflow: hidden;
+    text-align: left;
+}
+
+.chat-history__media-caption {
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: rgba(15, 20, 25, 0.06);
+    color: #0F1419;
+    font-size: 13px;
+    line-height: 1.45;
+    max-width: 280px;
+    word-break: break-word;
+}
+
+.tg-message-bubble.is-out .chat-history__media-caption {
+    background: rgba(29, 155, 240, 0.12);
+}
+
+/* 回到底部 / 未读新消息悬浮胶囊 */
+.chat-history__scroll-bottom {
+    position: absolute;
+    right: 20px;
+    bottom: 16px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 13px;
+    border-radius: 9999px;
+    border: 1px solid #E2E8F0;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    color: #0F1419;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(15, 20, 25, 0.12);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-history__scroll-bottom:hover {
+    transform: translateY(-1px);
+    border-color: #CBD5E1;
+    box-shadow: 0 6px 18px rgba(15, 20, 25, 0.16);
+}
+
+.chat-history__scroll-bottom.has-unread {
+    border-color: #BFDBFE;
+    background: #EFF6FF;
+    color: #1D4ED8;
+}
+
+.chat-history__scroll-bottom-badge {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9999px;
+    background: #2563EB;
+    color: #FFFFFF;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }

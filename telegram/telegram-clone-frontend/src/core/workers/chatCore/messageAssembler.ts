@@ -34,6 +34,7 @@ export interface RawSyncMessage {
   status?: string;
   readCount?: number;
   attachments?: unknown[];
+  replyTo?: string;
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
@@ -133,6 +134,7 @@ export function normalizeSyncMessage(raw: RawSyncMessage): Message | null {
     isGroupChat: chatType === 'group',
     status: (raw.status || 'delivered') as Message['status'],
     readCount: typeof raw.readCount === 'number' ? raw.readCount : undefined,
+    replyTo: typeof raw.replyTo === 'string' && raw.replyTo ? raw.replyTo : undefined,
     attachments: Array.isArray(raw.attachments) ? raw.attachments : undefined,
     fileUrl: raw.fileUrl || undefined,
     fileName: raw.fileName || undefined,

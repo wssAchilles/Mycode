@@ -22,7 +22,7 @@ function formatHourMinute(date: Date): string {
   return `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
 }
 
-function isSameCalendarDay(a: Date, b: Date): boolean {
+export function isSameCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
@@ -112,4 +112,40 @@ export function formatMessageTimestamp(
   }
 
   return `${formatAbsoluteDate(date, now)} ${timePart}`;
+}
+
+/**
+ * 聊天消息流居中日期分隔条文案
+ * - 今天 -> 「今天」
+ * - 昨天 -> 「昨天」
+ * - 本周内更早几天 -> 「周X」
+ * - 非本周同年 -> 「M月D日」
+ * - 跨年 -> 「YYYY年M月D日」
+ */
+export function formatChatDateDivider(
+  timestamp: string | number | Date | undefined,
+  now = new Date(),
+): string {
+  const date = toValidDate(timestamp);
+  if (!date) return '';
+
+  if (isSameCalendarDay(date, now)) {
+    return '今天';
+  }
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameCalendarDay(date, yesterday)) {
+    return '昨天';
+  }
+
+  if (isWithinCurrentWeek(date, now)) {
+    return WEEKDAY_LABELS[date.getDay()];
+  }
+
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${month}月${day}日`;
+  }
+  return `${date.getFullYear()}年${month}月${day}日`;
 }

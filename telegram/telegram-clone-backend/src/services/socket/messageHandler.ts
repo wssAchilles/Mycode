@@ -90,6 +90,7 @@ export class MessageHandler {
         fileSize: attachments?.[0]?.fileSize || data.fileSize,
         mimeType: attachments?.[0]?.mimeType || data.mimeType,
         thumbnailUrl: attachments?.[0]?.thumbnailUrl || data.thumbnailUrl,
+        replyTo: typeof data?.replyTo === 'string' && data.replyTo.trim() ? data.replyTo.trim() : undefined,
         clientTempId: this.getClientTempId(data),
       });
 

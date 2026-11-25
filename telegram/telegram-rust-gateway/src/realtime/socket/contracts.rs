@@ -31,6 +31,7 @@ pub struct SendMessagePayload {
     pub file_size: Option<u64>,
     pub mime_type: Option<String>,
     pub thumbnail_url: Option<String>,
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

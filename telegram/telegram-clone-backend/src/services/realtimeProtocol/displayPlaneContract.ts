@@ -127,6 +127,7 @@ export function translateDisplayEnvelopeToCompatMessage(payload: unknown): unkno
     receiverId: payload.displayEnvelope.receiverId,
     timestamp: payload.createdAt,
     type: payload.displayEnvelope.type || 'text',
+    replyTo: payload.displayEnvelope.replyToMessageId,
     isGroupChat: payload.displayEnvelope.serviceFlags?.isGroupChat ?? payload.chatType === 'group',
     status: payload.displayEnvelope.status || payload.displayEnvelope.serviceFlags?.status || 'delivered',
     attachments: payload.displayEnvelope.attachments,

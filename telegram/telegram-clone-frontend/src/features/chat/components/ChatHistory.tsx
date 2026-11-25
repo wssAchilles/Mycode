@@ -1,14 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { MessageBubble, ProgressiveImage } from '../../../components/common';
+import { ArrowDown } from 'lucide-react';
 import type { Message } from '../../../types/chat';
-import { formatMessageTimestamp } from '../../../utils/dateTime';
+import { isSameCalendarDay } from '../../../utils/dateTime';
 import { useMessageStore } from '../store/messageStore';
 import { useChatStore } from '../store/chatStore';
+import { ChatImageLightbox } from './media/ChatImageLightbox';
+import { MessageActionMenu } from './history/MessageActionMenu';
+import {
+  MessageBubbleRow,
+  type HighlightConfig,
+  type ImagePreviewPayload,
+  type SenderMeta,
+} from './history/MessageBubbleRow';
 import './ChatHistory.css';
 
-type HighlightConfig = { termLower: string; regex: RegExp } | null;
-type SenderMeta = { senderName?: string; senderAvatarUrl?: string };
 type EmptyStateKind = 'loading' | 'empty' | 'error';
 const EMPTY_GROUP_MEMBERS: readonly [] = [];
 
@@ -32,15 +38,29 @@ interface ChatHistoryProps {
   onMessageSelect?: (message: Message) => void;
   onVisibleRangeChange?: (start: number, end: number) => void;
   disableAutoScroll?: boolean;
+  onReplyMessage?: (message: Message) => void;
+  onEditMessage?: (message: Message) => void;
+  onDeleteMessage?: (message: Message) => void;
+  onRetryMessage?: (message: Message) => void;
 }
 
 interface StoreMessageBubbleProps {
   messageId: string;
+  prevMessageId?: string | null;
   currentUserId: string;
   highlightConfig: HighlightConfig;
   highlightSeq?: number;
+  isFlashed?: boolean;
   showGroupSenderMeta: boolean;
   resolveSenderMeta: (msg: Message) => SenderMeta;
+  resolveReplyTarget: (replyToId: string) => Message | undefined;
+  onJumpToMessage: (messageId: string) => void;
+  onPreviewImage: (payload: ImagePreviewPayload) => void;
+  onCopyMessage: (msg: Message) => void;
+  onReplyMessage?: (msg: Message) => void;
+  onRetryMessage?: (msg: Message) => void;
+  onOpenContextMenu: (msg: Message, isOut: boolean, x: number, y: number) => void;
+  enableActions: boolean;
 }
 
 const OVERSCAN_IDLE = 6;
@@ -51,70 +71,48 @@ const VISIBLE_RANGE_FLUSH_INTERVAL_MS = 42;
 
 const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   messageId,
+  prevMessageId,
   currentUserId,
   highlightConfig,
   highlightSeq,
+  isFlashed,
   showGroupSenderMeta,
   resolveSenderMeta,
+  resolveReplyTarget,
+  onJumpToMessage,
+  onPreviewImage,
+  onCopyMessage,
+  onReplyMessage,
+  onRetryMessage,
+  onOpenContextMenu,
+  enableActions,
 }) => {
   const msg = useMessageStore(useCallback((state) => state.entities.get(messageId), [messageId]));
+  const prevMsg = useMessageStore(
+    useCallback((state) => (prevMessageId ? state.entities.get(prevMessageId) : undefined), [prevMessageId]),
+  );
   if (!msg) return <div className="chat-history__placeholder" aria-hidden="true" />;
 
-  const isOut = msg.userId === currentUserId || msg.senderId === currentUserId;
-  const attachment = msg.attachments?.[0];
-  const fileUrl = msg.fileUrl || attachment?.fileUrl;
-  const isMedia = msg.type === 'image' && !!fileUrl;
-  const withTail = true;
-  const isHighlighted = typeof highlightSeq === 'number' && msg.seq === highlightSeq;
-
-  const renderContent = () => {
-    if (isMedia) {
-      return (
-        <ProgressiveImage
-          src={fileUrl || ''}
-          thumbnailSrc={msg.thumbnailUrl || attachment?.thumbnailUrl}
-          alt="图片"
-          className="chat-history__media"
-        />
-      );
-    }
-    if (!highlightConfig || !msg.content) return msg.content;
-    return msg.content.split(highlightConfig.regex).map((part, index) => {
-      const isMatch = part.toLowerCase() === highlightConfig.termLower;
-      return isMatch ? (
-        <mark key={`${msg.id}-mark-${index}`} className="tg-highlight">
-          {part}
-        </mark>
-      ) : (
-        <span key={`${msg.id}-text-${index}`}>{part}</span>
-      );
-    });
-  };
-
-  const time = formatMessageTimestamp(msg.timestamp);
-
-  const senderMeta = showGroupSenderMeta && !isOut ? resolveSenderMeta(msg) : {};
-
   return (
-    <MessageBubble
-      isOut={isOut}
-      time={time}
-      isEdited={Boolean(msg.editedAt)}
-      status={msg.status}
-      isRead={msg.status === 'read'}
-      isSent={msg.status !== 'failed' && msg.status !== 'pending'}
-      isFailed={msg.status === 'failed'}
-      readCount={msg.readCount}
-      withTail={withTail}
-      isMedia={isMedia}
-      showSenderMeta={showGroupSenderMeta && !isOut}
-      senderName={senderMeta.senderName}
-      senderAvatarUrl={senderMeta.senderAvatarUrl}
-      attentionKey={isHighlighted ? `${highlightSeq}-${highlightConfig?.termLower ?? ''}` : undefined}
-      className={isHighlighted ? 'is-highlighted' : ''}
-    >
-      {renderContent()}
-    </MessageBubble>
+    <MessageBubbleRow
+      message={msg}
+      previousMessage={prevMsg}
+      currentUserId={currentUserId}
+      useProgressiveImage
+      highlightConfig={highlightConfig}
+      highlightSeq={highlightSeq}
+      isFlashed={isFlashed}
+      showGroupSenderMeta={showGroupSenderMeta}
+      resolveSenderMeta={resolveSenderMeta}
+      resolveReplyTarget={resolveReplyTarget}
+      onJumpToMessage={onJumpToMessage}
+      onPreviewImage={onPreviewImage}
+      onCopyMessage={onCopyMessage}
+      onReplyMessage={onReplyMessage}
+      onRetryMessage={onRetryMessage}
+      onOpenContextMenu={onOpenContextMenu}
+      enableActions={enableActions}
+    />
   );
 };
 
@@ -133,6 +131,10 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   onMessageSelect,
   onVisibleRangeChange,
   disableAutoScroll = false,
+  onReplyMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onRetryMessage,
 }) => {
   const isStoreMode = Array.isArray(messageIds);
   const count = isStoreMode ? (messageIds?.length ?? 0) : (messages?.length ?? 0);
@@ -161,6 +163,25 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   latestCountRef.current = count;
   const scrollRafRef = useRef<number | null>(null);
   const loadMoreAnchorRafRef = useRef<number | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [lightboxMedia, setLightboxMedia] = useState<ImagePreviewPayload | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    message: Message;
+    isOut: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+  const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+  const [copiedNotice, setCopiedNotice] = useState(false);
+
+  const enableActions = Boolean(
+    !onMessageSelect
+    && (onReplyMessage || onEditMessage || onDeleteMessage || onRetryMessage),
+  );
 
   const groupMemberByUserId = useMemo(() => {
     const map = new Map<string, { username?: string; avatarUrl?: string }>();
@@ -218,20 +239,38 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   const estimateSize = useCallback(
     (index: number) => {
-      const msg = isStoreMode
-        ? (() => {
-            const id = messageIds?.[index];
-            if (!id) return undefined;
-            return useMessageStore.getState().entities.get(id);
-          })()
-        : messages?.[index];
+      const getAt = (idx: number) => {
+        if (idx < 0) return undefined;
+        if (isStoreMode) {
+          const id = messageIds?.[idx];
+          return id ? useMessageStore.getState().entities.get(id) : undefined;
+        }
+        return messages?.[idx];
+      };
 
+      const msg = getAt(index);
       if (!msg) return 72;
+
       let height = 64;
       const len = msg.content?.length ?? 0;
       if (len > 0) height += Math.min(Math.ceil(len / 36) * 18, 220);
       if (msg.type === 'image') height += 200;
-      if (msg.type === 'document' || msg.type === 'video' || msg.type === 'audio') height += 80;
+      if (msg.type === 'document' || msg.type === 'file' || msg.type === 'video' || msg.type === 'audio') {
+        height += 80;
+      }
+      if (msg.replyTo) height += 44;
+
+      const prevMsg = index > 0 ? getAt(index - 1) : undefined;
+      const curDate = msg.timestamp ? new Date(msg.timestamp) : null;
+      const prevDate = prevMsg?.timestamp ? new Date(prevMsg.timestamp) : null;
+      if (
+        curDate
+        && Number.isFinite(curDate.getTime())
+        && (!prevDate || !Number.isFinite(prevDate.getTime()) || !isSameCalendarDay(curDate, prevDate))
+      ) {
+        height += 32;
+      }
+
       return height;
     },
     [isStoreMode, messageIds, messages],
@@ -369,8 +408,71 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     [cancelPendingScrollToIndex],
   );
 
+  const resolveReplyTarget = useCallback(
+    (replyToId: string): Message | undefined => {
+      if (!replyToId) return undefined;
+      if (isStoreMode) {
+        return useMessageStore.getState().entities.get(replyToId);
+      }
+      return messages?.find((item) => item.id === replyToId);
+    },
+    [isStoreMode, messages],
+  );
+
+  const handleJumpToMessage = useCallback(
+    (targetId: string) => {
+      if (!targetId || count <= 0) return;
+      const idx = isStoreMode
+        ? (messageIds || []).indexOf(targetId)
+        : (messages || []).findIndex((item) => item.id === targetId);
+      if (idx < 0 || idx >= count) return;
+
+      safeScrollToIndex(idx, { align: 'center', behavior: 'smooth' });
+      setFlashMessageId(targetId);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => {
+        setFlashMessageId(null);
+        flashTimerRef.current = null;
+      }, 1600);
+    },
+    [count, isStoreMode, messageIds, messages, safeScrollToIndex],
+  );
+
+  const handleCopyMessage = useCallback((msg: Message) => {
+    const text = msg.content?.trim();
+    if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedNotice(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
+        setCopiedNotice(false);
+        copyTimerRef.current = null;
+      }, 1500);
+    }).catch(() => undefined);
+  }, []);
+
+  const handleOpenContextMenu = useCallback((msg: Message, isOut: boolean, x: number, y: number) => {
+    if (typeof window === 'undefined') {
+      setContextMenu({ message: msg, isOut, x, y });
+      return;
+    }
+    const clampedX = Math.max(12, Math.min(x, window.innerWidth - 180));
+    const clampedY = Math.max(12, Math.min(y, window.innerHeight - 220));
+    setContextMenu({ message: msg, isOut, x: clampedX, y: clampedY });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+
   const scrollToBottom = useCallback(() => {
     if (count <= 0) return;
+    setUnreadBelowCount(0);
+    setShowScrollBottom(false);
     safeScrollToIndex(count - 1, { align: 'end', behavior: 'auto' });
   }, [count, safeScrollToIndex]);
 
@@ -430,11 +532,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     });
   }, [count, isStoreMode, listVersion, messageIds, messages, virtualizer]);
 
-  // Auto-scroll only when the user is already at (or near) bottom.
+  // 仅在已在底部附近时自动滚底，否则统计底部未读新消息数
   useEffect(() => {
     if (disableAutoScroll) return;
     if (!count) {
       prevLastMessageIdRef.current = null;
+      setUnreadBelowCount(0);
+      setShowScrollBottom(false);
       return;
     }
 
@@ -447,8 +551,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       return;
     }
 
-    if (lastId && lastId !== prevLastId && isAtBottomRef.current) {
-      scrollToBottom();
+    if (lastId && lastId !== prevLastId) {
+      if (isAtBottomRef.current) {
+        scrollToBottom();
+      } else {
+        setUnreadBelowCount((prev) => prev + 1);
+        setShowScrollBottom(true);
+      }
     }
   }, [count, listVersion, isStoreMode, messageIds, messages, disableAutoScroll, scrollToBottom]);
 
@@ -491,9 +600,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       }
 
       const { scrollHeight, clientHeight } = el;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-      // Bottom detection (Telegram-style: only autoscroll if already at bottom).
-      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 120;
+      // 底部距离判定：接近底部时允许自动滚底并清零悬浮未读角标
+      isAtBottomRef.current = distanceFromBottom < 120;
+      if (distanceFromBottom > 220) {
+        setShowScrollBottom(true);
+      } else if (distanceFromBottom < 140) {
+        setShowScrollBottom(false);
+        setUnreadBelowCount(0);
+      }
 
       // Top trigger to load older messages.
       if (scrollTop < 80 && hasMore && !isLoading && onLoadMore && !loadMoreLockRef.current) {
@@ -574,42 +690,95 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   })();
 
   return (
-    <div
-      ref={containerRef}
-      className={`chat-history ${isEmpty ? 'chat-history--empty' : ''}`}
-      onScroll={handleScroll}
-    >
-      {showLoadingOverlay && <div className="chat-history__loading chat-history__loading--overlay">加载中...</div>}
+    <div className="chat-history__viewport">
+      <div
+        ref={containerRef}
+        className={`chat-history ${isEmpty ? 'chat-history--empty' : ''}`}
+        onScroll={handleScroll}
+      >
+        {showLoadingOverlay && <div className="chat-history__loading chat-history__loading--overlay">加载中...</div>}
 
-      {isEmpty ? (
-        <div
-          className={`chat-history__empty-state chat-history__empty-state--${emptyStateKind}`}
-          role={emptyStateKind === 'error' ? 'alert' : 'status'}
-        >
-          <div className="chat-history__empty-title">{emptyStateCopy.title}</div>
-          <div className="chat-history__empty-description">{emptyStateCopy.description}</div>
-        </div>
-      ) : (
-        <div
-          className="chat-history__inner"
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          {virtualItems.map((virtualRow) => {
-            if (isStoreMode) {
-              const id = messageIds?.[virtualRow.index];
-              if (!id) return null;
-              const seq = useMessageStore.getState().entities.get(id)?.seq;
+        {isEmpty ? (
+          <div
+            className={`chat-history__empty-state chat-history__empty-state--${emptyStateKind}`}
+            role={emptyStateKind === 'error' ? 'alert' : 'status'}
+          >
+            <div className="chat-history__empty-title">{emptyStateCopy.title}</div>
+            <div className="chat-history__empty-description">{emptyStateCopy.description}</div>
+          </div>
+        ) : (
+          <div
+            className="chat-history__inner"
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {virtualItems.map((virtualRow) => {
+              if (isStoreMode) {
+                const id = messageIds?.[virtualRow.index];
+                if (!id) return null;
+                const prevId = virtualRow.index > 0 ? messageIds?.[virtualRow.index - 1] ?? null : null;
+                const seq = useMessageStore.getState().entities.get(id)?.seq;
+
+                return (
+                  <div
+                    key={virtualRow.key}
+                    className="chat-history__item"
+                    data-index={virtualRow.index}
+                    data-seq={seq}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    ref={virtualizer.measureElement}
+                  >
+                    <StoreMessageBubble
+                      messageId={id}
+                      prevMessageId={prevId}
+                      currentUserId={currentUserId}
+                      highlightConfig={highlightConfig}
+                      highlightSeq={highlightSeq}
+                      isFlashed={flashMessageId === id}
+                      showGroupSenderMeta={isGroupChatMode}
+                      resolveSenderMeta={resolveSenderMeta}
+                      resolveReplyTarget={resolveReplyTarget}
+                      onJumpToMessage={handleJumpToMessage}
+                      onPreviewImage={setLightboxMedia}
+                      onCopyMessage={handleCopyMessage}
+                      onReplyMessage={onReplyMessage}
+                      onRetryMessage={onRetryMessage}
+                      onOpenContextMenu={handleOpenContextMenu}
+                      enableActions={enableActions}
+                    />
+                  </div>
+                );
+              }
+
+              const msg = messages?.[virtualRow.index];
+              if (!msg) return null;
+              const prevMsg = virtualRow.index > 0 ? messages?.[virtualRow.index - 1] ?? null : null;
 
               return (
                 <div
                   key={virtualRow.key}
-                  className="chat-history__item"
+                  className={`chat-history__item ${onMessageSelect ? 'is-clickable' : ''}`}
                   data-index={virtualRow.index}
-                  data-seq={seq}
+                  data-seq={msg.seq}
+                  role={onMessageSelect ? 'button' : undefined}
+                  tabIndex={onMessageSelect ? 0 : -1}
+                  onClick={() => onMessageSelect?.(msg)}
+                  onKeyDown={(event) => {
+                    if (!onMessageSelect) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onMessageSelect(msg);
+                    }
+                  }}
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -619,103 +788,73 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                   }}
                   ref={virtualizer.measureElement}
                 >
-                  <StoreMessageBubble
-                    messageId={id}
+                  <MessageBubbleRow
+                    message={msg}
+                    previousMessage={prevMsg}
                     currentUserId={currentUserId}
                     highlightConfig={highlightConfig}
                     highlightSeq={highlightSeq}
+                    isFlashed={flashMessageId === msg.id}
                     showGroupSenderMeta={isGroupChatMode}
                     resolveSenderMeta={resolveSenderMeta}
+                    resolveReplyTarget={resolveReplyTarget}
+                    onJumpToMessage={handleJumpToMessage}
+                    onPreviewImage={setLightboxMedia}
+                    onCopyMessage={handleCopyMessage}
+                    onReplyMessage={onReplyMessage}
+                    onRetryMessage={onRetryMessage}
+                    onOpenContextMenu={handleOpenContextMenu}
+                    enableActions={enableActions}
                   />
                 </div>
               );
-            }
+            })}
+          </div>
+        )}
+      </div>
 
-            const msg = messages?.[virtualRow.index];
-            if (!msg) return null;
+      {!isEmpty && (showScrollBottom || unreadBelowCount > 0) && (
+        <button
+          type="button"
+          className={`chat-history__scroll-bottom ${unreadBelowCount > 0 ? 'has-unread' : ''}`}
+          onClick={scrollToBottom}
+          aria-label={unreadBelowCount > 0 ? `查看底部 ${unreadBelowCount} 条新消息` : '回到底部'}
+        >
+          <ArrowDown size={15} />
+          <span>{unreadBelowCount > 0 ? `${unreadBelowCount} 条新消息` : '回到底部'}</span>
+          {unreadBelowCount > 0 && (
+            <span className="chat-history__scroll-bottom-badge" aria-hidden="true">
+              {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
+            </span>
+          )}
+        </button>
+      )}
 
-            const isOut = msg.userId === currentUserId || msg.senderId === currentUserId;
-            const attachment = msg.attachments?.[0];
-            const fileUrl = msg.fileUrl || attachment?.fileUrl;
-            const isMedia = msg.type === 'image' && !!fileUrl;
-            const withTail = true;
-            const isHighlighted = typeof highlightSeq === 'number' && msg.seq === highlightSeq;
-
-            const renderContent = () => {
-              if (isMedia) {
-                return (
-                  <img
-                    src={fileUrl || ''}
-                    alt="图片"
-                    className="chat-history__media"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                );
-              }
-              if (!highlightConfig || !msg.content) return msg.content;
-              return msg.content.split(highlightConfig.regex).map((part, index) => {
-                const isMatch = part.toLowerCase() === highlightConfig.termLower;
-                return isMatch ? (
-                  <mark key={`${msg.id}-mark-${index}`} className="tg-highlight">
-                    {part}
-                  </mark>
-                ) : (
-                  <span key={`${msg.id}-text-${index}`}>{part}</span>
-                );
-              });
-            };
-
-            const time = formatMessageTimestamp(msg.timestamp);
-
-            const senderMeta = isGroupChatMode && !isOut ? resolveSenderMeta(msg) : {};
-
-            return (
-              <div
-                key={virtualRow.key}
-                className={`chat-history__item ${onMessageSelect ? 'is-clickable' : ''}`}
-                data-index={virtualRow.index}
-                data-seq={msg.seq}
-                role={onMessageSelect ? 'button' : undefined}
-                tabIndex={onMessageSelect ? 0 : -1}
-                onClick={() => onMessageSelect?.(msg)}
-                onKeyDown={(event) => {
-                  if (!onMessageSelect) return;
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onMessageSelect(msg);
-                  }
-                }}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-                ref={virtualizer.measureElement}
-              >
-                <MessageBubble
-                  isOut={isOut}
-                  time={time}
-                  isEdited={Boolean(msg.editedAt)}
-                  isRead={msg.status === 'read'}
-                  isSent={msg.status !== 'failed' && msg.status !== 'pending'}
-                  readCount={msg.readCount}
-                  withTail={withTail}
-                  isMedia={isMedia}
-                  showSenderMeta={isGroupChatMode && !isOut}
-                  senderName={senderMeta.senderName}
-                  senderAvatarUrl={senderMeta.senderAvatarUrl}
-                  attentionKey={isHighlighted ? `${highlightSeq}-${highlightConfig?.termLower ?? ''}` : undefined}
-                  className={isHighlighted ? 'is-highlighted' : ''}
-                >
-                  {renderContent()}
-                </MessageBubble>
-              </div>
-            );
-          })}
+      {copiedNotice && (
+        <div className="chat-history__loading chat-history__loading--overlay" role="status">
+          已复制消息文字
         </div>
+      )}
+
+      <ChatImageLightbox
+        src={lightboxMedia?.src ?? null}
+        fileName={lightboxMedia?.fileName}
+        onClose={() => setLightboxMedia(null)}
+      />
+
+      {contextMenu && (
+        <MessageActionMenu
+          message={contextMenu.message}
+          isOut={contextMenu.isOut}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onCopy={handleCopyMessage}
+          onReply={(target) => onReplyMessage?.(target)}
+          onEdit={(target) => onEditMessage?.(target)}
+          onDelete={(target) => onDeleteMessage?.(target)}
+          onRetry={(target) => onRetryMessage?.(target)}
+        />
       )}
     </div>
   );

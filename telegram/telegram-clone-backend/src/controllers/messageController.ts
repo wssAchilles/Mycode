@@ -106,6 +106,8 @@ const formatMessage = (msg: any, userMap: Map<string, string>) => {
     readCount: typeof msg.readCount === 'number' && chatType === 'group' ? msg.readCount : undefined,
     isGroupChat: chatType === 'group',
     attachments: buildAttachments(msg),
+    replyTo: msg.replyTo ? String(msg.replyTo) : undefined,
+    editedAt: msg.editedAt || undefined,
     fileUrl: msg.fileUrl || null,
     fileName: msg.fileName || null,
     fileSize: msg.fileSize || null,
@@ -578,6 +580,7 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     fileSize,
     mimeType,
     thumbnailUrl,
+    replyTo,
     clientTempId
   } = req.body;
   const senderId = req.user?.id;
@@ -633,6 +636,7 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     fileSize,
     mimeType,
     thumbnailUrl,
+    replyTo: typeof replyTo === 'string' && replyTo.trim() ? replyTo.trim() : undefined,
     clientTempId,
     ...(prefetchedGroupMeta ? { prefetchedGroupMeta } : {}),
   });

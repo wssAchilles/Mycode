@@ -338,6 +338,7 @@ fn build_send_message_body(payload: &SendMessagePayload) -> Value {
     insert_optional_string(&mut body, "fileName", &payload.file_name);
     insert_optional_string(&mut body, "mimeType", &payload.mime_type);
     insert_optional_string(&mut body, "thumbnailUrl", &payload.thumbnail_url);
+    insert_optional_string(&mut body, "replyTo", &payload.reply_to);
     if let Some(file_size) = payload.file_size {
         body.insert("fileSize".to_string(), Value::from(file_size));
     }
@@ -417,6 +418,7 @@ mod tests {
             file_size: None,
             mime_type: None,
             thumbnail_url: None,
+            reply_to: None,
         };
 
         assert_eq!(

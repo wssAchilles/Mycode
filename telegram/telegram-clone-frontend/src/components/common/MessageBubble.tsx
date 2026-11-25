@@ -4,6 +4,12 @@ import { resolveMediaCrossOrigin, withApiBase } from '../../utils/apiUrl';
 import { isAvatarUrlLoaded, markAvatarUrlLoaded, resolveAvatarUrl } from '../../utils/media';
 import './MessageBubble.css';
 
+export interface MessageReplyPreview {
+    senderName: string;
+    text: string;
+    onClick?: () => void;
+}
+
 export interface MessageBubbleProps {
     isOut?: boolean; // 是否为我方发出消息
     children: React.ReactNode;
@@ -15,12 +21,13 @@ export interface MessageBubbleProps {
     isFailed?: boolean; // 发送失败告警态
     withTail?: boolean; // 是否显示气泡尾角
     className?: string;
-    isMedia?: boolean; // [NEW] Is this a media/image bubble?
+    isMedia?: boolean; // 是否为媒体/图片气泡
     readCount?: number; // 群聊已读人数
     showSenderMeta?: boolean; // 群聊中显示发言人信息（仅接收方）
     senderName?: string;
     senderAvatarUrl?: string;
     attentionKey?: string | number;
+    replyPreview?: MessageReplyPreview; // 引用消息预览条
 }
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -40,6 +47,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     senderName,
     senderAvatarUrl,
     attentionKey,
+    replyPreview,
 }) => {
     const resolvedStatus: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' = isFailed || status === 'failed'
         ? 'failed'
@@ -136,6 +144,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <div className="tg-message-content">
                     {showIncomingMeta && senderName && (
                         <div className="tg-message-sender">{senderName}</div>
+                    )}
+                    {replyPreview && (
+                        <button
+                            type="button"
+                            className="tg-message-reply"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                replyPreview.onClick?.();
+                            }}
+                            title="点击定位到被引用消息"
+                        >
+                            <span className="tg-message-reply__sender">{replyPreview.senderName}</span>
+                            <span className="tg-message-reply__text">{replyPreview.text}</span>
+                        </button>
                     )}
                     {children}
 
