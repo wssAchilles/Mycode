@@ -622,7 +622,7 @@
   z-index: 20;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .chat-container--mobile-sidebar .chat-sidebar {
     width: 100% !important;
     min-width: 0 !important;

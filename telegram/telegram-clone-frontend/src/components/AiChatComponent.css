@@ -23,7 +23,7 @@
     border-right: 1px solid #EFF3F4;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
     .ai-conversation-sidebar {
         width: 100%;
         min-width: 0;

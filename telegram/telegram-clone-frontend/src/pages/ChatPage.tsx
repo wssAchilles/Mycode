@@ -39,7 +39,7 @@ const GroupDetailPanel = lazy(() => import('./chat/GroupDetailPanel'));
 
 import './ChatPage.css';
 
-const MOBILE_BREAKPOINT = 900;
+const MOBILE_BREAKPOINT = 768;
 const BOOT_PREFETCH_CHAT_COUNT = 6;
 const BOOT_PREFETCH_PRIORITY_COUNT = 2;
 
@@ -145,7 +145,12 @@ const ChatPage: React.FC = () => {
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
   );
   const [mobilePane, setMobilePane] = useState<'sidebar' | 'chat'>('sidebar');
-  const lastMobileTargetRef = useRef<string | null>(null);
+  // 挂载时若未携带显式私聊参数，记录全局 Store 残留的既有会话 ID，避免窄屏回到 /chat 时被强行切入旧会话详情
+  const lastMobileTargetRef = useRef<string | null>(
+    searchParams.get('dm')
+      ? null
+      : (selectedGroup?.id || selectedContact?.userId || selectedChatId || null)
+  );
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
