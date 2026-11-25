@@ -460,7 +460,8 @@ export async function persistSyntheticCohort(input: {
           quoteContent: p.quoteContent,
           isReply: false,
           keywords: p.keywords,
-          language: p.language,
+          // MongoDB posts text index 默认按 language 字段分词且不支持 zh，统一落库为 'en'，语义特征快照保留原始语种
+          language: 'en',
           isNsfw: false,
           isPinned: false,
           engagementScore: stats.engagementScore,

@@ -31,8 +31,10 @@ function buildPostText(
   const body = rng.pick(config.postBodies);
   const outcome = rng.pick(config.postOutcomes);
 
-  const extraTag = rng.pick(config.keywords);
-  const content = `${hook}\n\n${body}。${outcome} #${cluster} #${extraTag}`;
+  const tagCandidates = config.keywords.filter((kw) => kw !== cluster);
+  const extraTag = tagCandidates.length > 0 ? rng.pick(tagCandidates) : rng.pick(config.keywords);
+  const hashtagLine = extraTag === cluster ? `#${cluster}` : `#${cluster} #${extraTag}`;
+  const content = `${hook}\n\n${body}。${outcome} ${hashtagLine}`;
   const isEnglish = /^[A-Za-z0-9\s,'"’—.-]+/.test(hook) && !/[\u4e00-\u9fff]/.test(hook);
   const keywords = Array.from(
     new Set([
