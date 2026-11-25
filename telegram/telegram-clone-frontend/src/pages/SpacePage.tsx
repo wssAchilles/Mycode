@@ -84,13 +84,6 @@ export const SpacePage: React.FC = () => {
         }
     }, [location.search]);
 
-    // 停留在通知面板时自动清空未读通知徽章
-    useEffect(() => {
-        if (activeSection === 'notifications' && unreadNotificationsCount > 0) {
-            clearUnreadNotifications();
-        }
-    }, [activeSection, unreadNotificationsCount, clearUnreadNotifications]);
-
     useEffect(() => {
         asideWidthRef.current = asideWidth;
     }, [asideWidth]);
@@ -133,6 +126,13 @@ export const SpacePage: React.FC = () => {
         () => chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0) + pendingRequestsCount,
         [chats, pendingRequestsCount],
     );
+
+    // 停留在通知面板时自动清空未读通知徽章（须在 store selector 声明之后执行以避免 TDZ）
+    useEffect(() => {
+        if (activeSection === 'notifications' && unreadNotificationsCount > 0) {
+            clearUnreadNotifications();
+        }
+    }, [activeSection, unreadNotificationsCount, clearUnreadNotifications]);
 
     // 获取当前用户
     const currentUser = authUtils.getCurrentUser();
