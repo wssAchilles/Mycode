@@ -1,6 +1,14 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MessageCircle, SendHorizontal, X } from 'lucide-react';
 import { spaceAPI, type CommentData } from '../../services/spaceApi';
+import { authUtils } from '../../services/apiClient';
 import type { PostData } from './SpacePost';
+import {
+    COMMENT_MAX_LENGTH,
+    formatCommentTime,
+    formatFullCommentTime,
+} from './utils/formatCommentTime';
+import { showToast } from '../ui/Toast';
 import {
     createTimeline,
     limitedMotionItems,
@@ -32,10 +40,13 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     const [hasMore, setHasMore] = useState(true);
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [isComposerFocused, setIsComposerFocused] = useState(false);
     const [renderedPost, setRenderedPost] = useState<PostData | null>(post);
     const panelRef = useRef<HTMLElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const returnFocusRef = useRef<HTMLElement | null>(null);
+    const isComposingRef = useRef(false);
+    const currentUser = useMemo(() => authUtils.getCurrentUser(), []);
     const { isPresent, isExiting, finishExit } = useMotionPresence(open, motionDurations.normal);
 
     const postId = post?.id;
@@ -235,30 +246,54 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
         return () => window.removeEventListener('keydown', handleKeydown);
     }, [open, onClose]);
 
-    const handleSubmit = async (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!postId || !draft.trim()) return;
+    const submitComment = useCallback(async () => {
+        if (!postId || !draft.trim() || submitting) return;
         setSubmitting(true);
         try {
             const created = await spaceAPI.createComment(postId, draft.trim());
             setComments((prev) => [created, ...prev]);
+            setRenderedPost((prev) =>
+                prev ? { ...prev, commentCount: prev.commentCount + 1 } : prev,
+            );
             setDraft('');
             onCommentAdded?.(postId);
         } catch (error) {
             console.error('发送评论失败:', error);
+            showToast('评论失败，请稍后再试', 'error');
         } finally {
             setSubmitting(false);
+        }
+    }, [draft, onCommentAdded, postId, submitting]);
+
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        await submitComment();
+    };
+
+    const handleTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (isComposingRef.current || event.nativeEvent.isComposing) {
+            return;
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault();
+            void submitComment();
         }
     };
 
     const shortContent = useMemo(() => {
         if (!renderedPost) return '';
-        return renderedPost.content.length > 120
-            ? `${renderedPost.content.slice(0, 120)}...`
+        return renderedPost.content.length > 140
+            ? `${renderedPost.content.slice(0, 140)}...`
             : renderedPost.content;
     }, [renderedPost]);
 
     if (!isPresent || !renderedPost) return null;
+
+    const totalComments = Math.max(renderedPost.commentCount, comments.length);
+    const postAuthorInitial = renderedPost.author.username.charAt(0).toUpperCase();
+    const currentUserInitial = (currentUser?.username?.trim().charAt(0) || '我').toUpperCase();
+    const isNearLimit = draft.length >= Math.floor(COMMENT_MAX_LENGTH * 0.9);
+    const isAtLimit = draft.length >= COMMENT_MAX_LENGTH;
 
     return (
         <div ref={drawerMotion.rootRef} className="space-comment-drawer">
@@ -272,75 +307,207 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
                 tabIndex={-1}
             >
                 <header className="space-comment-drawer__header">
-                    <div>
-                        <div id="space-comment-drawer-title" className="space-comment-drawer__title">评论</div>
-                        <div className="space-comment-drawer__subtitle">{renderedPost.author.username}</div>
+                    <div className="space-comment-drawer__header-info">
+                        <div className="space-comment-drawer__title-row">
+                            <h2 id="space-comment-drawer-title" className="space-comment-drawer__title">
+                                评论
+                            </h2>
+                            <span className="space-comment-drawer__count">{totalComments}</span>
+                        </div>
+                        <div className="space-comment-drawer__subtitle">
+                            回复 @{renderedPost.author.username}
+                        </div>
                     </div>
-                    <button className="space-comment-drawer__close" onClick={onClose} aria-label="关闭评论">
-                        ×
+                    <button
+                        type="button"
+                        className="space-comment-drawer__close"
+                        onClick={onClose}
+                        aria-label="关闭评论"
+                    >
+                        <X size={18} aria-hidden="true" />
                     </button>
                 </header>
 
                 <div className="space-comment-drawer__post">
-                    <div className="space-comment-drawer__post-author">@{renderedPost.author.username}</div>
-                    <div className="space-comment-drawer__post-content">{shortContent}</div>
+                    <div className="space-comment-drawer__post-rail" aria-hidden="true">
+                        <div className="space-comment-drawer__post-avatar">
+                            {renderedPost.author.avatarUrl ? (
+                                <img
+                                    src={renderedPost.author.avatarUrl}
+                                    alt={renderedPost.author.username}
+                                />
+                            ) : (
+                                <span>{postAuthorInitial}</span>
+                            )}
+                        </div>
+                        <span className="space-comment-drawer__thread-line" />
+                    </div>
+                    <div className="space-comment-drawer__post-main">
+                        <div className="space-comment-drawer__post-author-row">
+                            <span className="space-comment-drawer__post-name">
+                                {renderedPost.author.username}
+                            </span>
+                            <span className="space-comment-drawer__post-author">
+                                @{renderedPost.author.username}
+                            </span>
+                        </div>
+                        <div className="space-comment-drawer__post-content">{shortContent}</div>
+                    </div>
                 </div>
 
                 <div className="space-comment-drawer__list">
                     {loading && comments.length === 0 && (
-                        <div className="space-comment-drawer__loading">加载评论中...</div>
-                    )}
-                    {!loading && comments.length === 0 && (
-                        <div className="space-comment-drawer__empty">还没有评论，来做第一个发声的人</div>
-                    )}
-                    {comments.map((comment) => (
-                        <div key={comment.id} className="space-comment-drawer__item">
-                            <div className="space-comment-drawer__avatar">
-                                {comment.author.avatarUrl ? (
-                                    <img src={comment.author.avatarUrl} alt={comment.author.username} />
-                                ) : (
-                                    <span>{comment.author.username.charAt(0).toUpperCase()}</span>
-                                )}
-                            </div>
-                            <div className="space-comment-drawer__body">
-                                <div className="space-comment-drawer__meta">
-                                    <span className="space-comment-drawer__name">{comment.author.username}</span>
-                                    <span className="space-comment-drawer__time">
-                                        {new Date(comment.createdAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                    </span>
+                        <div className="space-comment-drawer__skeletons" aria-label="加载评论中">
+                            {[0, 1, 2].map((index) => (
+                                <div key={index} className="space-comment-drawer__skeleton-item">
+                                    <div className="space-comment-drawer__skeleton-avatar" />
+                                    <div className="space-comment-drawer__skeleton-lines">
+                                        <div className="space-comment-drawer__skeleton-line space-comment-drawer__skeleton-line--short" />
+                                        <div className="space-comment-drawer__skeleton-line" />
+                                    </div>
                                 </div>
-                                <div className="space-comment-drawer__text">{comment.content}</div>
-                            </div>
+                            ))}
                         </div>
-                    ))}
+                    )}
+
+                    {!loading && comments.length === 0 && (
+                        <div className="space-comment-drawer__empty">
+                            <div className="space-comment-drawer__empty-icon" aria-hidden="true">
+                                <MessageCircle size={20} />
+                            </div>
+                            <p className="space-comment-drawer__empty-title">还没有评论</p>
+                            <p className="space-comment-drawer__empty-desc">
+                                来做第一个发声的人
+                            </p>
+                        </div>
+                    )}
+
+                    {comments.map((comment) => {
+                        const relativeTime = formatCommentTime(comment.createdAt);
+                        const fullTime = formatFullCommentTime(comment.createdAt);
+                        return (
+                            <div key={comment.id} className="space-comment-drawer__item">
+                                <div className="space-comment-drawer__avatar">
+                                    {comment.author.avatarUrl ? (
+                                        <img
+                                            src={comment.author.avatarUrl}
+                                            alt={comment.author.username}
+                                        />
+                                    ) : (
+                                        <span>{comment.author.username.charAt(0).toUpperCase()}</span>
+                                    )}
+                                </div>
+                                <div className="space-comment-drawer__body">
+                                    <div className="space-comment-drawer__meta">
+                                        <span className="space-comment-drawer__name">
+                                            {comment.author.username}
+                                        </span>
+                                        <span
+                                            className="space-comment-drawer__dot"
+                                            aria-hidden="true"
+                                        >
+                                            ·
+                                        </span>
+                                        <time
+                                            className="space-comment-drawer__time"
+                                            title={fullTime}
+                                        >
+                                            {relativeTime}
+                                        </time>
+                                    </div>
+                                    <div className="space-comment-drawer__text">
+                                        {comment.content}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+
+                    {hasMore && (
+                        <button
+                            type="button"
+                            className="space-comment-drawer__more"
+                            onClick={() => loadComments(false)}
+                            disabled={loading}
+                        >
+                            {loading ? '加载中...' : '加载更多评论'}
+                        </button>
+                    )}
                 </div>
 
-                {hasMore && (
-                    <button
-                        className="space-comment-drawer__more"
-                        onClick={() => loadComments(false)}
-                        disabled={loading}
-                    >
-                        {loading ? '加载中...' : '加载更多'}
-                    </button>
-                )}
-
                 <form className="space-comment-drawer__composer" onSubmit={handleSubmit}>
-                    <label className="space-comment-drawer__sr-only" htmlFor="space-comment-input">
-                        输入评论内容
-                    </label>
-                    <textarea
-                        ref={textareaRef}
-                        id="space-comment-input"
-                        name="spaceComment"
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        placeholder="写下你的观点..."
-                        rows={2}
-                    />
-                    <button type="submit" disabled={submitting || !draft.trim()}>
-                        {submitting ? '发送中' : '发送'}
-                    </button>
+                    <div
+                        className={`space-comment-drawer__composer-box ${isComposerFocused ? 'is-focused' : ''}`}
+                    >
+                        <div className="space-comment-drawer__composer-input-row">
+                            <div className="space-comment-drawer__composer-avatar" aria-hidden="true">
+                                {currentUser?.avatarUrl ? (
+                                    <img
+                                        src={currentUser.avatarUrl}
+                                        alt={currentUser.username || '我'}
+                                    />
+                                ) : (
+                                    <span>{currentUserInitial}</span>
+                                )}
+                            </div>
+
+                            <label
+                                className="space-comment-drawer__sr-only"
+                                htmlFor="space-comment-input"
+                            >
+                                输入评论内容
+                            </label>
+                            <textarea
+                                ref={textareaRef}
+                                id="space-comment-input"
+                                name="spaceComment"
+                                maxLength={COMMENT_MAX_LENGTH}
+                                value={draft}
+                                onChange={(event) => setDraft(event.target.value)}
+                                onFocus={() => setIsComposerFocused(true)}
+                                onBlur={() => setIsComposerFocused(false)}
+                                onKeyDown={handleTextareaKeyDown}
+                                onCompositionStart={() => {
+                                    isComposingRef.current = true;
+                                }}
+                                onCompositionEnd={() => {
+                                    isComposingRef.current = false;
+                                }}
+                                placeholder="写下你的观点..."
+                                rows={2}
+                            />
+                        </div>
+
+                        <div className="space-comment-drawer__composer-footer">
+                            <div className="space-comment-drawer__composer-meta">
+                                <span className="space-comment-drawer__shortcut-hint">
+                                    ⌘ + Enter
+                                </span>
+                                {draft.length > 0 && (
+                                    <span
+                                        className={`space-comment-drawer__char-count ${
+                                            isAtLimit
+                                                ? 'is-limit'
+                                                : isNearLimit
+                                                  ? 'is-warning'
+                                                  : ''
+                                        }`}
+                                    >
+                                        {draft.length}/{COMMENT_MAX_LENGTH}
+                                    </span>
+                                )}
+                            </div>
+
+                            <button
+                                type="submit"
+                                className="space-comment-drawer__submit-btn"
+                                disabled={submitting || !draft.trim()}
+                            >
+                                <SendHorizontal size={14} aria-hidden="true" />
+                                <span>{submitting ? '发送中...' : '发送'}</span>
+                            </button>
+                        </div>
+                    </div>
                 </form>
             </aside>
         </div>
