@@ -51,6 +51,7 @@ interface ChatHistoryProps {
   onForwardMessage?: (message: Message) => void;
   onEnterMultiSelect?: (message: Message) => void;
   onPinMessage?: (message: Message) => void;
+  onAskAiMessage?: (message: Message) => void;
   selectionMode?: boolean;
   selectedMessageIds?: Set<string>;
   onToggleSelectMessage?: (message: Message) => void;
@@ -1035,6 +1036,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           onForward={onForwardMessage ? (target) => onForwardMessage(target) : undefined}
           onMultiSelect={onEnterMultiSelect ? (target) => onEnterMultiSelect(target) : undefined}
           onPin={onPinMessage ? (target) => onPinMessage(target) : undefined}
+          onAskAi={onAskAiMessage ? (target) => onAskAiMessage(target) : undefined}
           onEdit={(target) => onEditMessage?.(target)}
           onDelete={(target) => onDeleteMessage?.(target)}
           onRetry={(target) => onRetryMessage?.(target)}

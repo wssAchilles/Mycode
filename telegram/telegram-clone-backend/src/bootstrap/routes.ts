@@ -24,6 +24,7 @@ import { verifyOpsToken } from '../routes/ops/auth';
 import recommendationInternalRoutes from '../routes/recommendationInternal';
 import graphKernelInternalRoutes from '../routes/graphKernelInternal';
 import pushRoutes from '../routes/pushRoutes';
+import linkPreviewRoutes from '../routes/linkPreviewRoutes';
 
 const log = createChildLogger('bootstrap:routes');
 
@@ -73,6 +74,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/analytics', authenticateToken, analyticsRoutes);
   app.use('/api/features', authenticateToken, featureRoutes);
   app.use('/api/push', pushRoutes);
+  app.use('/api/link-preview', authenticateToken, linkPreviewRoutes);
 
   // API 根路由
   app.get('/api', (_req, res) => {

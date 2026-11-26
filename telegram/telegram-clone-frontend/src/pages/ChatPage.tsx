@@ -80,7 +80,20 @@ function cancelIdleTask(handle: number | null) {
 }
 
 /**
- * 通过 XMLHttpRequest 上传已预处理的媒体，提供真实字节级上传进度
+ * 创建可识别的上传取消错误
+ */
+function createUploadCancelledError(): Error {
+  const err = new Error('已取消文件上传');
+  err.name = 'UploadCancelledError';
+  return err;
+}
+
+function isUploadCancelledError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'UploadCancelledError' || error.name === 'AbortError');
+}
+
+/**
+ * 通过 XMLHttpRequest 上传已预处理的媒体，提供真实字节级上传进度与取消能力
  */
 function uploadPreparedWithProgress(
   prepared: { blob: Blob; fileName: string },
@@ -88,9 +101,30 @@ function uploadPreparedWithProgress(
   authToken: string | null | undefined,
   onProgress: (fraction: number) => void,
   timeoutMs = 25_000,
+  signal?: AbortSignal,
 ): Promise<UploadedFileResult> {
+  if (signal?.aborted) {
+    return Promise.reject(createUploadCancelledError());
+  }
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
+
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener('abort', handleAbortSignal);
+      }
+    };
+
+    const handleAbortSignal = () => {
+      xhr.abort();
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', handleAbortSignal, { once: true });
+    }
+
     xhr.open('POST', uploadUrl, true);
     xhr.timeout = timeoutMs;
     if (authToken) {
@@ -102,6 +136,9 @@ function uploadPreparedWithProgress(
       }
     };
     xhr.onload = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       try {
         const parsed = JSON.parse(xhr.responseText || '{}');
         resolve({
@@ -114,8 +151,24 @@ function uploadPreparedWithProgress(
         reject(new Error(`上传响应解析失败 (${xhr.status})`));
       }
     };
-    xhr.onerror = () => reject(new Error('网络错误导致上传中断'));
-    xhr.ontimeout = () => reject(new Error('文件上传超时，请重试'));
+    xhr.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('网络错误导致上传中断'));
+    };
+    xhr.ontimeout = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('文件上传超时，请重试'));
+    };
+    xhr.onabort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(createUploadCancelledError());
+    };
 
     const formData = new FormData();
     formData.append('file', prepared.blob, prepared.fileName);
@@ -191,6 +244,7 @@ const ChatPage: React.FC = () => {
   const [addContactInitialTab, setAddContactInitialTab] = useState<'search' | 'requests' | 'sent'>('search');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
+  const [pendingAiPrompt, setPendingAiPrompt] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // UI State
@@ -198,6 +252,7 @@ const ChatPage: React.FC = () => {
   const [showGroupDetailPanel, setShowGroupDetailPanel] = useState(false);  // 新增
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const uploadAbortControllerRef = useRef<AbortController | null>(null);
   const [showReconnectedNotice, setShowReconnectedNotice] = useState(false);
   const wasDisconnectedRef = useRef(false);
   const [unreadAnchorSeq, setUnreadAnchorSeq] = useState<number | null>(null);
@@ -858,10 +913,18 @@ const ChatPage: React.FC = () => {
     return false;
   };
 
+  const handleCancelUpload = () => {
+    uploadAbortControllerRef.current?.abort();
+  };
+
   const uploadAndSendFiles = async (files: File[], caption?: string) => {
     if (!files || files.length === 0 || (!selectedContact && !selectedGroup && !isAiChatMode) || !canSendMessages) {
       return;
     }
+
+    uploadAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    uploadAbortControllerRef.current = abortController;
 
     setIsUploading(true);
     setUploadProgress(4);
@@ -872,6 +935,9 @@ const ChatPage: React.FC = () => {
       const cleanCaption = caption?.trim();
 
       for (let i = 0; i < total; i += 1) {
+        if (abortController.signal.aborted) {
+          throw createUploadCancelledError();
+        }
         const file = files[i];
         const sliceBase = i / total;
         const sliceSpan = 1 / total;
@@ -925,6 +991,8 @@ const ChatPage: React.FC = () => {
             const combined = sliceBase + (0.25 + 0.72 * fraction) * sliceSpan;
             setUploadProgress(Math.min(99, Math.max(5, Math.round(combined * 100))));
           },
+          25_000,
+          abortController.signal,
         );
 
         if (!result.success || !result.data) {
@@ -978,9 +1046,16 @@ const ChatPage: React.FC = () => {
         await handleSendMessage(cleanCaption);
       }
     } catch (error) {
-      console.error('上传失败:', error);
-      showToast(error instanceof Error ? error.message : '文件上传失败，请稍后重试', 'error');
+      if (isUploadCancelledError(error)) {
+        showToast('已取消文件上传', 'info');
+      } else {
+        console.error('上传失败:', error);
+        showToast(error instanceof Error ? error.message : '文件上传失败，请稍后重试', 'error');
+      }
     } finally {
+      if (uploadAbortControllerRef.current === abortController) {
+        uploadAbortControllerRef.current = null;
+      }
       setIsUploading(false);
       setUploadProgress(null);
     }
@@ -1091,6 +1166,51 @@ const ChatPage: React.FC = () => {
       pinnedAt: Date.now(),
     });
     showToast('已置顶到会话顶部', 'success');
+  };
+
+  const handleAskAiMessage = (message: Message) => {
+    const text = message.content?.trim();
+    if (!text) return;
+    const isOut = Boolean(currentUser && (message.userId === currentUser.id || message.senderId === currentUser.id));
+    const senderName = isOut
+      ? '我'
+      : message.senderUsername || message.username || selectedContact?.alias || selectedContact?.username || '联系人';
+    const clipped = text.length > 1500 ? `${text.slice(0, 1500)}…` : text;
+    setPendingAiPrompt(
+      `请简洁解释下面来自「${senderName}」的聊天消息核心含义；如果包含外文或专业术语，请附带清晰的中文翻译与重点说明：\n\n「${clipped}」`,
+    );
+    setIsAiChatMode(true);
+    if (isMobileLayout) {
+      setMobilePane('chat');
+    }
+  };
+
+  const handleSummarizeRecentChat = () => {
+    const { messageIds, entities } = useMessageStore.getState();
+    const recentTexts: string[] = [];
+    for (let i = messageIds.length - 1; i >= 0 && recentTexts.length < 20; i -= 1) {
+      const msg = entities.get(messageIds[i]);
+      const text = msg?.content?.trim();
+      if (!msg || !text) continue;
+      const isOut = Boolean(currentUser && (msg.userId === currentUser.id || msg.senderId === currentUser.id));
+      const sender = isOut
+        ? '我'
+        : msg.senderUsername || msg.username || selectedContact?.alias || selectedContact?.username || '对方';
+      recentTexts.unshift(`[${sender}]: ${text}`);
+    }
+    if (recentTexts.length === 0) {
+      showToast('当前会话暂无可总结的文本消息', 'info');
+      return;
+    }
+    const joined = recentTexts.join('\n').slice(0, 2800);
+    const chatTitle = selectedGroup?.name || selectedContact?.alias || selectedContact?.username || '当前会话';
+    setPendingAiPrompt(
+      `请帮我分条总结「${chatTitle}」最近这段对话的核心内容、关键结论与待办事项：\n\n${joined}`,
+    );
+    setIsAiChatMode(true);
+    if (isMobileLayout) {
+      setMobilePane('chat');
+    }
   };
 
   const handleConfirmForward = async (targets: ForwardTarget[]) => {
@@ -1468,6 +1588,8 @@ const ChatPage: React.FC = () => {
               currentUser={currentUser}
               messages={aiMessages}
               isConnected={canSendMessages}
+              initialPrompt={pendingAiPrompt}
+              onInitialPromptConsumed={() => setPendingAiPrompt(null)}
               onBackToContacts={() => {
                 setIsAiChatMode(false);
                 if (isMobileLayout) {
@@ -1486,6 +1608,8 @@ const ChatPage: React.FC = () => {
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               onSearch={handleSearchMessages}
+              onSummarizeChat={handleSummarizeRecentChat}
+              canSummarizeChat={Boolean(selectedChatId)}
               onAvatarClick={() => {
                 if (isGroupChatMode) {
                   setShowGroupDetailPanel(true);
@@ -1523,6 +1647,7 @@ const ChatPage: React.FC = () => {
                 isConnected={canSendMessages}
                 isUploading={isUploading}
                 uploadProgress={uploadProgress}
+                onCancelUpload={handleCancelUpload}
                 editingMessage={editingMessage}
                 replyingMessage={replyingMessage}
                 isGroupChat={isGroupChatMode}
@@ -1701,6 +1826,7 @@ const ChatPage: React.FC = () => {
             onForwardMessage={isSearchMode || isContextMode ? undefined : (msg) => setForwardMessages([msg])}
             onEnterMultiSelect={isSearchMode || isContextMode ? undefined : handleEnterMultiSelect}
             onPinMessage={isSearchMode || isContextMode ? undefined : handlePinMessage}
+            onAskAiMessage={isSearchMode || isContextMode ? undefined : handleAskAiMessage}
             selectionMode={selectionMode && !isSearchMode && !isContextMode}
             selectedMessageIds={selectedMessageIds}
             onToggleSelectMessage={handleToggleSelectMessage}

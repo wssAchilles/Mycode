@@ -10,13 +10,20 @@ import { APP_SW_UPDATE_AVAILABLE_EVENT, applyPendingServiceWorkerUpdate } from '
 import { RealtimeSessionBridge } from './features/realtime';
 import { authUtils } from './services/apiClient';
 import { getExperimentAssignments } from './services/experimentService';
+import { applyPreferencesToDocument } from './features/preferences/userPreferencesStore';
 import './App.css';
 
-// 懒加载全局 Spotlight 命令面板与快捷键指南，保持独立 Chunk 且不增加首包体积
+// 懒加载全局 Spotlight 命令面板、快捷键指南与偏好设置中心，保持独立 Chunk 且不增加首包体积
 const CommandPalette = lazy(() => import('./components/command/CommandPalette'));
 const ShortcutHelpModal = lazy(() => import('./components/command/ShortcutHelpModal'));
+const PreferencesModal = lazy(() => import('./components/settings/PreferencesModal'));
 
 function App() {
+  // 应用启动时立即同步本地视觉密度与字号偏好到根文档
+  useEffect(() => {
+    applyPreferencesToDocument();
+  }, []);
+
   // 页面加载时预加载实验分配（仅已认证用户）
   useEffect(() => {
     if (authUtils.isAuthenticated()) {
@@ -50,6 +57,7 @@ function App() {
           <Suspense fallback={null}>
             <CommandPalette />
             <ShortcutHelpModal />
+            <PreferencesModal />
           </Suspense>
           <SwUpdateBanner />
         </Router>

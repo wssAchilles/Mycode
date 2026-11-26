@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Command } from 'cmdk';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Bot, Keyboard, Monitor, Moon, Sun, Volume2, VolumeX } from 'lucide-react';
+import { Bell, Bot, Keyboard, Monitor, Moon, Settings, Sun, Volume2, VolumeX } from 'lucide-react';
 import { authUtils } from '../../services/apiClient';
 import { useChatStore } from '../../features/chat/store/chatStore';
 import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
 import { formatThemeModeLabel, useThemeStore } from '../../core/theme/themeStore';
 import { showToast } from '../ui/Toast';
 import { openShortcutHelp } from './ShortcutHelpModal';
+import { openPreferencesModal } from '../settings/PreferencesModal';
 import {
   HomeIcon,
   MessageIcon,
@@ -300,6 +301,21 @@ export const CommandPalette: React.FC = () => {
                   </span>
                   <span className="tg-command-item-label">键盘快捷键指南</span>
                   <span className="tg-command-item-meta">按 ? 呼出</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="偏好设置 外观 密度 字号 发送键 缓存 preferences settings"
+                  onSelect={() => {
+                    setOpen(false);
+                    openPreferencesModal();
+                  }}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    <Settings size={16} />
+                  </span>
+                  <span className="tg-command-item-label">全局偏好设置</span>
+                  <span className="tg-command-item-meta">⌘/,</span>
                 </Command.Item>
 
                 <Command.Item

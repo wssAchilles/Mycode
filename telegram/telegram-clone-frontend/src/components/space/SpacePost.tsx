@@ -16,6 +16,7 @@ import apiClient, { authUtils } from '../../services/apiClient';
 import { spaceAPI } from '../../services/spaceApi';
 import { showToast } from '../ui/Toast';
 import { ChatImageLightbox, type LightboxMediaItem } from '../../features/chat/components/media/ChatImageLightbox';
+import { LinkPreviewCard, extractFirstPreviewableUrl } from '../common/LinkPreviewCard';
 import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1040,6 +1041,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                     )}
 
                     {renderMedia()}
+                    {!post.isNews && (!post.media || post.media.length === 0) && (() => {
+                        const previewUrl = extractFirstPreviewableUrl(post.content);
+                        return previewUrl ? <LinkPreviewCard url={previewUrl} /> : null;
+                    })()}
                 </div>
 
                 {/* 操作栏 */}

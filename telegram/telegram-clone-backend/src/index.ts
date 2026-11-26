@@ -68,7 +68,22 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(compression({ threshold: 1024, level: 6 }));
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+  filter: (req, res) => {
+    const accept = req.headers.accept || '';
+    const contentType = String(res.getHeader('Content-Type') || '');
+    if (
+      req.path.endsWith('/stream')
+      || accept.includes('text/event-stream')
+      || contentType.includes('text/event-stream')
+    ) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+}));
 app.set('etag', false);
 app.set('trust proxy', 1);
 

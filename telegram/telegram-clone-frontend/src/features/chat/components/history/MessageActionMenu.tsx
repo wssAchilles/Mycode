@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { CheckSquare, Copy, Edit3, Forward, Pin, Reply, RotateCw, Trash2 } from 'lucide-react';
+import { CheckSquare, Copy, Edit3, Forward, Pin, Reply, RotateCw, Sparkles, Trash2 } from 'lucide-react';
 import type { Message } from '../../../../types/chat';
 import './MessageActionMenu.css';
 
@@ -14,6 +14,7 @@ interface MessageActionMenuProps {
   onForward?: (msg: Message) => void;
   onMultiSelect?: (msg: Message) => void;
   onPin?: (msg: Message) => void;
+  onAskAi?: (msg: Message) => void;
   onEdit: (msg: Message) => void;
   onDelete: (msg: Message) => void;
   onRetry: (msg: Message) => void;
@@ -30,6 +31,7 @@ export const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   onForward,
   onMultiSelect,
   onPin,
+  onAskAi,
   onEdit,
   onDelete,
   onRetry,
@@ -141,6 +143,20 @@ export const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
         >
           <Copy size={14} />
           <span>复制文字</span>
+        </button>
+      )}
+      {canCopy && onAskAi && (
+        <button
+          type="button"
+          role="menuitem"
+          className="msg-context-menu__item"
+          onClick={() => {
+            onAskAi(message);
+            onClose();
+          }}
+        >
+          <Sparkles size={14} />
+          <span>问 AI 解释/翻译</span>
         </button>
       )}
       {canEdit && (

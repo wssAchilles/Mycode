@@ -126,6 +126,27 @@
     gap: 10px;
 }
 
+.chat-header__ai-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 11px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border, rgba(15, 20, 25, 0.12));
+    background: var(--tg-blue-bg, rgba(29, 155, 240, 0.08));
+    color: var(--tg-blue, #1D9BF0);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.chat-header__ai-btn:hover {
+    background: rgba(29, 155, 240, 0.16);
+    border-color: rgba(29, 155, 240, 0.35);
+}
+
 .chat-header__search {
     display: flex;
     align-items: center;

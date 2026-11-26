@@ -5,12 +5,13 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, BellOff, Check, Monitor, Moon, Sun, UserPlus, Users, X } from 'lucide-react';
+import { Bell, BellOff, Check, Monitor, Moon, Settings, Sun, UserPlus, Users, X } from 'lucide-react';
 import { authAPI } from '../../services/apiClient';
 import { formatChatListTimestamp, useChatStore } from '../../features/chat/store/chatStore';
 import { useMessageStore } from '../../features/chat/store/messageStore';
 import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
 import { formatThemeModeLabel, useThemeStore } from '../../core/theme/themeStore';
+import { openPreferencesModal } from '../../components/settings/PreferencesModal';
 import { requestDesktopNotificationPermission } from '../../features/realtime/browserNotifier';
 import { useSpaceStore } from '../../stores';
 import { Sidebar } from '../../components/layout';
@@ -217,6 +218,16 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     ) : (
                         <Monitor size={16} />
                     )}
+                </button>
+
+                <button
+                    type="button"
+                    className="sidebar-notify-button"
+                    onClick={openPreferencesModal}
+                    title="偏好设置 (⌘/,)"
+                    aria-label="打开偏好设置"
+                >
+                    <Settings size={16} />
                 </button>
 
                 <button

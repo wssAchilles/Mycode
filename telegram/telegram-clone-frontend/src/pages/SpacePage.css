@@ -1188,15 +1188,22 @@
     background: var(--color-surface, #F7F9F9);
 }
 
+.space-page__utility-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
 .space-page__theme-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: 36px;
-    margin-top: 10px;
-    padding: 0 14px;
+    padding: 0 12px;
     border-radius: 9999px;
     border: 1px solid var(--color-border-hover, #E2E8F0);
     background: var(--color-surface, #F7F9F9);
@@ -1207,9 +1214,25 @@
     transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
 
-.space-page__theme-toggle:hover {
+.space-page__theme-toggle:hover,
+.space-page__prefs-btn:hover {
     background: var(--color-surface-hover, #EFF3F4);
     color: var(--color-text-primary, #0F1419);
+}
+
+.space-page__prefs-btn {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-hover, #E2E8F0);
+    background: var(--color-surface, #F7F9F9);
+    color: var(--color-text-secondary, #536471);
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
 
 .space-page :is(button, [role="button"], a, input, textarea):focus-visible {

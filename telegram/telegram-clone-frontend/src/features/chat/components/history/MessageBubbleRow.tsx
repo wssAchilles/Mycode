@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { Check, Copy, MoreHorizontal, Reply, RotateCw, SmilePlus } from 'lucide-react';
 import { MessageBubble, ProgressiveImage } from '../../../../components/common';
+import {
+  LinkPreviewCard,
+  extractFirstPreviewableUrl,
+} from '../../../../components/common/LinkPreviewCard';
 import type { MessageReplyPreview } from '../../../../components/common/MessageBubble';
 import type { Message } from '../../../../types/chat';
 import { formatMessageTimestamp } from '../../../../utils/dateTime';
@@ -180,7 +184,17 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
         return <ChatAttachmentCard message={message} />;
       }
 
-      return renderTextContent();
+      const previewUrl = extractFirstPreviewableUrl(message.content);
+      if (!previewUrl) {
+        return renderTextContent();
+      }
+
+      return (
+        <>
+          {renderTextContent()}
+          <LinkPreviewCard url={previewUrl} compact />
+        </>
+      );
     };
 
     const canCopy = Boolean(message.content && message.content.trim());

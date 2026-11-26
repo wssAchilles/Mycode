@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { AiConversation } from '../models/AiConversation';
+import { AiConversation, type IAiConversation } from '../models/AiConversation';
 import { callDirectGeminiAI } from '../services/agentPlane/client/directGeminiClient';
 import { generateUserAgentReply } from '../services/agentPlane/orchestrator/agentResponseService';
 import { createChildLogger } from '../utils/logger';
@@ -30,18 +30,18 @@ export interface AIChatRequest extends Request {
   };
 }
 
-export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response) => {
-  const { message, imageData, conversationHistory = [], conversationId, model, temperature, maxTokens } = req.body;
+async function prepareAiContextAndReply(params: {
+  userId: string;
+  message: string;
+  imageData?: AIChatRequest['body']['imageData'];
+  conversationHistory?: AIChatRequest['body']['conversationHistory'];
+  conversationId?: string;
+}) {
+  const { userId, message, imageData, conversationHistory = [], conversationId } = params;
 
-  // 验证必要参数
-  if (!message || typeof message !== 'string') {
-    return errors.badRequest(res, '请提供有效的消息内容');
-  }
-
-  // 读取已有对话上下文
-  let conversationDoc = null;
+  let conversationDoc: IAiConversation | null = null;
   if (conversationId) {
-    conversationDoc = await AiConversation.findOne({ conversationId, userId: req.userId, isActive: true });
+    conversationDoc = await AiConversation.findOne({ conversationId, userId, isActive: true });
   }
 
   // 组装上下文（最多保留最近 10 条）
@@ -49,16 +49,16 @@ export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response
   const combinedHistory = [
     ...historyMessages.map((msg: any) => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }]
+      parts: [{ text: msg.content }],
     })),
     ...conversationHistory.map((msg) => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }]
-    }))
+      parts: [{ text: msg.content }],
+    })),
   ];
 
   const agentReply = await generateUserAgentReply({
-    userId: req.userId!,
+    userId,
     message,
     imageData,
     conversationHistory: combinedHistory.map((item) => ({
@@ -67,22 +67,35 @@ export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response
     })),
     conversationId,
   });
-  const aiMessage = agentReply.message;
 
-  // 持久化会话
+  return { conversationDoc, agentReply };
+}
+
+async function persistAiConversationExchange(params: {
+  userId: string;
+  conversationDoc: IAiConversation | null;
+  message: string;
+  aiMessage: string;
+  imageData?: AIChatRequest['body']['imageData'];
+}): Promise<string | undefined> {
+  const { userId, message, aiMessage, imageData } = params;
+  let conversationDoc = params.conversationDoc;
   let activeConversationId = conversationDoc?.conversationId;
+
   try {
     const userMessageRecord = {
       id: `user-${Date.now()}`,
       role: 'user' as const,
       content: message,
       timestamp: new Date(),
-      type: imageData ? 'image' as const : 'text' as const,
-      imageData: imageData ? {
-        mimeType: imageData.mimeType,
-        fileName: 'inline',
-        fileSize: imageData.base64Data?.length || 0,
-      } : undefined,
+      type: imageData ? ('image' as const) : ('text' as const),
+      imageData: imageData
+        ? {
+            mimeType: imageData.mimeType,
+            fileName: 'inline',
+            fileSize: imageData.base64Data?.length || 0,
+          }
+        : undefined,
     };
     const aiMessageRecord = {
       id: `ai-${Date.now()}`,
@@ -99,15 +112,61 @@ export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response
       await conversationDoc.save();
       activeConversationId = conversationDoc.conversationId;
     } else {
-      const created = await AiConversation.createNewConversation(req.userId!, userMessageRecord);
+      const created = await AiConversation.createNewConversation(userId, userMessageRecord);
       created.messages.push(aiMessageRecord);
       await created.save();
-      conversationDoc = created;
       activeConversationId = created.conversationId;
     }
   } catch (err) {
     log.warn({ err }, 'AI 对话持久化失败');
   }
+
+  return activeConversationId;
+}
+
+function splitStreamChunks(text: string): string[] {
+  if (!text) return [];
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const remaining = text.length - cursor;
+    const step = remaining > 400 ? 22 : remaining > 120 ? 16 : 10;
+    chunks.push(text.slice(cursor, cursor + step));
+    cursor += step;
+  }
+  return chunks;
+}
+
+function writeSseEvent(res: Response, event: string, data: unknown): void {
+  if (res.writableEnded) return;
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response) => {
+  const { message, imageData, conversationHistory = [], conversationId } = req.body;
+
+  // 验证必要参数
+  if (!message || typeof message !== 'string') {
+    return errors.badRequest(res, '请提供有效的消息内容');
+  }
+
+  const { conversationDoc, agentReply } = await prepareAiContextAndReply({
+    userId: req.userId!,
+    message,
+    imageData,
+    conversationHistory,
+    conversationId,
+  });
+  const aiMessage = agentReply.message;
+
+  const activeConversationId = await persistAiConversationExchange({
+    userId: req.userId!,
+    conversationDoc,
+    message,
+    aiMessage,
+    imageData,
+  });
 
   log.info({ preview: aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : '') }, 'AI 回复内容');
 
@@ -125,6 +184,86 @@ export const getAiResponse = catchAsync(async (req: AIChatRequest, res: Response
     },
   });
 });
+
+/**
+ * SSE 流式 AI 对话端点：逐步输出分块并在断开时中止
+ */
+export const streamAiResponse = async (req: AIChatRequest, res: Response): Promise<void> => {
+  const { message, imageData, conversationHistory = [], conversationId } = req.body;
+  if (!message || typeof message !== 'string') {
+    errors.badRequest(res, '请提供有效的消息内容');
+    return;
+  }
+
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  let aborted = false;
+  req.on('close', () => {
+    aborted = true;
+  });
+
+  writeSseEvent(res, 'start', { status: 'thinking' });
+
+  try {
+    const { conversationDoc, agentReply } = await prepareAiContextAndReply({
+      userId: req.userId!,
+      message,
+      imageData,
+      conversationHistory,
+      conversationId,
+    });
+
+    if (aborted) {
+      res.end();
+      return;
+    }
+
+    const aiMessage = agentReply.message;
+    const activeConversationId = await persistAiConversationExchange({
+      userId: req.userId!,
+      conversationDoc,
+      message,
+      aiMessage,
+      imageData,
+    });
+
+    const chunks = splitStreamChunks(aiMessage);
+    for (const delta of chunks) {
+      if (aborted || res.writableEnded) {
+        res.end();
+        return;
+      }
+      writeSseEvent(res, 'delta', { delta });
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+
+    if (!aborted && !res.writableEnded) {
+      writeSseEvent(res, 'done', {
+        message: aiMessage,
+        timestamp: new Date().toISOString(),
+        conversationId: activeConversationId,
+        agent: {
+          mode: agentReply.mode,
+          fallback: agentReply.fallback,
+          usedScopes: agentReply.usedScopes,
+          suggestions: agentReply.suggestions,
+        },
+      });
+      res.end();
+    }
+  } catch (err: unknown) {
+    if (!aborted && !res.writableEnded) {
+      const errorText = err instanceof Error ? err.message : 'AI 生成失败，请稍后重试';
+      writeSseEvent(res, 'error', { error: errorText });
+      res.end();
+    }
+  }
+};
 
 // 健康检查端点
 export const checkAiHealth = catchAsync(async (req: Request, res: Response) => {

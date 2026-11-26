@@ -1,13 +1,14 @@
 import express from 'express';
-import { getAiResponse, checkAiHealth, getSmartReplies } from '../controllers/aiController';
+import { getAiResponse, streamAiResponse, checkAiHealth, getSmartReplies } from '../controllers/aiController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { aiLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 
-// AI聊天端点 - POST /api/ai/chat
+// AI聊天端点 - POST /api/ai/chat 与 SSE 流式端点 /api/ai/chat/stream
 // 需要用户认证
 router.post('/chat', authenticateToken, aiLimiter, getAiResponse);
+router.post('/chat/stream', authenticateToken, aiLimiter, streamAiResponse);
 
 // AI服务健康检查端点 - GET /api/ai/health
 // 加认证避免被滥用

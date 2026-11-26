@@ -682,3 +682,47 @@ body {
   background: var(--color-surface-elevated);
   color: var(--color-text-primary);
 }
+
+/* =========================================
+   全局界面密度与字号偏好令牌
+   ========================================= */
+:root {
+  --tg-density-bubble-pad-y: 9px;
+  --tg-density-bubble-pad-x: 13px;
+  --tg-density-post-pad-y: 14px;
+  --tg-density-post-pad-x: 16px;
+  --tg-density-list-gap: 4px;
+  --tg-font-scale: 1;
+}
+
+:root[data-density="compact"] {
+  --tg-density-bubble-pad-y: 6px;
+  --tg-density-bubble-pad-x: 10px;
+  --tg-density-post-pad-y: 10px;
+  --tg-density-post-pad-x: 13px;
+  --tg-density-list-gap: 2px;
+}
+
+:root[data-density="compact"] .space-post {
+  padding: var(--tg-density-post-pad-y) var(--tg-density-post-pad-x);
+}
+
+:root[data-density="compact"] .tg-contact-card {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+:root[data-density="compact"] .chat-bubble {
+  padding: var(--tg-density-bubble-pad-y) var(--tg-density-bubble-pad-x);
+}
+
+:root[data-font-scale="large"] {
+  --tg-font-scale: 1.08;
+}
+
+:root[data-font-scale="large"] .space-post__markdown,
+:root[data-font-scale="large"] .chat-bubble__text,
+:root[data-font-scale="large"] .ai-chat-wrapper .chat-bubble__text {
+  font-size: calc(15px * var(--tg-font-scale));
+  line-height: 1.62;
+}

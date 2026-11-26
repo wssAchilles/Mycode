@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Avatar } from '../../../components/common';
 import { formatLastSeen } from '../../../utils/dateTime';
 import { formatTypingSummary, useTypingStore } from '../state/typingStore';
@@ -11,6 +12,8 @@ interface ChatHeaderProps {
     onSearchChange: (query: string) => void;
     onSearch: () => void;
     onAvatarClick?: () => void;
+    onSummarizeChat?: () => void;
+    canSummarizeChat?: boolean;
     showMobileBackButton?: boolean;
     onMobileBack?: () => void;
 }
@@ -21,6 +24,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     onSearchChange,
     onSearch,
     onAvatarClick,
+    onSummarizeChat,
+    canSummarizeChat = false,
     showMobileBackButton = false,
     onMobileBack,
 }) => {
@@ -168,8 +173,20 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                 </div>
             )}
 
-            {/* 搜索栏 */}
+            {/* AI 总结 + 搜索栏 */}
             <div className="chat-header__actions">
+                {canSummarizeChat && onSummarizeChat && (
+                    <button
+                        type="button"
+                        className="chat-header__ai-btn"
+                        onClick={onSummarizeChat}
+                        title="用 AI 总结最近对话要点"
+                        aria-label="用 AI 总结最近对话要点"
+                    >
+                        <Sparkles size={14} aria-hidden="true" />
+                        <span>总结对话</span>
+                    </button>
+                )}
                 <div className="chat-header__search">
                     <span className="chat-header__search-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

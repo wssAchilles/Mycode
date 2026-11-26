@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowDown, Paperclip, RotateCw, X } from 'lucide-react';
+import { ArrowDown, Paperclip, RotateCw, Square, X } from 'lucide-react';
 import { ChatArea } from './layout';
 import '../features/chat/components/ChatHeader.css';
 import './AiChatComponent.css';
@@ -23,6 +23,8 @@ interface AiChatComponentProps {
   currentUser: { id: string; username?: string } | null;
   messages?: Message[];
   isConnected?: boolean;
+  initialPrompt?: string | null;
+  onInitialPromptConsumed?: () => void;
   onBackToContacts?: () => void;
 }
 
@@ -46,6 +48,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     currentUser,
     messages = [],
     isConnected: propIsConnected = false,
+    initialPrompt,
+    onInitialPromptConsumed,
     onBackToContacts
   } = props;
 
@@ -54,6 +58,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const [suggestions, setSuggestions] = useState<Array<{ id: string; text: string }>>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -84,6 +89,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const streamingTextRef = useRef('');
   const showConversationList = isCompactViewport ? showConversationListMobile : true;
 
   // AI 对话状态仓库
@@ -103,7 +110,13 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
-  }, [messages, storeMessages.length]);
+  }, [messages, storeMessages.length, streamingText]);
+
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort();
+    };
+  }, []);
 
   // 检测 AI 回复状态并拉取智能快捷建议
   useEffect(() => {
@@ -163,29 +176,60 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     });
   }, [addLocalMessage]);
 
-  const sendAiThroughAvailableChannel = useCallback(async (aiMessage: string, imageData?: {
-    mimeType: string;
-    base64Data: string;
-    fileName?: string;
-    fileSize?: number;
-  }) => {
-    const visibleHistory = storeMessages
-      .filter((item) => item.content && item.content.trim())
-      .slice(-10)
-      .map((item) => ({
-        role: item.role,
-        content: item.content.trim(),
-      }));
+  const sendAiThroughAvailableChannel = useCallback(async (
+    aiMessage: string,
+    imageData?: {
+      mimeType: string;
+      base64Data: string;
+      fileName?: string;
+      fileSize?: number;
+    },
+    forceNewConversation = false,
+  ) => {
+    streamAbortRef.current?.abort();
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    streamingTextRef.current = '';
+    setStreamingText('');
 
-    const response = await aiChatAPI.sendChatMessage({
-      message: aiMessage.startsWith('/ai ') ? aiMessage.slice(4) : aiMessage,
-      conversationId: activeConversationId,
-      conversationHistory: visibleHistory,
-      imageData: imageData ? {
-        mimeType: imageData.mimeType,
-        base64Data: imageData.base64Data,
-      } : undefined,
-    });
+    const visibleHistory = forceNewConversation
+      ? []
+      : storeMessages
+          .filter((item) => item.content && item.content.trim())
+          .slice(-10)
+          .map((item) => ({
+            role: item.role,
+            content: item.content.trim(),
+          }));
+
+    const targetConversationId = forceNewConversation ? null : activeConversationId;
+
+    const response = await aiChatAPI.streamChatMessage(
+      {
+        message: aiMessage.startsWith('/ai ') ? aiMessage.slice(4) : aiMessage,
+        conversationId: targetConversationId,
+        conversationHistory: visibleHistory,
+        imageData: imageData
+          ? {
+              mimeType: imageData.mimeType,
+              base64Data: imageData.base64Data,
+            }
+          : undefined,
+      },
+      {
+        signal: controller.signal,
+        onDelta: (delta) => {
+          streamingTextRef.current += delta;
+          setStreamingText(streamingTextRef.current);
+        },
+      },
+    );
+
+    if (streamAbortRef.current === controller) {
+      streamAbortRef.current = null;
+    }
+    streamingTextRef.current = '';
+    setStreamingText('');
 
     appendLocalConversationMessage({
       role: 'assistant',
@@ -195,7 +239,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
     if (response.conversationId) {
       updateConversationFromResponse(response.conversationId);
-    } else if (!activeConversationId) {
+    } else if (!targetConversationId) {
       void loadConversations();
     }
 
@@ -278,7 +322,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     setShowScrollBottom(false);
   }, []);
 
-  // 发送 AI 消息（支持文本与暂存截图）
+  // 发送 AI 消息（支持文本、暂存截图与新建上下文）
   const dispatchAiPrompt = useCallback(
     async (
       rawText: string,
@@ -289,6 +333,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         fileSize?: number;
       },
       appendUserBubble = true,
+      forceNewConversation = false,
     ) => {
       setErrorBanner(null);
       setLastFailedPayload(null);
@@ -306,8 +351,24 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       }
       setIsTyping(true);
       try {
-        await sendAiThroughAvailableChannel(aiMessage, imageData);
+        await sendAiThroughAvailableChannel(aiMessage, imageData, forceNewConversation);
       } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          const partial = streamingTextRef.current.trim();
+          if (partial) {
+            appendLocalConversationMessage({
+              role: 'assistant',
+              content: `${partial}\n\n*（已停止生成）*`,
+              type: 'text',
+            });
+          }
+          streamingTextRef.current = '';
+          setStreamingText('');
+          showToast('已停止 AI 回复生成', 'info');
+          return;
+        }
+        streamingTextRef.current = '';
+        setStreamingText('');
         const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
         console.error('❌ AI 回复失败:', message);
         setErrorBanner(message);
@@ -319,6 +380,32 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     },
     [appendLocalConversationMessage, sendAiThroughAvailableChannel],
   );
+
+  // 停止当前流式回复生成
+  const handleStopGeneration = useCallback(() => {
+    streamAbortRef.current?.abort();
+  }, []);
+
+  // 来自聊天气泡「问 AI」或头部「总结对话」的外部提示词直达触发
+  useEffect(() => {
+    const prompt = initialPrompt?.trim();
+    if (!prompt || isTyping) return;
+    onInitialPromptConsumed?.();
+    if (storeMessages.length > 0 || activeConversationId) {
+      createNewConversation();
+      void dispatchAiPrompt(prompt, undefined, true, true);
+    } else {
+      void dispatchAiPrompt(prompt, undefined, true, false);
+    }
+  }, [
+    activeConversationId,
+    createNewConversation,
+    dispatchAiPrompt,
+    initialPrompt,
+    isTyping,
+    onInitialPromptConsumed,
+    storeMessages.length,
+  ]);
 
   // 发送 AI 消息
   const handleSendMessage = () => {
@@ -701,19 +788,32 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
         <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" style={{ display: 'none' }} />
 
-        <button
-          type="button"
-          onClick={handleSendMessage}
-          disabled={(!newMessage.trim() && !stagedImage) || isUploading || isTyping}
-          className="tg-icon-button send-button"
-          title="发送消息"
-          aria-label="发送消息"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
+        {isTyping ? (
+          <button
+            type="button"
+            onClick={handleStopGeneration}
+            className="ai-chat-stop-btn"
+            title="停止生成"
+            aria-label="停止生成 AI 回复"
+          >
+            <Square size={12} fill="currentColor" aria-hidden="true" />
+            <span>停止</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSendMessage}
+            disabled={(!newMessage.trim() && !stagedImage) || isUploading}
+            className="tg-icon-button send-button"
+            title="发送消息"
+            aria-label="发送消息"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -897,9 +997,32 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 )}
 
                 {isTyping && (
-                  <div className="ai-chat-typing-wrap">
-                    <AiTypingIndicator />
-                  </div>
+                  streamingText ? (
+                    <div
+                      style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-end', gap: '8px' }}
+                      className="ai-chat-message-row msg-ai"
+                    >
+                      <div className="ai-chat-message-avatar" aria-hidden="true">
+                        {aiBotSvg(16)}
+                      </div>
+                      <MessageBubble
+                        isOut={false}
+                        isMedia={false}
+                        time="生成中..."
+                        withTail={false}
+                        className="msg-ai"
+                      >
+                        <span>
+                          {renderMessageContent(streamingText, 'ai-streaming-draft', true)}
+                          <span className="ai-chat-streaming-cursor" aria-hidden="true" />
+                        </span>
+                      </MessageBubble>
+                    </div>
+                  ) : (
+                    <div className="ai-chat-typing-wrap">
+                      <AiTypingIndicator />
+                    </div>
+                  )
                 )}
                 <div ref={messagesEndRef} />
                 {showScrollBottom && (

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Edit3, FileText, LoaderCircle, Paperclip, Reply, Send, Smile, X } from 'lucide-react';
 import type { Message } from '../../../types/chat';
 import { useChatUiPrefsStore } from '../state/chatUiPrefsStore';
+import { useUserPreferencesStore } from '../../preferences/userPreferencesStore';
 import { MentionPopover, type MentionCandidate } from './input/MentionPopover';
 import './MessageInput.css';
 
@@ -20,6 +21,7 @@ interface MessageInputProps {
   isConnected: boolean;
   isUploading?: boolean;
   uploadProgress?: number | null;
+  onCancelUpload?: () => void;
   placeholder?: string;
   editingMessage?: Message | null;
   replyingMessage?: Message | null;
@@ -57,6 +59,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   isConnected,
   isUploading = false,
   uploadProgress = null,
+  onCancelUpload,
   placeholder = '输入消息...',
   editingMessage = null,
   replyingMessage = null,
@@ -84,6 +87,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   stagedFilesRef.current = stagedFiles;
   const setDraft = useChatUiPrefsStore((state) => state.setDraft);
   const clearDraft = useChatUiPrefsStore((state) => state.clearDraft);
+  const sendKey = useUserPreferencesStore((state) => state.sendKey);
 
   const trimmedMessage = message.trim();
   const isEditing = Boolean(editingMessage);
@@ -371,7 +375,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
       }
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+    const shouldSend =
+      sendKey === 'mod+enter'
+        ? e.key === 'Enter' && (e.metaKey || e.ctrlKey)
+        : e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+
+    if (shouldSend) {
       e.preventDefault();
       void handleSend();
       return;
@@ -508,6 +517,18 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <span className="message-input__upload-progress-label">
             正在上传附件{typeof uploadProgress === 'number' ? ` ${Math.round(uploadProgress)}%` : '...'}
           </span>
+          {onCancelUpload && (
+            <button
+              type="button"
+              className="message-input__upload-cancel"
+              onClick={onCancelUpload}
+              aria-label="取消上传"
+              title="取消当前上传"
+            >
+              <X size={13} aria-hidden="true" />
+              <span>取消</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -624,10 +645,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
               !isConnected
                 ? '连接中，暂不可发送...'
                 : hasStagedFiles
-                  ? '添加图片/文件说明（可选），按 Enter 发送...'
+                  ? `添加图片/文件说明（可选），按 ${sendKey === 'mod+enter' ? '⌘/Ctrl+Enter' : 'Enter'} 发送...`
                   : isGroupChat
-                    ? '输入消息，输入 @ 可提及群成员...'
-                    : placeholder
+                    ? `输入消息，@ 可提及群成员（${sendKey === 'mod+enter' ? '⌘/Ctrl+Enter 发送' : 'Enter 发送'}）`
+                    : sendKey === 'mod+enter'
+                      ? '输入消息（⌘/Ctrl+Enter 发送，Enter 换行）...'
+                      : placeholder
             }
             disabled={!isConnected}
             className="message-input__field message-input__textarea"

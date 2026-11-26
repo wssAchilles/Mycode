@@ -161,6 +161,27 @@
     flex-shrink: 0;
 }
 
+.message-input__upload-cancel {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    border: 1px solid rgba(244, 33, 46, 0.28);
+    background: rgba(244, 33, 46, 0.08);
+    color: #e11d48;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.message-input__upload-cancel:hover {
+    background: rgba(244, 33, 46, 0.16);
+    border-color: rgba(244, 33, 46, 0.45);
+}
+
 .message-input__context-close {
     width: 26px;
     height: 26px;

@@ -4,8 +4,9 @@
  */
 
 import React, { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Bookmark, Monitor, Moon, Sun } from 'lucide-react';
+import { ArrowUp, Bookmark, Monitor, Moon, Settings, Sun } from 'lucide-react';
 import { formatThemeModeLabel, useThemeStore } from '../core/theme/themeStore';
+import { openPreferencesModal } from '../components/settings/PreferencesModal';
 import {
     SpaceAsideWidgets,
     SpaceTimeline,
@@ -641,24 +642,35 @@ export const SpacePage: React.FC = () => {
                     <span>发布动态</span>
                 </button>
 
-                <button
-                    type="button"
-                    className="space-page__theme-toggle"
-                    onClick={() => {
-                        const next = cycleThemeMode();
-                        showToast(`已切换为${formatThemeModeLabel(next)}`, 'info');
-                    }}
-                    aria-label={`切换外观主题（当前：${formatThemeModeLabel(themeMode)}）`}
-                >
-                    {themeMode === 'dark' ? (
-                        <Moon size={16} />
-                    ) : themeMode === 'light' ? (
-                        <Sun size={16} />
-                    ) : (
-                        <Monitor size={16} />
-                    )}
-                    <span>主题：{formatThemeModeLabel(themeMode)}</span>
-                </button>
+                <div className="space-page__utility-row">
+                    <button
+                        type="button"
+                        className="space-page__theme-toggle"
+                        onClick={() => {
+                            const next = cycleThemeMode();
+                            showToast(`已切换为${formatThemeModeLabel(next)}`, 'info');
+                        }}
+                        aria-label={`切换外观主题（当前：${formatThemeModeLabel(themeMode)}）`}
+                    >
+                        {themeMode === 'dark' ? (
+                            <Moon size={16} />
+                        ) : themeMode === 'light' ? (
+                            <Sun size={16} />
+                        ) : (
+                            <Monitor size={16} />
+                        )}
+                        <span>主题：{formatThemeModeLabel(themeMode)}</span>
+                    </button>
+                    <button
+                        type="button"
+                        className="space-page__prefs-btn"
+                        onClick={openPreferencesModal}
+                        title="全局偏好设置 (⌘/,)"
+                        aria-label="打开偏好设置"
+                    >
+                        <Settings size={16} />
+                    </button>
+                </div>
 
                 {/* 用户信息 */}
                 <div
