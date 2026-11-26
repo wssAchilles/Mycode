@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { spaceService } from '../../services/spaceService';
 import User from '../../models/User';
+import UserSignal from '../../models/UserSignal';
 import {
   broadcastSocialNotification,
   type SocialNotificationAction,
@@ -190,20 +191,24 @@ router.post('/posts/:postId/not-interested', async (req: Request, res: Response)
             productSurface: 'home_feed',
             timestamp: new Date(),
         });
-        logSignal({
+        const signalDoc = await UserSignal.logSignal({
             userId,
             signalType: SignalType.DISMISS_POST,
             targetId: postId,
             targetType: TargetType.POST,
+            productSurface: ProductSurface.HOME_FEED,
             targetAuthorId: post?.authorId,
             metadata: {
                 reason: 'not_interested',
                 targetKeywords: extractPostKeywords(post),
                 negativeWeight: -2,
             },
-        });
+        }).catch(() => null);
 
-        return res.status(201).json({ success: true });
+        return res.status(201).json({
+            success: true,
+            signalId: signalDoc?._id ? String(signalDoc._id) : undefined,
+        });
     } catch (error) {
         log.error({ err: error }, '记录不感兴趣失败');
         return res.status(500).json({ error: '操作失败' });
@@ -230,20 +235,24 @@ router.post('/posts/:postId/hide', async (req: Request, res: Response) => {
             productSurface: 'home_feed',
             timestamp: new Date(),
         });
-        logSignal({
+        const signalDoc = await UserSignal.logSignal({
             userId,
             signalType: SignalType.HIDE_POST,
             targetId: postId,
             targetType: TargetType.POST,
+            productSurface: ProductSurface.HOME_FEED,
             targetAuthorId: post?.authorId,
             metadata: {
                 reason: 'hide_post',
                 targetKeywords: extractPostKeywords(post),
                 negativeWeight: -4,
             },
-        });
+        }).catch(() => null);
 
-        return res.status(201).json({ success: true });
+        return res.status(201).json({
+            success: true,
+            signalId: signalDoc?._id ? String(signalDoc._id) : undefined,
+        });
     } catch (error) {
         log.error({ err: error }, '记录隐藏失败');
         return res.status(500).json({ error: '操作失败' });

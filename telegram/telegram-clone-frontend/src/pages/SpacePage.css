@@ -1092,6 +1092,102 @@
     height: 24px;
 }
 
+/* 右侧栏标题与换一批按钮 */
+.space-page__widget-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.space-page__widget-head .space-page__widget-title {
+    margin: 0;
+}
+
+.space-page__widget-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-light, #E2E8F0);
+    background: var(--color-background, #FFFFFF);
+    color: var(--color-text-secondary, #536471);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.space-page__widget-refresh:hover:not(:disabled) {
+    background: var(--color-surface-hover, #EFF3F4);
+    color: var(--color-text-primary, #0F1419);
+}
+
+.space-page__widget-refresh:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.space-page__widget-refresh svg.is-spinning {
+    animation: spaceWidgetSpin 0.8s linear infinite;
+}
+
+@keyframes spaceWidgetSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.space-page__suggest-user-trigger {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.space-page__suggest-user-trigger:hover .space-page__suggest-user-name {
+    text-decoration: underline;
+    color: var(--tg-blue, #1D9BF0);
+}
+
+/* 滚动超 600px 时显示桌面端回到顶部悬浮钮 */
+.space-page__main {
+    position: relative;
+}
+
+.space-page__back-top {
+    position: absolute;
+    right: 18px;
+    bottom: 22px;
+    z-index: 30;
+    width: 40px;
+    height: 40px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border, #CFD9DE);
+    background: var(--color-background, rgba(255, 255, 255, 0.94));
+    backdrop-filter: blur(8px);
+    color: var(--color-text-primary, #0F1419);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(15, 20, 25, 0.14);
+    transition: transform 0.14s ease, background-color 0.14s ease;
+}
+
+.space-page__back-top:hover {
+    transform: translateY(-2px);
+    background: var(--color-surface, #F7F9F9);
+}
+
 .space-page :is(button, [role="button"], a, input, textarea):focus-visible {
     outline: 2px solid var(--tg-blue);
     outline-offset: 2px;

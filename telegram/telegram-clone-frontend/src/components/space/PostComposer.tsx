@@ -21,6 +21,32 @@ export interface PostComposerProps {
     };
     onSubmit: (content: string, media?: File[]) => Promise<void>;
     placeholder?: string;
+    autoFocus?: boolean;
+}
+
+const COMPOSER_DRAFT_KEY_PREFIX = 'tg:space:composer-draft:';
+
+function readDraft(username: string): string {
+    if (typeof window === 'undefined' || !username) return '';
+    try {
+        return window.localStorage.getItem(`${COMPOSER_DRAFT_KEY_PREFIX}${username}`) || '';
+    } catch {
+        return '';
+    }
+}
+
+function writeDraft(username: string, value: string): void {
+    if (typeof window === 'undefined' || !username) return;
+    try {
+        const key = `${COMPOSER_DRAFT_KEY_PREFIX}${username}`;
+        if (!value) {
+            window.localStorage.removeItem(key);
+        } else {
+            window.localStorage.setItem(key, value);
+        }
+    } catch {
+        // 忽略存储异常
+    }
 }
 
 // SVG 图标（Apple SF Symbols 1.85px 圆润几何笔触）
@@ -68,10 +94,12 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     currentUser,
     onSubmit,
     placeholder = '发生了什么？',
+    autoFocus = false,
 }) => {
-    const [content, setContent] = useState('');
+    const [content, setContent] = useState(() => readDraft(currentUser.username));
     const [mediaFiles, setMediaFiles] = useState<File[]>([]);
     const [mediaPreviewUrls, setMediaPreviewUrls] = useState<string[]>([]);
+    const [isDragOver, setIsDragOver] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [safetyWarning, setSafetyWarning] = useState<string | null>(null);
     const [isCheckingSafety, setIsCheckingSafety] = useState(false);
@@ -90,13 +118,27 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const charCount = content.length;
     const isOverLimit = charCount > MAX_CHARS;
     const isNearLimit = charCount > MAX_CHARS * 0.9;
-    const canSubmit = content.trim().length > 0 && !isOverLimit && !isSubmitting && !isCheckingSafety;
+    const canSubmit =
+        (content.trim().length > 0 || mediaFiles.length > 0)
+        && !isOverLimit
+        && !isSubmitting
+        && !isCheckingSafety;
     const resolvedAvatarUrl = !avatarError ? resolveSpaceMediaUrl(currentUser.avatarUrl) : null;
 
     useEffect(() => {
         // When avatar changes (e.g. user updated profile), retry loading.
         setAvatarError(false);
     }, [currentUser.avatarUrl]);
+
+    useEffect(() => {
+        writeDraft(currentUser.username, content);
+    }, [currentUser.username, content]);
+
+    useEffect(() => {
+        if (autoFocus) {
+            requestAnimationFrame(() => textareaRef.current?.focus());
+        }
+    }, [autoFocus]);
 
     // 自动调整高度
     const adjustTextareaHeight = useCallback(() => {
@@ -116,6 +158,19 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         [adjustTextareaHeight]
     );
 
+    const appendImageFiles = useCallback((files: File[]) => {
+        const remaining = MAX_MEDIA - mediaFiles.length;
+        if (remaining <= 0) {
+            showToast('最多只能添加 4 张图片', 'info');
+            return;
+        }
+        const validFiles = files.filter((file) => file.type.startsWith('image/')).slice(0, remaining);
+        if (validFiles.length === 0) return;
+        setMediaFiles((prev) => [...prev, ...validFiles]);
+        const newUrls = validFiles.map((file) => URL.createObjectURL(file));
+        setMediaPreviewUrls((prev) => [...prev, ...newUrls]);
+    }, [mediaFiles.length]);
+
     // 处理图片选择
     const handleImageSelect = useCallback(() => {
         fileInputRef.current?.click();
@@ -123,21 +178,10 @@ export const PostComposer: React.FC<PostComposerProps> = ({
 
     const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
-        const validFiles = files
-            .filter((file) => file.type.startsWith('image/'))
-            .slice(0, MAX_MEDIA - mediaFiles.length);
-
-        if (validFiles.length > 0) {
-            setMediaFiles((prev) => [...prev, ...validFiles]);
-
-            // 创建预览 URL
-            const newUrls = validFiles.map((file) => URL.createObjectURL(file));
-            setMediaPreviewUrls((prev) => [...prev, ...newUrls]);
-        }
-
+        appendImageFiles(files);
         // 清空 input 以允许重复选择
         if (e.target) e.target.value = '';
-    }, [mediaFiles.length]);
+    }, [appendImageFiles]);
 
     // 移除媒体
     const removeMedia = useCallback((index: number) => {
@@ -242,12 +286,15 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         setIsCheckingSafety(true);
 
         try {
-            // Step 1: 安全检测 (Phoenix VF v2)
-            const vfResult = await mlService.vfCheckContent(content.trim());
-            if (vfResult && vfResult.safe === false) {
-                setSafetyWarning(vfResult.reason || '内容被系统拦截 (安全策略)');
-                setIsCheckingSafety(false);
-                return;
+            // Step 1: 安全检测 (Phoenix VF v2)，纯图片动态无需检测空文本
+            const trimmedContent = content.trim();
+            if (trimmedContent) {
+                const vfResult = await mlService.vfCheckContent(trimmedContent);
+                if (vfResult && vfResult.safe === false) {
+                    setSafetyWarning(vfResult.reason || '内容被系统拦截 (安全策略)');
+                    setIsCheckingSafety(false);
+                    return;
+                }
             }
 
             // (Previous array check logic removed)
@@ -264,8 +311,9 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         try {
             await onSubmit(content.trim(), mediaFiles.length > 0 ? mediaFiles : undefined);
 
-            // 清空表单
+            // 清空表单并清除草稿
             setContent('');
+            writeDraft(currentUser.username, '');
             setMediaFiles([]);
             mediaPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
             setMediaPreviewUrls([]);
@@ -276,7 +324,31 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         } finally {
             setIsSubmitting(false);
         }
-    }, [canSubmit, content, mediaFiles, mediaPreviewUrls, onSubmit]);
+    }, [canSubmit, content, currentUser.username, mediaFiles, mediaPreviewUrls, onSubmit]);
+
+    const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = Array.from(event.clipboardData?.items || []);
+        const imageFiles: File[] = [];
+        for (const item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const f = item.getAsFile();
+                if (f) imageFiles.push(f);
+            }
+        }
+        if (imageFiles.length > 0) {
+            event.preventDefault();
+            appendImageFiles(imageFiles);
+        }
+    }, [appendImageFiles]);
+
+    const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (canSubmit) {
+                void handleSubmit();
+            }
+        }
+    }, [canSubmit, handleSubmit]);
 
     // 获取首字母
     const getInitials = (name: string): string => name.charAt(0).toUpperCase();
@@ -289,7 +361,28 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     };
 
     return (
-        <div className="post-composer">
+        <div
+            className={`post-composer ${isDragOver ? 'is-drag-over' : ''}`}
+            onDragOver={(event) => {
+                if (event.dataTransfer?.types?.includes('Files')) {
+                    event.preventDefault();
+                    setIsDragOver(true);
+                }
+            }}
+            onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setIsDragOver(false);
+                }
+            }}
+            onDrop={(event) => {
+                setIsDragOver(false);
+                const dropped = Array.from(event.dataTransfer?.files || []);
+                if (dropped.some((f) => f.type.startsWith('image/'))) {
+                    event.preventDefault();
+                    appendImageFiles(dropped);
+                }
+            }}
+        >
             {/* 头像 */}
             <div className="post-composer__avatar">
                 {resolvedAvatarUrl ? (
@@ -320,6 +413,8 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         placeholder={placeholder}
                         value={content}
                         onChange={handleContentChange}
+                        onPaste={handlePaste}
+                        onKeyDown={handleKeyDown}
                         rows={1}
                     />
                     {charCount > 0 && (
@@ -427,14 +522,19 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         </button>
                     </div>
 
-                    <button
-                        type="button"
-                        className={`post-composer__submit ${isSubmitting || isCheckingSafety ? 'post-composer__submit--loading' : ''}`}
-                        onClick={handleSubmit}
-                        disabled={!canSubmit}
-                    >
-                        {isCheckingSafety ? '检测中...' : isSubmitting ? '发布中...' : '发布'}
-                    </button>
+                    <div className="post-composer__submit-group">
+                        <span className="post-composer__shortcut-hint" aria-hidden="true">
+                            ⌘/Ctrl + Enter 发送 · 支持粘贴图片
+                        </span>
+                        <button
+                            type="button"
+                            className={`post-composer__submit ${isSubmitting || isCheckingSafety ? 'post-composer__submit--loading' : ''}`}
+                            onClick={handleSubmit}
+                            disabled={!canSubmit}
+                        >
+                            {isCheckingSafety ? '检测中...' : isSubmitting ? '发布中...' : '发布'}
+                        </button>
+                    </div>
                 </div>
 
                 {showGifPanel && (

@@ -46,9 +46,16 @@ router.post('/posts', spaceUpload.array('media'), async (req: Request, res: Resp
             return res.status(401).json({ error: '未授权' });
         }
 
+        const safeContent = typeof content === 'string' ? content : '';
+        const hasMedia = Array.isArray(media) && media.length > 0;
+        const hasQuote = typeof quotePostId === 'string' && quotePostId.trim().length > 0;
+        if (!safeContent.trim() && !hasMedia && !hasQuote) {
+            return res.status(400).json({ error: '动态内容与媒体不能同时为空' });
+        }
+
         const post = await spaceService.createPost({
             authorId: userId,
-            content,
+            content: safeContent,
             media,
             replyToPostId,
             quotePostId,

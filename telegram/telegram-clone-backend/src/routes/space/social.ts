@@ -3,12 +3,15 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import User from '../../models/User';
 import Contact, { ContactStatus } from '../../models/Contact';
+import SpaceProfile from '../../models/SpaceProfile';
 import { recsysStreamPublisher } from '../../services/recommendation/realtime';
 import { broadcastSocialNotification } from '../../services/realtimeEvents';
 import {
     log,
+    isValidUuid,
     logSignal,
     SignalType,
     TargetType,
@@ -185,6 +188,140 @@ router.delete('/users/:id/mute', async (req: Request, res: Response) => {
     } catch (error) {
         log.error({ err: error }, '取消静音失败');
         return res.status(500).json({ error: '取消静音失败' });
+    }
+});
+
+/**
+ * 批量装配关注关系用户列表卡片数据
+ */
+async function hydrateRelationUsers(
+    targetUserIds: string[],
+    viewerId?: string,
+): Promise<Array<{
+    id: string;
+    username: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+    bio?: string | null;
+    isOnline?: boolean;
+    isFollowing: boolean;
+}>> {
+    if (targetUserIds.length === 0) return [];
+    const [users, profiles, viewerFollows] = await Promise.all([
+        User.findAll({
+            where: { id: { [Op.in]: targetUserIds } },
+            attributes: ['id', 'username', 'avatarUrl', 'isOnline'],
+        }),
+        SpaceProfile.find({ userId: { $in: targetUserIds } })
+            .select('userId displayName bio')
+            .lean(),
+        viewerId
+            ? Contact.findAll({
+                where: {
+                    userId: viewerId,
+                    contactId: { [Op.in]: targetUserIds },
+                    status: ContactStatus.ACCEPTED,
+                },
+                attributes: ['contactId'],
+            })
+            : Promise.resolve([]),
+    ]);
+
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+    const followedSet = new Set(viewerFollows.map((c) => c.contactId));
+
+    return targetUserIds
+        .map((id) => {
+            const u = userMap.get(id);
+            if (!u) return null;
+            const p = profileMap.get(id);
+            return {
+                id: u.id,
+                username: u.username,
+                displayName: p?.displayName ?? null,
+                avatarUrl: u.avatarUrl ?? null,
+                bio: p?.bio ?? null,
+                isOnline: Boolean(u.isOnline),
+                isFollowing: followedSet.has(u.id),
+            };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+// ---------------------------------------------------------------------------
+// GET /users/:id/followers — list followers
+// ---------------------------------------------------------------------------
+
+router.get('/users/:id/followers', async (req: Request, res: Response) => {
+    try {
+        const viewerId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+        if (!isValidUuid(targetId)) {
+            return res.status(400).json({ error: 'invalid_user_id' });
+        }
+
+        const rawLimit = parseInt(req.query.limit as string, 10);
+        const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 50)) : 20;
+        const rawOffset = parseInt(req.query.offset as string, 10);
+        const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+
+        const { count, rows } = await Contact.findAndCountAll({
+            where: { contactId: targetId, status: ContactStatus.ACCEPTED },
+            attributes: ['userId'],
+            order: [['updatedAt', 'DESC']],
+            limit,
+            offset,
+        });
+
+        const ids = rows.map((row) => row.userId);
+        const users = await hydrateRelationUsers(ids, viewerId);
+        return res.json({
+            users,
+            totalCount: count,
+            hasMore: offset + rows.length < count,
+        });
+    } catch (error) {
+        log.error({ err: error }, '获取粉丝列表失败');
+        return res.status(500).json({ error: '获取粉丝列表失败' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// GET /users/:id/following — list following users
+// ---------------------------------------------------------------------------
+
+router.get('/users/:id/following', async (req: Request, res: Response) => {
+    try {
+        const viewerId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+        if (!isValidUuid(targetId)) {
+            return res.status(400).json({ error: 'invalid_user_id' });
+        }
+
+        const rawLimit = parseInt(req.query.limit as string, 10);
+        const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 50)) : 20;
+        const rawOffset = parseInt(req.query.offset as string, 10);
+        const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+
+        const { count, rows } = await Contact.findAndCountAll({
+            where: { userId: targetId, status: ContactStatus.ACCEPTED },
+            attributes: ['contactId'],
+            order: [['updatedAt', 'DESC']],
+            limit,
+            offset,
+        });
+
+        const ids = rows.map((row) => row.contactId);
+        const users = await hydrateRelationUsers(ids, viewerId);
+        return res.json({
+            users,
+            totalCount: count,
+            hasMore: offset + rows.length < count,
+        });
+    } catch (error) {
+        log.error({ err: error }, '获取关注列表失败');
+        return res.status(500).json({ error: '获取关注列表失败' });
     }
 });
 

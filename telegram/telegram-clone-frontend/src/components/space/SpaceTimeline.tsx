@@ -35,6 +35,7 @@ export interface SpaceTimelineProps {
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
     onAuthorClick?: SpacePostProps['onAuthorClick'];
+    onHashtagClick?: SpacePostProps['onHashtagClick'];
     /** SpacePage scroll container (avoid window scrolling + enables virtualization). */
     scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
@@ -61,6 +62,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onShare,
     onPostClick,
     onAuthorClick,
+    onHashtagClick,
     scrollElementRef,
 }) => {
     const shouldVirtualize = posts.length >= 80;
@@ -343,6 +345,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                     onShare={onShare}
                                     onClick={onPostClick}
                                     onAuthorClick={onAuthorClick}
+                                    onHashtagClick={onHashtagClick}
                                 />
                             </div>
                         ))}
@@ -385,6 +388,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                         onShare={onShare}
                                         onClick={onPostClick}
                                         onAuthorClick={onAuthorClick}
+                                        onHashtagClick={onHashtagClick}
                                         onLayoutChanged={scheduleMeasure}
                                     />
                                 </div>

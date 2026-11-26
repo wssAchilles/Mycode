@@ -17,13 +17,14 @@ const log = createChildLogger('services:spaceService');
 
 export async function createPost(params: CreatePostParams): Promise<IPost> {
     const { authorId, content, media, replyToPostId, quotePostId, quoteContent } = params;
+    const normalizedContent = typeof content === 'string' ? content : '';
 
     // 提取关键词 (用于 MutedKeywordFilter)
-    const keywords = extractKeywords(content);
+    const keywords = extractKeywords(normalizedContent);
 
     const postData: Partial<IPost> = {
         authorId,
-        content,
+        content: normalizedContent,
         keywords,
         media: media?.map(m => ({ ...m, type: m.type as MediaType })) || [],
     };

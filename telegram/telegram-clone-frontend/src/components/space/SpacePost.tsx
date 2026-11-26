@@ -9,7 +9,10 @@ import { RecommendationReason, type RecallSource } from './RecommendationReason'
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
 import { useAnalytics, useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import { useSpaceStore } from '../../stores';
-import apiClient from '../../services/apiClient';
+import apiClient, { authUtils } from '../../services/apiClient';
+import { spaceAPI } from '../../services/spaceApi';
+import { showToast } from '../ui/Toast';
+import { ChatImageLightbox, type LightboxMediaItem } from '../../features/chat/components/media/ChatImageLightbox';
 import { resolveMediaCrossOrigin } from '../../utils/apiUrl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -105,12 +108,45 @@ export interface SpacePostProps {
     onAuthorClick?: (authorId: string) => void;
     onDismiss?: (postId: string) => void;
     onHide?: (postId: string) => void;
+    onRestore?: (postId: string) => void;
     onBlock?: (authorId: string) => void;
     onMute?: (authorId: string) => void;
+    onHashtagClick?: (tag: string) => void;
+    onMentionClick?: (username: string) => void;
     onLayoutChanged?: () => void;
     feedPosition?: number;
     showRecommendationReason?: boolean;
     showPinAction?: boolean;
+}
+
+const CODE_OR_URL_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s<>"'`]+)/g;
+const SPACE_TAG_OR_MENTION_RE = /(^|[\s(（[【,;，。！？：:])([#@])([a-zA-Z0-9_\u4e00-\u9fa5-]{1,40})/g;
+
+/**
+ * 将普通文本中的 #话题 与 @用户名 安全转写为内部伪协议 Markdown 链接（避开代码块、URL 与邮箱）
+ */
+function decorateSpaceTagsAndMentions(text: string): string {
+    if (!text) return '';
+    return text
+        .split(CODE_OR_URL_SEGMENT_RE)
+        .map((segment) => {
+            if (
+                !segment
+                || segment.startsWith('`')
+                || segment.startsWith('http://')
+                || segment.startsWith('https://')
+            ) {
+                return segment;
+            }
+            return segment.replace(
+                SPACE_TAG_OR_MENTION_RE,
+                (_, prefix: string, symbol: string, token: string) => {
+                    const scheme = symbol === '#' ? 'tg-tag' : 'tg-mention';
+                    return `${prefix}[${symbol}${token}](${scheme}://${encodeURIComponent(token)})`;
+                },
+            );
+        })
+        .join('');
 }
 
 // SVG 图标组件
@@ -193,8 +229,11 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onAuthorClick,
     onDismiss,
     onHide,
+    onRestore,
     onBlock,
     onMute,
+    onHashtagClick,
+    onMentionClick,
     onLayoutChanged,
     feedPosition,
     showRecommendationReason = true,
@@ -206,7 +245,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [repostCount, setRepostCount] = useState(post.repostCount);
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
     const [isExpanded, setIsExpanded] = useState(false);
-    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+    const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
     const [showMoreMenu, setShowMoreMenu] = useState(false);
     const [showReportMenu, setShowReportMenu] = useState(false);
     const [showQuoteComposer, setShowQuoteComposer] = useState(false);
@@ -377,18 +416,54 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         setShowMoreMenu(false);
         setIsRemoving(true);
         analytics.trackDismiss(post.id, post.author.id, recommendationEventContext);
-        void apiClient.post(`/api/space/posts/${post.id}/not-interested`).catch(() => undefined);
+        void apiClient
+            .post<{ success?: boolean; signalId?: string }>(`/api/space/posts/${post.id}/not-interested`)
+            .then((res) => {
+                const signalId = res?.data?.signalId;
+                showToast('已减少类似内容推荐', 'info', {
+                    duration: 5000,
+                    actionLabel: '撤销',
+                    onAction: () => {
+                        setIsRemoved(false);
+                        setIsRemoving(false);
+                        onRestore?.(post.id);
+                        const viewerId = authUtils.getCurrentUser()?.id;
+                        if (viewerId && signalId) {
+                            void spaceAPI.undoNegativeFeedback(viewerId, signalId).catch(() => undefined);
+                        }
+                    },
+                });
+            })
+            .catch(() => undefined);
         postMotion.run('remove', () => finishRemoval(onDismiss));
-    }, [analytics, finishRemoval, onDismiss, post.author.id, post.id, postMotion, recommendationEventContext]);
+    }, [analytics, finishRemoval, onDismiss, onRestore, post.author.id, post.id, postMotion, recommendationEventContext]);
 
     const handleHide = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
         setIsRemoving(true);
         analytics.trackHide(post.id, post.author.id, recommendationEventContext);
-        void apiClient.post(`/api/space/posts/${post.id}/hide`).catch(() => undefined);
+        void apiClient
+            .post<{ success?: boolean; signalId?: string }>(`/api/space/posts/${post.id}/hide`)
+            .then((res) => {
+                const signalId = res?.data?.signalId;
+                showToast('已隐藏此动态', 'info', {
+                    duration: 5000,
+                    actionLabel: '撤销',
+                    onAction: () => {
+                        setIsRemoved(false);
+                        setIsRemoving(false);
+                        onRestore?.(post.id);
+                        const viewerId = authUtils.getCurrentUser()?.id;
+                        if (viewerId && signalId) {
+                            void spaceAPI.undoNegativeFeedback(viewerId, signalId).catch(() => undefined);
+                        }
+                    },
+                });
+            })
+            .catch(() => undefined);
         postMotion.run('remove', () => finishRemoval(onHide));
-    }, [analytics, finishRemoval, onHide, post.author.id, post.id, postMotion, recommendationEventContext]);
+    }, [analytics, finishRemoval, onHide, onRestore, post.author.id, post.id, postMotion, recommendationEventContext]);
 
     const handleReport = useCallback(async (e: React.MouseEvent, reason: string) => {
         e.stopPropagation();
@@ -397,7 +472,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         analytics.trackReport(post.id, reason, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/posts/${post.id}/report`, { reason });
-        } catch { /* fire-and-forget */ }
+            showToast('已提交举报，感谢反馈', 'success');
+        } catch {
+            showToast('举报提交失败，请稍后重试', 'error');
+        }
     }, [analytics, post.id, recommendationEventContext]);
 
     const handleBlock = useCallback(async (e: React.MouseEvent) => {
@@ -406,9 +484,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         analytics.trackBlock(post.author.id, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/block`);
-        } catch { /* fire-and-forget */ }
+            showToast(`已屏蔽 @${post.author.username}`, 'info');
+        } catch {
+            showToast('屏蔽失败，请稍后重试', 'error');
+        }
         onBlock?.(post.author.id);
-    }, [analytics, post.author.id, onBlock, recommendationEventContext]);
+    }, [analytics, post.author.id, post.author.username, onBlock, recommendationEventContext]);
 
     const handleMute = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -416,9 +497,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         analytics.trackMute(post.author.id, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/mute`);
-        } catch { /* fire-and-forget */ }
+            showToast(`已静音 @${post.author.username}`, 'info');
+        } catch {
+            showToast('静音失败，请稍后重试', 'error');
+        }
         onMute?.(post.author.id);
-    }, [analytics, post.author.id, onMute, recommendationEventContext]);
+    }, [analytics, post.author.id, post.author.username, onMute, recommendationEventContext]);
 
     const handleOpenQuoteComposer = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
@@ -599,25 +683,18 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         }
     }, [postMotion, showMoreMenu]);
 
-    // Lightbox 键盘 Escape 关闭支持
-    useEffect(() => {
-        if (!lightboxUrl) return;
-        const onKeyDown = (ev: KeyboardEvent) => {
-            if (ev.key === 'Escape') {
-                setLightboxUrl(null);
-            }
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [lightboxUrl]);
+    const visibleMedia = useMemo(
+        () => (post.media || []).filter((media) => Boolean(media.url) && !failedMediaUrls[media.url]).slice(0, 4),
+        [post.media, failedMediaUrls],
+    );
 
-    // 渲染媒体网格（自动过滤失效媒体并在跨源 API 媒体上启用安全 CORS，支持 Apple Quick Look 预览）
+    const galleryItems = useMemo<LightboxMediaItem[]>(
+        () => visibleMedia.map((media, idx) => ({ id: `${post.id}-m-${idx}`, src: media.url })),
+        [visibleMedia, post.id],
+    );
+
+    // 渲染媒体网格（自动过滤失效媒体并在跨源 API 媒体上启用安全 CORS，支持多图相册灯箱预览）
     const renderMedia = () => {
-        if (!post.media || post.media.length === 0) return null;
-
-        const visibleMedia = post.media
-            .filter((media) => Boolean(media.url) && !failedMediaUrls[media.url])
-            .slice(0, 4);
         if (visibleMedia.length === 0) return null;
 
         const mediaCount = visibleMedia.length;
@@ -626,7 +703,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         return (
             <div className="space-post__media">
                 <div className={gridClass}>
-                    {visibleMedia.map((media) => (
+                    {visibleMedia.map((media, idx) => (
                         <img
                             key={media.url}
                             src={media.url}
@@ -639,7 +716,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             decoding="async"
                             onClick={(e) => {
                                 e.stopPropagation();
-                                setLightboxUrl(media.url);
+                                setLightboxIndex(idx);
                             }}
                             onLoad={onLayoutChanged}
                             onError={() => {
@@ -825,6 +902,57 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             components={{
                                 a: ({ node: _node, ...props }) => {
                                     void _node;
+                                    const href = typeof props.href === 'string' ? props.href : '';
+                                    if (href.startsWith('tg-tag://')) {
+                                        const tag = decodeURIComponent(href.slice('tg-tag://'.length));
+                                        return (
+                                            <a
+                                                href={`#${tag}`}
+                                                className="space-post__inline-tag"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    analytics.trackHashtagClick(tag, recommendationEventContext);
+                                                    if (onHashtagClick) {
+                                                        onHashtagClick(tag);
+                                                    } else {
+                                                        void useSpaceStore.getState().searchTopicPosts(tag);
+                                                    }
+                                                }}
+                                            >
+                                                {props.children}
+                                            </a>
+                                        );
+                                    }
+                                    if (href.startsWith('tg-mention://')) {
+                                        const mentionName = decodeURIComponent(href.slice('tg-mention://'.length));
+                                        return (
+                                            <a
+                                                href={`#${mentionName}`}
+                                                className="space-post__inline-mention"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    if (onMentionClick) {
+                                                        onMentionClick(mentionName);
+                                                    } else {
+                                                        void spaceAPI.searchUsers(mentionName, 3).then((matches) => {
+                                                            const exact = matches.find(
+                                                                (u) => u.username.toLowerCase() === mentionName.toLowerCase(),
+                                                            ) || matches[0];
+                                                            if (exact) {
+                                                                onAuthorClick?.(exact.id);
+                                                            } else {
+                                                                void useSpaceStore.getState().searchPosts(mentionName);
+                                                            }
+                                                        });
+                                                    }
+                                                }}
+                                            >
+                                                {props.children}
+                                            </a>
+                                        );
+                                    }
                                     return (
                                         <a
                                             {...props}
@@ -832,7 +960,6 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                             rel="noopener noreferrer"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                const href = typeof props.href === 'string' ? props.href : '';
                                                 if (href) {
                                                     analytics.trackOpenLink(post.id, href, {
                                                         ...recommendationEventContext,
@@ -845,7 +972,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                 },
                             }}
                         >
-                            {displayContent}
+                            {decorateSpaceTagsAndMentions(displayContent)}
                         </ReactMarkdown>
                     </div>
 
@@ -966,38 +1093,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                     )}
                 </div>
 
-                {lightboxUrl && createPortal(
-                    <div
-                        className="space-post__lightbox"
-                        role="dialog"
-                        aria-modal="true"
-                        aria-label="图片预览"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setLightboxUrl(null);
-                        }}
-                    >
-                        <button
-                            type="button"
-                            className="space-post__lightbox-close"
-                            aria-label="关闭图片预览"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setLightboxUrl(null);
-                            }}
-                        >
-                            ×
-                        </button>
-                        <img
-                            src={lightboxUrl}
-                            alt=""
-                            crossOrigin={resolveMediaCrossOrigin(lightboxUrl)}
-                            className="space-post__lightbox-img"
-                            onClick={(e) => e.stopPropagation()}
-                        />
-                    </div>,
-                    document.body,
-                )}
+                <ChatImageLightbox
+                    src={lightboxIndex !== null ? (galleryItems[lightboxIndex]?.src ?? null) : null}
+                    items={lightboxIndex !== null ? galleryItems : undefined}
+                    initialIndex={lightboxIndex ?? 0}
+                    onClose={() => setLightboxIndex(null)}
+                />
             </>
         );
     };

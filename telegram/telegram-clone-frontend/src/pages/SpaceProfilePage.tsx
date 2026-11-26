@@ -5,8 +5,9 @@ import apiClient from '../services/apiClient';
 import { authStorage } from '../utils/authStorage';
 import { spaceAPI, type NegativeFeedbackItem, type NegativeFeedbackSummary, type UserProfile } from '../services/spaceApi';
 import { COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
-import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
+import { SpacePost, SpaceCommentDrawer, FollowListModal, type FollowListMode, type PostData } from '../components/space';
 import NegativeFeedbackPanel from '../components/space/NegativeFeedbackPanel';
+import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
@@ -63,6 +64,8 @@ const SpaceProfilePage: React.FC = () => {
     const [avatarUploading, setAvatarUploading] = useState(false);
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+    const [followModalOpen, setFollowModalOpen] = useState(false);
+    const [followModalMode, setFollowModalMode] = useState<FollowListMode>('followers');
 
     const loadPosts = async (reset: boolean = false, pinnedIds?: string[]) => {
         if (!id) return;
@@ -484,8 +487,29 @@ const SpaceProfilePage: React.FC = () => {
     if (loading) {
         return (
             <div className="space-profile">
-                <div className="space-profile__shell">
-                    <div className="space-profile__loading">加载中...</div>
+                <div className="space-profile__shell" aria-label="个人主页加载中" aria-busy="true">
+                    <div className="space-profile__skeleton-cover" />
+                    <div className="space-profile__skeleton-header">
+                        <Skeleton className="space-profile__skeleton-avatar-lg" />
+                        <Skeleton className="space-profile__skeleton-name" />
+                        <Skeleton className="space-profile__skeleton-bio" />
+                        <div className="space-profile__skeleton-stats">
+                            <Skeleton className="space-profile__skeleton-stat" />
+                            <Skeleton className="space-profile__skeleton-stat" />
+                            <Skeleton className="space-profile__skeleton-stat" />
+                        </div>
+                    </div>
+                    <div className="space-profile__likes-skeleton">
+                        {Array.from({ length: 2 }).map((_, i) => (
+                            <div className="space-profile__skeleton-card" key={`profile-skel-${i}`}>
+                                <Skeleton className="space-profile__skeleton-avatar" />
+                                <div className="space-profile__skeleton-lines">
+                                    <Skeleton className="space-profile__skeleton-line is-wide" />
+                                    <Skeleton className="space-profile__skeleton-line" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         );
@@ -624,7 +648,15 @@ const SpaceProfilePage: React.FC = () => {
                                         <span>动态</span>
                                     </div>
                                 </div>
-                                <div className="space-profile__stat">
+                                <button
+                                    type="button"
+                                    className="space-profile__stat is-clickable"
+                                    aria-label={`查看 ${profile.stats.followers} 位关注者`}
+                                    onClick={() => {
+                                        setFollowModalMode('followers');
+                                        setFollowModalOpen(true);
+                                    }}
+                                >
                                     <span className="space-profile__stat-icon space-profile__stat-icon--followers" aria-hidden="true">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <circle cx="9" cy="8" r="3" />
@@ -636,8 +668,16 @@ const SpaceProfilePage: React.FC = () => {
                                         <strong>{profile.stats.followers}</strong>
                                         <span>关注者</span>
                                     </div>
-                                </div>
-                                <div className="space-profile__stat">
+                                </button>
+                                <button
+                                    type="button"
+                                    className="space-profile__stat is-clickable"
+                                    aria-label={`查看 ${profile.stats.following} 位正在关注`}
+                                    onClick={() => {
+                                        setFollowModalMode('following');
+                                        setFollowModalOpen(true);
+                                    }}
+                                >
                                     <span className="space-profile__stat-icon space-profile__stat-icon--following" aria-hidden="true">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <circle cx="9" cy="8" r="3" />
@@ -649,7 +689,7 @@ const SpaceProfilePage: React.FC = () => {
                                         <strong>{profile.stats.following}</strong>
                                         <span>正在关注</span>
                                     </div>
-                                </div>
+                                </button>
                             </div>
                         </div>
                         {isSelf && (
@@ -669,6 +709,16 @@ const SpaceProfilePage: React.FC = () => {
                                     aria-label="更换头像"
                                 >
                                     {avatarUploading ? '头像上传中...' : '更换头像'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="space-profile__avatar-btn"
+                                    onClick={() => {
+                                        void navigator.clipboard?.writeText(`${SHARE_BASE_URL}/space/user/${profile.id}`);
+                                        showToast('主页链接已复制', 'success');
+                                    }}
+                                >
+                                    复制链接
                                 </button>
                                 <input
                                     ref={avatarInputRef}
@@ -696,6 +746,16 @@ const SpaceProfilePage: React.FC = () => {
                                     onClick={() => navigate(`/chat?dm=${profile.id}`)}
                                 >
                                     私信
+                                </button>
+                                <button
+                                    type="button"
+                                    className="space-profile__avatar-btn"
+                                    onClick={() => {
+                                        void navigator.clipboard?.writeText(`${SHARE_BASE_URL}/space/user/${profile.id}`);
+                                        showToast('主页链接已复制', 'success');
+                                    }}
+                                >
+                                    复制链接
                                 </button>
                             </div>
                         )}
@@ -1075,6 +1135,29 @@ const SpaceProfilePage: React.FC = () => {
                 post={commentPost}
                 onClose={() => setCommentPost(null)}
                 onCommentAdded={handleCommentAdded}
+            />
+
+            <FollowListModal
+                open={followModalOpen}
+                onOpenChange={setFollowModalOpen}
+                userId={profile.id}
+                username={profile.username}
+                viewerUserId={currentUser?.id}
+                initialMode={followModalMode}
+                onNavigateUser={(targetId) => navigate(`/space/user/${targetId}`)}
+                onViewerFollowChanged={(delta) => {
+                    setProfile((prev) =>
+                        prev
+                            ? {
+                                ...prev,
+                                stats: {
+                                    ...prev.stats,
+                                    following: Math.max(0, prev.stats.following + delta),
+                                },
+                            }
+                            : prev,
+                    );
+                }}
             />
         </div>
     );

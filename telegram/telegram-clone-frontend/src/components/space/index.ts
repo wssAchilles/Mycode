@@ -28,3 +28,9 @@ export type { RecallSource, RecommendationReasonProps, MultiReasonProps } from '
 
 export { SensitiveContentOverlay, SensitiveTag } from './SensitiveContentOverlay';
 export type { SafetyLevel, SensitiveContentOverlayProps, SensitiveTagProps } from './SensitiveContentOverlay';
+
+export { ComposePostModal } from './ComposePostModal';
+export type { ComposePostModalProps } from './ComposePostModal';
+
+export { FollowListModal } from './FollowListModal';
+export type { FollowListModalProps, FollowListMode } from './FollowListModal';

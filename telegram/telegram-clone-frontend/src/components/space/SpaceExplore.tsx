@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { spaceAPI, type TrendItem } from '../../services/spaceApi';
+import { Clock, Trash2, X } from 'lucide-react';
+import { spaceAPI, type SpaceRelationUser, type TrendItem } from '../../services/spaceApi';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import { useSpaceStore } from '../../stores';
+import { authUtils } from '../../services/apiClient';
+import { showToast } from '../ui/Toast';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { SpacePost, type SpacePostProps } from './SpacePost';
@@ -21,6 +24,30 @@ export interface SpaceExploreProps {
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
     onAuthorClick?: SpacePostProps['onAuthorClick'];
+    onHashtagClick?: SpacePostProps['onHashtagClick'];
+}
+
+const RECENT_SEARCHES_KEY = 'tg:space:recent-searches';
+const MAX_RECENT_SEARCHES = 8;
+
+function readRecentSearches(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = window.localStorage.getItem(RECENT_SEARCHES_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeRecentSearches(items: string[]): void {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(items.slice(0, MAX_RECENT_SEARCHES)));
+    } catch {
+        // 忽略存储异常
+    }
 }
 
 type ExploreTab = 'recommend' | 'topics' | 'news';
@@ -50,14 +77,20 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onShare,
     onPostClick,
     onAuthorClick,
+    onHashtagClick,
 }) => {
     const navigate = useNavigate();
+    const currentUserId = authUtils.getCurrentUser()?.id;
     const analytics = useAnalytics({ source: 'space_explore' });
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [trendsLoading, setTrendsLoading] = useState(true);
     const [trendsError, setTrendsError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<ExploreTab>('recommend');
+    const [resultFilter, setResultFilter] = useState<'all' | 'posts' | 'users'>('all');
+    const [userResults, setUserResults] = useState<SpaceRelationUser[]>([]);
+    const [loadingUsers, setLoadingUsers] = useState(false);
+    const [recentSearches, setRecentSearches] = useState<string[]>(readRecentSearches);
     const [fallbackNews, setFallbackNews] = useState<NewsFeedItem[]>([]);
     const [fallbackNewsLoading, setFallbackNewsLoading] = useState(false);
     const [fallbackNewsError, setFallbackNewsError] = useState<string | null>(null);
@@ -114,15 +147,60 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         fetchExploreFeed(true);
     }, [activeTab, searchQuery, searchResults.length, explorePosts.length, isLoadingExplore, exploreHasLoaded, exploreError, fetchExploreFeed]);
 
+    const recordRecentSearch = useCallback((keyword: string) => {
+        const clean = keyword.trim();
+        if (!clean) return;
+        setRecentSearches((prev) => {
+            const next = [clean, ...prev.filter((item) => item !== clean)].slice(0, MAX_RECENT_SEARCHES);
+            writeRecentSearches(next);
+            return next;
+        });
+    }, []);
+
+    const executeSearch = useCallback((rawKeyword: string) => {
+        const trimmed = rawKeyword.trim();
+        setActiveTab('recommend');
+        if (!trimmed) {
+            setUserResults([]);
+            clearSearch();
+            return;
+        }
+        recordRecentSearch(trimmed);
+        analytics.trackSearchQuery(trimmed, { productSurface: 'explore' });
+        void searchPosts(trimmed);
+        setLoadingUsers(true);
+        void spaceAPI.searchUsers(trimmed, 12)
+            .then((users) => setUserResults(users))
+            .finally(() => setLoadingUsers(false));
+    }, [analytics, clearSearch, recordRecentSearch, searchPosts]);
+
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
-        const trimmed = query.trim();
-        setActiveTab('recommend');
-        if (trimmed) {
-            analytics.trackSearchQuery(trimmed, { productSurface: 'explore' });
-            searchPosts(trimmed);
-        } else {
-            clearSearch();
+        executeSearch(query);
+    };
+
+    const handleClearSearchInput = () => {
+        setQuery('');
+        setUserResults([]);
+        setResultFilter('all');
+        clearSearch();
+    };
+
+    const handleToggleExploreUserFollow = async (target: SpaceRelationUser) => {
+        const nextFollow = !target.isFollowing;
+        try {
+            if (nextFollow) {
+                await spaceAPI.followUser(target.id);
+                showToast(`已关注 ${target.displayName || target.username}`, 'success');
+            } else {
+                await spaceAPI.unfollowUser(target.id);
+                showToast(`已取消关注 ${target.displayName || target.username}`, 'info');
+            }
+            setUserResults((prev) =>
+                prev.map((u) => (u.id === target.id ? { ...u, isFollowing: nextFollow } : u)),
+            );
+        } catch {
+            showToast('操作失败，请稍后重试', 'error');
         }
     };
 
@@ -236,19 +314,157 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                     />
+                    {query.length > 0 && (
+                        <button
+                            type="button"
+                            className="space-explore__clear-btn"
+                            aria-label="清空搜索"
+                            onClick={handleClearSearchInput}
+                        >
+                            <X size={15} />
+                        </button>
+                    )}
                     <button className="space-explore__submit" type="submit">
                         搜索
                     </button>
                 </form>
+                {recentSearches.length > 0 && (
+                    <div className="space-explore__recent" aria-label="最近搜索">
+                        <span className="space-explore__recent-label">
+                            <Clock size={12} />
+                            <span>最近</span>
+                        </span>
+                        <div className="space-explore__recent-chips">
+                            {recentSearches.map((item) => (
+                                <span key={item} className="space-explore__recent-chip">
+                                    <button
+                                        type="button"
+                                        className="space-explore__recent-text"
+                                        onClick={() => {
+                                            setQuery(item);
+                                            executeSearch(item);
+                                        }}
+                                    >
+                                        {item}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="space-explore__recent-del"
+                                        aria-label={`删除搜索历史 ${item}`}
+                                        onClick={() => {
+                                            const next = recentSearches.filter((x) => x !== item);
+                                            setRecentSearches(next);
+                                            writeRecentSearches(next);
+                                        }}
+                                    >
+                                        <X size={11} />
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            className="space-explore__recent-clear-all"
+                            aria-label="清空全部历史"
+                            title="清空历史"
+                            onClick={() => {
+                                setRecentSearches([]);
+                                writeRecentSearches([]);
+                            }}
+                        >
+                            <Trash2 size={13} />
+                        </button>
+                    </div>
+                )}
             </header>
 
             {activeTab === 'recommend' && (
                 <div className="space-explore__panel animate-fade-in">
                     <div className="space-explore__results">
+                        {searchQuery && (
+                            <div className="space-explore__result-filters" role="tablist" aria-label="搜索结果分类">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={resultFilter === 'all'}
+                                    className={`space-explore__filter-pill ${resultFilter === 'all' ? 'is-active' : ''}`}
+                                    onClick={() => setResultFilter('all')}
+                                >
+                                    综合
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={resultFilter === 'posts'}
+                                    className={`space-explore__filter-pill ${resultFilter === 'posts' ? 'is-active' : ''}`}
+                                    onClick={() => setResultFilter('posts')}
+                                >
+                                    动态 ({recommendedPosts.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={resultFilter === 'users'}
+                                    className={`space-explore__filter-pill ${resultFilter === 'users' ? 'is-active' : ''}`}
+                                    onClick={() => setResultFilter('users')}
+                                >
+                                    用户 ({userResults.length})
+                                </button>
+                            </div>
+                        )}
+                        {searchQuery && (resultFilter === 'all' || resultFilter === 'users') && (loadingUsers || userResults.length > 0) && (
+                            <div className="space-explore__user-results">
+                                <div className="space-explore__user-results-title">
+                                    {loadingUsers ? '正在匹配用户...' : `相关用户 (${userResults.length})`}
+                                </div>
+                                {userResults.map((user) => {
+                                    const isSelfUser = Boolean(currentUserId && currentUserId === user.id);
+                                    return (
+                                        <div key={user.id} className="space-explore__user-card">
+                                            <button
+                                                type="button"
+                                                className="space-explore__user-trigger"
+                                                onClick={() => {
+                                                    if (onAuthorClick) {
+                                                        onAuthorClick(user.id);
+                                                    } else {
+                                                        navigate(`/space/user/${user.id}`);
+                                                    }
+                                                }}
+                                            >
+                                                <span className="space-explore__user-avatar">
+                                                    {user.avatarUrl ? (
+                                                        <img src={user.avatarUrl} alt={user.username} />
+                                                    ) : (
+                                                        <span>{(user.displayName || user.username).charAt(0).toUpperCase()}</span>
+                                                    )}
+                                                </span>
+                                                <span className="space-explore__user-meta">
+                                                    <span className="space-explore__user-name">
+                                                        {user.displayName || user.username}
+                                                    </span>
+                                                    <span className="space-explore__user-handle">@{user.username}</span>
+                                                    {user.bio && <span className="space-explore__user-bio">{user.bio}</span>}
+                                                </span>
+                                            </button>
+                                            {!isSelfUser && (
+                                                <button
+                                                    type="button"
+                                                    className={`space-explore__user-follow ${user.isFollowing ? 'is-followed' : ''}`}
+                                                    onClick={() => void handleToggleExploreUserFollow(user)}
+                                                >
+                                                    {user.isFollowing ? '已关注' : '关注'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                         {isSearching && recommendedPosts.length === 0 && (
                             <ExploreSkeleton />
                         )}
-                        {searchQuery && recommendedPosts.length > 0 && (
+                        {searchQuery && recommendedPosts.length > 0 && (resultFilter === 'all' || resultFilter === 'posts') && (
                             <div className="space-explore__search-summary">
                                 <div>
                                     <span className="space-explore__search-title">{searchResultLabel}</span>
@@ -257,7 +473,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 <span className="space-explore__search-shown">当前显示 {recommendedPosts.length}</span>
                             </div>
                         )}
-                        {recommendedPosts.length > 0 && (
+                        {recommendedPosts.length > 0 && (!searchQuery || resultFilter === 'all' || resultFilter === 'posts') && (
                             <>
                                 <div className="space-explore__post-list">
                                     {recommendedPosts.map((post) => (
@@ -273,6 +489,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                             onShare={onShare}
                                             onClick={onPostClick}
                                             onAuthorClick={onAuthorClick}
+                                            onHashtagClick={onHashtagClick}
                                             showRecommendationReason
                                         />
                                     ))}

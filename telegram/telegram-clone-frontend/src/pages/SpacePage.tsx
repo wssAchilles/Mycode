@@ -3,13 +3,15 @@
  * 整合时间线、侧边栏、状态管理
  */
 
-import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp } from 'lucide-react';
 import {
     SpaceAsideWidgets,
     SpaceTimeline,
     SpaceExplore,
     SpaceNotifications,
     SpaceCommentDrawer,
+    ComposePostModal,
     type PostData,
 } from '../components/space';
 import { useSpaceStore } from '../stores';
@@ -53,6 +55,16 @@ export const SpacePage: React.FC = () => {
     const [recommendationRefreshError, setRecommendationRefreshError] = useState<string | null>(null);
     const [sharePostId, setSharePostId] = useState<string | null>(null);
     const [isShareOpen, setIsShareOpen] = useState(false);
+    const [composeModalOpen, setComposeModalOpen] = useState(false);
+    const [refreshingRecommendedUsers, setRefreshingRecommendedUsers] = useState(false);
+    const [showBackToTop, setShowBackToTop] = useState(false);
+    const seenRecommendedIdsRef = useRef<Set<string>>(new Set());
+    const scrollPositionsRef = useRef<Record<'home' | 'explore' | 'notifications', number>>({
+        home: 0,
+        explore: 0,
+        notifications: 0,
+    });
+    const prevSectionRef = useRef<'home' | 'explore' | 'notifications'>('home');
     const contentScrollRef = useRef<HTMLDivElement>(null);
     const asideMountedRef = useRef(true);
 
@@ -155,6 +167,7 @@ export const SpacePage: React.FC = () => {
             if (!asideMountedRef.current) return;
             setTrends(trendData);
             setRecommendedUsers(userData);
+            userData.forEach((u) => seenRecommendedIdsRef.current.add(String(u.id)));
         } catch {
             if (!asideMountedRef.current) return;
             setAsideError('右侧栏内容加载失败，请稍后重试');
@@ -187,6 +200,58 @@ export const SpacePage: React.FC = () => {
         if (!asideError) return;
         showToast(asideError, 'error');
     }, [asideError]);
+
+    // 换一批推荐用户（过滤本轮已浏览过的推荐人选；耗尽时自动重置池子重拉）
+    const handleRefreshRecommendedUsers = useCallback(async () => {
+        if (refreshingRecommendedUsers) return;
+        setRefreshingRecommendedUsers(true);
+        try {
+            const excludeIds = Array.from(seenRecommendedIdsRef.current);
+            let nextUsers = await spaceAPI.getRecommendedUsers(4, excludeIds);
+            if (nextUsers.length === 0 && excludeIds.length > 0) {
+                seenRecommendedIdsRef.current.clear();
+                recommendedUsers.forEach((u) => seenRecommendedIdsRef.current.add(String(u.id)));
+                nextUsers = await spaceAPI.getRecommendedUsers(4, Array.from(seenRecommendedIdsRef.current));
+            }
+            if (!asideMountedRef.current) return;
+            if (nextUsers.length > 0) {
+                setRecommendedUsers(nextUsers);
+                nextUsers.forEach((u) => seenRecommendedIdsRef.current.add(String(u.id)));
+            } else {
+                showToast('暂无更多推荐创作者', 'info');
+            }
+        } catch {
+            showToast('换一批推荐失败，请稍后重试', 'error');
+        } finally {
+            if (asideMountedRef.current) {
+                setRefreshingRecommendedUsers(false);
+            }
+        }
+    }, [refreshingRecommendedUsers, recommendedUsers]);
+
+    // 记忆各视图滚动位置，并在超过 600px 时显示回到顶部悬浮钮
+    useLayoutEffect(() => {
+        const el = contentScrollRef.current;
+        const prev = prevSectionRef.current;
+        if (el && prev !== activeSection) {
+            scrollPositionsRef.current[prev] = el.scrollTop;
+            const targetTop = scrollPositionsRef.current[activeSection] ?? 0;
+            el.scrollTo({ top: targetTop, behavior: 'auto' });
+            setShowBackToTop(targetTop > 600);
+            prevSectionRef.current = activeSection;
+        }
+    }, [activeSection]);
+
+    useEffect(() => {
+        const el = contentScrollRef.current;
+        if (!el) return;
+        const onScroll = () => {
+            scrollPositionsRef.current[activeSection] = el.scrollTop;
+            setShowBackToTop(el.scrollTop > 600);
+        };
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, [activeSection]);
 
     // 处理创建帖子
     const handleCreatePost = useCallback(
@@ -467,14 +532,7 @@ export const SpacePage: React.FC = () => {
                 <button
                     type="button"
                     className="space-page__compose-btn"
-                    onClick={() => {
-                        setActiveSection('home');
-                        scrollContentToTop('smooth');
-                        setTimeout(() => {
-                            const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
-                            textarea?.focus();
-                        }, 200);
-                    }}
+                    onClick={() => setComposeModalOpen(true)}
                 >
                     <PlusIcon />
                     <span>发布动态</span>
@@ -545,6 +603,7 @@ export const SpacePage: React.FC = () => {
                             onShare={handleShare}
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}
+                            onHashtagClick={handleTrendClick}
                             scrollElementRef={contentScrollRef}
                         />
                     )}
@@ -559,12 +618,27 @@ export const SpacePage: React.FC = () => {
                             onShare={handleShare}
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}
+                            onHashtagClick={handleTrendClick}
                         />
                     )}
                     {activeSection === 'notifications' && (
-                        <SpaceNotifications onPostClick={handlePostClick} />
+                        <SpaceNotifications
+                            onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
+                        />
                     )}
                 </div>
+                {showBackToTop && (
+                    <button
+                        type="button"
+                        className="space-page__back-top"
+                        onClick={() => scrollContentToTop('smooth')}
+                        aria-label="回到顶部"
+                        title="回到顶部"
+                    >
+                        <ArrowUp size={18} />
+                    </button>
+                )}
             </main>
 
             {/* 可拖拽分隔条：调整主内容区与右侧栏宽度 */}
@@ -591,6 +665,9 @@ export const SpacePage: React.FC = () => {
                 onRecommendationRefreshRetry={loadRecommendationRefreshStatus}
                 onTrendClick={handleTrendClick}
                 onFollowToggle={handleFollowToggle}
+                onUserClick={handleAuthorClick}
+                refreshingRecommendedUsers={refreshingRecommendedUsers}
+                onRefreshRecommendedUsers={() => void handleRefreshRecommendedUsers()}
             />
 
             <nav className="space-page__bottom-nav">
@@ -641,18 +718,18 @@ export const SpacePage: React.FC = () => {
             <button
                 type="button"
                 className="space-page__fab"
-                onClick={() => {
-                    setActiveSection('home');
-                    scrollContentToTop('smooth');
-                    setTimeout(() => {
-                        const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
-                        textarea?.focus();
-                    }, 200);
-                }}
+                onClick={() => setComposeModalOpen(true)}
                 aria-label="发布动态"
             >
                 <PlusIcon />
             </button>
+
+            <ComposePostModal
+                open={composeModalOpen}
+                onOpenChange={setComposeModalOpen}
+                currentUser={currentUser || { username: 'User' }}
+                onSubmit={handleCreatePost}
+            />
 
             <SpaceCommentDrawer
                 open={!!commentPost}

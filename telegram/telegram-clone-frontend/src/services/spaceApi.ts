@@ -327,6 +327,16 @@ export interface NegativeFeedbackResponse {
     summary: NegativeFeedbackSummary;
 }
 
+export interface SpaceRelationUser {
+    id: string;
+    username: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+    bio?: string | null;
+    isOnline?: boolean;
+    isFollowing: boolean;
+}
+
 interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost' | 'pinnedPosts'> {
     pinnedPost?: PostResponse | null;
     pinnedPosts?: PostResponse[];
@@ -1201,6 +1211,74 @@ export const spaceAPI = {
             return response.data.profile;
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '资料更新失败'));
+        }
+    },
+
+    /**
+     * 获取粉丝列表
+     */
+    getUserFollowers: async (
+        userId: string,
+        limit: number = 20,
+        offset: number = 0,
+    ): Promise<{ users: SpaceRelationUser[]; totalCount: number; hasMore: boolean }> => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        const response = await apiClient.get<{
+            users: SpaceRelationUser[];
+            totalCount: number;
+            hasMore: boolean;
+        }>(`/api/space/users/${userId}/followers?${params.toString()}`);
+        return {
+            users: (response.data.users || []).map((u) => ({
+                ...u,
+                avatarUrl: resolveSpaceMediaUrl(u.avatarUrl) ?? u.avatarUrl,
+            })),
+            totalCount: response.data.totalCount ?? 0,
+            hasMore: Boolean(response.data.hasMore),
+        };
+    },
+
+    /**
+     * 获取关注列表
+     */
+    getUserFollowing: async (
+        userId: string,
+        limit: number = 20,
+        offset: number = 0,
+    ): Promise<{ users: SpaceRelationUser[]; totalCount: number; hasMore: boolean }> => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        const response = await apiClient.get<{
+            users: SpaceRelationUser[];
+            totalCount: number;
+            hasMore: boolean;
+        }>(`/api/space/users/${userId}/following?${params.toString()}`);
+        return {
+            users: (response.data.users || []).map((u) => ({
+                ...u,
+                avatarUrl: resolveSpaceMediaUrl(u.avatarUrl) ?? u.avatarUrl,
+            })),
+            totalCount: response.data.totalCount ?? 0,
+            hasMore: Boolean(response.data.hasMore),
+        };
+    },
+
+    /**
+     * 搜索 Space 用户
+     */
+    searchUsers: async (query: string, limit: number = 12): Promise<SpaceRelationUser[]> => {
+        const trimmed = query.trim();
+        if (!trimmed) return [];
+        try {
+            const params = new URLSearchParams({ query: trimmed, limit: String(limit) });
+            const response = await apiClient.get<{ users: SpaceRelationUser[] }>(
+                `/api/space/users/search?${params.toString()}`,
+            );
+            return (response.data.users || []).map((u) => ({
+                ...u,
+                avatarUrl: resolveSpaceMediaUrl(u.avatarUrl) ?? u.avatarUrl,
+            }));
+        } catch {
+            return [];
         }
     },
 

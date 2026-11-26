@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { TrendIcon, UserPlusIcon } from '../icons/SpaceIcons';
@@ -25,6 +26,9 @@ interface SpaceAsideWidgetsProps {
     onRecommendationRefreshRetry: () => void;
     onTrendClick: (tag: string) => void;
     onFollowToggle: (user: RecommendedUser) => void;
+    onUserClick?: (userId: string) => void;
+    refreshingRecommendedUsers?: boolean;
+    onRefreshRecommendedUsers?: () => void;
 }
 
 export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
@@ -39,6 +43,9 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
     onRecommendationRefreshRetry,
     onTrendClick,
     onFollowToggle,
+    onUserClick,
+    refreshingRecommendedUsers = false,
+    onRefreshRecommendedUsers,
 }) => {
     const widgetsMotion = useAnimeScope<HTMLElement, {
         reveal: () => void;
@@ -161,10 +168,25 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
             </div>
 
             <div className="space-page__widget glass-card">
-                <h2 className="space-page__widget-title">
-                    <UserPlusIcon />
-                    推荐关注
-                </h2>
+                <div className="space-page__widget-head">
+                    <h2 className="space-page__widget-title">
+                        <UserPlusIcon />
+                        推荐关注
+                    </h2>
+                    {onRefreshRecommendedUsers && (
+                        <button
+                            type="button"
+                            className="space-page__widget-refresh"
+                            onClick={onRefreshRecommendedUsers}
+                            disabled={refreshingRecommendedUsers}
+                            aria-label="换一批推荐用户"
+                            title="换一批"
+                        >
+                            <RefreshCw size={13} className={refreshingRecommendedUsers ? 'is-spinning' : ''} />
+                            <span>换一批</span>
+                        </button>
+                    )}
+                </div>
                 {loadingAside && recommendedUsers.length === 0 && (
                     <div className="space-page__skeleton-list" aria-label="推荐用户加载中">
                         {Array.from({ length: 3 }).map((_, index) => (
@@ -193,18 +215,25 @@ export const SpaceAsideWidgets: React.FC<SpaceAsideWidgetsProps> = ({
                 )}
                 {recommendedUsers.map((user) => (
                     <div className="space-page__suggest-user-item" key={user.id}>
-                        <div className={`space-page__suggest-avatar-wrapper ${user.isOnline ? 'is-online' : ''}`}>
-                            {user.avatarUrl ? (
-                                <img className="space-page__suggest-avatar-img" src={user.avatarUrl} alt={user.username} />
-                            ) : (
-                                <div className="space-page__suggest-avatar">{user.username.charAt(0).toUpperCase()}</div>
-                            )}
-                            {user.isOnline && <div className="space-page__suggest-status-ring" />}
-                        </div>
-                        <div className="space-page__suggest-user-info">
-                            <div className="space-page__suggest-user-name">{user.username}</div>
-                            <div className="space-page__suggest-user-handle">{user.reason || '@space'}</div>
-                        </div>
+                        <button
+                            type="button"
+                            className="space-page__suggest-user-trigger"
+                            onClick={() => onUserClick?.(user.id)}
+                            aria-label={`查看 ${user.username} 的主页`}
+                        >
+                            <div className={`space-page__suggest-avatar-wrapper ${user.isOnline ? 'is-online' : ''}`}>
+                                {user.avatarUrl ? (
+                                    <img className="space-page__suggest-avatar-img" src={user.avatarUrl} alt={user.username} />
+                                ) : (
+                                    <div className="space-page__suggest-avatar">{user.username.charAt(0).toUpperCase()}</div>
+                                )}
+                                {user.isOnline && <div className="space-page__suggest-status-ring" />}
+                            </div>
+                            <div className="space-page__suggest-user-info">
+                                <div className="space-page__suggest-user-name">{user.username}</div>
+                                <div className="space-page__suggest-user-handle">{user.reason || '@space'}</div>
+                            </div>
+                        </button>
                         <button
                             type="button"
                             className={`space-page__follow-btn ${user.isFollowed ? 'is-followed' : ''}`}

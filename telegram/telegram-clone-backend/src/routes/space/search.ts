@@ -3,8 +3,12 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { spaceService } from '../../services/spaceService';
 import UserAction, { ActionType } from '../../models/UserAction';
+import User from '../../models/User';
+import SpaceProfile from '../../models/SpaceProfile';
+import Contact, { ContactStatus } from '../../models/Contact';
 import {
     log,
     transformPostsToResponse,
@@ -41,6 +45,81 @@ router.get('/search', async (req: Request, res: Response) => {
     } catch (error) {
         log.error({ err: error }, '搜索失败');
         return res.status(500).json({ error: '搜索失败' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// GET /users/search — search Space users by username or displayName
+// ---------------------------------------------------------------------------
+
+router.get('/users/search', async (req: Request, res: Response) => {
+    try {
+        const viewerId = (req as Request & { userId?: string }).userId;
+        const query = String(req.query.query || req.query.q || '').trim();
+        const rawLimit = parseInt(req.query.limit as string, 10);
+        const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 30)) : 12;
+
+        if (!query) {
+            return res.json({ users: [] });
+        }
+
+        const safePattern = query.replace(/[%_\\]/g, '\\$&');
+        const profileMatches = await SpaceProfile.find({
+            displayName: { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' },
+        })
+            .select('userId displayName bio')
+            .limit(limit)
+            .lean();
+        const profileIds = profileMatches.map((p) => p.userId).filter(Boolean);
+
+        const users = await User.findAll({
+            where: {
+                [Op.or]: [
+                    { username: { [Op.iLike]: `%${safePattern}%` } },
+                    ...(profileIds.length > 0 ? [{ id: { [Op.in]: profileIds } }] : []),
+                ],
+            },
+            attributes: ['id', 'username', 'avatarUrl', 'isOnline'],
+            limit,
+        });
+
+        const foundIds = users.map((u) => u.id);
+        const [profiles, followedRows] = await Promise.all([
+            foundIds.length > 0
+                ? SpaceProfile.find({ userId: { $in: foundIds } }).select('userId displayName bio').lean()
+                : Promise.resolve([]),
+            viewerId && foundIds.length > 0
+                ? Contact.findAll({
+                    where: {
+                        userId: viewerId,
+                        contactId: { [Op.in]: foundIds },
+                        status: ContactStatus.ACCEPTED,
+                    },
+                    attributes: ['contactId'],
+                })
+                : Promise.resolve([]),
+        ]);
+
+        const profileMap = new Map(profiles.map((p) => [p.userId, p]));
+        const followedSet = new Set(followedRows.map((row) => row.contactId));
+
+        return res.json({
+            users: users.map((u) => {
+                const prof = profileMap.get(u.id);
+                return {
+                    id: u.id,
+                    username: u.username,
+                    displayName: prof?.displayName ?? null,
+                    avatarUrl: u.avatarUrl ?? null,
+                    bio: prof?.bio ?? null,
+                    isOnline: Boolean(u.isOnline),
+                    isFollowing: followedSet.has(u.id),
+                };
+            }),
+        });
+    } catch (error) {
+        log.error({ err: error }, '搜索用户失败');
+        return res.status(500).json({ error: '搜索用户失败' });
     }
 });
 

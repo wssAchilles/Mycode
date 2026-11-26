@@ -1,0 +1,67 @@
+.compose-post-modal__overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9800;
+    background: rgba(15, 20, 25, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.compose-post-modal__content {
+    position: fixed;
+    top: 12vh;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9801;
+    width: min(600px, calc(100vw - 32px));
+    max-height: 80vh;
+    overflow-y: auto;
+    border-radius: 18px;
+    background: var(--color-background, #FFFFFF);
+    color: var(--color-text-primary, #0F1419);
+    border: 1px solid var(--color-border-light, #EFF3F4);
+    box-shadow: 0 24px 60px rgba(15, 20, 25, 0.22);
+    outline: none;
+}
+
+.compose-post-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border-light, #EFF3F4);
+}
+
+.compose-post-modal__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--color-text-primary, #0F1419);
+}
+
+.compose-post-modal__close {
+    width: 32px;
+    height: 32px;
+    border-radius: 9999px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary, #536471);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.compose-post-modal__close:hover {
+    background: var(--color-surface-hover, #EFF3F4);
+    color: var(--color-text-primary, #0F1419);
+}
+
+.compose-post-modal__body {
+    padding: 4px 0 8px;
+}
+
+.compose-post-modal__body .post-composer {
+    border-bottom: none;
+}

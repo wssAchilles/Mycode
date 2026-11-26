@@ -456,7 +456,27 @@
     opacity: 1;
 }
 
+.post-composer.is-drag-over {
+    background: rgba(29, 155, 240, 0.06);
+    outline: 2px dashed rgba(29, 155, 240, 0.55);
+    outline-offset: -6px;
+}
+
+.post-composer__submit-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.post-composer__shortcut-hint {
+    font-size: 12px;
+    color: var(--color-text-secondary, #64748B);
+}
+
 @media (max-width: 640px) {
+    .post-composer__shortcut-hint {
+        display: none;
+    }
     .post-composer {
         padding: 12px 14px;
     }
