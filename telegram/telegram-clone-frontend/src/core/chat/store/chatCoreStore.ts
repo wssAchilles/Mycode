@@ -585,6 +585,31 @@ export class ChatCoreStore {
   }
 
   /**
+   * 原地更新内存缓存中的单条消息表情回应
+   */
+  updateMessageReactions(
+    chatId: string,
+    messageId: string,
+    reactions: Message['reactions'],
+  ): Message | null {
+    const chat = this.chats.get(chatId);
+    if (!chat || !messageId) return null;
+    const existing = chat.entityById.get(messageId);
+    if (!existing) return null;
+
+    const updated: Message = {
+      ...existing,
+      reactions: Array.isArray(reactions) ? reactions : [],
+    };
+    chat.entityById.set(messageId, updated);
+    const idx = chat.messages.findIndex((m) => m.id === messageId);
+    if (idx >= 0) {
+      chat.messages[idx] = updated;
+    }
+    return updated;
+  }
+
+  /**
    * 原地更新内存缓存中的单条消息正文与编辑时间戳
    */
   updateMessageContent(chatId: string, messageId: string, content: string, editedAt?: string): Message | null {

@@ -1,24 +1,29 @@
-import React from 'react';
-import { Copy, MoreHorizontal, Reply, RotateCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Copy, MoreHorizontal, Reply, RotateCw, SmilePlus } from 'lucide-react';
 import { MessageBubble, ProgressiveImage } from '../../../../components/common';
 import type { MessageReplyPreview } from '../../../../components/common/MessageBubble';
 import type { Message } from '../../../../types/chat';
 import { formatMessageTimestamp } from '../../../../utils/dateTime';
 import { ChatAttachmentCard } from '../media/ChatAttachmentCard';
 import { computeMessageRowMeta, isRichAttachmentMessage } from './messageGrouping';
+import { renderChatRichText, type HighlightConfig } from './richTextRender';
 
-export type HighlightConfig = { termLower: string; regex: RegExp } | null;
+export type { HighlightConfig };
 export type SenderMeta = { senderName?: string; senderAvatarUrl?: string };
 
 export interface ImagePreviewPayload {
+  messageId?: string;
   src: string;
   fileName?: string;
 }
+
+const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '🔥', '🎉', '👀'];
 
 interface MessageBubbleRowProps {
   message: Message;
   previousMessage?: Message | null;
   currentUserId: string;
+  currentUsername?: string;
   useProgressiveImage?: boolean;
   highlightConfig: HighlightConfig;
   highlightSeq?: number;
@@ -31,6 +36,7 @@ interface MessageBubbleRowProps {
   onCopyMessage?: (msg: Message) => void;
   onReplyMessage?: (msg: Message) => void;
   onRetryMessage?: (msg: Message) => void;
+  onToggleReaction?: (msg: Message, emoji: string) => void;
   onOpenContextMenu?: (msg: Message, isOut: boolean, x: number, y: number) => void;
   enableActions?: boolean;
 }
@@ -57,6 +63,7 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
     message,
     previousMessage,
     currentUserId,
+    currentUsername,
     useProgressiveImage = false,
     highlightConfig,
     highlightSeq,
@@ -69,9 +76,11 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
     onCopyMessage,
     onReplyMessage,
     onRetryMessage,
+    onToggleReaction,
     onOpenContextMenu,
     enableActions = false,
   }) => {
+    const [showReactionPicker, setShowReactionPicker] = useState(false);
     const isOut = message.userId === currentUserId || message.senderId === currentUserId;
     const attachment = message.attachments?.[0];
     const fileUrl = message.fileUrl || attachment?.fileUrl;
@@ -108,16 +117,12 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
     }
 
     const renderTextContent = () => {
-      if (!highlightConfig || !message.content) return message.content;
-      return message.content.split(highlightConfig.regex).map((part, index) => {
-        const isMatch = part.toLowerCase() === highlightConfig.termLower;
-        return isMatch ? (
-          <mark key={`${message.id}-mark-${index}`} className="tg-highlight">
-            {part}
-          </mark>
-        ) : (
-          <span key={`${message.id}-text-${index}`}>{part}</span>
-        );
+      if (!message.content) return message.content;
+      return renderChatRichText(message.content, {
+        messageId: message.id,
+        highlightConfig,
+        currentUsername,
+        isOut,
       });
     };
 
@@ -137,6 +142,7 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
               onClick={(event) => {
                 event.stopPropagation();
                 onPreviewImage?.({
+                  messageId: message.id,
                   src: fileUrl,
                   fileName: message.fileName || attachment?.fileName,
                 });
@@ -173,6 +179,18 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
 
     const canCopy = Boolean(message.content && message.content.trim());
     const canRetry = isOut && message.status === 'failed' && Boolean(onRetryMessage);
+    const activeReactions = Array.isArray(message.reactions)
+      ? message.reactions.filter((r) => r && r.emoji && Array.isArray(r.userIds) && r.userIds.length > 0)
+      : [];
+
+    const handleBubbleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!enableActions || !onReplyMessage) return;
+      const target = event.target as HTMLElement | null;
+      if (target && target.closest('a, button, audio, video, code, pre')) return;
+      const selected = typeof window !== 'undefined' ? window.getSelection()?.toString() : '';
+      if (selected && selected.trim().length > 0) return;
+      onReplyMessage(message);
+    };
 
     return (
       <>
@@ -186,32 +204,61 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
           className={`chat-history__row ${isOut ? 'is-out' : 'is-in'} ${
             collapseGroupSenderMeta ? 'is-collapsed-sender' : ''
           }`}
+          onDoubleClick={handleBubbleDoubleClick}
+          onMouseLeave={() => {
+            if (showReactionPicker) setShowReactionPicker(false);
+          }}
           onContextMenu={(event) => {
             if (!enableActions || !onOpenContextMenu) return;
             event.preventDefault();
             onOpenContextMenu(message, isOut, event.clientX, event.clientY);
           }}
         >
-          <MessageBubble
-            isOut={isOut}
-            time={time}
-            isEdited={Boolean(message.editedAt)}
-            status={message.status}
-            isRead={message.status === 'read'}
-            isSent={message.status !== 'failed' && message.status !== 'pending'}
-            isFailed={message.status === 'failed'}
-            readCount={message.readCount}
-            withTail={!collapseGroupSenderMeta}
-            isMedia={isMedia}
-            showSenderMeta={shouldShowSenderMeta}
-            senderName={senderMeta.senderName}
-            senderAvatarUrl={senderMeta.senderAvatarUrl}
-            attentionKey={isHighlighted ? `${message.id}-${highlightSeq ?? 'flash'}` : undefined}
-            className={isHighlighted ? 'is-highlighted' : ''}
-            replyPreview={replyPreview}
-          >
-            {renderContent()}
-          </MessageBubble>
+          <div className={`chat-history__bubble-stack ${isOut ? 'is-out' : 'is-in'}`}>
+            <MessageBubble
+              isOut={isOut}
+              time={time}
+              isEdited={Boolean(message.editedAt)}
+              status={message.status}
+              isRead={message.status === 'read'}
+              isSent={message.status !== 'failed' && message.status !== 'pending'}
+              isFailed={message.status === 'failed'}
+              readCount={message.readCount}
+              withTail={!collapseGroupSenderMeta}
+              isMedia={isMedia}
+              showSenderMeta={shouldShowSenderMeta}
+              senderName={senderMeta.senderName}
+              senderAvatarUrl={senderMeta.senderAvatarUrl}
+              attentionKey={isHighlighted ? `${message.id}-${highlightSeq ?? 'flash'}` : undefined}
+              className={isHighlighted ? 'is-highlighted' : ''}
+              replyPreview={replyPreview}
+            >
+              {renderContent()}
+            </MessageBubble>
+
+            {activeReactions.length > 0 && (
+              <div className={`chat-history__reactions ${isOut ? 'is-out' : 'is-in'}`}>
+                {activeReactions.map((reaction) => {
+                  const reactedByMe = reaction.userIds.includes(currentUserId);
+                  return (
+                    <button
+                      key={reaction.emoji}
+                      type="button"
+                      className={`chat-history__reaction-pill ${reactedByMe ? 'is-mine' : ''}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleReaction?.(message, reaction.emoji);
+                      }}
+                      title={reactedByMe ? '取消此表情回应' : '添加同样表情回应'}
+                    >
+                      <span>{reaction.emoji}</span>
+                      <span className="chat-history__reaction-count">{reaction.userIds.length}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {canRetry && (
             <button
@@ -230,11 +277,44 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
 
           {enableActions && !canRetry && (
             <div className="chat-history__hover-actions" aria-label="快捷消息操作">
+              {onToggleReaction && (
+                <div className="chat-history__reaction-trigger-wrap">
+                  <button
+                    type="button"
+                    className="chat-history__hover-btn"
+                    title="添加表情回应"
+                    aria-label="添加表情回应"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setShowReactionPicker((prev) => !prev);
+                    }}
+                  >
+                    <SmilePlus size={13} />
+                  </button>
+                  {showReactionPicker && (
+                    <div className="chat-history__reaction-picker" onClick={(e) => e.stopPropagation()}>
+                      {QUICK_REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="chat-history__reaction-pick-btn"
+                          onClick={() => {
+                            setShowReactionPicker(false);
+                            onToggleReaction(message, emoji);
+                          }}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {onReplyMessage && (
                 <button
                   type="button"
                   className="chat-history__hover-btn"
-                  title="引用回复"
+                  title="引用回复（也可双击气泡）"
                   aria-label="引用回复"
                   onClick={(event) => {
                     event.stopPropagation();

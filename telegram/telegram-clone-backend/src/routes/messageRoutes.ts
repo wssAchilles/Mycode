@@ -12,6 +12,7 @@ import {
   searchMessages,
   getMessageContext,
   getLegacyMessageEndpointUsage,
+  toggleMessageReaction,
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { validate } from '../middleware/validate';
@@ -213,6 +214,12 @@ router.delete('/:messageId', deleteMessage);
  * Body: { content }
  */
 router.put('/:messageId', validate(editMessageSchema), editMessage);
+
+/**
+ * 切换消息表情回应
+ * POST /api/messages/:messageId/reactions
+ */
+router.post('/:messageId/reactions', toggleMessageReaction);
 
 /**
  * 获取未读消息数量

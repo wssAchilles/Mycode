@@ -108,7 +108,13 @@ export const useMessageStore = create<MessageState>((set, get) => {
   >();
   const deferredEntityUpdates = new Map<
     string,
-    { status?: Message['status']; readCount?: number; content?: string; editedAt?: string }
+    {
+      status?: Message['status'];
+      readCount?: number;
+      content?: string;
+      editedAt?: string;
+      reactions?: Message['reactions'];
+    }
   >();
   let resolveMissingInFlight = false;
   let resolveMissingQueue = new Set<string>();
@@ -157,6 +163,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
         readCount: Math.max(next.readCount ?? 0, deferred.readCount ?? 0) || deferred.readCount || next.readCount,
         content: deferred.content ?? next.content,
         editedAt: deferred.editedAt ?? next.editedAt,
+        reactions: deferred.reactions ?? next.reactions,
       };
       deferredEntityUpdates.delete(raw.id);
     }
@@ -760,11 +767,13 @@ export const useMessageStore = create<MessageState>((set, get) => {
             const nextReadCount = u.readCount ?? current.readCount;
             const nextContent = u.content !== undefined ? u.content : current.content;
             const nextEditedAt = u.editedAt !== undefined ? u.editedAt : current.editedAt;
+            const nextReactions = u.reactions !== undefined ? u.reactions : current.reactions;
             if (
               nextStatus === current.status &&
               nextReadCount === current.readCount &&
               nextContent === current.content &&
-              nextEditedAt === current.editedAt
+              nextEditedAt === current.editedAt &&
+              nextReactions === current.reactions
             ) {
               continue;
             }
@@ -774,6 +783,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
               readCount: nextReadCount,
               content: nextContent,
               editedAt: nextEditedAt,
+              reactions: nextReactions,
             });
             didEntityChange = true;
             continue;
@@ -785,6 +795,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
             readCount: u.readCount ?? prevDeferred?.readCount,
             content: u.content !== undefined ? u.content : prevDeferred?.content,
             editedAt: u.editedAt !== undefined ? u.editedAt : prevDeferred?.editedAt,
+            reactions: u.reactions !== undefined ? u.reactions : prevDeferred?.reactions,
           };
           deferredEntityUpdates.set(u.id, nextDeferred);
         }
@@ -1310,6 +1321,50 @@ export const useMessageStore = create<MessageState>((set, get) => {
     ...loadActions,
     ...prefetchActions,
     ...ingestActions,
+
+    toggleMessageReaction: async (messageId: string, emoji: string, currentUserId: string) => {
+      if (!messageId || !emoji || !currentUserId) return;
+      const existing = entityCache.get(messageId);
+      const prevReactions = existing?.reactions
+        ? existing.reactions.map((r) => ({ emoji: r.emoji, userIds: [...r.userIds] }))
+        : [];
+
+      if (existing) {
+        const nextReactions = prevReactions.map((r) => ({ emoji: r.emoji, userIds: [...r.userIds] }));
+        const idx = nextReactions.findIndex((r) => r.emoji === emoji);
+        if (idx >= 0) {
+          if (nextReactions[idx].userIds.includes(currentUserId)) {
+            nextReactions[idx].userIds = nextReactions[idx].userIds.filter((id) => id !== currentUserId);
+            if (nextReactions[idx].userIds.length === 0) {
+              nextReactions.splice(idx, 1);
+            }
+          } else {
+            nextReactions[idx].userIds.push(currentUserId);
+          }
+        } else {
+          nextReactions.push({ emoji, userIds: [currentUserId] });
+        }
+
+        touchEntityCache({ ...existing, reactions: nextReactions });
+        rebuildVisibleEntities();
+      }
+
+      try {
+        const res = await messageAPI.toggleReaction(messageId, emoji);
+        const latest = entityCache.get(messageId);
+        if (latest) {
+          touchEntityCache({ ...latest, reactions: res.reactions });
+          rebuildVisibleEntities();
+        }
+      } catch (err) {
+        const latest = entityCache.get(messageId);
+        if (latest) {
+          touchEntityCache({ ...latest, reactions: prevReactions });
+          rebuildVisibleEntities();
+        }
+        throw err;
+      }
+    },
   };
 });
 

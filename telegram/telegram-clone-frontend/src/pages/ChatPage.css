@@ -858,3 +858,100 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* 顶部网络与实时连接状态横幅 */
+.chat-connection-banner {
+  margin: 8px 16px 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.chat-connection-banner__left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chat-connection-banner.is-offline {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #B91C1C;
+}
+
+.chat-connection-banner.is-connecting {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  color: #B45309;
+}
+
+.chat-connection-banner.is-reconnected {
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #047857;
+}
+
+.chat-connection-banner__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.85);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease;
+}
+
+.chat-connection-banner__action:hover {
+  background: #FFFFFF;
+}
+
+/* 搜索命中上下条快速切换控件 */
+.chat-context-bar__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  background: #F1F5F9;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-context-bar__nav-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: #0F1419;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.chat-context-bar__nav-btn:hover:not(:disabled) {
+  background: #E2E8F0;
+}
+
+.chat-context-bar__nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

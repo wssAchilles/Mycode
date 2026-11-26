@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ChevronUp, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { spaceAPI } from '../services/spaceApi';
 import { showToast } from '../components/ui/Toast';
@@ -13,6 +14,7 @@ import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 import { mediaWorkerClient } from '../core/bridge/mediaWorkerClient';
+import type { UploadedFileResult } from '../core/workers/media.worker';
 import { API_BASE_URL } from '../utils/apiUrl';
 
 // Zustand Stores
@@ -65,6 +67,50 @@ function cancelIdleTask(handle: number | null) {
     return;
   }
   globalThis.clearTimeout(handle);
+}
+
+/**
+ * 通过 XMLHttpRequest 上传已预处理的媒体，提供真实字节级上传进度
+ */
+function uploadPreparedWithProgress(
+  prepared: { blob: Blob; fileName: string },
+  uploadUrl: string,
+  authToken: string | null | undefined,
+  onProgress: (fraction: number) => void,
+  timeoutMs = 25_000,
+): Promise<UploadedFileResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', uploadUrl, true);
+    xhr.timeout = timeoutMs;
+    if (authToken) {
+      xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.min(0.98, Math.max(0.05, event.loaded / event.total)));
+      }
+    };
+    xhr.onload = () => {
+      try {
+        const parsed = JSON.parse(xhr.responseText || '{}');
+        resolve({
+          success: Boolean(parsed?.success) && xhr.status >= 200 && xhr.status < 300,
+          data: parsed?.data,
+          message: parsed?.message,
+          status: xhr.status,
+        });
+      } catch {
+        reject(new Error(`上传响应解析失败 (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误导致上传中断'));
+    xhr.ontimeout = () => reject(new Error('文件上传超时，请重试'));
+
+    const formData = new FormData();
+    formData.append('file', prepared.blob, prepared.fileName);
+    xhr.send(formData);
+  });
 }
 
 const pageVariants = {
@@ -135,12 +181,17 @@ const ChatPage: React.FC = () => {
   const [addContactInitialTab, setAddContactInitialTab] = useState<'search' | 'requests' | 'sent'>('search');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // UI State
   const [showDetailPanel, setShowDetailPanel] = useState(false);
   const [showGroupDetailPanel, setShowGroupDetailPanel] = useState(false);  // 新增
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [showReconnectedNotice, setShowReconnectedNotice] = useState(false);
+  const wasDisconnectedRef = useRef(false);
+  const [unreadAnchorSeq, setUnreadAnchorSeq] = useState<number | null>(null);
+  const pendingUnreadCountRef = useRef(0);
   const [isMobileLayout, setIsMobileLayout] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
   );
@@ -156,6 +207,7 @@ const ChatPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [searchCursor, setSearchCursor] = useState(0);
   const [isContextMode, setIsContextMode] = useState(false);
   const [contextMessages, setContextMessages] = useState<Message[]>([]);
   const [contextHighlightSeq, setContextHighlightSeq] = useState<number | undefined>(undefined);
@@ -286,6 +338,24 @@ const ChatPage: React.FC = () => {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // 监测断线恢复状态：短时展示绿色恢复横幅后自动收起
+  useEffect(() => {
+    if (!canSendMessages) return;
+    if (!isBrowserOnline || selfPresence.status === 'connecting' || selfPresence.status === 'offline') {
+      wasDisconnectedRef.current = true;
+      setShowReconnectedNotice(false);
+      return;
+    }
+    if (wasDisconnectedRef.current && selfPresence.status === 'online') {
+      wasDisconnectedRef.current = false;
+      setShowReconnectedNotice(true);
+      const timer = window.setTimeout(() => {
+        setShowReconnectedNotice(false);
+      }, 1800);
+      return () => window.clearTimeout(timer);
+    }
+  }, [canSendMessages, isBrowserOnline, selfPresence.status]);
 
   // 初始化用户
   useEffect(() => {
@@ -443,6 +513,20 @@ const ChatPage: React.FC = () => {
     openDm();
   }, [currentUser, searchParams, selectContact]);
 
+  // 快捷键 / 命令面板携带 ?ai=1 时直达 AI 助手模式
+  useEffect(() => {
+    if (!currentUser) return;
+    if (searchParams.get('ai') !== '1') return;
+    setIsAiChatMode(true);
+    selectContact(null);
+    selectGroup(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('ai');
+      return next;
+    }, { replace: true });
+  }, [currentUser, searchParams, selectContact, selectGroup, setSearchParams]);
+
   // 同步选中联系人/群组到 messageStore（仅依赖稳定主键，避免后台元数据同步触发重加载）
   useEffect(() => {
     if (selectedGroupId) {
@@ -580,10 +664,16 @@ const ChatPage: React.FC = () => {
     }
   }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
-  // 当前聊天自动标记已读（基于最后一条消息 seq）
+  // 当前聊天自动标记已读（基于最后一条消息 seq），并在清零前捕获未读分界线锚点
   const lastReadSeqRef = useRef<number>(0);
   useEffect(() => {
     lastReadSeqRef.current = 0;
+    const summaryId = selectedGroup?.id || selectedContact?.userId;
+    const summaryUnread = summaryId
+      ? (useChatStore.getState().chats.find((chat) => chat.id === summaryId)?.unreadCount ?? 0)
+      : 0;
+    pendingUnreadCountRef.current = summaryUnread > 0 ? summaryUnread : 0;
+    setUnreadAnchorSeq(null);
   }, [selectedGroup?.id, selectedContact?.userId]);
   useEffect(() => {
     if (!currentUser) return;
@@ -594,6 +684,27 @@ const ChatPage: React.FC = () => {
       : buildPrivateChatId(currentUser.id, selectedContact!.userId);
 
     const { messageIds, entities } = useMessageStore.getState();
+
+    // 在标记已读前锁定本轮未读分界线，避免进入会话后分界条立即消失
+    if (pendingUnreadCountRef.current > 0 && messageIds.length > 0) {
+      let remaining = pendingUnreadCountRef.current;
+      let firstUnreadSeq: number | null = null;
+      for (let i = messageIds.length - 1; i >= 0; i -= 1) {
+        const msg = entities.get(messageIds[i]);
+        if (!msg || typeof msg.seq !== 'number') continue;
+        const isIncoming = msg.userId !== currentUser.id && msg.senderId !== currentUser.id;
+        if (isIncoming) {
+          firstUnreadSeq = msg.seq;
+          remaining -= 1;
+          if (remaining <= 0) break;
+        }
+      }
+      if (typeof firstUnreadSeq === 'number') {
+        setUnreadAnchorSeq(Math.max(0, firstUnreadSeq - 1));
+      }
+      pendingUnreadCountRef.current = 0;
+    }
+
     const lastId = messageIds[messageIds.length - 1];
     const lastSeq = lastId ? entities.get(lastId)?.seq : undefined;
     const summaryId = selectedGroup ? selectedGroup.id : selectedContact!.userId;
@@ -629,6 +740,7 @@ const ChatPage: React.FC = () => {
       const results = await searchActiveChat(keyword, limit);
       if (searchRequestSeqRef.current !== requestSeq) return;
       setSearchResults(results);
+      setSearchCursor(0);
       setIsSearchMode(true);
       setIsContextMode(false);
     } catch (error: unknown) {
@@ -641,6 +753,7 @@ const ChatPage: React.FC = () => {
     setSearchQuery('');
     setIsSearchMode(false);
     setSearchResults([]);
+    setSearchCursor(0);
     setIsContextMode(false);
     setContextMessages([]);
     setContextHighlightSeq(undefined);
@@ -653,6 +766,10 @@ const ChatPage: React.FC = () => {
 
   const handleSelectSearchResult = async (message: Message) => {
     if (!message.chatId || !message.seq) return;
+    const idx = searchResults.findIndex((item) => item.id === message.id);
+    if (idx >= 0) {
+      setSearchCursor(idx);
+    }
     try {
       const contextList = await loadMessageContext(message.seq, 30);
 
@@ -666,6 +783,16 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  const handleStepSearchResult = (delta: number) => {
+    if (searchResults.length === 0) return;
+    const nextIdx = (searchCursor + delta + searchResults.length) % searchResults.length;
+    setSearchCursor(nextIdx);
+    const target = searchResults[nextIdx];
+    if (target) {
+      void handleSelectSearchResult(target);
+    }
+  };
+
   const emitRealtimeMessage = async (
     payload: Parameters<typeof sendRealtimeMessage>[0],
     fallbackError = '消息发送失败',
@@ -676,61 +803,85 @@ const ChatPage: React.FC = () => {
     return false;
   };
 
-  const uploadAndSendFile = async (file: File, caption?: string) => {
-    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !canSendMessages) return;
+  const uploadAndSendFiles = async (files: File[], caption?: string) => {
+    if (!files || files.length === 0 || (!selectedContact && !selectedGroup && !isAiChatMode) || !canSendMessages) {
+      return;
+    }
 
     setIsUploading(true);
+    setUploadProgress(4);
     try {
-      if (isAiChatMode && file.type.startsWith('image/')) {
-        const prepared = await mediaWorkerClient.prepareAiImage(file, {
-          maxEdge: 1536,
-          quality: 0.84,
-        });
-        const aiMessageData = {
-          content: caption || newMessage || '请分析这张图片',
-          imageData: {
-            mimeType: prepared.mimeType,
-            base64Data: prepared.base64Data,
-            fileName: file.name,
-            fileSize: file.size,
-            width: prepared.width,
-            height: prepared.height,
-          },
-        };
-        const ok = await emitRealtimeMessage(
-          {
-            content: JSON.stringify(aiMessageData),
-            chatType: 'private',
-            receiverId: 'ai',
-            type: 'image',
-          },
-          'AI 图片消息发送失败',
-        );
-        if (ok) {
-          setNewMessage('');
+      const total = files.length;
+      let anySent = false;
+      const activeReplyToId = replyingMessage?.id;
+      const cleanCaption = caption?.trim();
+
+      for (let i = 0; i < total; i += 1) {
+        const file = files[i];
+        const sliceBase = i / total;
+        const sliceSpan = 1 / total;
+
+        if (isAiChatMode && file.type.startsWith('image/')) {
+          setUploadProgress(Math.round((sliceBase + 0.5 * sliceSpan) * 100));
+          const prepared = await mediaWorkerClient.prepareAiImage(file, {
+            maxEdge: 1536,
+            quality: 0.84,
+          });
+          const aiMessageData = {
+            content: cleanCaption || newMessage || '请分析这张图片',
+            imageData: {
+              mimeType: prepared.mimeType,
+              base64Data: prepared.base64Data,
+              fileName: file.name,
+              fileSize: file.size,
+              width: prepared.width,
+              height: prepared.height,
+            },
+          };
+          const ok = await emitRealtimeMessage(
+            {
+              content: JSON.stringify(aiMessageData),
+              chatType: 'private',
+              receiverId: 'ai',
+              type: 'image',
+            },
+            'AI 图片消息发送失败',
+          );
+          if (ok) {
+            anySent = true;
+            setNewMessage('');
+          }
+          setUploadProgress(Math.round(((i + 1) / total) * 100));
+          continue;
         }
-        return;
-      }
 
-      const uploadResult = await mediaWorkerClient.prepareAndUploadFile(file, {
-        maxEdge: 2048,
-        quality: 0.86,
-        minBytesForTranscode: 320 * 1024,
-        uploadUrl: `${API_BASE_URL}/api/upload`,
-        authToken: authUtils.getAccessToken(),
-        requestTimeoutMs: 25_000,
-        maxAttempts: 3,
-        retryBaseDelayMs: 420,
-      });
-      const result = uploadResult.upload;
+        const prepared = await mediaWorkerClient.prepareUploadFile(file, {
+          maxEdge: 2048,
+          quality: 0.86,
+          minBytesForTranscode: 320 * 1024,
+        });
+        setUploadProgress(Math.round((sliceBase + 0.25 * sliceSpan) * 100));
 
-      if (result.success && result.data) {
+        const result = await uploadPreparedWithProgress(
+          prepared,
+          `${API_BASE_URL}/api/upload`,
+          authUtils.getAccessToken(),
+          (fraction) => {
+            const combined = sliceBase + (0.25 + 0.72 * fraction) * sliceSpan;
+            setUploadProgress(Math.min(99, Math.max(5, Math.round(combined * 100))));
+          },
+        );
+
+        if (!result.success || !result.data) {
+          throw new Error(result.message || '文件上传失败');
+        }
+
         const uploaded = result.data;
         const uploadedName = uploaded.fileName || file.name || 'upload.bin';
         const uploadedType: Message['type'] = (uploaded.fileType as Message['type'] | undefined) || 'file';
         const uploadedUrl = uploaded.fileUrl || undefined;
-        const activeReplyToId = replyingMessage?.id;
         let sentOk = false;
+
         if (selectedGroup) {
           sentOk = await emitRealtimeMessage({
             chatType: 'group',
@@ -742,7 +893,7 @@ const ChatPage: React.FC = () => {
             fileSize: uploaded.fileSize,
             mimeType: uploaded.mimeType,
             thumbnailUrl: uploaded.thumbnailUrl,
-            ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
+            ...(i === 0 && activeReplyToId ? { replyTo: activeReplyToId } : {}),
           }, '群聊文件消息发送失败');
         } else if (selectedContact) {
           sentOk = await emitRealtimeMessage({
@@ -755,26 +906,33 @@ const ChatPage: React.FC = () => {
             fileSize: uploaded.fileSize,
             mimeType: uploaded.mimeType,
             thumbnailUrl: uploaded.thumbnailUrl,
-            ...(activeReplyToId ? { replyTo: activeReplyToId } : {}),
+            ...(i === 0 && activeReplyToId ? { replyTo: activeReplyToId } : {}),
           }, '私聊文件消息发送失败');
         }
-        if (sentOk && activeReplyToId) {
-          setReplyingMessage(null);
+
+        if (sentOk) {
+          anySent = true;
+          if (i === 0 && activeReplyToId) {
+            setReplyingMessage(null);
+          }
         }
-        // 若用户同时填写了图片/文件附言，上传成功后紧随发送附言文本
-        const cleanCaption = caption?.trim();
-        if (sentOk && cleanCaption) {
-          await handleSendMessage(cleanCaption);
-        }
-      } else {
-        throw new Error(result.message || '文件上传失败');
+        setUploadProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      if (anySent && cleanCaption && !isAiChatMode) {
+        await handleSendMessage(cleanCaption);
       }
     } catch (error) {
       console.error('上传失败:', error);
-      showToast('文件上传失败，请稍后重试', 'error');
+      showToast(error instanceof Error ? error.message : '文件上传失败，请稍后重试', 'error');
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
+  };
+
+  const uploadAndSendFile = async (file: File, caption?: string) => {
+    await uploadAndSendFiles([file], caption);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -979,7 +1137,9 @@ const ChatPage: React.FC = () => {
   // Derived Data
   const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : null;
   const sharedMediaMessages = useMemo(() => {
-    if (isGroupChatMode || !showDetailPanel || !selectedContact) return [];
+    const needPrivateMedia = !isGroupChatMode && showDetailPanel && Boolean(selectedContact);
+    const needGroupMedia = isGroupChatMode && showGroupDetailPanel && Boolean(selectedGroup);
+    if (!needPrivateMedia && !needGroupMedia) return [];
     const { messageIds, entities } = useMessageStore.getState();
     const list: Message[] = [];
     for (const id of messageIds) {
@@ -987,7 +1147,38 @@ const ChatPage: React.FC = () => {
       if (msg) list.push(msg);
     }
     return list;
-  }, [isGroupChatMode, showDetailPanel, selectedContact, messageIdsVersion]);
+  }, [isGroupChatMode, showDetailPanel, showGroupDetailPanel, selectedContact, selectedGroup, messageIdsVersion]);
+
+  const detailGalleryItems = useMemo(() => {
+    if (!detailLightboxMedia) return [];
+    const items: Array<{ id?: string; src: string; fileName?: string }> = [];
+    for (const msg of sharedMediaMessages) {
+      if (msg.type !== 'image') continue;
+      const rawUrl = msg.fileUrl || msg.attachments?.[0]?.fileUrl;
+      if (!rawUrl) continue;
+      items.push({
+        id: msg.id,
+        src: rawUrl,
+        fileName: msg.fileName || msg.attachments?.[0]?.fileName,
+      });
+    }
+    return items.length > 0 ? items : [detailLightboxMedia];
+  }, [detailLightboxMedia, sharedMediaMessages]);
+
+  const detailLightboxInitialIndex = useMemo(() => {
+    if (!detailLightboxMedia || detailGalleryItems.length === 0) return 0;
+    const idx = detailGalleryItems.findIndex(
+      (item) => item.src === detailLightboxMedia.src || detailLightboxMedia.src.endsWith(item.src),
+    );
+    return idx >= 0 ? idx : 0;
+  }, [detailLightboxMedia, detailGalleryItems]);
+
+  const currentGroupCanMentionAll = Boolean(
+    selectedGroup
+    && (selectedGroup.ownerId === currentUser?.id
+      || selectedGroup.currentUserRole === 'owner'
+      || selectedGroup.currentUserRole === 'admin'),
+  );
   const selectedChatSummary = selectedChatId ? chats.find((chat) => chat.id === selectedChatId) : undefined;
   const selectedHistoryChatId = currentUser
     ? selectedGroup
@@ -1096,10 +1287,18 @@ const ChatPage: React.FC = () => {
               onFileUpload={(file, caption) => {
                 void uploadAndSendFile(file, caption);
               }}
+              onFilesUpload={(files, caption) => {
+                void uploadAndSendFiles(files, caption);
+              }}
               isConnected={canSendMessages}
               isUploading={isUploading}
+              uploadProgress={uploadProgress}
               editingMessage={editingMessage}
               replyingMessage={replyingMessage}
+              isGroupChat={isGroupChatMode}
+              groupMembers={selectedGroup?.members}
+              currentUsername={currentUser?.username}
+              canMentionAll={currentGroupCanMentionAll}
               onCancelContext={() => {
                 setEditingMessage(null);
                 setReplyingMessage(null);
@@ -1111,6 +1310,44 @@ const ChatPage: React.FC = () => {
           }
           showEmptyState={!selectedContact && !selectedGroup}
         >
+          {(!isBrowserOnline || selfPresence.status === 'connecting' || showReconnectedNotice) && (
+            <div
+              className={`chat-connection-banner ${
+                !isBrowserOnline
+                  ? 'is-offline'
+                  : selfPresence.status === 'connecting'
+                    ? 'is-connecting'
+                    : 'is-reconnected'
+              }`}
+              role="status"
+            >
+              <div className="chat-connection-banner__left">
+                {!isBrowserOnline || selfPresence.status === 'connecting' ? (
+                  <WifiOff size={15} />
+                ) : (
+                  <Wifi size={15} />
+                )}
+                <span>
+                  {!isBrowserOnline
+                    ? '当前处于离线状态，网络恢复后将自动同步新消息'
+                    : selfPresence.status === 'connecting'
+                      ? '正在连接实时消息服务...'
+                      : '实时连接已恢复，消息已保持同步'}
+                </span>
+              </div>
+              {(!isBrowserOnline || selfPresence.status === 'connecting') && (
+                <button
+                  type="button"
+                  className="chat-connection-banner__action"
+                  onClick={() => connectRealtime()}
+                >
+                  <RefreshCw size={12} />
+                  <span>重连</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {(isSearchMode || isContextMode) && (
             <div className="chat-context-bar">
               <div className="chat-context-bar__left">
@@ -1122,6 +1359,29 @@ const ChatPage: React.FC = () => {
                 </span>
               </div>
               <div className="chat-context-bar__actions">
+                {searchResults.length > 0 && (
+                  <div className="chat-context-bar__nav" aria-label="搜索结果切换">
+                    <span>第 {searchCursor + 1} / {searchResults.length} 条</span>
+                    <button
+                      type="button"
+                      className="chat-context-bar__nav-btn"
+                      aria-label="上一条命中消息"
+                      disabled={searchResults.length <= 1}
+                      onClick={() => handleStepSearchResult(-1)}
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-context-bar__nav-btn"
+                      aria-label="下一条命中消息"
+                      disabled={searchResults.length <= 1}
+                      onClick={() => handleStepSearchResult(1)}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
+                )}
                 {isContextMode && (
                   <button
                     type="button"
@@ -1145,6 +1405,7 @@ const ChatPage: React.FC = () => {
           <ChatHistory
             key={selectedChatId ?? 'empty'}
             currentUserId={currentUser?.id || ''}
+            currentUsername={currentUser?.username}
             {...(isSearchMode || isContextMode
               ? { messages: displayedMessages || [] }
               : {
@@ -1154,9 +1415,17 @@ const ChatPage: React.FC = () => {
             isLoading={isLoadingMessages}
             hasMore={isSearchMode || isContextMode ? false : hasMoreMessages}
             onLoadMore={isSearchMode || isContextMode ? undefined : loadMoreMessages}
+            onRetryLoad={() => {
+              if (selectedGroupId) {
+                setActiveContact(selectedGroupId, true);
+              } else if (selectedContactId) {
+                setActiveContact(selectedContactId, false);
+              }
+            }}
             onVisibleRangeChange={isSearchMode || isContextMode ? undefined : setVisibleRange}
             highlightTerm={searchQuery.trim() ? searchQuery.trim() : undefined}
             highlightSeq={contextHighlightSeq}
+            unreadAnchorSeq={isSearchMode || isContextMode ? null : unreadAnchorSeq}
             onMessageSelect={isSearchMode ? handleSelectSearchResult : undefined}
             disableAutoScroll={isSearchMode || isContextMode}
             hasHistoryHint={isResolvingSelectedHistory}
@@ -1165,6 +1434,13 @@ const ChatPage: React.FC = () => {
             onEditMessage={isSearchMode || isContextMode ? undefined : handleEditMessage}
             onDeleteMessage={isSearchMode || isContextMode ? undefined : (msg) => setPendingDeleteMessage(msg)}
             onRetryMessage={isSearchMode || isContextMode ? undefined : handleRetryMessage}
+            onToggleReaction={
+              isSearchMode || isContextMode || !currentUser?.id
+                ? undefined
+                : (msg, emoji) => {
+                    void useMessageStore.getState().toggleMessageReaction(msg.id, emoji, currentUser.id);
+                  }
+            }
           />
         </ChatArea>
       )}
@@ -1196,6 +1472,8 @@ const ChatPage: React.FC = () => {
             isOpen
             onClose={() => setShowGroupDetailPanel(false)}
             group={selectedGroup}
+            sharedMediaMessages={sharedMediaMessages}
+            onPreviewImage={setDetailLightboxMedia}
           />
         </Suspense>
       )}
@@ -1288,6 +1566,8 @@ const ChatPage: React.FC = () => {
       <ChatImageLightbox
         src={detailLightboxMedia?.src ?? null}
         fileName={detailLightboxMedia?.fileName}
+        items={detailLightboxMedia ? detailGalleryItems : undefined}
+        initialIndex={detailLightboxInitialIndex}
         onClose={() => setDetailLightboxMedia(null)}
       />
     </motion.div>

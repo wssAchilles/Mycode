@@ -45,6 +45,7 @@ export interface IMessage extends Document {
   replyTo?: Types.ObjectId;
   editedAt?: Date;
   deletedAt?: Date;
+  reactions?: Array<{ emoji: string; userIds: string[] }>;
   createdAt: Date;
   updatedAt: Date;
   
@@ -173,6 +174,17 @@ const MessageSchema: Schema = new Schema({
   deletedAt: {
     type: Date,
     default: null
+  },
+
+  // 表情回应聚合列表
+  reactions: {
+    type: [
+      {
+        emoji: { type: String, required: true },
+        userIds: { type: [String], default: [] }
+      }
+    ],
+    default: []
   },
   
   // 文件相关字段

@@ -5,7 +5,11 @@ import { buildGroupChatId, buildPrivateChatId, parseChatId } from '../../utils/c
 import { createChildLogger } from '../../utils/logger';
 import { getSocketService } from '../socketRegistry';
 import { updateService } from '../updateService';
-import type { MessageMutationAction, MessageMutationRealtimePayload } from './contracts';
+import type {
+  MessageMutationAction,
+  MessageMutationRealtimePayload,
+  MessageReactionSummary,
+} from './contracts';
 
 const log = createChildLogger('services:realtimeEvents:messageMutation');
 
@@ -22,6 +26,7 @@ export interface MessageMutationInput {
   content?: string | null;
   editedAt?: Date | string | null;
   deletedAt?: Date | string | null;
+  reactions?: MessageReactionSummary[] | null;
 }
 
 function resolveChatMeta(message: MessageMutationInput): {
@@ -117,13 +122,17 @@ async function broadcastMessageMutation(
             content: String(message.content ?? ''),
             editedAt: toIso(message.editedAt) ?? emittedAt,
           }
-        : {
-            deletedAt: toIso(message.deletedAt) ?? emittedAt,
-          }),
+        : action === 'reaction_updated'
+          ? {
+              reactions: Array.isArray(message.reactions) ? message.reactions : [],
+            }
+          : {
+              deletedAt: toIso(message.deletedAt) ?? emittedAt,
+            }),
     };
 
     const recipientIds = await resolveTargetUserIds(chatId, chatType, groupId, message, actorId);
-    if (recipientIds.length > 0) {
+    if (recipientIds.length > 0 && action !== 'reaction_updated') {
       await updateService.appendUpdates(recipientIds, {
         type: action === 'edited' ? 'message_edit' : 'message_delete',
         chatId,
@@ -170,4 +179,14 @@ export async function broadcastMessageDeleted(
   actorId: string,
 ): Promise<void> {
   await broadcastMessageMutation('deleted', message, actorId);
+}
+
+/**
+ * 广播消息表情回应更新事件至会话内在线成员
+ */
+export async function broadcastMessageReactionUpdated(
+  message: MessageMutationInput,
+  actorId: string,
+): Promise<void> {
+  await broadcastMessageMutation('reaction_updated', message, actorId);
 }

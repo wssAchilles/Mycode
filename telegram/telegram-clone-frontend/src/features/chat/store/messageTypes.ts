@@ -64,5 +64,6 @@ export interface MessageState {
   ingestGroupUpdateEvent: (event: unknown) => void;
   ingestGroupUpdateEvents: (events: unknown[]) => void;
   applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string, readerId?: string) => void;
+  toggleMessageReaction: (messageId: string, emoji: string, currentUserId: string) => Promise<void>;
   clearMessages: () => void;
 }

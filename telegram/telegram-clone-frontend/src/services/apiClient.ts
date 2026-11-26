@@ -444,6 +444,28 @@ export const messageAPI = {
     }
   },
 
+  // 切换消息表情回应
+  toggleReaction: async (
+    messageId: string,
+    emoji: string,
+  ): Promise<{ messageId: string; reactions: Array<{ emoji: string; userIds: string[] }> }> => {
+    try {
+      const response = await apiClient.post<{
+        success?: boolean;
+        data?: { messageId: string; reactions: Array<{ emoji: string; userIds: string[] }> };
+        messageId?: string;
+        reactions?: Array<{ emoji: string; userIds: string[] }>;
+      }>(`/api/messages/${messageId}/reactions`, { emoji });
+      const data = response.data.data || response.data;
+      return {
+        messageId: data.messageId || messageId,
+        reactions: Array.isArray(data.reactions) ? data.reactions : [],
+      };
+    } catch (error: unknown) {
+      throw new Error(getErrorMessage(error, '表情回应失败'));
+    }
+  },
+
   // 获取未读消息数量
   getUnreadCount: async (): Promise<number> => {
     try {

@@ -1,19 +1,32 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Edit3, FileText, LoaderCircle, Paperclip, Reply, Send, Smile, X } from 'lucide-react';
 import type { Message } from '../../../types/chat';
 import { useChatUiPrefsStore } from '../state/chatUiPrefsStore';
+import { MentionPopover, type MentionCandidate } from './input/MentionPopover';
 import './MessageInput.css';
+
+interface StagedAttachmentItem {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+}
 
 interface MessageInputProps {
   chatId?: string;
   onSendMessage: (content: string) => void;
   onFileUpload: (file: File, caption?: string) => void;
+  onFilesUpload?: (files: File[], caption?: string) => void;
   isConnected: boolean;
   isUploading?: boolean;
+  uploadProgress?: number | null;
   placeholder?: string;
   editingMessage?: Message | null;
   replyingMessage?: Message | null;
+  isGroupChat?: boolean;
+  groupMembers?: MentionCandidate[];
+  currentUsername?: string;
+  canMentionAll?: boolean;
   onCancelContext?: () => void;
   onSaveEdit?: (messageId: string, newContent: string) => Promise<boolean | void> | boolean | void;
   onEditLastOwnMessage?: () => void;
@@ -27,6 +40,7 @@ const COMMON_EMOJIS = [
 ];
 
 const MAX_TEXTAREA_HEIGHT = 140;
+const MAX_STAGED_FILES = 6;
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -39,11 +53,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
   chatId,
   onSendMessage,
   onFileUpload,
+  onFilesUpload,
   isConnected,
   isUploading = false,
+  uploadProgress = null,
   placeholder = '输入消息...',
   editingMessage = null,
   replyingMessage = null,
+  isGroupChat = false,
+  groupMembers = [],
+  currentUsername,
+  canMentionAll = false,
   onCancelContext,
   onSaveEdit,
   onEditLastOwnMessage,
@@ -51,24 +71,51 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [stagedFile, setStagedFile] = useState<File | null>(null);
-  const [stagedPreviewUrl, setStagedPreviewUrl] = useState<string | null>(null);
+  const [stagedFiles, setStagedFiles] = useState<StagedAttachmentItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<{ start: number; end: number; keyword: string } | null>(null);
+  const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevEditingIdRef = useRef<string | null>(null);
   const lastTypingActiveRef = useRef(false);
+  const stagedFilesRef = useRef<StagedAttachmentItem[]>([]);
+  stagedFilesRef.current = stagedFiles;
   const setDraft = useChatUiPrefsStore((state) => state.setDraft);
   const clearDraft = useChatUiPrefsStore((state) => state.clearDraft);
 
   const trimmedMessage = message.trim();
   const isEditing = Boolean(editingMessage);
+  const hasStagedFiles = stagedFiles.length > 0;
   const canSend = Boolean(
     isConnected
     && !isUploading
-    && (isEditing ? trimmedMessage : trimmedMessage || stagedFile),
+    && (isEditing ? trimmedMessage : trimmedMessage || hasStagedFiles),
   );
+
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    if (!isGroupChat || !mentionQuery) return [];
+    const kw = mentionQuery.keyword.toLowerCase();
+    const list: MentionCandidate[] = [];
+    if (canMentionAll && (!kw || '所有人'.includes(kw) || 'all'.startsWith(kw))) {
+      list.push({
+        userId: '__all__',
+        username: '所有人',
+        role: 'all',
+      });
+    }
+    const selfName = currentUsername?.trim().toLowerCase();
+    for (const member of groupMembers) {
+      if (!member?.username) continue;
+      if (selfName && member.username.trim().toLowerCase() === selfName) continue;
+      if (!kw || member.username.toLowerCase().includes(kw)) {
+        list.push(member);
+      }
+      if (list.length >= 8) break;
+    }
+    return list;
+  }, [canMentionAll, currentUsername, groupMembers, isGroupChat, mentionQuery]);
 
   // 自动调整多行输入框高度
   const adjustTextareaHeight = useCallback(() => {
@@ -83,49 +130,69 @@ const MessageInput: React.FC<MessageInputProps> = ({
     adjustTextareaHeight();
   }, [message, adjustTextareaHeight]);
 
-  // 清理待发送附件预览 URL，避免内存泄漏
+  // 组件卸载时统一释放暂存预览 URL，避免内存泄漏
   useEffect(() => {
     return () => {
-      if (stagedPreviewUrl) {
-        URL.revokeObjectURL(stagedPreviewUrl);
+      for (const item of stagedFilesRef.current) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
       }
     };
-  }, [stagedPreviewUrl]);
+  }, []);
 
-  const clearStagedFile = useCallback(() => {
-    setStagedFile(null);
-    setStagedPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
+  const clearStagedFiles = useCallback(() => {
+    setStagedFiles((prev) => {
+      for (const item of prev) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      }
+      return [];
     });
   }, []);
 
-  const stageFileForSend = useCallback((file: File) => {
-    if (!file) return;
-    setStagedFile(file);
-    setStagedPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+  const removeStagedFileAt = useCallback((id: string) => {
+    setStagedFiles((prev) =>
+      prev.filter((item) => {
+        if (item.id === id) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+          return false;
+        }
+        return true;
+      }),
+    );
+  }, []);
+
+  const appendFilesForSend = useCallback((files: File[]) => {
+    if (!files.length) return;
+    setStagedFiles((prev) => {
+      const remaining = Math.max(0, MAX_STAGED_FILES - prev.length);
+      if (remaining === 0) return prev;
+      const accepted = files.slice(0, remaining).map((file, idx) => ({
+        id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        file,
+        previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      }));
+      return [...prev, ...accepted];
     });
     window.setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
   }, []);
 
-  // 切换会话时恢复对应草稿，同时重置暂存附件
+  // 切换会话时恢复对应草稿，同时重置暂存附件与提及状态
   useEffect(() => {
-    clearStagedFile();
+    clearStagedFiles();
+    setMentionQuery(null);
     if (editingMessage) return;
     const savedDraft = chatId ? (useChatUiPrefsStore.getState().draftByChatId[chatId] || '') : '';
     setMessage(savedDraft);
-  }, [chatId, clearStagedFile, editingMessage]);
+  }, [chatId, clearStagedFiles, editingMessage]);
 
   // 切换编辑态时填充被编辑消息正文，退出编辑态时恢复当前会话草稿
   useEffect(() => {
     const currentEditId = editingMessage?.id || null;
     if (currentEditId && currentEditId !== prevEditingIdRef.current) {
       prevEditingIdRef.current = currentEditId;
-      clearStagedFile();
+      clearStagedFiles();
+      setMentionQuery(null);
       setMessage(editingMessage?.content || '');
       window.setTimeout(() => {
         const el = textareaRef.current;
@@ -143,7 +210,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       const savedDraft = chatId ? (useChatUiPrefsStore.getState().draftByChatId[chatId] || '') : '';
       setMessage(savedDraft);
     }
-  }, [chatId, clearStagedFile, editingMessage]);
+  }, [chatId, clearStagedFiles, editingMessage]);
 
   // 进入回复态时自动聚焦输入框
   useEffect(() => {
@@ -174,12 +241,55 @@ const MessageInput: React.FC<MessageInputProps> = ({
     };
   }, [chatId, onTypingChange]);
 
+  const updateMentionQueryFromValue = useCallback(
+    (value: string, caret: number | null) => {
+      if (!isGroupChat || isEditing || caret === null) {
+        setMentionQuery(null);
+        return;
+      }
+      const beforeCaret = value.slice(0, caret);
+      const match = beforeCaret.match(/(?:^|\s)@([^\s@]{0,24})$/);
+      if (!match) {
+        setMentionQuery(null);
+        return;
+      }
+      const keyword = match[1] || '';
+      const atStart = beforeCaret.length - keyword.length - 1;
+      setMentionQuery({ start: atStart, end: caret, keyword });
+      setMentionActiveIdx(0);
+    },
+    [isEditing, isGroupChat],
+  );
+
+  const handleSelectMention = useCallback(
+    (candidate: MentionCandidate) => {
+      if (!mentionQuery) return;
+      const insertion = `@${candidate.username} `;
+      const nextVal = `${message.slice(0, mentionQuery.start)}${insertion}${message.slice(mentionQuery.end)}`;
+      const nextCaret = mentionQuery.start + insertion.length;
+      setMessage(nextVal);
+      setMentionQuery(null);
+      if (!editingMessage && chatId) {
+        setDraft(chatId, nextVal);
+      }
+      window.setTimeout(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(nextCaret, nextCaret);
+        }
+      }, 0);
+    },
+    [chatId, editingMessage, mentionQuery, message, setDraft],
+  );
+
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextVal = e.target.value;
     setMessage(nextVal);
     if (!editingMessage && chatId) {
       setDraft(chatId, nextVal);
     }
+    updateMentionQueryFromValue(nextVal, e.target.selectionStart);
     notifyTyping(!editingMessage && nextVal.trim().length > 0 && isConnected);
   };
 
@@ -201,14 +311,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
 
     notifyTyping(false);
+    setMentionQuery(null);
 
-    if (stagedFile) {
-      const fileToSend = stagedFile;
+    if (stagedFiles.length > 0) {
+      const filesToSend = stagedFiles.map((item) => item.file);
       const captionToSend = trimmedMessage;
-      clearStagedFile();
+      clearStagedFiles();
       setMessage('');
       if (chatId) clearDraft(chatId);
-      onFileUpload(fileToSend, captionToSend || undefined);
+      if (onFilesUpload && filesToSend.length > 1) {
+        onFilesUpload(filesToSend, captionToSend || undefined);
+      } else if (filesToSend.length === 1) {
+        onFileUpload(filesToSend[0], captionToSend || undefined);
+      } else {
+        for (let i = 0; i < filesToSend.length; i += 1) {
+          onFileUpload(filesToSend[i], i === filesToSend.length - 1 ? (captionToSend || undefined) : undefined);
+        }
+      }
       textareaRef.current?.focus();
       return;
     }
@@ -228,16 +347,40 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
 
+    if (mentionQuery && mentionCandidates.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionActiveIdx((prev) => (prev + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionActiveIdx((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const selected = mentionCandidates[mentionActiveIdx] || mentionCandidates[0];
+        if (selected) handleSelectMention(selected);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void handleSend();
       return;
     }
 
-    if (e.key === 'Escape' && (editingMessage || replyingMessage || stagedFile)) {
+    if (e.key === 'Escape' && (editingMessage || replyingMessage || hasStagedFiles)) {
       e.preventDefault();
-      if (stagedFile) {
-        clearStagedFile();
+      if (hasStagedFiles) {
+        clearStagedFiles();
       }
       if (editingMessage || replyingMessage) {
         onCancelContext?.();
@@ -250,7 +393,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       && !message
       && !editingMessage
       && !replyingMessage
-      && !stagedFile
+      && !hasStagedFiles
       && onEditLastOwnMessage
     ) {
       e.preventDefault();
@@ -259,9 +402,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      stageFileForSend(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      appendFilesForSend(files);
       e.target.value = '';
     }
   };
@@ -270,16 +413,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (!isConnected || isEditing) return;
     const items = e.clipboardData?.items;
     if (!items) return;
+    const pastedFiles: File[] = [];
     for (let i = 0; i < items.length; i += 1) {
       const item = items[i];
       if (item.kind === 'file') {
         const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          stageFileForSend(file);
-          return;
-        }
+        if (file) pastedFiles.push(file);
       }
+    }
+    if (pastedFiles.length > 0) {
+      e.preventDefault();
+      appendFilesForSend(pastedFiles);
     }
   };
 
@@ -300,10 +444,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const handleDrop = (e: React.DragEvent<HTMLFormElement>) => {
     setIsDragActive(false);
     if (!isConnected || isEditing) return;
-    const file = e.dataTransfer?.files?.[0];
-    if (file) {
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length > 0) {
       e.preventDefault();
-      stageFileForSend(file);
+      appendFilesForSend(files);
     }
   };
 
@@ -344,6 +488,29 @@ const MessageInput: React.FC<MessageInputProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* @群成员自动补全浮层 */}
+      <MentionPopover
+        open={Boolean(mentionQuery && mentionCandidates.length > 0)}
+        candidates={mentionCandidates}
+        activeIndex={mentionActiveIdx}
+        onSelect={handleSelectMention}
+      />
+
+      {/* 上传进度条 */}
+      {isUploading && (
+        <div className="message-input__upload-progress" role="progressbar" aria-valuenow={uploadProgress ?? undefined} aria-valuemin={0} aria-valuemax={100}>
+          <div className="message-input__upload-progress-track">
+            <div
+              className="message-input__upload-progress-fill"
+              style={{ width: `${Math.max(8, Math.min(100, uploadProgress ?? 35))}%` }}
+            />
+          </div>
+          <span className="message-input__upload-progress-label">
+            正在上传附件{typeof uploadProgress === 'number' ? ` ${Math.round(uploadProgress)}%` : '...'}
+          </span>
+        </div>
+      )}
+
       {/* 上下文预览条：正在编辑 / 引用回复 */}
       {(editingMessage || replyingMessage) && (
         <div className="message-input__context-bar" role="status">
@@ -372,36 +539,52 @@ const MessageInput: React.FC<MessageInputProps> = ({
         </div>
       )}
 
-      {/* 待发送附件确认预览条 */}
-      {stagedFile && (
-        <div className="message-input__staged-file" role="status">
-          {stagedPreviewUrl ? (
-            <img src={stagedPreviewUrl} alt={stagedFile.name} className="message-input__staged-thumb" />
-          ) : (
-            <div className="message-input__staged-icon" aria-hidden="true">
-              <FileText size={18} />
-            </div>
-          )}
-          <div className="message-input__staged-meta">
-            <span className="message-input__staged-name">{stagedFile.name || '粘贴的图片'}</span>
-            <span className="message-input__staged-size">{formatBytes(stagedFile.size)}</span>
+      {/* 待发送附件确认预览条（支持多图/多文件队列） */}
+      {stagedFiles.length > 0 && (
+        <div className="message-input__staged-queue" role="status">
+          <div className="message-input__staged-list">
+            {stagedFiles.map((item) => (
+              <div key={item.id} className="message-input__staged-file">
+                {item.previewUrl ? (
+                  <img src={item.previewUrl} alt={item.file.name} className="message-input__staged-thumb" />
+                ) : (
+                  <div className="message-input__staged-icon" aria-hidden="true">
+                    <FileText size={18} />
+                  </div>
+                )}
+                <div className="message-input__staged-meta">
+                  <span className="message-input__staged-name">{item.file.name || '粘贴的文件'}</span>
+                  <span className="message-input__staged-size">{formatBytes(item.file.size)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="message-input__context-close"
+                  onClick={() => removeStagedFileAt(item.id)}
+                  aria-label={`移除附件 ${item.file.name}`}
+                  title="移除此附件"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
           </div>
-          <button
-            type="button"
-            className="message-input__context-close"
-            onClick={clearStagedFile}
-            aria-label="移除待发送附件"
-            title="移除附件"
-          >
-            <X size={15} aria-hidden="true" />
-          </button>
+          {stagedFiles.length > 1 && (
+            <button
+              type="button"
+              className="message-input__staged-clear-all"
+              onClick={clearStagedFiles}
+            >
+              清空全部 ({stagedFiles.length}/{MAX_STAGED_FILES})
+            </button>
+          )}
         </div>
       )}
 
       <div className="message-input__row">
-        {/* 隐藏文件选择器 */}
+        {/* 隐藏文件选择器（支持多选） */}
         <input
           type="file"
+          multiple
           ref={fileInputRef}
           onChange={handleFileChange}
           className="message-input__file"
@@ -416,8 +599,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
             type="button"
             className="message-input__btn message-input__btn--attach"
             onClick={() => fileInputRef.current?.click()}
-            disabled={!isConnected || isUploading || isEditing}
-            title="上传附件"
+            disabled={!isConnected || isUploading || isEditing || stagedFiles.length >= MAX_STAGED_FILES}
+            title="上传附件（最多 6 个）"
             aria-label="上传附件"
             whileTap={{ scale: 0.94 }}
           >
@@ -440,9 +623,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
             placeholder={
               !isConnected
                 ? '连接中，暂不可发送...'
-                : stagedFile
+                : hasStagedFiles
                   ? '添加图片/文件说明（可选），按 Enter 发送...'
-                  : placeholder
+                  : isGroupChat
+                    ? '输入消息，输入 @ 可提及群成员...'
+                    : placeholder
             }
             disabled={!isConnected}
             className="message-input__field message-input__textarea"

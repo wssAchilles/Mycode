@@ -5,6 +5,11 @@ import type {
   SyncStateRealtimePayload,
 } from '../features/realtime/contracts';
 
+export interface MessageReaction {
+  emoji: string;
+  userIds: string[];
+}
+
 // 消息相关类型定义
 export interface Message {
   id: string;
@@ -15,6 +20,7 @@ export interface Message {
   content: string;
   editedAt?: string;
   replyTo?: string;
+  reactions?: MessageReaction[];
   senderId: string;      // 兼容旧的属性名
   senderUsername: string; // 兼容旧的属性名
   userId: string;        // 新的属性名

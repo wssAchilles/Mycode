@@ -15,10 +15,12 @@ import {
     Bell,
     BellOff,
     Check,
+    ChevronDown,
     ChevronLeft,
     Copy,
     Crown,
     Globe,
+    Image as ImageIcon,
     Lock,
     MoreHorizontal,
     Pencil,
@@ -33,6 +35,8 @@ import {
 } from 'lucide-react';
 import { useChatStore, type Group, type GroupMember } from '../../features/chat/store/chatStore';
 import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
+import type { Message } from '../../types/chat';
+import { withApiBase } from '../../utils/apiUrl';
 import { Avatar } from '../../components/common';
 import { authUtils, groupAPI } from '../../services/apiClient';
 import { showToast } from '../../components/ui/Toast';
@@ -48,6 +52,8 @@ interface GroupDetailPanelProps {
     isOpen: boolean;
     onClose: () => void;
     group: Group | null;
+    sharedMediaMessages?: Message[];
+    onPreviewImage?: (payload: { src: string; fileName?: string }) => void;
 }
 
 type MemberFilter = 'all' | 'staff' | 'online';
@@ -80,7 +86,13 @@ const migrateLegacyGroupMuted = (
     }
 };
 
-const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, group }) => {
+const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({
+    isOpen,
+    onClose,
+    group,
+    sharedMediaMessages = [],
+    onPreviewImage,
+}) => {
     const leaveGroup = useChatStore((s) => s.leaveGroup);
     const loadGroupDetails = useChatStore((s) => s.loadGroupDetails);
     const loadChats = useChatStore((s) => s.loadChats);
@@ -117,6 +129,41 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
     const [leaving, setLeaving] = useState(false);
     const [pendingTransferMember, setPendingTransferMember] = useState<GroupMember | null>(null);
     const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+
+    const { sharedImages, sharedFileCount } = useMemo(() => {
+        const images: Array<{ id: string; src: string; thumb: string; fileName?: string }> = [];
+        let files = 0;
+
+        for (let i = sharedMediaMessages.length - 1; i >= 0; i -= 1) {
+            const msg = sharedMediaMessages[i];
+            const firstAtt = msg.attachments?.[0];
+            const rawUrl = msg.fileUrl || firstAtt?.fileUrl;
+            if (!rawUrl) continue;
+
+            if (msg.type === 'image') {
+                if (images.length < 9) {
+                    const resolved = withApiBase(rawUrl) || rawUrl;
+                    const resolvedThumb = withApiBase(msg.thumbnailUrl || firstAtt?.thumbnailUrl || rawUrl) || resolved;
+                    images.push({
+                        id: msg.id,
+                        src: resolved,
+                        thumb: resolvedThumb,
+                        fileName: msg.fileName || firstAtt?.fileName,
+                    });
+                }
+            } else if (
+                msg.type === 'file'
+                || msg.type === 'document'
+                || msg.type === 'video'
+                || msg.type === 'audio'
+            ) {
+                files += 1;
+            }
+        }
+        return { sharedImages: images, sharedFileCount: files };
+    }, [sharedMediaMessages]);
+
+    const [mediaExpanded, setMediaExpanded] = useState(() => sharedImages.length > 0);
 
     useEffect(() => {
         setAvatarSelection({ mode: 'existing', url: group?.avatarUrl || null });
@@ -702,6 +749,59 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
                                 </div>
                             </section>
                         )}
+
+                        {/* 3.5 群内共享媒体画廊 */}
+                        <section className="group-inset-card group-media-card" aria-label="共享媒体">
+                            <button
+                                type="button"
+                                className="group-media-toggle"
+                                aria-expanded={mediaExpanded}
+                                onClick={() => setMediaExpanded((prev) => !prev)}
+                            >
+                                <span className="group-media-toggle-title">
+                                    <ImageIcon size={15} />
+                                    <span>共享媒体{sharedImages.length > 0 ? ` (${sharedImages.length})` : ''}</span>
+                                </span>
+                                <ChevronDown
+                                    size={16}
+                                    className={`group-media-chevron ${mediaExpanded ? 'is-open' : ''}`}
+                                />
+                            </button>
+                            {mediaExpanded && (
+                                <div className="group-media-body">
+                                    {sharedImages.length > 0 ? (
+                                        <>
+                                            <div className="group-media-grid">
+                                                {sharedImages.map((img) => (
+                                                    <button
+                                                        key={img.id}
+                                                        type="button"
+                                                        className="group-media-thumb"
+                                                        aria-label={`预览共享图片 ${img.fileName || ''}`.trim()}
+                                                        onClick={() =>
+                                                            onPreviewImage?.({ src: img.src, fileName: img.fileName })
+                                                        }
+                                                    >
+                                                        <img src={img.thumb} alt={img.fileName || '共享图片'} loading="lazy" />
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {sharedFileCount > 0 && (
+                                                <div className="group-media-summary">
+                                                    另有 {sharedFileCount} 个文件或音视频记录在群聊中
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <div className="group-media-empty">
+                                            {sharedFileCount > 0
+                                                ? `暂无共享图片（含 ${sharedFileCount} 个文件或音视频）`
+                                                : '暂无共享图片或媒体文件'}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </section>
 
                         {/* 4. 成员搜索与管理白卡 */}
                         <section className="group-inset-card group-detail-members" aria-label="成员管理">

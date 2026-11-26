@@ -34,6 +34,7 @@ export interface RawSyncMessage {
   status?: string;
   readCount?: number;
   attachments?: unknown[];
+  reactions?: Array<{ emoji?: unknown; userIds?: unknown }>;
   replyTo?: string;
   fileUrl?: string;
   fileName?: string;
@@ -136,6 +137,11 @@ export function normalizeSyncMessage(raw: RawSyncMessage): Message | null {
     readCount: typeof raw.readCount === 'number' ? raw.readCount : undefined,
     replyTo: typeof raw.replyTo === 'string' && raw.replyTo ? raw.replyTo : undefined,
     attachments: Array.isArray(raw.attachments) ? raw.attachments : undefined,
+    reactions: Array.isArray(raw.reactions)
+      ? raw.reactions
+          .filter((r) => r && typeof r.emoji === 'string' && Array.isArray(r.userIds))
+          .map((r) => ({ emoji: String(r.emoji), userIds: (r.userIds as unknown[]).map(String) }))
+      : undefined,
     fileUrl: raw.fileUrl || undefined,
     fileName: raw.fileName || undefined,
     fileSize: typeof raw.fileSize === 'number' ? raw.fileSize : undefined,

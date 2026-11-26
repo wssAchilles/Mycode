@@ -74,6 +74,7 @@ function patchSignature(patches: MessagePatch[]): string {
           readCount: update.readCount,
           content: update.content,
           editedAt: update.editedAt,
+          reactions: update.reactions,
         })),
       };
     }),
@@ -88,11 +89,13 @@ export function compactMessagePatchesWithRuntime(
   } = {},
 ): MessagePatchCompactionRuntimeResult {
   const jsBaseline = compactMessagePatches(patches);
-  // 若更新补丁中包含消息正文编辑（content/editedAt），跳过未覆盖新字段的 WASM 合并器以防丢失内容
+  // 若更新补丁中包含消息正文编辑或表情回应更新，跳过未覆盖新字段的 WASM 合并器以防丢失字段
   const hasContentMutation = patches.some(
     (patch) =>
       patch.kind === 'update' &&
-      patch.updates.some((u) => u.content !== undefined || u.editedAt !== undefined),
+      patch.updates.some(
+        (u) => u.content !== undefined || u.editedAt !== undefined || u.reactions !== undefined,
+      ),
   );
   if (!options.wasmPatchCompactor || hasContentMutation) {
     return {
@@ -181,9 +184,16 @@ function mergeAdjacentPatches(prev: MessagePatch, next: MessagePatch): MessagePa
   }
 
   if (prev.kind === 'update' && next.kind === 'update') {
-    const byId = new Map<
+      const byId = new Map<
       string,
-      { id: string; status?: Message['status']; readCount?: number; content?: string; editedAt?: string }
+      {
+        id: string;
+        status?: Message['status'];
+        readCount?: number;
+        content?: string;
+        editedAt?: string;
+        reactions?: Message['reactions'];
+      }
     >();
     for (const u of prev.updates) byId.set(u.id, u);
     for (const u of next.updates) {

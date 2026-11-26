@@ -17,6 +17,7 @@ import { updateService } from '../services/updateService';
 import {
   broadcastMessageDeleted,
   broadcastMessageEdited,
+  broadcastMessageReactionUpdated,
   broadcastSelfReadSync,
 } from '../services/realtimeEvents';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
@@ -108,6 +109,11 @@ const formatMessage = (msg: any, userMap: Map<string, string>) => {
     attachments: buildAttachments(msg),
     replyTo: msg.replyTo ? String(msg.replyTo) : undefined,
     editedAt: msg.editedAt || undefined,
+    reactions: Array.isArray(msg.reactions)
+      ? msg.reactions
+          .filter((r: any) => r && typeof r.emoji === 'string' && Array.isArray(r.userIds) && r.userIds.length > 0)
+          .map((r: any) => ({ emoji: r.emoji, userIds: r.userIds.map(String) }))
+      : undefined,
     fileUrl: msg.fileUrl || null,
     fileName: msg.fileName || null,
     fileSize: msg.fileSize || null,
@@ -914,4 +920,83 @@ export const getUnreadCount = catchAsync(async (req: AuthenticatedRequest, res: 
   }, 0);
 
   sendSuccess(res, { unreadCount });
+});
+
+/**
+ * 切换消息表情回应（Reaction）
+ * POST /api/messages/:messageId/reactions
+ */
+export const toggleMessageReaction = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
+  const { messageId } = req.params;
+  const userId = req.user?.id;
+  const rawEmoji = typeof req.body?.emoji === 'string' ? req.body.emoji.trim() : '';
+
+  if (!userId) {
+    return errors.unauthorized(res);
+  }
+  if (!messageId) {
+    return errors.badRequest(res, '消息 ID 不能为空');
+  }
+  if (!rawEmoji || rawEmoji.length > 16) {
+    return errors.badRequest(res, '表情格式无效');
+  }
+
+  try {
+    await waitForMongoReady(15000);
+  } catch {
+    return errors.unavailable(res, '数据库未就绪，请稍后重试');
+  }
+
+  const message = await Message.findById(messageId);
+  if (!message || message.deletedAt) {
+    return errors.notFound(res, '消息');
+  }
+
+  // 鉴权：仅会话参与者可回应表情
+  if (message.isGroupChat || message.chatType === 'group') {
+    const targetGroupId = message.groupId || message.receiver;
+    const isMember = targetGroupId ? await GroupMember.isMember(targetGroupId, userId) : false;
+    if (!isMember) {
+      return errors.forbidden(res, '您不是该群组成员，无权操作该消息');
+    }
+  } else {
+    const participants = [message.sender, message.receiver].map(String);
+    if (!participants.includes(String(userId))) {
+      return errors.forbidden(res, '无权操作该会话消息');
+    }
+  }
+
+  const currentReactions = Array.isArray(message.reactions)
+    ? message.reactions.map((item) => ({
+        emoji: String(item.emoji),
+        userIds: Array.isArray(item.userIds) ? item.userIds.map(String) : [],
+      }))
+    : [];
+
+  const targetIdx = currentReactions.findIndex((item) => item.emoji === rawEmoji);
+  if (targetIdx >= 0) {
+    const existingUsers = currentReactions[targetIdx].userIds;
+    if (existingUsers.includes(userId)) {
+      const filtered = existingUsers.filter((id) => id !== userId);
+      if (filtered.length > 0) {
+        currentReactions[targetIdx].userIds = filtered;
+      } else {
+        currentReactions.splice(targetIdx, 1);
+      }
+    } else {
+      currentReactions[targetIdx].userIds = [...existingUsers, userId];
+    }
+  } else {
+    currentReactions.push({ emoji: rawEmoji, userIds: [userId] });
+  }
+
+  message.reactions = currentReactions;
+  await message.save();
+
+  await broadcastMessageReactionUpdated(message, userId);
+
+  sendSuccess(res, {
+    messageId: message._id.toString(),
+    reactions: currentReactions,
+  });
 });

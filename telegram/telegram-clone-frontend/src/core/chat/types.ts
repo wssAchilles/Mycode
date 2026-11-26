@@ -251,6 +251,7 @@ export type ChatPatch =
         readCount?: number;
         content?: string;
         editedAt?: string;
+        reactions?: Message['reactions'];
       }>;
     }
   | {

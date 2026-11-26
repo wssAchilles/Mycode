@@ -5,7 +5,7 @@ import type { Message } from '../../../types/chat';
 import { isSameCalendarDay } from '../../../utils/dateTime';
 import { useMessageStore } from '../store/messageStore';
 import { useChatStore } from '../store/chatStore';
-import { ChatImageLightbox } from './media/ChatImageLightbox';
+import { ChatImageLightbox, type LightboxMediaItem } from './media/ChatImageLightbox';
 import { MessageActionMenu } from './history/MessageActionMenu';
 import {
   MessageBubbleRow,
@@ -20,6 +20,7 @@ const EMPTY_GROUP_MEMBERS: readonly [] = [];
 
 interface ChatHistoryProps {
   currentUserId: string;
+  currentUsername?: string;
 
   // Provide one of:
   // - `messages` for small, local lists (search/context mode)
@@ -33,8 +34,10 @@ interface ChatHistoryProps {
   errorMessage?: string | null;
   hasMore?: boolean;
   onLoadMore?: () => void;
+  onRetryLoad?: () => void;
   highlightTerm?: string;
   highlightSeq?: number;
+  unreadAnchorSeq?: number | null;
   onMessageSelect?: (message: Message) => void;
   onVisibleRangeChange?: (start: number, end: number) => void;
   disableAutoScroll?: boolean;
@@ -42,12 +45,14 @@ interface ChatHistoryProps {
   onEditMessage?: (message: Message) => void;
   onDeleteMessage?: (message: Message) => void;
   onRetryMessage?: (message: Message) => void;
+  onToggleReaction?: (message: Message, emoji: string) => void;
 }
 
 interface StoreMessageBubbleProps {
   messageId: string;
   prevMessageId?: string | null;
   currentUserId: string;
+  currentUsername?: string;
   highlightConfig: HighlightConfig;
   highlightSeq?: number;
   isFlashed?: boolean;
@@ -59,6 +64,7 @@ interface StoreMessageBubbleProps {
   onCopyMessage: (msg: Message) => void;
   onReplyMessage?: (msg: Message) => void;
   onRetryMessage?: (msg: Message) => void;
+  onToggleReaction?: (msg: Message, emoji: string) => void;
   onOpenContextMenu: (msg: Message, isOut: boolean, x: number, y: number) => void;
   enableActions: boolean;
 }
@@ -73,6 +79,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   messageId,
   prevMessageId,
   currentUserId,
+  currentUsername,
   highlightConfig,
   highlightSeq,
   isFlashed,
@@ -84,6 +91,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   onCopyMessage,
   onReplyMessage,
   onRetryMessage,
+  onToggleReaction,
   onOpenContextMenu,
   enableActions,
 }) => {
@@ -98,6 +106,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
       message={msg}
       previousMessage={prevMsg}
       currentUserId={currentUserId}
+      currentUsername={currentUsername}
       useProgressiveImage
       highlightConfig={highlightConfig}
       highlightSeq={highlightSeq}
@@ -110,6 +119,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
       onCopyMessage={onCopyMessage}
       onReplyMessage={onReplyMessage}
       onRetryMessage={onRetryMessage}
+      onToggleReaction={onToggleReaction}
       onOpenContextMenu={onOpenContextMenu}
       enableActions={enableActions}
     />
@@ -118,6 +128,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
 
 const ChatHistory: React.FC<ChatHistoryProps> = ({
   currentUserId,
+  currentUsername,
   messages,
   messageIds,
   messageIdsVersion = 0,
@@ -126,8 +137,10 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   errorMessage = null,
   hasMore = false,
   onLoadMore,
+  onRetryLoad,
   highlightTerm,
   highlightSeq,
+  unreadAnchorSeq = null,
   onMessageSelect,
   onVisibleRangeChange,
   disableAutoScroll = false,
@@ -135,6 +148,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   onEditMessage,
   onDeleteMessage,
   onRetryMessage,
+  onToggleReaction,
 }) => {
   const isStoreMode = Array.isArray(messageIds);
   const count = isStoreMode ? (messageIds?.length ?? 0) : (messages?.length ?? 0);
@@ -180,8 +194,77 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   const enableActions = Boolean(
     !onMessageSelect
-    && (onReplyMessage || onEditMessage || onDeleteMessage || onRetryMessage),
+    && (onReplyMessage || onEditMessage || onDeleteMessage || onRetryMessage || onToggleReaction),
   );
+
+  // 收集当前会话中的图片消息，供多图相册灯箱左右切换
+  const galleryImages = useMemo<LightboxMediaItem[]>(() => {
+    const items: LightboxMediaItem[] = [];
+    if (isStoreMode && messageIds) {
+      const { entities } = useMessageStore.getState();
+      for (const id of messageIds) {
+        const msg = entities.get(id);
+        if (!msg || msg.type !== 'image') continue;
+        const src = msg.fileUrl || msg.attachments?.[0]?.fileUrl;
+        if (!src) continue;
+        items.push({
+          id: msg.id,
+          src,
+          fileName: msg.fileName || msg.attachments?.[0]?.fileName,
+        });
+      }
+      return items;
+    }
+
+    for (const msg of messages || []) {
+      if (msg.type !== 'image') continue;
+      const src = msg.fileUrl || msg.attachments?.[0]?.fileUrl;
+      if (!src) continue;
+      items.push({
+        id: msg.id,
+        src,
+        fileName: msg.fileName || msg.attachments?.[0]?.fileName,
+      });
+    }
+    return items;
+  }, [isStoreMode, messageIds, listVersion, messages]);
+
+  // 定位第一条未读消息 ID（用于在列表内渲染“以下为新消息”分界线）
+  const firstUnreadMessageId = useMemo<string | null>(() => {
+    if (typeof unreadAnchorSeq !== 'number' || !Number.isFinite(unreadAnchorSeq)) {
+      return null;
+    }
+    if (isStoreMode && messageIds) {
+      const { entities } = useMessageStore.getState();
+      for (const id of messageIds) {
+        const msg = entities.get(id);
+        if (!msg || typeof msg.seq !== 'number') continue;
+        const isIncoming = msg.userId !== currentUserId && msg.senderId !== currentUserId;
+        if (isIncoming && msg.seq > unreadAnchorSeq) {
+          return msg.id;
+        }
+      }
+      return null;
+    }
+    for (const msg of messages || []) {
+      if (typeof msg.seq !== 'number') continue;
+      const isIncoming = msg.userId !== currentUserId && msg.senderId !== currentUserId;
+      if (isIncoming && msg.seq > unreadAnchorSeq) {
+        return msg.id;
+      }
+    }
+    return null;
+  }, [unreadAnchorSeq, isStoreMode, messageIds, listVersion, messages, currentUserId]);
+
+  const lightboxInitialIndex = useMemo(() => {
+    if (!lightboxMedia || galleryImages.length === 0) return 0;
+    const byId = lightboxMedia.messageId
+      ? galleryImages.findIndex((item) => item.id === lightboxMedia.messageId)
+      : -1;
+    if (byId >= 0) return byId;
+    const bySrc = galleryImages.findIndex((item) => item.src === lightboxMedia.src);
+    return bySrc >= 0 ? bySrc : 0;
+  }, [lightboxMedia, galleryImages]);
 
   const groupMemberByUserId = useMemo(() => {
     const map = new Map<string, { username?: string; avatarUrl?: string }>();
@@ -705,6 +788,15 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           >
             <div className="chat-history__empty-title">{emptyStateCopy.title}</div>
             <div className="chat-history__empty-description">{emptyStateCopy.description}</div>
+            {emptyStateKind === 'error' && onRetryLoad && (
+              <button
+                type="button"
+                className="chat-history__empty-retry"
+                onClick={onRetryLoad}
+              >
+                重新加载
+              </button>
+            )}
           </div>
         ) : (
           <div
@@ -737,10 +829,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                     }}
                     ref={virtualizer.measureElement}
                   >
+                    {firstUnreadMessageId === id && (
+                      <div className="chat-history__unread-divider" role="separator" aria-label="以下为新消息">
+                        <span>以下为新消息</span>
+                      </div>
+                    )}
                     <StoreMessageBubble
                       messageId={id}
                       prevMessageId={prevId}
                       currentUserId={currentUserId}
+                      currentUsername={currentUsername}
                       highlightConfig={highlightConfig}
                       highlightSeq={highlightSeq}
                       isFlashed={flashMessageId === id}
@@ -752,6 +850,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                       onCopyMessage={handleCopyMessage}
                       onReplyMessage={onReplyMessage}
                       onRetryMessage={onRetryMessage}
+                      onToggleReaction={onToggleReaction}
                       onOpenContextMenu={handleOpenContextMenu}
                       enableActions={enableActions}
                     />
@@ -788,10 +887,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                   }}
                   ref={virtualizer.measureElement}
                 >
+                  {firstUnreadMessageId === msg.id && (
+                    <div className="chat-history__unread-divider" role="separator" aria-label="以下为新消息">
+                      <span>以下为新消息</span>
+                    </div>
+                  )}
                   <MessageBubbleRow
                     message={msg}
                     previousMessage={prevMsg}
                     currentUserId={currentUserId}
+                    currentUsername={currentUsername}
                     highlightConfig={highlightConfig}
                     highlightSeq={highlightSeq}
                     isFlashed={flashMessageId === msg.id}
@@ -803,6 +908,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                     onCopyMessage={handleCopyMessage}
                     onReplyMessage={onReplyMessage}
                     onRetryMessage={onRetryMessage}
+                    onToggleReaction={onToggleReaction}
                     onOpenContextMenu={handleOpenContextMenu}
                     enableActions={enableActions}
                   />
@@ -839,6 +945,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       <ChatImageLightbox
         src={lightboxMedia?.src ?? null}
         fileName={lightboxMedia?.fileName}
+        items={lightboxMedia ? galleryImages : undefined}
+        initialIndex={lightboxInitialIndex}
         onClose={() => setLightboxMedia(null)}
       />
 

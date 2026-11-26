@@ -184,10 +184,37 @@ export function processMessageMutationPayload(
   const chatId = typeof record.chatId === 'string' ? record.chatId.trim() : '';
   const messageId = typeof record.messageId === 'string' ? record.messageId.trim() : '';
   if (!chatId || !messageId) return;
-  if (action !== 'edited' && action !== 'deleted') return;
+  if (action !== 'edited' && action !== 'deleted' && action !== 'reaction_updated') return;
 
   const isGroup = record.chatType === 'group' || chatId.startsWith('g:');
   const listId = ctx.chatListIdFromChatId(chatId, isGroup);
+
+  if (action === 'reaction_updated') {
+    const reactions = Array.isArray(record.reactions)
+      ? record.reactions.map((r) => ({
+          emoji: String(r.emoji),
+          userIds: Array.isArray(r.userIds) ? r.userIds.map(String) : [],
+        }))
+      : [];
+    const updated = ctx.store.updateMessageReactions(chatId, messageId, reactions);
+    if (updated) {
+      ctx.saveMessages([updated]).catch(() => undefined);
+    }
+    if (ctx.store.activeChatId === chatId) {
+      ctx.emitPatch({
+        kind: 'update',
+        chatId,
+        loadSeq: ctx.store.activeLoadSeq,
+        updates: [
+          {
+            id: messageId,
+            reactions,
+          },
+        ],
+      });
+    }
+    return;
+  }
 
   if (action === 'edited') {
     const nextContent = typeof record.content === 'string' ? record.content : '';

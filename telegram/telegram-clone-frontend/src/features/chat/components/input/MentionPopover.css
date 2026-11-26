@@ -1,0 +1,80 @@
+.tg-mention-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 16px;
+  right: 16px;
+  max-width: 360px;
+  border-radius: 14px;
+  background: var(--color-background, #FFFFFF);
+  border: 1px solid var(--color-border, #EFF3F4);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(15, 20, 25, 0.14));
+  overflow: hidden;
+  z-index: 60;
+}
+
+.tg-mention-popover__header {
+  padding: 8px 12px 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-text-secondary, #536471);
+  border-bottom: 1px solid var(--color-border, #EFF3F4);
+}
+
+.tg-mention-popover__list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tg-mention-popover__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-primary, #0F1419);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.tg-mention-popover__item:hover,
+.tg-mention-popover__item.is-active {
+  background: var(--tg-blue-bg, rgba(29, 155, 240, 0.1));
+}
+
+.tg-mention-popover__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tg-mention-popover__role {
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-surface, #F7F9F9);
+  color: var(--color-text-secondary, #536471);
+}
+
+.tg-mention-popover__role.is-owner {
+  background: rgba(217, 119, 6, 0.14);
+  color: #B45309;
+}
+
+.tg-mention-popover__role.is-admin,
+.tg-mention-popover__role.is-all {
+  background: rgba(29, 155, 240, 0.14);
+  color: #1D9BF0;
+}

@@ -56,7 +56,12 @@ export interface ContactRealtimePayload {
   contact?: ContactRealtimeContactSnapshot;
 }
 
-export type MessageMutationAction = 'edited' | 'deleted';
+export type MessageMutationAction = 'edited' | 'deleted' | 'reaction_updated';
+
+export interface MessageReactionSummary {
+  emoji: string;
+  userIds: string[];
+}
 
 export interface MessageMutationRealtimePayload {
   eventId: string;
@@ -71,6 +76,7 @@ export interface MessageMutationRealtimePayload {
   content?: string;
   editedAt?: string;
   deletedAt?: string;
+  reactions?: MessageReactionSummary[];
 }
 
 export type SocialNotificationAction = 'like' | 'comment' | 'repost' | 'follow';

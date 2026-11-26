@@ -96,6 +96,71 @@
     color: #536471;
 }
 
+.message-input__staged-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.message-input__staged-list {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.message-input__staged-list .message-input__staged-file {
+    min-width: 180px;
+    max-width: 240px;
+    flex-shrink: 0;
+}
+
+.message-input__staged-clear-all {
+    align-self: flex-end;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary, #536471);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+}
+
+.message-input__staged-clear-all:hover {
+    background: var(--color-surface-hover, #EFF3F4);
+    color: var(--color-text-primary, #0F1419);
+}
+
+.message-input__upload-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.message-input__upload-progress-track {
+    flex: 1;
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--color-surface-hover, #EFF3F4);
+    overflow: hidden;
+}
+
+.message-input__upload-progress-fill {
+    height: 100%;
+    border-radius: 9999px;
+    background: var(--tg-blue, #1D9BF0);
+    transition: width 0.2s ease;
+}
+
+.message-input__upload-progress-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--tg-blue, #1D9BF0);
+    flex-shrink: 0;
+}
+
 .message-input__context-close {
     width: 26px;
     height: 26px;
