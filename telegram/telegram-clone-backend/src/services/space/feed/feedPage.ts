@@ -50,6 +50,11 @@ import { getUserMap } from '../internal/userMap';
 import { getUserPosts } from '../profiles/profileQueries';
 import Post from '../../../models/Post';
 import { createChildLogger } from '../../../utils/logger';
+import {
+    isFirstPageFeedCacheable,
+    readFeedPageCache,
+    writeFeedPageCache,
+} from './feedPageCache';
 
 const log = createChildLogger('services:spaceService');
 
@@ -238,6 +243,24 @@ export async function getFeedPage(
         const decisionId = uuidv4();
         const clientRequestId = options?.clientRequestId;
         const pageIdentity = { requestId, decisionId, clientRequestId };
+        const cacheIdentity = {
+            userId,
+            inNetworkOnly,
+            includeSelf,
+            limit,
+        };
+        const cacheableFirstPage = isFirstPageFeedCacheable({
+            cursor,
+            isBottomRequest: options?.isBottomRequest,
+            seenIds: options?.seenIds,
+        });
+
+        if (cacheableFirstPage) {
+            const cachedPage = await readFeedPageCache(cacheIdentity, pageIdentity);
+            if (cachedPage && cachedPage.candidates.length > 0) {
+                return cachedPage;
+            }
+        }
 
         const createBaseQuery = () =>
             createFeedQuery(userId, limit, inNetworkOnly, {
@@ -512,6 +535,9 @@ export async function getFeedPage(
             debug: finalDebugInfo,
             ...pageIdentity,
         });
+        if (cacheableFirstPage && page.candidates.length > 0) {
+            writeFeedPageCache(cacheIdentity, page);
+        }
         const decisionAt = new Date();
         void recordTrace(
             finalFeedQuery,

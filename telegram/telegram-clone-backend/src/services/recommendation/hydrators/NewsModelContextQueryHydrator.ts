@@ -13,8 +13,15 @@ import { QueryHydrator } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import UserAction, { ActionType, IUserAction } from '../../../models/UserAction';
 import Post from '../../../models/Post';
+import { readQueryHydratorCache, writeQueryHydratorCache } from './queryHydratorCache';
 
 const MAX_SEQUENCE_LENGTH = 50;
+const NEWS_CTX_CACHE_TTL_SEC = 60;
+
+interface CachedNewsModelContext {
+    newsHistoryExternalIds: string[];
+    modelUserActionSequence: Array<Record<string, any>>;
+}
 
 export class NewsModelContextQueryHydrator implements QueryHydrator<FeedQuery> {
     readonly name = 'NewsModelContextQueryHydrator';
@@ -24,9 +31,22 @@ export class NewsModelContextQueryHydrator implements QueryHydrator<FeedQuery> {
     }
 
     async hydrate(query: FeedQuery): Promise<FeedQuery> {
+        const hasPresetSequence = Boolean(query.userActionSequence && query.userActionSequence.length > 0);
+        const cacheKey = `rec:qh:newsctx:v1:${query.userId}`;
         try {
-            const actions: Array<IUserAction | Record<string, any>> = (query.userActionSequence && query.userActionSequence.length > 0)
-                ? query.userActionSequence
+            if (!hasPresetSequence) {
+                const cached = await readQueryHydratorCache<CachedNewsModelContext>(cacheKey);
+                if (cached) {
+                    return {
+                        ...query,
+                        newsHistoryExternalIds: cached.newsHistoryExternalIds ?? [],
+                        modelUserActionSequence: cached.modelUserActionSequence ?? [],
+                    };
+                }
+            }
+
+            const actions: Array<IUserAction | Record<string, any>> = hasPresetSequence
+                ? query.userActionSequence!
                 : await UserAction.getUserActionSequence(
                     query.userId,
                     MAX_SEQUENCE_LENGTH,
@@ -82,6 +102,14 @@ export class NewsModelContextQueryHydrator implements QueryHydrator<FeedQuery> {
                     targetPostId: ext,
                     timestamp: a?.timestamp,
                 });
+            }
+
+            if (!hasPresetSequence) {
+                writeQueryHydratorCache(
+                    cacheKey,
+                    { newsHistoryExternalIds, modelUserActionSequence },
+                    NEWS_CTX_CACHE_TTL_SEC,
+                );
             }
 
             return {

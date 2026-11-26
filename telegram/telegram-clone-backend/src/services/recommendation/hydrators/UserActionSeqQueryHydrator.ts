@@ -8,12 +8,14 @@ import { QueryHydrator } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import UserAction, { ActionType } from '../../../models/UserAction';
 import Post from '../../../models/Post';
+import { readQueryHydratorCache, writeQueryHydratorCache } from './queryHydratorCache';
 
 /**
  * 配置参数
  * 复刻 UAS_MAX_SEQUENCE_LENGTH
  */
 const MAX_SEQUENCE_LENGTH = 50;
+const ACTION_SEQ_CACHE_TTL_SEC = 30;
 const ACTION_TYPES = [
     ActionType.LIKE,
     ActionType.REPLY,
@@ -42,6 +44,15 @@ export class UserActionSeqQueryHydrator implements QueryHydrator<FeedQuery> {
     }
 
     async hydrate(query: FeedQuery): Promise<FeedQuery> {
+        const cacheKey = `rec:qh:actionseq:v1:${query.userId}`;
+        const cached = await readQueryHydratorCache<Array<Record<string, any>>>(cacheKey);
+        if (Array.isArray(cached)) {
+            return {
+                ...query,
+                userActionSequence: cached,
+            };
+        }
+
         const actions = await UserAction.find({
             userId: query.userId,
             action: { $in: ACTION_TYPES },
@@ -101,6 +112,8 @@ export class UserActionSeqQueryHydrator implements QueryHydrator<FeedQuery> {
                     : action.timestamp,
             };
         });
+
+        writeQueryHydratorCache(cacheKey, userActionSequence, ACTION_SEQ_CACHE_TTL_SEC);
 
         return {
             ...query,

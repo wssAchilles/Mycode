@@ -12,6 +12,7 @@ import type { CreatePostParams } from '../types';
 import { extractKeywords } from '../internal/pureHelpers';
 import { refreshPostFeatureSnapshots } from '../internal/postFeatureSnapshots';
 import { recsysStreamPublisher } from '../../recommendation/realtime';
+import { invalidateUserFeedPageCache } from '../feed/feedPageCache';
 
 const log = createChildLogger('services:spaceService');
 
@@ -71,6 +72,7 @@ export async function createPost(params: CreatePostParams): Promise<IPost> {
 
     // 异步非阻塞推送新帖事件至内网 Stream 并触发 Cloud Run /sid/encode 实时打标
     recsysStreamPublisher.publishPostCreatedAndEncodeSid(post);
+    void invalidateUserFeedPageCache(authorId);
 
     return post;
 }
@@ -163,6 +165,7 @@ export async function deletePost(postId: string, userId: string): Promise<boolea
     followingTimelineCache.invalidatePost(post.authorId, deletedPostId);
     InNetworkTimelineService.removePost(post.authorId, deletedPostId).catch(() => undefined);
     recsysStreamPublisher.publishPostDeleted(deletedPostId, post.authorId);
+    void invalidateUserFeedPageCache(post.authorId);
     return true;
 }
 

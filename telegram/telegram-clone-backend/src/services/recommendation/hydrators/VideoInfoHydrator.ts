@@ -22,7 +22,26 @@ export class VideoInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     ): Promise<FeedCandidate[]> {
         if (candidates.length === 0) return candidates;
 
-        const ids = candidates.map((c) => new mongoose.Types.ObjectId(c.postId));
+        // 仅对确实缺少媒体类型、NSFW 标记或视频时长的候选查库，纯图文候选直接短路跳过 MongoDB
+        const lookupIdSet = new Set<string>();
+        for (const candidate of candidates) {
+            const needsLookup =
+                candidate.hasVideo === undefined ||
+                typeof candidate.isNsfw !== 'boolean' ||
+                (candidate.hasVideo === true && candidate.videoDurationSec === undefined);
+            if (!needsLookup) continue;
+
+            const postId = candidate.postId?.toString?.() ?? String(candidate.postId || '');
+            if (mongoose.Types.ObjectId.isValid(postId)) {
+                lookupIdSet.add(postId);
+            }
+        }
+
+        if (lookupIdSet.size === 0) {
+            return candidates;
+        }
+
+        const ids = Array.from(lookupIdSet).map((id) => new mongoose.Types.ObjectId(id));
         const posts = await Post.find({ _id: { $in: ids } })
             .select('media isNsfw')
             .lean();
@@ -44,7 +63,7 @@ export class VideoInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
             return {
                 ...c,
                 hasVideo: c.hasVideo ?? Boolean(video),
-                videoDurationSec: durationSec,
+                videoDurationSec: durationSec ?? c.videoDurationSec,
                 isNsfw: p.isNsfw ?? c.isNsfw,
             };
         });

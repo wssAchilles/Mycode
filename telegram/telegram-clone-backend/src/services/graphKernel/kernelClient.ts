@@ -68,7 +68,8 @@ export interface GraphKernelOverlapRequest {
 }
 
 const DEFAULT_GRAPH_KERNEL_URL = 'http://graph_kernel:4300';
-const DEFAULT_TIMEOUT_MS = 1200;
+// 收敛默认单次图查询超时至 350ms（可通过 CPP_GRAPH_KERNEL_TIMEOUT_MS 覆盖），避免慢图查询拖垮首屏主链路
+const DEFAULT_TIMEOUT_MS = 350;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
