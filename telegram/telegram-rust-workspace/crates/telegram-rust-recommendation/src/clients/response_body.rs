@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-// ponytail: fixed 1 MiB ceiling; raise only with measured contract evidence.
-pub(crate) const MAX_RESPONSE_BODY_BYTES: usize = 1_048_576;
+// 依据线上 /internal/recommendation/score 实测响应体已达 ~1.12 MB，扩容至 4 MiB 以避免候选集截断触发整条管线回退。
+pub(crate) const MAX_RESPONSE_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ERROR_BODY_CHARS: usize = 4_096;
 
 #[derive(Debug)]
