@@ -111,8 +111,8 @@ export default defineConfig({
         name: 'Telegram Clone',
         short_name: 'Telegram',
         description: 'High-performance chat application',
-        theme_color: '#1f1f1f',
-        background_color: '#1f1f1f',
+        theme_color: '#FFFFFF',
+        background_color: '#FFFFFF',
         display: 'standalone',
         icons: [
           { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
@@ -125,12 +125,76 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'virtual-list': ['@tanstack/react-virtual'],
-          'animation': ['framer-motion'],
-          'animejs': ['animejs/scope', 'animejs/timeline', 'animejs/utils', 'animejs/waapi'],
-          'icons': ['lucide-react'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (
+            id.includes('/react/')
+            || id.includes('/react-dom/')
+            || id.includes('/react-router')
+            || id.includes('/scheduler/')
+          ) {
+            return 'react-vendor';
+          }
+          if (
+            id.includes('/react-markdown/')
+            || id.includes('/remark-')
+            || id.includes('/rehype-')
+            || id.includes('/unified/')
+            || id.includes('/micromark')
+            || id.includes('/mdast-')
+            || id.includes('/hast-')
+            || id.includes('/unist-')
+            || id.includes('/vfile')
+          ) {
+            return 'markdown-vendor';
+          }
+          if (
+            id.includes('/socket.io-client/')
+            || id.includes('/engine.io-client/')
+            || id.includes('/socket.io-parser/')
+          ) {
+            return 'realtime-vendor';
+          }
+          if (
+            id.includes('/@radix-ui/')
+            || id.includes('/radix-ui/')
+            || id.includes('/cmdk/')
+          ) {
+            return 'radix-vendor';
+          }
+          if (
+            id.includes('/recharts/')
+            || id.includes('/d3-')
+            || id.includes('/victory-vendor/')
+          ) {
+            return 'charts-vendor';
+          }
+          if (id.includes('/@tanstack/')) {
+            return 'virtual-list';
+          }
+          if (id.includes('/framer-motion/') || id.includes('/motion-')) {
+            return 'animation';
+          }
+          if (id.includes('/animejs/')) {
+            return 'animejs';
+          }
+          if (id.includes('/lucide-react/')) {
+            return 'icons';
+          }
+          if (
+            id.includes('/axios/')
+            || id.includes('/dexie/')
+            || id.includes('/idb-keyval/')
+            || id.includes('/immer/')
+            || id.includes('/zustand/')
+            || id.includes('/tweetnacl')
+            || id.includes('/comlink/')
+            || id.includes('/tailwind-merge/')
+            || id.includes('/clsx/')
+          ) {
+            return 'core-vendor';
+          }
+          return undefined;
         },
       },
     },

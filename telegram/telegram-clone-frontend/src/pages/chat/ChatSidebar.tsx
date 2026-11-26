@@ -21,6 +21,7 @@ import { ArrowLeftIcon, LogoutIcon } from '../../components/icons/SpaceIcons';
 import type { User } from '../../types/auth';
 import type { SelfPresenceStatus } from '../../features/chat/presence/presenceState';
 import { buildGroupChatId, buildPrivateChatId } from '../../utils/chat';
+import { prefetchSpaceRoute } from '../../routes/prefetch';
 
 interface PendingRequest {
     id: string;
@@ -160,6 +161,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     type="button"
                     className="back-to-space-btn"
                     onClick={() => navigate('/space')}
+                    onMouseEnter={prefetchSpaceRoute}
+                    onFocus={prefetchSpaceRoute}
                     title="返回 Space"
                     aria-label={spaceUnreadCount > 0 ? `返回 Space 首页（${spaceUnreadCount} 条未读动态通知）` : '返回 Space 首页'}
                 >

@@ -32,11 +32,13 @@ import ChatHeader from '../features/chat/components/ChatHeader';
 import MessageInput from '../features/chat/components/MessageInput';
 import ChatHistory from '../features/chat/components/ChatHistory';
 import { ChatImageLightbox } from '../features/chat/components/media/ChatImageLightbox';
-import AiChatComponent from '../components/AiChatComponent';
 
-// 拆分的子组件
-import { ChatSidebar, ChatDetailPanel, ChatModals } from './chat';
+// 拆分的子组件（按需懒加载，显著压缩 ChatPage 首包与 CSS 体积）
+import ChatSidebar from './chat/ChatSidebar';
 
+const AiChatComponent = lazy(() => import('../components/AiChatComponent'));
+const ChatDetailPanel = lazy(() => import('./chat/ChatDetailPanel'));
+const ChatModals = lazy(() => import('./chat/ChatModals'));
 const GroupDetailPanel = lazy(() => import('./chat/GroupDetailPanel'));
 
 import './ChatPage.css';
@@ -1248,17 +1250,19 @@ const ChatPage: React.FC = () => {
       {/* 2. Chat Area */}
       {isAiChatMode ? (
         <div className="main-ai-chat-container">
-          <AiChatComponent
-            currentUser={currentUser}
-            messages={aiMessages}
-            isConnected={canSendMessages}
-            onBackToContacts={() => {
-              setIsAiChatMode(false);
-              if (isMobileLayout) {
-                setMobilePane('sidebar');
-              }
-            }}
-          />
+          <Suspense fallback={null}>
+            <AiChatComponent
+              currentUser={currentUser}
+              messages={aiMessages}
+              isConnected={canSendMessages}
+              onBackToContacts={() => {
+                setIsAiChatMode(false);
+                if (isMobileLayout) {
+                  setMobilePane('sidebar');
+                }
+              }}
+            />
+          </Suspense>
         </div>
       ) : (
         <ChatArea
@@ -1447,22 +1451,24 @@ const ChatPage: React.FC = () => {
 
       {/* 3. Detail Panel */}
       {!isMobileLayout && showDetailPanel && !isGroupChatMode && (
-        <ChatDetailPanel
-          isOpen
-          onClose={() => setShowDetailPanel(false)}
-          selectedContact={selectedContact}
-          sharedMediaMessages={sharedMediaMessages}
-          onPreviewImage={setDetailLightboxMedia}
-          onContactUpdated={() => {
-            void loadContacts();
-            void loadChats({ silent: true });
-          }}
-          onContactRemoved={(removedUserId) => {
-            if (selectedContact?.userId === removedUserId) {
-              selectContact(null);
-            }
-          }}
-        />
+        <Suspense fallback={null}>
+          <ChatDetailPanel
+            isOpen
+            onClose={() => setShowDetailPanel(false)}
+            selectedContact={selectedContact}
+            sharedMediaMessages={sharedMediaMessages}
+            onPreviewImage={setDetailLightboxMedia}
+            onContactUpdated={() => {
+              void loadContacts();
+              void loadChats({ silent: true });
+            }}
+            onContactRemoved={(removedUserId) => {
+              if (selectedContact?.userId === removedUserId) {
+                selectContact(null);
+              }
+            }}
+          />
+        </Suspense>
       )}
 
       {/* 3.5 Group Detail Panel */}
@@ -1479,50 +1485,54 @@ const ChatPage: React.FC = () => {
       )}
 
       {/* 4. Modals */}
-      <ChatModals
-        showAddContactModal={showAddContactModal}
-        addContactInitialTab={addContactInitialTab}
-        isGroupModalOpen={isGroupModalOpen}
-        onCloseAddContact={() => setShowAddContactModal(false)}
-        onCloseGroupModal={() => setIsGroupModalOpen(false)}
-        onContactAdded={() => {
-          void loadContacts();
-          void loadPendingRequests({ silent: true });
-          void loadChats({ silent: true });
-        }}
-        onStartChatWithContact={(userId) => {
-          setShowAddContactModal(false);
-          const existing = useChatStore.getState().contacts.find((c) => c.userId === userId);
-          if (existing) {
-            selectContact(existing);
-            if (isMobileLayout) setMobilePane('chat');
-            return;
-          }
-          void spaceAPI.getUserProfile(userId)
-            .then((profile) => {
-              selectContact({
-                id: profile.id,
-                userId: profile.id,
-                username: profile.username,
-                avatarUrl: profile.avatarUrl || undefined,
-                status: 'accepted',
-                isOnline: !!profile.isOnline,
-                lastSeen: profile.lastSeen || undefined,
-                unreadCount: 0,
-              });
-              if (isMobileLayout) setMobilePane('chat');
-            })
-            .catch(() => {
-              showToast('打开会话失败，请稍后重试', 'error');
-            });
-        }}
-        onOpenAddContactFromGroup={() => {
-          setIsGroupModalOpen(false);
-          setAddContactInitialTab('search');
-          setShowAddContactModal(true);
-        }}
-        onGroupCreated={() => { }}
-      />
+      {(showAddContactModal || isGroupModalOpen) && (
+        <Suspense fallback={null}>
+          <ChatModals
+            showAddContactModal={showAddContactModal}
+            addContactInitialTab={addContactInitialTab}
+            isGroupModalOpen={isGroupModalOpen}
+            onCloseAddContact={() => setShowAddContactModal(false)}
+            onCloseGroupModal={() => setIsGroupModalOpen(false)}
+            onContactAdded={() => {
+              void loadContacts();
+              void loadPendingRequests({ silent: true });
+              void loadChats({ silent: true });
+            }}
+            onStartChatWithContact={(userId) => {
+              setShowAddContactModal(false);
+              const existing = useChatStore.getState().contacts.find((c) => c.userId === userId);
+              if (existing) {
+                selectContact(existing);
+                if (isMobileLayout) setMobilePane('chat');
+                return;
+              }
+              void spaceAPI.getUserProfile(userId)
+                .then((profile) => {
+                  selectContact({
+                    id: profile.id,
+                    userId: profile.id,
+                    username: profile.username,
+                    avatarUrl: profile.avatarUrl || undefined,
+                    status: 'accepted',
+                    isOnline: !!profile.isOnline,
+                    lastSeen: profile.lastSeen || undefined,
+                    unreadCount: 0,
+                  });
+                  if (isMobileLayout) setMobilePane('chat');
+                })
+                .catch(() => {
+                  showToast('打开会话失败，请稍后重试', 'error');
+                });
+            }}
+            onOpenAddContactFromGroup={() => {
+              setIsGroupModalOpen(false);
+              setAddContactInitialTab('search');
+              setShowAddContactModal(true);
+            }}
+            onGroupCreated={() => { }}
+          />
+        </Suspense>
+      )}
 
       {pendingDeleteMessage && (
         <div

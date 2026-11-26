@@ -1,6 +1,5 @@
 import React, { Suspense } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { authUtils } from '../services/apiClient';
 
@@ -17,24 +16,39 @@ const Dashboard = React.lazy(() => import('../components/admin/Dashboard'));
 const ExperimentManager = React.lazy(() => import('../components/admin/ExperimentManager'));
 const ChatRuntimeDashboard = React.lazy(() => import('../components/admin/ChatRuntimeDashboard'));
 
-// 加载中占位组件（纯净淡色与 SVG 指示器）
+// 主题感知的零闪白轻量级路由占位：顶部细进度条 + SVG 指示器
 const LoadingFallback = () => (
-  <div style={{
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100vh',
-    background: '#FFFFFF',
-    color: '#536471',
-    fontSize: '15px',
-  }}>
+  <div
+    style={{
+      position: 'relative',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100vh',
+      background: 'var(--color-background, #FFFFFF)',
+      color: 'var(--color-text-secondary, #536471)',
+      fontSize: '14px',
+    }}
+  >
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '2px',
+        background: 'linear-gradient(90deg, transparent, var(--tg-blue, #1D9BF0), transparent)',
+        opacity: 0.9,
+      }}
+    />
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
       <svg
-        width="28"
-        height="28"
+        width="26"
+        height="26"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="#1D9BF0"
+        stroke="var(--tg-blue, #1D9BF0)"
         strokeWidth="2.4"
         strokeLinecap="round"
         aria-hidden="true"
@@ -42,18 +56,15 @@ const LoadingFallback = () => (
       >
         <path d="M21 12a9 9 0 1 1-6.219-8.56" />
       </svg>
-      <div style={{ fontWeight: 500, color: '#0F1419' }}>正在加载页面...</div>
+      <div style={{ fontWeight: 500, color: 'var(--color-text-primary, #0F1419)' }}>正在加载页面...</div>
     </div>
   </div>
 );
 
 const AppRoutes: React.FC = () => {
-  const location = useLocation();
-
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <AnimatePresence mode="wait">
-        <Routes location={location} key={location.pathname}>
+      <Routes>
           {/* 根路径重定向 */}
           <Route
             path="/"
@@ -151,7 +162,7 @@ const AppRoutes: React.FC = () => {
             }
           />
 
-          {/* 404 页面（极简淡色高对比） */}
+          {/* 404 页面（支持主题自适应的高对比排版） */}
           <Route
             path="*"
             element={
@@ -161,21 +172,21 @@ const AppRoutes: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: '100vh',
-                background: '#FFFFFF',
+                background: 'var(--color-background, #FFFFFF)',
                 fontFamily: 'var(--font-family)',
                 textAlign: 'center',
-                color: '#536471',
+                color: 'var(--color-text-secondary, #536471)',
                 padding: '24px'
               }}>
-                <h1 style={{ fontSize: '56px', fontWeight: 800, letterSpacing: '-0.03em', margin: '0 0 12px 0', color: '#0F1419' }}>404</h1>
-                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px 0', color: '#0F1419' }}>页面未找到</h2>
-                <p style={{ margin: '0 0 24px 0', fontSize: '15px', color: '#536471' }}>抱歉，您访问的页面不存在或已被移动。</p>
+                <h1 style={{ fontSize: '56px', fontWeight: 800, letterSpacing: '-0.03em', margin: '0 0 12px 0', color: 'var(--color-text-primary, #0F1419)' }}>404</h1>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px 0', color: 'var(--color-text-primary, #0F1419)' }}>页面未找到</h2>
+                <p style={{ margin: '0 0 24px 0', fontSize: '15px', color: 'var(--color-text-secondary, #536471)' }}>抱歉，您访问的页面不存在或已被移动。</p>
                 <button
                   onClick={() => window.location.href = '/'}
                   style={{
                     padding: '11px 26px',
-                    background: '#0F1419',
-                    color: '#FFFFFF',
+                    background: 'var(--color-cta-solid, #0F1419)',
+                    color: 'var(--color-background, #FFFFFF)',
                     border: 'none',
                     borderRadius: '9999px',
                     fontSize: '15px',
@@ -183,20 +194,13 @@ const AppRoutes: React.FC = () => {
                     cursor: 'pointer',
                     transition: 'background-color 0.15s ease'
                   }}
-                  onMouseOver={(e) => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = '#272C30';
-                  }}
-                  onMouseOut={(e) => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = '#0F1419';
-                  }}
                 >
                   返回首页
                 </button>
               </div>
             }
           />
-        </Routes>
-      </AnimatePresence>
+      </Routes>
     </Suspense>
   );
 };

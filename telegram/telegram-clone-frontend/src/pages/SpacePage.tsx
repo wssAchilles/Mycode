@@ -28,6 +28,7 @@ import { openCommandPalette } from '../components/command/CommandPalette';
 import { spaceAPI, type RecommendedUser, type RecommendationDailyRefreshOps, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
 import { useAnalytics } from '../hooks/useAnalytics';
+import { prefetchChatRoute } from '../routes/prefetch';
 import './SpacePage.css';
 
 const pageVariants = {
@@ -521,6 +522,8 @@ export const SpacePage: React.FC = () => {
                         type="button"
                         className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('/chat', '消息')}
+                        onMouseEnter={prefetchChatRoute}
+                        onFocus={prefetchChatRoute}
                     >
                         <MessageIcon active={location.pathname === '/chat'} />
                         <span>消息</span>
