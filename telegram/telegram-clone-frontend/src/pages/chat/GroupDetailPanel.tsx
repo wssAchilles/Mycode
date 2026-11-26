@@ -32,6 +32,7 @@ import {
     X,
 } from 'lucide-react';
 import { useChatStore, type Group, type GroupMember } from '../../features/chat/store/chatStore';
+import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
 import { Avatar } from '../../components/common';
 import { authUtils, groupAPI } from '../../services/apiClient';
 import { showToast } from '../../components/ui/Toast';
@@ -57,24 +58,22 @@ const panelVariants = {
     exit: { x: '100%', opacity: 0, transition: { duration: 0.18 } },
 };
 
-const MUTE_STORAGE_KEY_PREFIX = 'tg:group-muted:';
+const LEGACY_MUTE_STORAGE_KEY_PREFIX = 'tg:group-muted:';
 
-const readGroupMuted = (groupId?: string): boolean => {
-    if (!groupId || typeof localStorage === 'undefined') return false;
+const migrateLegacyGroupMuted = (
+    groupId: string | undefined,
+    mutedChatIds: string[],
+    toggleMuteChat: (id: string) => boolean,
+): void => {
+    if (!groupId || typeof localStorage === 'undefined') return;
     try {
-        return localStorage.getItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`) === '1';
-    } catch {
-        return false;
-    }
-};
-
-const writeGroupMuted = (groupId: string, muted: boolean): void => {
-    if (typeof localStorage === 'undefined') return;
-    try {
-        if (muted) {
-            localStorage.setItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`, '1');
-        } else {
-            localStorage.removeItem(`${MUTE_STORAGE_KEY_PREFIX}${groupId}`);
+        const legacyKey = `${LEGACY_MUTE_STORAGE_KEY_PREFIX}${groupId}`;
+        const legacyVal = localStorage.getItem(legacyKey);
+        if (legacyVal === '1') {
+            if (!mutedChatIds.includes(groupId)) {
+                toggleMuteChat(groupId);
+            }
+            localStorage.removeItem(legacyKey);
         }
     } catch {
         // 忽略无痕模式存储异常
@@ -87,6 +86,8 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
     const loadChats = useChatStore((s) => s.loadChats);
     const selectGroup = useChatStore((s) => s.selectGroup);
     const contacts = useChatStore((s) => s.contacts);
+    const mutedChatIds = useChatUiPrefsStore((s) => s.mutedChatIds);
+    const toggleMuteChat = useChatUiPrefsStore((s) => s.toggleMuteChat);
 
     const currentUser = authUtils.getCurrentUser();
     const isOwner = Boolean(currentUser?.id && currentUser.id === group?.ownerId);
@@ -105,7 +106,7 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
     const [savingStage, setSavingStage] = useState<'idle' | 'uploading' | 'saving'>('idle');
     const isSaving = savingStage !== 'idle';
 
-    const [isMuted, setIsMuted] = useState(() => readGroupMuted(group?.id));
+    const isMuted = Boolean(group?.id && mutedChatIds.includes(group.id));
     const [inviteOpen, setInviteOpen] = useState(false);
     const [selectedInviteIds, setSelectedInviteIds] = useState<string[]>([]);
     const [inviting, setInviting] = useState(false);
@@ -123,7 +124,7 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
         setDescDraft(group?.description || '');
         setTypeDraft(group?.type === 'private' ? 'private' : 'public');
         setMaxMembersDraft(group?.maxMembers && group.maxMembers >= 2 ? group.maxMembers : 200);
-        setIsMuted(readGroupMuted(group?.id));
+        migrateLegacyGroupMuted(group?.id, mutedChatIds, toggleMuteChat);
         setIsEditing(false);
         setInviteOpen(false);
         setSelectedInviteIds([]);
@@ -143,9 +144,7 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
 
     const handleToggleMute = () => {
         if (!group) return;
-        const nextMuted = !isMuted;
-        setIsMuted(nextMuted);
-        writeGroupMuted(group.id, nextMuted);
+        const nextMuted = toggleMuteChat(group.id);
         showToast(nextMuted ? '已开启群消息免打扰' : '已恢复群消息通知', 'info');
     };
 

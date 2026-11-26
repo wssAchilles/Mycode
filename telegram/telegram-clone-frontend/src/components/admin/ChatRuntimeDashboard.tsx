@@ -25,6 +25,7 @@ import chatCoreClient from '../../core/bridge/chatCoreClient';
 import { resolveChatRuntimePolicy } from '../../core/chat/rolloutPolicy';
 import type { ChatCoreRuntimeInfo } from '../../core/chat/types';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import './ChatRuntimeDashboard.css';
 
 function num(n: number | null | undefined): string {
@@ -158,6 +159,7 @@ const ChatRuntimeDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
   const userId = authUtils.getCurrentUser()?.id || '';
   const rolloutPolicy = useMemo(
@@ -189,11 +191,11 @@ const ChatRuntimeDashboard: React.FC = () => {
 
   const handleReset = useCallback(async () => {
     if (resetting) return;
-    if (!window.confirm('确认重置当前 Chat Runtime 指标快照？')) return;
     setResetting(true);
     setError(null);
     try {
       await opsAPI.resetChatRuntimeSnapshot();
+      setConfirmResetOpen(false);
       await fetchAll(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '重置指标失败');
@@ -285,7 +287,7 @@ const ChatRuntimeDashboard: React.FC = () => {
           <button
             type="button"
             className="chat-runtime-reset"
-            onClick={() => void handleReset()}
+            onClick={() => setConfirmResetOpen(true)}
             disabled={resetting}
           >
             {resetting ? '重置中...' : '重置快照'}
@@ -567,6 +569,17 @@ const ChatRuntimeDashboard: React.FC = () => {
           </div>
         </article>
       </section>
+
+      <ConfirmDialog
+        open={confirmResetOpen}
+        title="重置 Chat Runtime 指标快照？"
+        description="重置后当前运行时计数器与采样轨迹将清零，并重新开始统计。"
+        confirmText="确认重置"
+        variant="danger"
+        loading={resetting}
+        onConfirm={handleReset}
+        onCancel={() => setConfirmResetOpen(false)}
+      />
     </div>
   );
 };

@@ -4,14 +4,28 @@ import { createRoot } from 'react-dom/client';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './Toast.css';
 
+export interface ToastOptions {
+    actionLabel?: string;
+    onAction?: () => void | Promise<void>;
+}
+
 interface ToastProps {
     message: string;
     type?: 'info' | 'success' | 'warning' | 'error';
     duration?: number;
+    actionLabel?: string;
+    onAction?: () => void | Promise<void>;
     onClose?: () => void;
 }
 
-const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, onClose }) => {
+const Toast: React.FC<ToastProps> = ({
+    message,
+    type = 'info',
+    duration = 3000,
+    actionLabel,
+    onAction,
+    onClose,
+}) => {
     const liveRole = type === 'error' || type === 'warning' ? 'alert' : 'status';
     const livePriority = type === 'error' || type === 'warning' ? 'assertive' : 'polite';
     const toastMotion = useAnimeScope<HTMLDivElement, {
@@ -62,12 +76,24 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
     return (
         <div
             ref={toastMotion.rootRef}
-            className={`tg-toast tg-toast--${type}`}
+            className={`tg-toast tg-toast--${type} ${actionLabel ? 'tg-toast--has-action' : ''}`}
             role={liveRole}
             aria-live={livePriority}
             aria-atomic="true"
         >
-            {message}
+            <span className="tg-toast__message">{message}</span>
+            {actionLabel && onAction && (
+                <button
+                    type="button"
+                    className="tg-toast__action"
+                    onClick={() => {
+                        void onAction();
+                        onClose?.();
+                    }}
+                >
+                    {actionLabel}
+                </button>
+            )}
         </div>
     );
 };
@@ -107,7 +133,12 @@ function demoteToastContainerIfEmpty(el: HTMLDivElement): void {
     }
 }
 
-export const showToast = (message: string, type: ToastProps['type'] = 'info', duration = 2000) => {
+export const showToast = (
+    message: string,
+    type: ToastProps['type'] = 'info',
+    duration = 2000,
+    options?: ToastOptions,
+) => {
     if (!toastContainer || !document.body.contains(toastContainer)) {
         toastContainer = document.createElement('div');
         toastContainer.className = 'tg-toast-container';
@@ -122,7 +153,10 @@ export const showToast = (message: string, type: ToastProps['type'] = 'info', du
 
     const root = createRoot(wrapper);
 
+    let closed = false;
     const handleClose = () => {
+        if (closed) return;
+        closed = true;
         root.unmount();
         if (wrapper.parentNode) {
             wrapper.parentNode.removeChild(wrapper);
@@ -131,6 +165,13 @@ export const showToast = (message: string, type: ToastProps['type'] = 'info', du
     };
 
     root.render(
-        <Toast message={message} type={type} duration={duration} onClose={handleClose} />
+        <Toast
+            message={message}
+            type={type}
+            duration={duration}
+            actionLabel={options?.actionLabel}
+            onAction={options?.onAction}
+            onClose={handleClose}
+        />
     );
 };

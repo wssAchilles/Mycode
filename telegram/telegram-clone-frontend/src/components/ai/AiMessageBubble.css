@@ -262,7 +262,7 @@
     height: 6px;
     background: #536471;
     border-radius: 50%;
-    animation: aiBubbleThinkingPulse 1.2s ease-in-out infinite;
+    animation: aiBubbleTypingDot 1.2s ease-in-out infinite;
 }
 
 .tg-ai-thinking__dots span:nth-child(2) {
@@ -273,7 +273,7 @@
     animation-delay: 0.36s;
 }
 
-@keyframes aiBubbleThinkingPulse {
+@keyframes aiBubbleTypingDot {
     0%,
     80%,
     100% {

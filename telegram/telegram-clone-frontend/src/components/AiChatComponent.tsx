@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { ArrowDown, Paperclip, RotateCw, X } from 'lucide-react';
 import { ChatArea } from './layout';
 import '../features/chat/components/ChatHeader.css';
 import './AiChatComponent.css';
@@ -54,6 +57,23 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [lastFailedPayload, setLastFailedPayload] = useState<{
+    message: string;
+    imageData?: {
+      mimeType: string;
+      base64Data: string;
+      fileName?: string;
+      fileSize?: number;
+    };
+  } | null>(null);
+  const [stagedImage, setStagedImage] = useState<{
+    file: File;
+    previewUrl: string;
+    mimeType: string;
+    base64Data: string;
+  } | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isCompactViewport, setIsCompactViewport] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= 900 : false
@@ -63,6 +83,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const showConversationList = isCompactViewport ? showConversationListMobile : true;
 
   // AI 对话状态仓库
@@ -191,41 +212,146 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     updateConversationFromResponse,
   ]);
 
+  // 自动调整多行输入框高度
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight || 22, 132);
+    el.style.height = `${Math.max(22, next)}px`;
+  }, [newMessage]);
+
+  useEffect(() => {
+    return () => {
+      if (stagedImage?.previewUrl) {
+        URL.revokeObjectURL(stagedImage.previewUrl);
+      }
+    };
+  }, [stagedImage]);
+
+  const clearStagedImage = useCallback(() => {
+    setStagedImage((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  const stageImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) {
+      showToast('当前仅支持图片文件', 'info');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string | undefined;
+      const base64Data = dataUrl?.split(',')[1];
+      if (!base64Data) {
+        showToast('图片解析失败，请重试', 'error');
+        return;
+      }
+      const previewUrl = URL.createObjectURL(file);
+      setStagedImage((prev) => {
+        if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return {
+          file,
+          previewUrl,
+          mimeType: file.type,
+          base64Data,
+        };
+      });
+      textareaRef.current?.focus();
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBottom(distanceFromBottom > 200);
+  }, []);
+
+  const scrollToMessagesBottom = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setShowScrollBottom(false);
+  }, []);
+
+  // 发送 AI 消息（支持文本与暂存截图）
+  const dispatchAiPrompt = useCallback(
+    async (
+      rawText: string,
+      imageData?: {
+        mimeType: string;
+        base64Data: string;
+        fileName?: string;
+        fileSize?: number;
+      },
+      appendUserBubble = true,
+    ) => {
+      setErrorBanner(null);
+      setLastFailedPayload(null);
+      const trimmedMessage = rawText.trim();
+      const displayContent = trimmedMessage.startsWith('/ai ')
+        ? trimmedMessage.substring(4)
+        : trimmedMessage;
+      const aiMessage = `/ai ${displayContent}`;
+      if (appendUserBubble) {
+        appendLocalConversationMessage({
+          role: 'user',
+          content: displayContent,
+          type: imageData ? 'image' : 'text',
+        });
+      }
+      setIsTyping(true);
+      try {
+        await sendAiThroughAvailableChannel(aiMessage, imageData);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
+        console.error('❌ AI 回复失败:', message);
+        setErrorBanner(message);
+        setLastFailedPayload({ message: displayContent, imageData });
+        showToast(message, 'error');
+      } finally {
+        setIsTyping(false);
+      }
+    },
+    [appendLocalConversationMessage, sendAiThroughAvailableChannel],
+  );
+
   // 发送 AI 消息
   const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
-    setErrorBanner(null);
-    const trimmedMessage = newMessage.trim();
-    const aiMessage = trimmedMessage.startsWith('/ai ') ? trimmedMessage : `/ai ${trimmedMessage}`;
-    const displayContent = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-    appendLocalConversationMessage({ role: 'user', content: displayContent });
+    if (isTyping || isUploading) return;
+    const trimmed = newMessage.trim();
+    if (!trimmed && !stagedImage) return;
+
+    const currentStaged = stagedImage;
+    const promptText = trimmed || '请分析这张图片';
+    const imagePayload = currentStaged
+      ? {
+          mimeType: currentStaged.mimeType,
+          base64Data: currentStaged.base64Data,
+          fileName: currentStaged.file.name,
+          fileSize: currentStaged.file.size,
+        }
+      : undefined;
+
     setNewMessage('');
-    setIsTyping(true);
-    void sendAiThroughAvailableChannel(aiMessage).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
-      console.error('❌ AI 回复失败:', message);
-      setErrorBanner(message);
-      showToast(message, 'error');
-    }).finally(() => {
-      setIsTyping(false);
-    });
+    clearStagedImage();
+    void dispatchAiPrompt(promptText, imagePayload, true);
+  };
+
+  const handleRetryLastFailed = () => {
+    if (!lastFailedPayload || isTyping) return;
+    const payload = lastFailedPayload;
+    void dispatchAiPrompt(payload.message, payload.imageData, false);
   };
 
   const handleSuggestionClick = (text: string) => {
-    setErrorBanner(null);
-    const aiMessage = `/ai ${text}`;
-    appendLocalConversationMessage({ role: 'user', content: text });
     // 点击后清空当前建议列表
     setSuggestions([]);
-    setIsTyping(true);
-    void sendAiThroughAvailableChannel(aiMessage).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
-      console.error('❌ AI 快捷回复失败:', message);
-      setErrorBanner(message);
-      showToast(message, 'error');
-    }).finally(() => {
-      setIsTyping(false);
-    });
+    void dispatchAiPrompt(text, undefined, true);
   };
 
   // 新建 AI 聊天并归档当前会话
@@ -267,64 +393,58 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     }
   };
 
-  // 图片文件上传处理
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // 图片文件上传处理（暂存至待发送预览条，可搭配提问发送）
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (file) {
+      stageImageFile(file);
+    }
+    event.target.value = '';
+  };
 
-    setErrorBanner(null);
-    setIsUploading(true);
-    try {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          try {
-            const base64Data = (e.target?.result as string)?.split(',')[1];
-            if (base64Data) {
-              const imageData = {
-                mimeType: file.type,
-                base64Data: base64Data,
-                fileName: file.name,
-                fileSize: file.size
-              };
-              const message = newMessage.trim() || '请分析这张图片';
-              const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
-              appendLocalConversationMessage({ role: 'user', content: message, type: 'image' });
-              setNewMessage('');
-              setIsTyping(true);
-              void sendAiThroughAvailableChannel(aiMessage, imageData).catch((error: unknown) => {
-                const errMsg = error instanceof Error ? error.message : 'AI 图片分析失败，请稍后再试';
-                console.error('❌ AI 图片回复失败:', errMsg);
-                setErrorBanner(errMsg);
-                showToast(errMsg, 'error');
-              }).finally(() => {
-                setIsTyping(false);
-              });
-            }
-          } catch (error) {
-            console.error('❌ AI图片处理失败:', error);
-            setErrorBanner('图片处理失败，请重试');
-            showToast('图片处理失败，请重试', 'error');
-          } finally {
-            setIsUploading(false);
-          }
-        };
-        reader.readAsDataURL(file);
-      } else {
-        setErrorBanner('当前仅支持图片文件');
-        showToast('当前仅支持图片文件', 'error');
-        setIsUploading(false);
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          stageImageFile(file);
+          return;
+        }
       }
-    } catch (error) {
-      console.error('❌ 文件上传失败:', error);
-      setIsUploading(false);
-    } finally {
-      event.target.value = '';
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      if (!isDragActive) setIsDragActive(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setIsDragActive(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    setIsDragActive(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      e.preventDefault();
+      stageImageFile(file);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -346,42 +466,55 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     }
   };
 
-  // 解析代码块与行内代码以高对比样式展示
-  const renderMessageContent = (raw: string, msgKey: string) => {
-    if (!raw.includes('`')) {
-      return raw;
+  // 使用完整的 ReactMarkdown + remarkGfm 渲染结构化回复与带复制栏代码块
+  const renderMessageContent = (raw: string, msgKey: string, isAiMessage: boolean) => {
+    if (!isAiMessage) {
+      return raw.includes('`') ? renderInlineCodeText(raw, msgKey) : raw;
     }
-    const segments = raw.split(/(```[\s\S]*?```)/g);
-    return segments.map((segment, idx) => {
-      if (segment.startsWith('```') && segment.endsWith('```')) {
-        const inner = segment.slice(3, -3);
-        const firstNewline = inner.indexOf('\n');
-        const lang = firstNewline > -1 ? inner.slice(0, firstNewline).trim() : '';
-        const codeBody = firstNewline > -1 ? inner.slice(firstNewline + 1) : inner;
-        return (
-          <div key={`${msgKey}-cb-${idx}`} className="ai-chat-code-wrap">
-            <div className="ai-chat-code-header">
-              <span>{lang || 'code'}</span>
-              <button
-                type="button"
-                className="ai-chat-copy-btn"
-                onClick={() => void handleCopyText(codeBody, `${msgKey}-cb-${idx}`)}
-              >
-                {copiedMessageId === `${msgKey}-cb-${idx}` ? '已复制' : '复制代码'}
-              </button>
-            </div>
-            <pre className="ai-chat-code-block">
-              <code>{codeBody}</code>
-            </pre>
-          </div>
-        );
-      }
-      return (
-        <React.Fragment key={`${msgKey}-seg-${idx}`}>
-          {renderInlineCodeText(segment, `${msgKey}-seg-${idx}`)}
-        </React.Fragment>
-      );
-    });
+    let codeBlockCounter = 0;
+    return (
+      <div className="ai-chat-markdown">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            pre: ({ children }) => <>{children}</>,
+            code: ({ className, children, ...props }) => {
+              const rawCode = String(children).replace(/\n$/, '');
+              const langMatch = /language-(\w+)/.exec(className || '');
+              const isBlock = Boolean(langMatch) || rawCode.includes('\n');
+              if (!isBlock) {
+                return (
+                  <code className="ai-chat-inline-code" {...props}>
+                    {children}
+                  </code>
+                );
+              }
+              const blockId = `${msgKey}-cb-${codeBlockCounter}`;
+              codeBlockCounter += 1;
+              return (
+                <div className="ai-chat-code-wrap">
+                  <div className="ai-chat-code-header">
+                    <span>{langMatch?.[1] || 'code'}</span>
+                    <button
+                      type="button"
+                      className="ai-chat-copy-btn"
+                      onClick={() => void handleCopyText(rawCode, blockId)}
+                    >
+                      {copiedMessageId === blockId ? '已复制' : '复制代码'}
+                    </button>
+                  </div>
+                  <pre className="ai-chat-code-block">
+                    <code className={className} {...props}>{rawCode}</code>
+                  </pre>
+                </div>
+              );
+            },
+          }}
+        >
+          {raw}
+        </ReactMarkdown>
+      </div>
+    );
   };
 
   const handleBackToContacts = (event: React.SyntheticEvent) => {
@@ -435,7 +568,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         <div className="chat-header__details">
           <div className="chat-header__name">AI 助手</div>
           <div className={`chat-header__status ${isConnected ? 'chat-header__status--online' : 'chat-header__status--offline'}`}>
-            {isConnected ? 'Online' : 'Offline'} • 个性化问答
+            {isConnected ? '在线' : '离线'} · 个性化问答
           </div>
         </div>
       </div>
@@ -475,17 +608,53 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 构建底部淡色高对比输入区内容
   const footerContent = (
-    <div className="ai-chat-footer-stack">
+    <div
+      className={`ai-chat-footer-stack ${isDragActive ? 'is-dragging' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {errorBanner && (
         <div className="ai-chat-error-banner" role="alert">
           <span>{errorBanner}</span>
+          <div className="ai-chat-error-banner__actions">
+            {lastFailedPayload && (
+              <button
+                type="button"
+                className="ai-chat-error-banner__retry"
+                onClick={handleRetryLastFailed}
+                disabled={isTyping}
+              >
+                <RotateCw size={12} aria-hidden="true" />
+                <span>重试上一条</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="ai-chat-error-banner__close"
+              onClick={() => setErrorBanner(null)}
+              aria-label="关闭错误提示"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
+      {stagedImage && (
+        <div className="ai-chat-staged-preview" role="status">
+          <img src={stagedImage.previewUrl} alt={stagedImage.file.name || '待发送图片'} />
+          <div className="ai-chat-staged-meta">
+            <span className="ai-chat-staged-name">{stagedImage.file.name || '粘贴的图片'}</span>
+            <span className="ai-chat-staged-hint">可输入提问说明后按 Enter 发送</span>
+          </div>
           <button
             type="button"
-            className="ai-chat-error-banner__close"
-            onClick={() => setErrorBanner(null)}
-            aria-label="关闭错误提示"
+            className="ai-chat-staged-remove"
+            onClick={clearStagedImage}
+            aria-label="移除待发送图片"
+            title="移除图片"
           >
-            ✕
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       )}
@@ -493,9 +662,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={isUploading || isTyping}
           className="tg-icon-button"
-          title="上传图片"
+          title="上传或粘贴图片"
           aria-label="上传图片"
         >
           {isUploading ? (
@@ -512,14 +681,17 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         </button>
 
         <div className="message-input-wrapper">
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
+            rows={1}
             id="ai-chat-input"
             name="ai-chat-input"
+            className="ai-chat-textarea"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
+            onPaste={handlePaste}
+            placeholder={isUploading ? '正在处理图片...' : '向 AI 提问、粘贴截图或 Shift+Enter 换行...'}
             disabled={isUploading}
             autoComplete="off"
             aria-label="向 AI 提问或上传图片"
@@ -532,7 +704,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         <button
           type="button"
           onClick={handleSendMessage}
-          disabled={!newMessage.trim() || isUploading}
+          disabled={(!newMessage.trim() && !stagedImage) || isUploading || isTyping}
           className="tg-icon-button send-button"
           title="发送消息"
           aria-label="发送消息"
@@ -636,7 +808,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
               </div>
             ) : (
-              <div ref={messagesContainerRef} className="ai-chat-messages-container">
+              <div ref={messagesContainerRef} className="ai-chat-messages-container" onScroll={handleMessagesScroll}>
                 <AnimatePresence initial={false}>
                   {displayMessages.map((msg, index) => {
                     const isOwnMessage = msg.senderId === currentUser?.id || msg.senderId === 'me';
@@ -681,7 +853,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                             />
                           ) : (
                             <span>
-                              {renderMessageContent(displayContent, msgKey)}
+                              {renderMessageContent(displayContent, msgKey, isAiMessage)}
                               {hasFile && (
                                 <a
                                   className="ai-chat-file-link"
@@ -689,7 +861,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  <span aria-hidden="true">📎</span> {msgWithFile.fileName || '文件'}
+                                  <Paperclip size={14} aria-hidden="true" /> {msgWithFile.fileName || '文件'}
                                 </a>
                               )}
                               {isAiMessage && displayContent && (
@@ -730,6 +902,18 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                   </div>
                 )}
                 <div ref={messagesEndRef} />
+                {showScrollBottom && (
+                  <button
+                    type="button"
+                    className="ai-chat-scroll-bottom-btn"
+                    onClick={scrollToMessagesBottom}
+                    aria-label="回到底部"
+                    title="回到底部"
+                  >
+                    <ArrowDown size={16} aria-hidden="true" />
+                    <span>回到底部</span>
+                  </button>
+                )}
               </div>
             )}
           </ChatArea>

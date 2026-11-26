@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight, Lock, Mail } from 'lucide-react';
 import { authAPI, authUtils } from '../services/apiClient';
@@ -17,6 +17,9 @@ const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+  const usernameInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
   const authMotion = useAnimeScope<HTMLDivElement, {
     enter: () => void;
     error: () => void;
@@ -100,10 +103,12 @@ const LoginPage: React.FC = () => {
     // 基本验证
     if (!formData.usernameOrEmail.trim()) {
       setError('请输入用户名或邮箱');
+      usernameInputRef.current?.focus();
       return;
     }
     if (!formData.password) {
       setError('请输入密码');
+      passwordInputRef.current?.focus();
       return;
     }
 
@@ -121,6 +126,10 @@ const LoginPage: React.FC = () => {
       setError(error instanceof Error ? error.message : '登录失败，请重试');
       console.error('登录失败:', error);
       setLoading(false);
+      window.setTimeout(() => {
+        passwordInputRef.current?.focus();
+        passwordInputRef.current?.select();
+      }, 0);
     }
     // 成功情况下不设置loading=false，让跳转时保持loading状态
   };
@@ -193,6 +202,7 @@ const LoginPage: React.FC = () => {
                     <Mail size={18} />
                   </span>
                   <input
+                    ref={usernameInputRef}
                     type="text"
                     id="usernameOrEmail"
                     name="usernameOrEmail"
@@ -209,18 +219,29 @@ const LoginPage: React.FC = () => {
               <div className="form-group form-group--login">
                 <div className="auth-field-head">
                   <label htmlFor="password">密码</label>
-                  <span className="auth-field-inline-note">忘记密码请联系管理员</span>
+                  <div className="auth-field-head__right">
+                    {capsLockOn && (
+                      <span className="auth-capslock-badge" role="status">
+                        大写锁定已开启
+                      </span>
+                    )}
+                    <span className="auth-field-inline-note">忘记密码请联系管理员</span>
+                  </div>
                 </div>
                 <div className="auth-input-shell auth-input-shell--password">
                   <span className="auth-input-icon" aria-hidden="true">
                     <Lock size={18} />
                   </span>
                   <input
+                    ref={passwordInputRef}
                     type={showPassword ? 'text' : 'password'}
                     id="password"
                     name="password"
                     value={formData.password}
                     onChange={handleInputChange}
+                    onKeyDown={(e) => setCapsLockOn(Boolean(e.getModifierState?.('CapsLock')))}
+                    onKeyUp={(e) => setCapsLockOn(Boolean(e.getModifierState?.('CapsLock')))}
+                    onBlur={() => setCapsLockOn(false)}
                     placeholder="输入您的密码"
                     disabled={loading}
                     autoComplete="current-password"

@@ -41,6 +41,39 @@
     opacity: 0;
     transform: translateY(20px) scale(0.95);
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tg-toast--has-action {
+    pointer-events: auto;
+    padding: 8px 10px 8px 18px;
+}
+
+.tg-toast__message {
+    display: inline-block;
+}
+
+.tg-toast__action {
+    border: none;
+    border-radius: 9999px;
+    padding: 4px 11px;
+    background: rgba(255, 255, 255, 0.18);
+    color: #FFFFFF;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.16s ease;
+}
+
+.tg-toast__action:hover {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.tg-toast__action:focus-visible {
+    outline: 2px solid #FFFFFF;
+    outline-offset: 1px;
 }
 
 .tg-toast--success {

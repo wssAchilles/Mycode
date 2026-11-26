@@ -8,6 +8,8 @@ import { FlaskConical, Sprout, AlertTriangle } from 'lucide-react';
 import { analyticsAPI } from '../../services/analyticsApi';
 import type { ExperimentConfig } from '../../types/analytics';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { showToast } from '../ui/Toast';
 import './ExperimentManager.css';
 
 // ===== 图标 =====
@@ -399,24 +401,30 @@ export const ExperimentManager: React.FC = () => {
         );
     };
 
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+    const [isSeeding, setIsSeeding] = useState(false);
+
     const handleDelete = (id: string) => {
-        if (window.confirm('确定要删除此实验吗？此操作无法撤销。')) {
-            setExperiments((prev) => prev.filter((exp) => exp.id !== id));
-            // 待接入后端删除实验接口
-        }
+        setPendingDeleteId(id);
     };
 
-    const [isSeeding, setIsSeeding] = useState(false);
+    const handleConfirmDelete = () => {
+        if (!pendingDeleteId) return;
+        setExperiments((prev) => prev.filter((exp) => exp.id !== pendingDeleteId));
+        setPendingDeleteId(null);
+        showToast('实验已从列表移除', 'info');
+    };
+
     const handleSeed = async () => {
         setIsSeeding(true);
         try {
             const results = await analyticsAPI.seedExperiments();
             const created = results.filter(r => r.status === 'created').length;
             const skipped = results.filter(r => r.status === 'skipped').length;
-            alert(`种子实验初始化完成：${created} 个新建，${skipped} 个已存在`);
+            showToast(`种子实验初始化完成：${created} 个新建，${skipped} 个已存在`, 'success', 3500);
             fetchExperiments();
         } catch (err: unknown) {
-            alert('初始化失败：' + (err instanceof Error ? err.message : '未知错误'));
+            showToast('初始化失败：' + (err instanceof Error ? err.message : '未知错误'), 'error', 3500);
         } finally {
             setIsSeeding(false);
         }
@@ -499,6 +507,16 @@ export const ExperimentManager: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            <ConfirmDialog
+                open={Boolean(pendingDeleteId)}
+                title="删除此 A/B 实验？"
+                description="删除后此操作无法撤销，实验配置将从当前面板移除。"
+                confirmText="确认删除"
+                variant="danger"
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setPendingDeleteId(null)}
+            />
         </div>
     );
 };

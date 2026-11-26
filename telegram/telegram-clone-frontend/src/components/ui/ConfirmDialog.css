@@ -1,0 +1,117 @@
+.tg-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: var(--overlay-color, rgba(15, 20, 25, 0.42));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.tg-confirm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9501;
+  width: min(400px, calc(100vw - 32px));
+  padding: 22px 24px;
+  border-radius: 18px;
+  background: var(--color-background, #FFFFFF);
+  border: 1px solid var(--color-border, #EFF3F4);
+  box-shadow: var(--shadow-xl, 0 16px 40px rgba(15, 20, 25, 0.16));
+  color: var(--color-text-primary, #0F1419);
+  outline: none;
+}
+
+.tg-confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tg-confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(225, 29, 72, 0.1);
+  color: var(--color-error, #E11D48);
+  flex-shrink: 0;
+}
+
+.tg-confirm-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text-primary, #0F1419);
+}
+
+.tg-confirm-desc {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-text-secondary, #536471);
+}
+
+.tg-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.tg-confirm-btn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 9999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.tg-confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tg-confirm-btn:focus-visible {
+  outline: 2px solid var(--tg-blue, #1D9BF0);
+  outline-offset: 2px;
+}
+
+.tg-confirm-btn--cancel {
+  background: var(--color-surface, #F7F9F9);
+  border-color: var(--color-border, #EFF3F4);
+  color: var(--color-text-primary, #0F1419);
+}
+
+.tg-confirm-btn--cancel:hover:not(:disabled) {
+  background: var(--color-surface-hover, #EFF3F4);
+}
+
+.tg-confirm-btn--primary {
+  background: var(--color-cta-solid, #0F1419);
+  color: var(--primary-foreground, #FFFFFF);
+}
+
+.tg-confirm-btn--primary:hover:not(:disabled) {
+  background: var(--color-cta-solid-hover, #272C30);
+}
+
+.tg-confirm-btn--danger {
+  background: var(--color-error, #E11D48);
+  color: #FFFFFF;
+}
+
+.tg-confirm-btn--danger:hover:not(:disabled) {
+  background: #BE123C;
+}

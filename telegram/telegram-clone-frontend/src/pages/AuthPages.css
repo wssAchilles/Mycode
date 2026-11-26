@@ -753,6 +753,23 @@
   font-weight: 600;
 }
 
+.auth-field-head__right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-capslock-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(217, 119, 6, 0.12);
+  color: #B45309;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
 .auth-field-inline-note {
   color: var(--color-text-secondary, #536471);
   font-size: 12px;

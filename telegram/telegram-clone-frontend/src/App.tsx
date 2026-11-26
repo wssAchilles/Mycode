@@ -5,6 +5,8 @@ import AppRoutes from './routes';
 import ErrorBoundary from './components/ErrorBoundary';
 import { TooltipProvider } from './components/ui/shadcn/tooltip';
 import { SwUpdateBanner } from './components/ui/SwUpdateBanner';
+import { showToast } from './components/ui/Toast';
+import { APP_SW_UPDATE_AVAILABLE_EVENT, applyPendingServiceWorkerUpdate } from './pwa/register';
 import { RealtimeSessionBridge } from './features/realtime';
 import { authUtils } from './services/apiClient';
 import { getExperimentAssignments } from './services/experimentService';
@@ -19,6 +21,21 @@ function App() {
     if (authUtils.isAuthenticated()) {
       getExperimentAssignments().catch(() => {});
     }
+  }, []);
+
+  // 桌面端检测到新版 Service Worker 时弹出带「立即更新」操作条的非阻塞 Toast
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleSwUpdate = () => {
+      showToast('发现新版本，刷新即可体验最新功能', 'info', 15000, {
+        actionLabel: '立即更新',
+        onAction: () => applyPendingServiceWorkerUpdate(),
+      });
+    };
+    window.addEventListener(APP_SW_UPDATE_AVAILABLE_EVENT, handleSwUpdate);
+    return () => {
+      window.removeEventListener(APP_SW_UPDATE_AVAILABLE_EVENT, handleSwUpdate);
+    };
   }, []);
 
   return (

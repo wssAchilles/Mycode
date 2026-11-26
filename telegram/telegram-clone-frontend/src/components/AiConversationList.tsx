@@ -3,10 +3,12 @@
  * 显示所有历史 AI 对话，支持选择、删除和新建
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAiChatStore } from '../features/chat/store/aiChatStore';
 import { formatChatListTimestamp } from '../utils/dateTime';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { showToast } from './ui/Toast';
 import './AiConversationList.css';
 
 interface AiConversationListProps {
@@ -30,6 +32,9 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
         loadConversations
     } = useAiChatStore();
 
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+    const [deleting, setDeleting] = useState(false);
+
     // 初始加载历史会话列表
     React.useEffect(() => {
         loadConversations();
@@ -45,9 +50,17 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
         onNewConversation?.();
     };
 
-    const handleDelete = async (conversationId: string) => {
-        if (confirm('确定要删除这个会话吗？')) {
-            await deleteConversation(conversationId);
+    const handleConfirmDelete = async () => {
+        if (!pendingDeleteId || deleting) return;
+        setDeleting(true);
+        try {
+            await deleteConversation(pendingDeleteId);
+            setPendingDeleteId(null);
+            showToast('会话已删除', 'info');
+        } catch {
+            showToast('删除会话失败，请稍后重试', 'error');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -146,7 +159,7 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
                                     <button
                                         type="button"
                                         className="ai-conversation-item__delete"
-                                        onClick={() => handleDelete(conv.conversationId)}
+                                        onClick={() => setPendingDeleteId(conv.conversationId)}
                                         title="删除会话"
                                         aria-label={`删除会话 ${conv.title}`}
                                     >
@@ -161,6 +174,17 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
                     </ul>
                 )}
             </div>
+
+            <ConfirmDialog
+                open={Boolean(pendingDeleteId)}
+                title="删除 AI 对话历史？"
+                description="删除后将无法恢复该条历史对话记录。"
+                confirmText="确认删除"
+                variant="danger"
+                loading={deleting}
+                onConfirm={handleConfirmDelete}
+                onCancel={() => setPendingDeleteId(null)}
+            />
         </div>
     );
 };
