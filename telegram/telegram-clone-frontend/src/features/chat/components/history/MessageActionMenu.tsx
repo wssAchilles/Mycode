@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Copy, Edit3, Reply, RotateCw, Trash2 } from 'lucide-react';
+import { CheckSquare, Copy, Edit3, Forward, Pin, Reply, RotateCw, Trash2 } from 'lucide-react';
 import type { Message } from '../../../../types/chat';
 import './MessageActionMenu.css';
 
@@ -11,6 +11,9 @@ interface MessageActionMenuProps {
   onClose: () => void;
   onCopy: (msg: Message) => void;
   onReply: (msg: Message) => void;
+  onForward?: (msg: Message) => void;
+  onMultiSelect?: (msg: Message) => void;
+  onPin?: (msg: Message) => void;
   onEdit: (msg: Message) => void;
   onDelete: (msg: Message) => void;
   onRetry: (msg: Message) => void;
@@ -24,6 +27,9 @@ export const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
   onClose,
   onCopy,
   onReply,
+  onForward,
+  onMultiSelect,
+  onPin,
   onEdit,
   onDelete,
   onRetry,
@@ -81,6 +87,48 @@ export const MessageActionMenu: React.FC<MessageActionMenuProps> = ({
         <Reply size={14} />
         <span>引用回复</span>
       </button>
+      {onForward && message.status !== 'failed' && (
+        <button
+          type="button"
+          role="menuitem"
+          className="msg-context-menu__item"
+          onClick={() => {
+            onForward(message);
+            onClose();
+          }}
+        >
+          <Forward size={14} />
+          <span>转发消息</span>
+        </button>
+      )}
+      {onPin && message.status !== 'failed' && (
+        <button
+          type="button"
+          role="menuitem"
+          className="msg-context-menu__item"
+          onClick={() => {
+            onPin(message);
+            onClose();
+          }}
+        >
+          <Pin size={14} />
+          <span>置顶消息</span>
+        </button>
+      )}
+      {onMultiSelect && (
+        <button
+          type="button"
+          role="menuitem"
+          className="msg-context-menu__item"
+          onClick={() => {
+            onMultiSelect(message);
+            onClose();
+          }}
+        >
+          <CheckSquare size={14} />
+          <span>多选消息</span>
+        </button>
+      )}
       {canCopy && (
         <button
           type="button"

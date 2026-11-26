@@ -1,0 +1,101 @@
+.chat-multiselect-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--color-surface, #ffffff);
+  border-top: 1px solid var(--color-border-subtle, #e2e8f0);
+  min-height: 62px;
+}
+
+.chat-multiselect-bar__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-multiselect-bar__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  border: none;
+  background: rgba(15, 20, 25, 0.05);
+  color: var(--color-text-secondary, #475569);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.chat-multiselect-bar__close:hover {
+  background: rgba(15, 20, 25, 0.1);
+  color: var(--color-text-primary, #0f1419);
+}
+
+.chat-multiselect-bar__count {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary, #0f1419);
+}
+
+.chat-multiselect-bar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-multiselect-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-background, #ffffff);
+  color: var(--color-text-primary, #0f1419);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+}
+
+.chat-multiselect-bar__btn:hover:not(:disabled) {
+  background: rgba(15, 20, 25, 0.05);
+}
+
+.chat-multiselect-bar__btn.is-primary {
+  border-color: var(--tg-blue, #3390ec);
+  background: var(--tg-blue, #3390ec);
+  color: #ffffff;
+}
+
+.chat-multiselect-bar__btn.is-primary:hover:not(:disabled) {
+  background: #227ed9;
+}
+
+.chat-multiselect-bar__btn.is-danger {
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.chat-multiselect-bar__btn.is-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.chat-multiselect-bar__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+:root[data-theme="dark"] .chat-multiselect-bar {
+  background: var(--color-surface, #17212b);
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="dark"] .chat-multiselect-bar__close {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary, #9aa6b2);
+}

@@ -1,0 +1,108 @@
+.inline-chat-search {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 14px;
+  background: var(--color-surface, rgba(248, 250, 252, 0.98));
+  border-bottom: 1px solid var(--color-border-subtle, #e2e8f0);
+  z-index: 9;
+}
+
+.inline-chat-search__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  background: var(--color-background, #ffffff);
+}
+
+.inline-chat-search__field:focus-within {
+  border-color: var(--tg-blue, #3390ec);
+  box-shadow: 0 0 0 2px rgba(51, 144, 236, 0.14);
+}
+
+.inline-chat-search__icon {
+  color: var(--color-text-secondary, #64748b);
+  flex-shrink: 0;
+}
+
+.inline-chat-search__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary, #0f1419);
+  font-size: 13px;
+}
+
+.inline-chat-search__counter {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.inline-chat-search__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.inline-chat-search__btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary, #475569);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.inline-chat-search__btn:hover:not(:disabled) {
+  background: rgba(15, 20, 25, 0.06);
+  color: var(--color-text-primary, #0f1419);
+}
+
+.inline-chat-search__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.inline-chat-search__remote-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 144, 236, 0.28);
+  background: rgba(51, 144, 236, 0.08);
+  color: var(--tg-blue, #0284c7);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.inline-chat-search__remote-btn:hover {
+  background: rgba(51, 144, 236, 0.16);
+}
+
+:root[data-theme="dark"] .inline-chat-search {
+  background: rgba(23, 33, 43, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="dark"] .inline-chat-search__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, MoreHorizontal, Reply, RotateCw, SmilePlus } from 'lucide-react';
+import { Check, Copy, MoreHorizontal, Reply, RotateCw, SmilePlus } from 'lucide-react';
 import { MessageBubble, ProgressiveImage } from '../../../../components/common';
 import type { MessageReplyPreview } from '../../../../components/common/MessageBubble';
 import type { Message } from '../../../../types/chat';
@@ -39,6 +39,9 @@ interface MessageBubbleRowProps {
   onToggleReaction?: (msg: Message, emoji: string) => void;
   onOpenContextMenu?: (msg: Message, isOut: boolean, x: number, y: number) => void;
   enableActions?: boolean;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (msg: Message) => void;
 }
 
 /**
@@ -79,6 +82,9 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
     onToggleReaction,
     onOpenContextMenu,
     enableActions = false,
+    selectionMode = false,
+    isSelected = false,
+    onToggleSelect,
   }) => {
     const [showReactionPicker, setShowReactionPicker] = useState(false);
     const isOut = message.userId === currentUserId || message.senderId === currentUserId;
@@ -203,17 +209,39 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
         <div
           className={`chat-history__row ${isOut ? 'is-out' : 'is-in'} ${
             collapseGroupSenderMeta ? 'is-collapsed-sender' : ''
-          }`}
-          onDoubleClick={handleBubbleDoubleClick}
+          } ${selectionMode ? 'is-selection-mode' : ''} ${isSelected ? 'is-selected' : ''}`}
+          onClick={
+            selectionMode && onToggleSelect
+              ? (event) => {
+                  event.stopPropagation();
+                  onToggleSelect(message);
+                }
+              : undefined
+          }
+          onDoubleClick={selectionMode ? undefined : handleBubbleDoubleClick}
           onMouseLeave={() => {
             if (showReactionPicker) setShowReactionPicker(false);
           }}
           onContextMenu={(event) => {
-            if (!enableActions || !onOpenContextMenu) return;
+            if (selectionMode || !enableActions || !onOpenContextMenu) return;
             event.preventDefault();
             onOpenContextMenu(message, isOut, event.clientX, event.clientY);
           }}
         >
+          {selectionMode && (
+            <button
+              type="button"
+              className={`chat-history__select-box ${isSelected ? 'is-checked' : ''}`}
+              aria-label={isSelected ? '取消选择该消息' : '选择该消息'}
+              aria-pressed={isSelected}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleSelect?.(message);
+              }}
+            >
+              {isSelected && <Check size={12} strokeWidth={3} />}
+            </button>
+          )}
           <div className={`chat-history__bubble-stack ${isOut ? 'is-out' : 'is-in'}`}>
             <MessageBubble
               isOut={isOut}
@@ -275,7 +303,7 @@ export const MessageBubbleRow: React.FC<MessageBubbleRowProps> = React.memo(
             </button>
           )}
 
-          {enableActions && !canRetry && (
+          {enableActions && !selectionMode && !canRetry && (
             <div className="chat-history__hover-actions" aria-label="快捷消息操作">
               {onToggleReaction && (
                 <div className="chat-history__reaction-trigger-wrap">

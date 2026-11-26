@@ -1,0 +1,92 @@
+.chat-pinned-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--color-surface, rgba(248, 250, 252, 0.96));
+  border-bottom: 1px solid var(--color-border-subtle, #e2e8f0);
+  backdrop-filter: blur(10px);
+  z-index: 9;
+}
+
+.chat-pinned-banner__main {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.chat-pinned-banner__main:hover {
+  background: rgba(51, 144, 236, 0.08);
+}
+
+.chat-pinned-banner__icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(51, 144, 236, 0.12);
+  color: var(--tg-blue, #3390ec);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-pinned-banner__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-pinned-banner__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--tg-blue, #3390ec);
+  line-height: 1.25;
+}
+
+.chat-pinned-banner__preview {
+  font-size: 12.5px;
+  color: var(--color-text-primary, #0f1419);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-pinned-banner__close {
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary, #536471);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.chat-pinned-banner__close:hover {
+  background: rgba(15, 20, 25, 0.08);
+  color: var(--color-text-primary, #0f1419);
+}
+
+:root[data-theme="dark"] .chat-pinned-banner {
+  background: rgba(23, 33, 43, 0.94);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="dark"] .chat-pinned-banner__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}

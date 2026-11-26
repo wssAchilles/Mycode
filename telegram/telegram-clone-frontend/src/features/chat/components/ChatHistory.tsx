@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { Message } from '../../../types/chat';
 import { isSameCalendarDay } from '../../../utils/dateTime';
+import { readChatScrollState, saveChatScrollState } from '../state/chatScrollMemory';
 import { useMessageStore } from '../store/messageStore';
 import { useChatStore } from '../store/chatStore';
 import { ChatImageLightbox, type LightboxMediaItem } from './media/ChatImageLightbox';
@@ -19,6 +20,7 @@ type EmptyStateKind = 'loading' | 'empty' | 'error';
 const EMPTY_GROUP_MEMBERS: readonly [] = [];
 
 interface ChatHistoryProps {
+  chatId?: string | null;
   currentUserId: string;
   currentUsername?: string;
 
@@ -46,6 +48,13 @@ interface ChatHistoryProps {
   onDeleteMessage?: (message: Message) => void;
   onRetryMessage?: (message: Message) => void;
   onToggleReaction?: (message: Message, emoji: string) => void;
+  onForwardMessage?: (message: Message) => void;
+  onEnterMultiSelect?: (message: Message) => void;
+  onPinMessage?: (message: Message) => void;
+  selectionMode?: boolean;
+  selectedMessageIds?: Set<string>;
+  onToggleSelectMessage?: (message: Message) => void;
+  jumpToMessageRef?: React.MutableRefObject<((messageId: string) => void) | null>;
 }
 
 interface StoreMessageBubbleProps {
@@ -67,6 +76,9 @@ interface StoreMessageBubbleProps {
   onToggleReaction?: (msg: Message, emoji: string) => void;
   onOpenContextMenu: (msg: Message, isOut: boolean, x: number, y: number) => void;
   enableActions: boolean;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (msg: Message) => void;
 }
 
 const OVERSCAN_IDLE = 6;
@@ -94,6 +106,9 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   onToggleReaction,
   onOpenContextMenu,
   enableActions,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const msg = useMessageStore(useCallback((state) => state.entities.get(messageId), [messageId]));
   const prevMsg = useMessageStore(
@@ -122,11 +137,15 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
       onToggleReaction={onToggleReaction}
       onOpenContextMenu={onOpenContextMenu}
       enableActions={enableActions}
+      selectionMode={selectionMode}
+      isSelected={isSelected}
+      onToggleSelect={onToggleSelect}
     />
   );
 };
 
 const ChatHistory: React.FC<ChatHistoryProps> = ({
+  chatId = null,
   currentUserId,
   currentUsername,
   messages,
@@ -149,6 +168,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   onDeleteMessage,
   onRetryMessage,
   onToggleReaction,
+  onForwardMessage,
+  onEnterMultiSelect,
+  onPinMessage,
+  selectionMode = false,
+  selectedMessageIds,
+  onToggleSelectMessage,
+  jumpToMessageRef,
 }) => {
   const isStoreMode = Array.isArray(messageIds);
   const count = isStoreMode ? (messageIds?.length ?? 0) : (messages?.length ?? 0);
@@ -191,6 +217,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const [unreadBelowCount, setUnreadBelowCount] = useState(0);
   const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
   const [copiedNotice, setCopiedNotice] = useState(false);
+  const restoredScrollRef = useRef(false);
 
   const enableActions = Boolean(
     !onMessageSelect
@@ -521,6 +548,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     [count, isStoreMode, messageIds, messages, safeScrollToIndex],
   );
 
+  useEffect(() => {
+    if (!jumpToMessageRef) return;
+    jumpToMessageRef.current = handleJumpToMessage;
+    return () => {
+      if (jumpToMessageRef.current === handleJumpToMessage) {
+        jumpToMessageRef.current = null;
+      }
+    };
+  }, [handleJumpToMessage, jumpToMessageRef]);
+
   const handleCopyMessage = useCallback((msg: Message) => {
     const text = msg.content?.trim();
     if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
@@ -630,6 +667,20 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     prevLastMessageIdRef.current = lastId;
 
     if (prevLastId === null) {
+      if (!restoredScrollRef.current && chatId) {
+        restoredScrollRef.current = true;
+        const saved = readChatScrollState(chatId);
+        if (saved && !saved.wasAtBottom && saved.scrollTop > 0) {
+          isAtBottomRef.current = false;
+          setShowScrollBottom(true);
+          requestAnimationFrame(() => {
+            if (containerRef.current) {
+              containerRef.current.scrollTop = saved.scrollTop;
+            }
+          });
+          return;
+        }
+      }
       scrollToBottom();
       return;
     }
@@ -686,7 +737,11 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
       // 底部距离判定：接近底部时允许自动滚底并清零悬浮未读角标
-      isAtBottomRef.current = distanceFromBottom < 120;
+      const isNearBottom = distanceFromBottom < 120;
+      isAtBottomRef.current = isNearBottom;
+      if (chatId && !disableAutoScroll) {
+        saveChatScrollState(chatId, { scrollTop, wasAtBottom: isNearBottom });
+      }
       if (distanceFromBottom > 220) {
         setShowScrollBottom(true);
       } else if (distanceFromBottom < 140) {
@@ -714,7 +769,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
         onLoadMore();
       }
     },
-    [hasMore, isLoading, onLoadMore, virtualizer, isStoreMode, messageIds, messages],
+    [chatId, disableAutoScroll, hasMore, isLoading, onLoadMore, virtualizer, isStoreMode, messageIds, messages],
   );
 
   const handleScroll = useCallback(() => {
@@ -853,6 +908,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                       onToggleReaction={onToggleReaction}
                       onOpenContextMenu={handleOpenContextMenu}
                       enableActions={enableActions}
+                      selectionMode={selectionMode}
+                      isSelected={Boolean(selectedMessageIds?.has(id))}
+                      onToggleSelect={onToggleSelectMessage}
                     />
                   </div>
                 );
@@ -911,6 +969,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                     onToggleReaction={onToggleReaction}
                     onOpenContextMenu={handleOpenContextMenu}
                     enableActions={enableActions}
+                    selectionMode={selectionMode}
+                    isSelected={Boolean(selectedMessageIds?.has(msg.id))}
+                    onToggleSelect={onToggleSelectMessage}
                   />
                 </div>
               );
@@ -918,6 +979,18 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           </div>
         )}
       </div>
+
+      {!isEmpty && firstUnreadMessageId && showScrollBottom && (
+        <button
+          type="button"
+          className="chat-history__unread-jump"
+          onClick={() => handleJumpToMessage(firstUnreadMessageId)}
+          aria-label="跳转到未读消息起点"
+        >
+          <ArrowUp size={14} />
+          <span>跳转到未读起点</span>
+        </button>
+      )}
 
       {!isEmpty && (showScrollBottom || unreadBelowCount > 0) && (
         <button
@@ -959,6 +1032,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
           onClose={() => setContextMenu(null)}
           onCopy={handleCopyMessage}
           onReply={(target) => onReplyMessage?.(target)}
+          onForward={onForwardMessage ? (target) => onForwardMessage(target) : undefined}
+          onMultiSelect={onEnterMultiSelect ? (target) => onEnterMultiSelect(target) : undefined}
+          onPin={onPinMessage ? (target) => onPinMessage(target) : undefined}
           onEdit={(target) => onEditMessage?.(target)}
           onDelete={(target) => onDeleteMessage?.(target)}
           onRetry={(target) => onRetryMessage?.(target)}

@@ -9,10 +9,19 @@
 
 import { create } from 'zustand';
 
+export interface PinnedMessageEntry {
+  id: string;
+  content: string;
+  senderName: string;
+  type?: string;
+  pinnedAt: number;
+}
+
 interface PersistedChatUiPrefs {
   draftByChatId: Record<string, string>;
   pinnedChatIds: string[];
   mutedChatIds: string[];
+  pinnedMessageByChatId: Record<string, PinnedMessageEntry>;
   desktopNotifyEnabled: boolean;
   soundEnabled: boolean;
 }
@@ -25,6 +34,8 @@ export interface ChatUiPrefsState extends PersistedChatUiPrefs {
   clearDraft: (chatId: string) => void;
   togglePinChat: (chatId: string) => boolean;
   toggleMuteChat: (chatId: string) => boolean;
+  pinMessageInChat: (chatId: string, entry: PinnedMessageEntry) => void;
+  unpinMessageInChat: (chatId: string) => void;
   setDesktopNotifyEnabled: (enabled: boolean) => void;
   setSoundEnabled: (enabled: boolean) => void;
 }
@@ -36,6 +47,7 @@ const DEFAULT_PREFS: PersistedChatUiPrefs = {
   draftByChatId: {},
   pinnedChatIds: [],
   mutedChatIds: [],
+  pinnedMessageByChatId: {},
   desktopNotifyEnabled: false,
   soundEnabled: true,
 };
@@ -51,10 +63,26 @@ function getStorage(): Storage | null {
 
 function readPersistedPrefs(userId: string): PersistedChatUiPrefs {
   const storage = getStorage();
-  if (!storage || !userId) return { ...DEFAULT_PREFS, draftByChatId: {}, pinnedChatIds: [], mutedChatIds: [] };
+  if (!storage || !userId) {
+    return {
+      ...DEFAULT_PREFS,
+      draftByChatId: {},
+      pinnedChatIds: [],
+      mutedChatIds: [],
+      pinnedMessageByChatId: {},
+    };
+  }
   try {
     const raw = storage.getItem(`${STORAGE_PREFIX}${userId}`);
-    if (!raw) return { ...DEFAULT_PREFS, draftByChatId: {}, pinnedChatIds: [], mutedChatIds: [] };
+    if (!raw) {
+      return {
+        ...DEFAULT_PREFS,
+        draftByChatId: {},
+        pinnedChatIds: [],
+        mutedChatIds: [],
+        pinnedMessageByChatId: {},
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<PersistedChatUiPrefs>;
     return {
       draftByChatId:
@@ -67,11 +95,21 @@ function readPersistedPrefs(userId: string): PersistedChatUiPrefs {
       mutedChatIds: Array.isArray(parsed.mutedChatIds)
         ? parsed.mutedChatIds.map(String).filter(Boolean)
         : [],
+      pinnedMessageByChatId:
+        parsed.pinnedMessageByChatId && typeof parsed.pinnedMessageByChatId === 'object'
+          ? { ...parsed.pinnedMessageByChatId }
+          : {},
       desktopNotifyEnabled: Boolean(parsed.desktopNotifyEnabled),
       soundEnabled: parsed.soundEnabled !== false,
     };
   } catch {
-    return { ...DEFAULT_PREFS, draftByChatId: {}, pinnedChatIds: [], mutedChatIds: [] };
+    return {
+      ...DEFAULT_PREFS,
+      draftByChatId: {},
+      pinnedChatIds: [],
+      mutedChatIds: [],
+      pinnedMessageByChatId: {},
+    };
   }
 }
 
@@ -90,6 +128,7 @@ function pickPersisted(state: ChatUiPrefsState): PersistedChatUiPrefs {
     draftByChatId: state.draftByChatId,
     pinnedChatIds: state.pinnedChatIds,
     mutedChatIds: state.mutedChatIds,
+    pinnedMessageByChatId: state.pinnedMessageByChatId,
     desktopNotifyEnabled: state.desktopNotifyEnabled,
     soundEnabled: state.soundEnabled,
   };
@@ -119,6 +158,7 @@ export const useChatUiPrefsStore = create<ChatUiPrefsState>((set, get) => ({
       draftByChatId: {},
       pinnedChatIds: [],
       mutedChatIds: [],
+      pinnedMessageByChatId: {},
       desktopNotifyEnabled: false,
       soundEnabled: true,
     });
@@ -189,6 +229,33 @@ export const useChatUiPrefsStore = create<ChatUiPrefsState>((set, get) => ({
     });
 
     return isNowMuted;
+  },
+
+  pinMessageInChat: (chatId, entry) => {
+    const cleanChatId = String(chatId || '').trim();
+    if (!cleanChatId || !entry?.id) return;
+    set((state) => {
+      const nextPinned = {
+        ...state.pinnedMessageByChatId,
+        [cleanChatId]: entry,
+      };
+      const nextState = { ...state, pinnedMessageByChatId: nextPinned };
+      writePersistedPrefs(state.currentUserId, pickPersisted(nextState));
+      return { pinnedMessageByChatId: nextPinned };
+    });
+  },
+
+  unpinMessageInChat: (chatId) => {
+    const cleanChatId = String(chatId || '').trim();
+    if (!cleanChatId) return;
+    set((state) => {
+      if (!(cleanChatId in state.pinnedMessageByChatId)) return state;
+      const nextPinned = { ...state.pinnedMessageByChatId };
+      delete nextPinned[cleanChatId];
+      const nextState = { ...state, pinnedMessageByChatId: nextPinned };
+      writePersistedPrefs(state.currentUserId, pickPersisted(nextState));
+      return { pinnedMessageByChatId: nextPinned };
+    });
   },
 
   setDesktopNotifyEnabled: (enabled) => {

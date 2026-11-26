@@ -525,3 +525,76 @@
     background: #F1F5F9;
     border-color: #94A3B8;
 }
+
+/* 多选模式复选框与整行交互 */
+.chat-history__row.is-selection-mode {
+    cursor: pointer;
+    padding-left: 4px;
+    padding-right: 4px;
+    border-radius: 10px;
+    transition: background-color 0.14s ease;
+}
+
+.chat-history__row.is-selection-mode:hover {
+    background: rgba(51, 144, 236, 0.05);
+}
+
+.chat-history__row.is-selected {
+    background: rgba(51, 144, 236, 0.11);
+}
+
+.chat-history__select-box {
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    align-self: center;
+    border-radius: 9999px;
+    border: 1.5px solid #94A3B8;
+    background: var(--color-background, #FFFFFF);
+    color: #FFFFFF;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.chat-history__select-box.is-checked {
+    background: var(--tg-blue, #3390ec);
+    border-color: var(--tg-blue, #3390ec);
+}
+
+/* 跳转到未读消息起点悬浮胶囊 */
+.chat-history__unread-jump {
+    position: absolute;
+    top: 12px;
+    right: 20px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: 1px solid #BFDBFE;
+    background: rgba(239, 246, 255, 0.96);
+    backdrop-filter: blur(8px);
+    color: #1D4ED8;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.14);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-history__unread-jump:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(29, 78, 216, 0.2);
+}
+
+:root[data-theme="dark"] .chat-history__unread-jump {
+    background: rgba(30, 58, 95, 0.94);
+    border-color: rgba(96, 165, 250, 0.4);
+    color: #93C5FD;
+}

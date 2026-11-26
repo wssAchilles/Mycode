@@ -5,7 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Ban, Check, Edit2, ExternalLink, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { Ban, Check, Edit2, ExternalLink, FileText, Image as ImageIcon, Link2, Trash2 } from 'lucide-react';
 import { DetailPanel, DetailSection } from '../../components/layout';
 import { Avatar } from '../../components/common';
 import { showToast } from '../../components/ui/Toast';
@@ -49,44 +49,74 @@ const ChatDetailPanel: React.FC<ChatDetailPanelProps> = ({
     const [isSavingAlias, setIsSavingAlias] = useState(false);
     const [pendingAction, setPendingAction] = useState<'remove' | 'block' | null>(null);
     const [isMutatingContact, setIsMutatingContact] = useState(false);
+    const [assetTab, setAssetTab] = useState<'images' | 'files' | 'links'>('images');
 
     useEffect(() => {
         setIsEditingAlias(false);
         setAliasInput(selectedContact?.alias || '');
         setPendingAction(null);
+        setAssetTab('images');
     }, [selectedContact?.userId, selectedContact?.alias]);
 
-    const { sharedImages, sharedFileCount } = useMemo(() => {
+    const { sharedImages, sharedFiles, sharedLinks } = useMemo(() => {
         const images: Array<{ id: string; src: string; thumb: string; fileName?: string }> = [];
-        let files = 0;
+        const files: Array<{ id: string; url: string; fileName: string; fileSize?: number }> = [];
+        const links: Array<{ id: string; url: string; host: string }> = [];
+        const seenUrls = new Set<string>();
 
         for (let i = sharedMediaMessages.length - 1; i >= 0; i -= 1) {
             const msg = sharedMediaMessages[i];
             const firstAtt = msg.attachments?.[0];
             const rawUrl = msg.fileUrl || firstAtt?.fileUrl;
-            if (!rawUrl) continue;
 
-            if (msg.type === 'image') {
-                if (images.length < 9) {
-                    const resolved = withApiBase(rawUrl) || rawUrl;
-                    const resolvedThumb = withApiBase(msg.thumbnailUrl || firstAtt?.thumbnailUrl || rawUrl) || resolved;
-                    images.push({
-                        id: msg.id,
-                        src: resolved,
-                        thumb: resolvedThumb,
-                        fileName: msg.fileName || firstAtt?.fileName,
-                    });
+            if (rawUrl) {
+                const resolved = withApiBase(rawUrl) || rawUrl;
+                if (msg.type === 'image') {
+                    if (images.length < 12) {
+                        const resolvedThumb = withApiBase(msg.thumbnailUrl || firstAtt?.thumbnailUrl || rawUrl) || resolved;
+                        images.push({
+                            id: msg.id,
+                            src: resolved,
+                            thumb: resolvedThumb,
+                            fileName: msg.fileName || firstAtt?.fileName,
+                        });
+                    }
+                } else if (
+                    msg.type === 'file'
+                    || msg.type === 'document'
+                    || msg.type === 'video'
+                    || msg.type === 'audio'
+                ) {
+                    if (files.length < 20) {
+                        files.push({
+                            id: msg.id,
+                            url: resolved,
+                            fileName: msg.fileName || firstAtt?.fileName || '未命名文件',
+                            fileSize: msg.fileSize ?? firstAtt?.fileSize,
+                        });
+                    }
                 }
-            } else if (
-                msg.type === 'file'
-                || msg.type === 'document'
-                || msg.type === 'video'
-                || msg.type === 'audio'
-            ) {
-                files += 1;
+            }
+
+            if (msg.content && links.length < 20) {
+                const matched = msg.content.match(/https?:\/\/[^\s<>"'`]+/g);
+                if (matched) {
+                    for (const url of matched) {
+                        if (seenUrls.has(url)) continue;
+                        seenUrls.add(url);
+                        let host = url;
+                        try {
+                            host = new URL(url).hostname;
+                        } catch {
+                            // 保留原 URL
+                        }
+                        links.push({ id: `${msg.id}-${links.length}`, url, host });
+                        if (links.length >= 20) break;
+                    }
+                }
             }
         }
-        return { sharedImages: images, sharedFileCount: files };
+        return { sharedImages: images, sharedFiles: files, sharedLinks: links };
     }, [sharedMediaMessages]);
 
     const handleSaveAlias = async (event: React.FormEvent) => {
@@ -216,9 +246,43 @@ const ChatDetailPanel: React.FC<ChatDetailPanelProps> = ({
                         </DetailSection>
                     )}
 
-                    <DetailSection title="共享媒体" collapsible defaultCollapsed={sharedImages.length === 0}>
-                        {sharedImages.length > 0 ? (
-                            <>
+                    <DetailSection
+                        title="共享媒体与文件"
+                        collapsible
+                        defaultCollapsed={sharedImages.length === 0 && sharedFiles.length === 0 && sharedLinks.length === 0}
+                    >
+                        <div className="detail-asset-tabs" role="tablist" aria-label="共享资产分类">
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={assetTab === 'images'}
+                                className={`detail-asset-tab ${assetTab === 'images' ? 'is-active' : ''}`}
+                                onClick={() => setAssetTab('images')}
+                            >
+                                图片 ({sharedImages.length})
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={assetTab === 'files'}
+                                className={`detail-asset-tab ${assetTab === 'files' ? 'is-active' : ''}`}
+                                onClick={() => setAssetTab('files')}
+                            >
+                                文件 ({sharedFiles.length})
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={assetTab === 'links'}
+                                className={`detail-asset-tab ${assetTab === 'links' ? 'is-active' : ''}`}
+                                onClick={() => setAssetTab('links')}
+                            >
+                                链接 ({sharedLinks.length})
+                            </button>
+                        </div>
+
+                        {assetTab === 'images' && (
+                            sharedImages.length > 0 ? (
                                 <div className="detail-media-grid">
                                     {sharedImages.map((img) => (
                                         <button
@@ -234,19 +298,57 @@ const ChatDetailPanel: React.FC<ChatDetailPanelProps> = ({
                                         </button>
                                     ))}
                                 </div>
-                                {sharedFileCount > 0 && (
-                                    <div className="detail-media-summary">
-                                        另有 {sharedFileCount} 个文件/音视频记录在当前会话中
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <div className="detail-empty-media">
-                                <ImageIcon size={16} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />
-                                {sharedFileCount > 0
-                                    ? `暂无共享图片（当前会话含 ${sharedFileCount} 个文件/音视频）`
-                                    : '暂无共享图片或媒体文件'}
-                            </div>
+                            ) : (
+                                <div className="detail-empty-media">
+                                    <ImageIcon size={15} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />
+                                    暂无共享图片
+                                </div>
+                            )
+                        )}
+
+                        {assetTab === 'files' && (
+                            sharedFiles.length > 0 ? (
+                                <div className="detail-asset-list">
+                                    {sharedFiles.map((file) => (
+                                        <a
+                                            key={file.id}
+                                            href={file.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="detail-asset-row"
+                                        >
+                                            <FileText size={15} />
+                                            <span className="detail-asset-row__name">{file.fileName}</span>
+                                        </a>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="detail-empty-media">暂无共享文件或音视频</div>
+                            )
+                        )}
+
+                        {assetTab === 'links' && (
+                            sharedLinks.length > 0 ? (
+                                <div className="detail-asset-list">
+                                    {sharedLinks.map((item) => (
+                                        <a
+                                            key={item.id}
+                                            href={item.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="detail-asset-row"
+                                        >
+                                            <Link2 size={15} />
+                                            <div className="detail-asset-row__link">
+                                                <span className="detail-asset-row__host">{item.host}</span>
+                                                <span className="detail-asset-row__url">{item.url}</span>
+                                            </div>
+                                        </a>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="detail-empty-media">暂无提取到的网页链接</div>
+                            )
                         )}
                     </DetailSection>
 

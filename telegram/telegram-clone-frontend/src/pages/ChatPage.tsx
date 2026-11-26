@@ -31,6 +31,14 @@ import { ChatArea } from '../components/layout';
 import ChatHeader from '../features/chat/components/ChatHeader';
 import MessageInput from '../features/chat/components/MessageInput';
 import ChatHistory from '../features/chat/components/ChatHistory';
+import { PinnedMessageBanner } from '../features/chat/components/PinnedMessageBanner';
+import { InlineChatSearchBar } from '../features/chat/components/InlineChatSearchBar';
+import { MultiSelectActionBar } from '../features/chat/components/history/MultiSelectActionBar';
+import { ForwardMessageModal, type ForwardTarget } from '../features/chat/components/history/ForwardMessageModal';
+import {
+  formatMergedMessagesForCopy,
+  summarizeMessagePreview,
+} from '../features/chat/components/history/MessageSelectionUtils';
 import { ChatImageLightbox } from '../features/chat/components/media/ChatImageLightbox';
 
 // 拆分的子组件（按需懒加载，显著压缩 ChatPage 首包与 CSS 体积）
@@ -221,6 +229,20 @@ const ChatPage: React.FC = () => {
   const [isDeletingMessage, setIsDeletingMessage] = useState(false);
   const [detailLightboxMedia, setDetailLightboxMedia] = useState<{ src: string; fileName?: string } | null>(null);
 
+  // 多选、转发与会话内 ⌘F 内联搜索状态
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
+  const [forwardMessages, setForwardMessages] = useState<Message[] | null>(null);
+  const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [inlineSearchQuery, setInlineSearchQuery] = useState('');
+  const [inlineMatchIdx, setInlineMatchIdx] = useState(0);
+  const jumpToMessageRef = useRef<((messageId: string) => void) | null>(null);
+
+  const pinnedMessageByChatId = useChatUiPrefsStore((state) => state.pinnedMessageByChatId);
+  const pinMessageInChat = useChatUiPrefsStore((state) => state.pinMessageInChat);
+  const unpinMessageInChat = useChatUiPrefsStore((state) => state.unpinMessageInChat);
+  const activePinnedMessage = selectedChatId ? pinnedMessageByChatId[selectedChatId] : undefined;
+
   const lastTypingEmitAtRef = useRef(0);
   const typingActiveRef = useRef(false);
   const typingTargetRef = useRef<{ receiverId?: string; groupId?: string } | null>(null);
@@ -243,20 +265,49 @@ const ChatPage: React.FC = () => {
     setReplyingMessage(null);
     setPendingDeleteMessage(null);
     setDetailLightboxMedia(null);
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    setForwardMessages(null);
+    setInlineSearchOpen(false);
+    setInlineSearchQuery('');
+    setInlineMatchIdx(0);
   }, [selectedChatId, isAiChatMode, selectedGroupId, selectedContactId, sendTypingIndicator]);
 
-  // 全局 Escape 分级关闭快捷键（不干扰已被灯箱捕获的事件）
+  // ⌘F / Ctrl+F 会话内上下文快速搜索，以及 Escape 分级关闭快捷键
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        if (!isAiChatMode && (selectedContact || selectedGroup)) {
+          event.preventDefault();
+          setInlineSearchOpen(true);
+        }
+        return;
+      }
+
       if (event.key !== 'Escape' || event.defaultPrevented) return;
 
+      if (forwardMessages) {
+        setForwardMessages(null);
+        return;
+      }
       if (detailLightboxMedia) {
         setDetailLightboxMedia(null);
         return;
       }
       if (pendingDeleteMessage) {
         if (!isDeletingMessage) setPendingDeleteMessage(null);
+        return;
+      }
+      if (inlineSearchOpen) {
+        setInlineSearchOpen(false);
+        setInlineSearchQuery('');
+        setInlineMatchIdx(0);
+        return;
+      }
+      if (selectionMode) {
+        setSelectionMode(false);
+        setSelectedMessageIds(new Set());
         return;
       }
       if (showAddContactModal) {
@@ -301,6 +352,9 @@ const ChatPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     detailLightboxMedia,
+    forwardMessages,
+    inlineSearchOpen,
+    selectionMode,
     pendingDeleteMessage,
     isDeletingMessage,
     showAddContactModal,
@@ -1005,6 +1059,166 @@ const ChatPage: React.FC = () => {
     setEditingMessage(message);
   };
 
+  const handleToggleSelectMessage = (message: Message) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(message.id)) {
+        next.delete(message.id);
+      } else {
+        next.add(message.id);
+      }
+      if (next.size === 0) {
+        setSelectionMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleEnterMultiSelect = (message: Message) => {
+    setSelectionMode(true);
+    setSelectedMessageIds(new Set([message.id]));
+  };
+
+  const handlePinMessage = (message: Message) => {
+    if (!selectedChatId) return;
+    const isOut = Boolean(currentUser && (message.userId === currentUser.id || message.senderId === currentUser.id));
+    const senderName = isOut ? '我' : (message.senderUsername || message.username || selectedContact?.alias || selectedContact?.username || '联系人');
+    pinMessageInChat(selectedChatId, {
+      id: message.id,
+      content: summarizeMessagePreview(message),
+      senderName,
+      type: message.type,
+      pinnedAt: Date.now(),
+    });
+    showToast('已置顶到会话顶部', 'success');
+  };
+
+  const handleConfirmForward = async (targets: ForwardTarget[]) => {
+    if (!forwardMessages || forwardMessages.length === 0) return;
+    let successOps = 0;
+    for (const target of targets) {
+      for (const msg of forwardMessages) {
+        const attachment = msg.attachments?.[0];
+        const fileUrl = msg.fileUrl || attachment?.fileUrl;
+        const ok = await emitRealtimeMessage({
+          ...(target.isGroup
+            ? { chatType: 'group' as const, groupId: target.id }
+            : { chatType: 'private' as const, receiverId: target.id }),
+          content: msg.content || msg.fileName || '',
+          type: msg.type === 'text' || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'file' || msg.type === 'document'
+            ? msg.type
+            : 'text',
+          ...(fileUrl ? { fileUrl } : {}),
+          ...(msg.fileName || attachment?.fileName ? { fileName: msg.fileName || attachment?.fileName } : {}),
+          ...(msg.fileSize ?? attachment?.fileSize ? { fileSize: msg.fileSize ?? attachment?.fileSize } : {}),
+          ...(msg.mimeType || attachment?.mimeType ? { mimeType: msg.mimeType || attachment?.mimeType } : {}),
+          ...(msg.thumbnailUrl || attachment?.thumbnailUrl
+            ? { thumbnailUrl: msg.thumbnailUrl || attachment?.thumbnailUrl }
+            : {}),
+        }, `转发至 ${target.title} 失败`);
+        if (ok) successOps += 1;
+      }
+    }
+    if (successOps > 0) {
+      showToast(`已成功转发至 ${targets.length} 个会话`, 'success');
+      setSelectionMode(false);
+      setSelectedMessageIds(new Set());
+    }
+  };
+
+  const selectedMessagesList = useMemo(() => {
+    if (!selectionMode || selectedMessageIds.size === 0) return [];
+    const { messageIds, entities } = useMessageStore.getState();
+    const result: Message[] = [];
+    for (const id of messageIds) {
+      if (!selectedMessageIds.has(id)) continue;
+      const msg = entities.get(id);
+      if (msg) result.push(msg);
+    }
+    return result;
+  }, [selectionMode, selectedMessageIds, messageIdsVersion]);
+
+  const deletableSelectedMessages = useMemo(() => {
+    if (!currentUser) return [];
+    return selectedMessagesList.filter((msg) => {
+      const isOut = msg.userId === currentUser.id || msg.senderId === currentUser.id;
+      return isOut && msg.status !== 'pending' && msg.status !== 'failed';
+    });
+  }, [currentUser, selectedMessagesList]);
+
+  const handleCopyMergedSelected = async () => {
+    if (selectedMessagesList.length === 0 || !currentUser) return;
+    const text = formatMergedMessagesForCopy(selectedMessagesList, currentUser.id);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`已合并复制 ${selectedMessagesList.length} 条消息`, 'success');
+      setSelectionMode(false);
+      setSelectedMessageIds(new Set());
+    } catch {
+      showToast('复制失败，请检查浏览器剪贴板权限', 'error');
+    }
+  };
+
+  const handleBatchDeleteSelected = async () => {
+    if (deletableSelectedMessages.length === 0) return;
+    let deletedCount = 0;
+    for (const msg of deletableSelectedMessages) {
+      try {
+        await messageAPI.deleteMessage(msg.id);
+        deletedCount += 1;
+      } catch {
+        // 继续尝试撤回其余消息
+      }
+    }
+    if (deletedCount > 0) {
+      showToast(`已撤回 ${deletedCount} 条消息`, 'info');
+    } else {
+      showToast('批量撤回失败', 'error');
+    }
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  };
+
+  const inlineMatchedMessageIds = useMemo(() => {
+    const q = inlineSearchQuery.trim().toLowerCase();
+    if (!inlineSearchOpen || !q) return [];
+    const { messageIds, entities } = useMessageStore.getState();
+    const matched: string[] = [];
+    for (const id of messageIds) {
+      const msg = entities.get(id);
+      if (!msg) continue;
+      const haystack = `${msg.content || ''} ${msg.fileName || ''}`.toLowerCase();
+      if (haystack.includes(q)) {
+        matched.push(id);
+      }
+    }
+    return matched;
+  }, [inlineSearchOpen, inlineSearchQuery, messageIdsVersion]);
+
+  useEffect(() => {
+    if (!inlineSearchOpen || inlineMatchedMessageIds.length === 0) {
+      setInlineMatchIdx(0);
+      return;
+    }
+    const lastIdx = inlineMatchedMessageIds.length - 1;
+    setInlineMatchIdx(lastIdx);
+    const targetId = inlineMatchedMessageIds[lastIdx];
+    if (targetId) {
+      jumpToMessageRef.current?.(targetId);
+    }
+  }, [inlineSearchOpen, inlineSearchQuery, inlineMatchedMessageIds.length]);
+
+  const handleStepInlineSearch = (delta: number) => {
+    if (inlineMatchedMessageIds.length === 0) return;
+    const nextIdx = (inlineMatchIdx + delta + inlineMatchedMessageIds.length) % inlineMatchedMessageIds.length;
+    setInlineMatchIdx(nextIdx);
+    const targetId = inlineMatchedMessageIds[nextIdx];
+    if (targetId) {
+      jumpToMessageRef.current?.(targetId);
+    }
+  };
+
   const handleEditLastOwnMessage = () => {
     if (!currentUser || isAiChatMode) return;
     const { messageIds, entities } = useMessageStore.getState();
@@ -1284,32 +1498,46 @@ const ChatPage: React.FC = () => {
             />
           }
           footer={
-            <MessageInput
-              chatId={selectedChatId}
-              onSendMessage={handleSendMessage}
-              onFileUpload={(file, caption) => {
-                void uploadAndSendFile(file, caption);
-              }}
-              onFilesUpload={(files, caption) => {
-                void uploadAndSendFiles(files, caption);
-              }}
-              isConnected={canSendMessages}
-              isUploading={isUploading}
-              uploadProgress={uploadProgress}
-              editingMessage={editingMessage}
-              replyingMessage={replyingMessage}
-              isGroupChat={isGroupChatMode}
-              groupMembers={selectedGroup?.members}
-              currentUsername={currentUser?.username}
-              canMentionAll={currentGroupCanMentionAll}
-              onCancelContext={() => {
-                setEditingMessage(null);
-                setReplyingMessage(null);
-              }}
-              onSaveEdit={handleSaveEdit}
-              onEditLastOwnMessage={handleEditLastOwnMessage}
-              onTypingChange={isAiChatMode ? undefined : handleTypingChange}
-            />
+            selectionMode ? (
+              <MultiSelectActionBar
+                selectedCount={selectedMessagesList.length}
+                deletableCount={deletableSelectedMessages.length}
+                onForward={() => setForwardMessages(selectedMessagesList)}
+                onCopyMerged={() => void handleCopyMergedSelected()}
+                onDeleteSelected={() => void handleBatchDeleteSelected()}
+                onCancel={() => {
+                  setSelectionMode(false);
+                  setSelectedMessageIds(new Set());
+                }}
+              />
+            ) : (
+              <MessageInput
+                chatId={selectedChatId}
+                onSendMessage={handleSendMessage}
+                onFileUpload={(file, caption) => {
+                  void uploadAndSendFile(file, caption);
+                }}
+                onFilesUpload={(files, caption) => {
+                  void uploadAndSendFiles(files, caption);
+                }}
+                isConnected={canSendMessages}
+                isUploading={isUploading}
+                uploadProgress={uploadProgress}
+                editingMessage={editingMessage}
+                replyingMessage={replyingMessage}
+                isGroupChat={isGroupChatMode}
+                groupMembers={selectedGroup?.members}
+                currentUsername={currentUser?.username}
+                canMentionAll={currentGroupCanMentionAll}
+                onCancelContext={() => {
+                  setEditingMessage(null);
+                  setReplyingMessage(null);
+                }}
+                onSaveEdit={handleSaveEdit}
+                onEditLastOwnMessage={handleEditLastOwnMessage}
+                onTypingChange={isAiChatMode ? undefined : handleTypingChange}
+              />
+            )
           }
           showEmptyState={!selectedContact && !selectedGroup}
         >
@@ -1405,8 +1633,35 @@ const ChatPage: React.FC = () => {
               </div>
             </div>
           )}
+          {activePinnedMessage && !isSearchMode && !isContextMode && (
+            <PinnedMessageBanner
+              pinned={activePinnedMessage}
+              onJump={(messageId) => jumpToMessageRef.current?.(messageId)}
+              onUnpin={() => selectedChatId && unpinMessageInChat(selectedChatId)}
+            />
+          )}
+          {inlineSearchOpen && !isSearchMode && !isContextMode && (
+            <InlineChatSearchBar
+              query={inlineSearchQuery}
+              onQueryChange={setInlineSearchQuery}
+              totalMatches={inlineMatchedMessageIds.length}
+              activeIndex={inlineMatchIdx}
+              onStep={handleStepInlineSearch}
+              onSearchRemote={() => {
+                setSearchQuery(inlineSearchQuery);
+                setInlineSearchOpen(false);
+                void handleSearchMessages();
+              }}
+              onClose={() => {
+                setInlineSearchOpen(false);
+                setInlineSearchQuery('');
+                setInlineMatchIdx(0);
+              }}
+            />
+          )}
           <ChatHistory
             key={selectedChatId ?? 'empty'}
+            chatId={selectedChatId}
             currentUserId={currentUser?.id || ''}
             currentUsername={currentUser?.username}
             {...(isSearchMode || isContextMode
@@ -1426,7 +1681,13 @@ const ChatPage: React.FC = () => {
               }
             }}
             onVisibleRangeChange={isSearchMode || isContextMode ? undefined : setVisibleRange}
-            highlightTerm={searchQuery.trim() ? searchQuery.trim() : undefined}
+            highlightTerm={
+              searchQuery.trim()
+                ? searchQuery.trim()
+                : inlineSearchOpen && inlineSearchQuery.trim()
+                  ? inlineSearchQuery.trim()
+                  : undefined
+            }
             highlightSeq={contextHighlightSeq}
             unreadAnchorSeq={isSearchMode || isContextMode ? null : unreadAnchorSeq}
             onMessageSelect={isSearchMode ? handleSelectSearchResult : undefined}
@@ -1437,6 +1698,13 @@ const ChatPage: React.FC = () => {
             onEditMessage={isSearchMode || isContextMode ? undefined : handleEditMessage}
             onDeleteMessage={isSearchMode || isContextMode ? undefined : (msg) => setPendingDeleteMessage(msg)}
             onRetryMessage={isSearchMode || isContextMode ? undefined : handleRetryMessage}
+            onForwardMessage={isSearchMode || isContextMode ? undefined : (msg) => setForwardMessages([msg])}
+            onEnterMultiSelect={isSearchMode || isContextMode ? undefined : handleEnterMultiSelect}
+            onPinMessage={isSearchMode || isContextMode ? undefined : handlePinMessage}
+            selectionMode={selectionMode && !isSearchMode && !isContextMode}
+            selectedMessageIds={selectedMessageIds}
+            onToggleSelectMessage={handleToggleSelectMessage}
+            jumpToMessageRef={jumpToMessageRef}
             onToggleReaction={
               isSearchMode || isContextMode || !currentUser?.id
                 ? undefined
@@ -1571,6 +1839,20 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ForwardMessageModal
+        isOpen={Boolean(forwardMessages && forwardMessages.length > 0)}
+        messageCount={forwardMessages?.length || 0}
+        previewText={
+          forwardMessages && forwardMessages.length > 0
+            ? summarizeMessagePreview(forwardMessages[0])
+            : ''
+        }
+        chats={chats}
+        contacts={contacts}
+        onClose={() => setForwardMessages(null)}
+        onConfirmForward={handleConfirmForward}
+      />
 
       <ChatImageLightbox
         src={detailLightboxMedia?.src ?? null}
