@@ -1,0 +1,147 @@
+.author-hover-trigger {
+    display: inline-flex;
+    align-items: center;
+}
+
+.author-hover-card {
+    position: fixed;
+    z-index: 140;
+    width: 296px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: var(--color-background, rgba(255, 255, 255, 0.98));
+    border: 1px solid var(--color-border-subtle, #e2e8f0);
+    box-shadow: 0 16px 38px rgba(15, 20, 25, 0.16);
+    backdrop-filter: blur(16px);
+}
+
+.author-hover-card__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.author-hover-card__avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 9999px;
+    border: none;
+    padding: 0;
+    overflow: hidden;
+    background: rgba(51, 144, 236, 0.14);
+    color: var(--tg-blue, #3390ec);
+    font-size: 18px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.author-hover-card__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.author-hover-card__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.author-hover-card__dm {
+    width: 30px;
+    height: 30px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border, #cbd5e1);
+    background: transparent;
+    color: var(--color-text-primary, #0f1419);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.14s ease;
+}
+
+.author-hover-card__dm:hover {
+    background: rgba(15, 20, 25, 0.06);
+}
+
+.author-hover-card__follow {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-cta-solid, #0f1419);
+    background: var(--color-cta-solid, #0f1419);
+    color: #ffffff;
+    font-size: 12.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.author-hover-card__follow.is-following {
+    background: transparent;
+    color: var(--color-text-primary, #0f1419);
+    border-color: var(--color-border, #cbd5e1);
+}
+
+.author-hover-card__identity {
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+.author-hover-card__name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-text-primary, #0f1419);
+}
+
+.author-hover-card__handle {
+    font-size: 13px;
+    color: var(--color-text-secondary, #536471);
+}
+
+.author-hover-card__bio {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--color-text-primary, #0f1419);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.author-hover-card__bio.is-muted {
+    color: var(--color-text-secondary, #64748b);
+}
+
+.author-hover-card__stats {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border-subtle, #f1f5f9);
+    display: flex;
+    gap: 14px;
+    font-size: 12.5px;
+    color: var(--color-text-secondary, #536471);
+}
+
+.author-hover-card__stats strong {
+    color: var(--color-text-primary, #0f1419);
+    font-weight: 700;
+}
+
+:root[data-theme="dark"] .author-hover-card {
+    background: var(--color-background, #17212b);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="dark"] .author-hover-card__dm:hover {
+    background: rgba(255, 255, 255, 0.08);
+}

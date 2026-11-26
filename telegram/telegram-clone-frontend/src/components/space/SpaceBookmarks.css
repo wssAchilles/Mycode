@@ -1,0 +1,121 @@
+.space-bookmarks {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+}
+
+.space-bookmarks__header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: 56px;
+    padding: 0 clamp(16px, 2.8cqi, 28px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--color-header-bg, rgba(255, 255, 255, 0.86));
+    backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--color-border-subtle, rgba(15, 20, 25, 0.06));
+}
+
+.space-bookmarks__title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-text-primary, #0F1419);
+}
+
+.space-bookmarks__title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 800;
+}
+
+.space-bookmarks__count {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: rgba(51, 144, 236, 0.12);
+    color: var(--tg-blue, #3390ec);
+}
+
+.space-bookmarks__refresh {
+    width: 32px;
+    height: 32px;
+    border-radius: 9999px;
+    border: 1px solid var(--color-border-subtle, rgba(15, 20, 25, 0.08));
+    background: transparent;
+    color: var(--color-text-secondary, #536471);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.space-bookmarks__refresh.is-loading svg {
+    animation: space-bookmarks-spin 0.85s linear infinite;
+}
+
+@keyframes space-bookmarks-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.space-bookmarks__skeletons {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.space-bookmarks__skeleton-item {
+    display: flex;
+    gap: 12px;
+}
+
+.space-bookmarks__skeleton-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 9999px;
+}
+
+.space-bookmarks__skeleton-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.space-bookmarks__skeleton-line {
+    height: 14px;
+    border-radius: 7px;
+}
+
+.space-bookmarks__skeleton-line.is-short {
+    width: 35%;
+}
+
+.space-bookmarks__empty {
+    padding: 40px 24px;
+}
+
+.space-bookmarks__more {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    background: transparent;
+    color: var(--tg-blue, #3390ec);
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+:root[data-theme="dark"] .space-bookmarks__header {
+    background: rgba(15, 20, 25, 0.85);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}

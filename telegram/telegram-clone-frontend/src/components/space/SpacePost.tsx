@@ -5,10 +5,13 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Bookmark } from 'lucide-react';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
+import { AuthorHoverCard } from './AuthorHoverCard';
 import { useAnalytics, useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import { useSpaceStore } from '../../stores';
+import { useBookmarkStore } from '../../stores/useBookmarkStore';
 import apiClient, { authUtils } from '../../services/apiClient';
 import { spaceAPI } from '../../services/spaceApi';
 import { showToast } from '../ui/Toast';
@@ -117,6 +120,7 @@ export interface SpacePostProps {
     feedPosition?: number;
     showRecommendationReason?: boolean;
     showPinAction?: boolean;
+    isKeyboardFocused?: boolean;
 }
 
 const CODE_OR_URL_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]+`|https?:\/\/[^\s<>"'`]+)/g;
@@ -754,29 +758,41 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             <>
                 {/* 帖子头部 */}
                 <header className="space-post__header">
-                    <button className="space-post__avatar" onClick={handleAuthorClick} aria-label={`查看 ${post.author.username} 的主页`}>
-                        {post.author.avatarUrl && !avatarFailed ? (
-                            <img
-                                src={post.author.avatarUrl}
-                                alt={post.author.username}
-                                crossOrigin={resolveMediaCrossOrigin(post.author.avatarUrl)}
-                                onError={() => setAvatarFailed(true)}
-                            />
-                        ) : (
-                            <div className="space-post__avatar-placeholder">
-                                {getInitials(post.author.username)}
-                            </div>
-                        )}
-                    </button>
+                    <AuthorHoverCard
+                        authorId={post.author.id}
+                        authorName={post.author.username}
+                        authorAvatarUrl={post.author.avatarUrl}
+                    >
+                        <button className="space-post__avatar" onClick={handleAuthorClick} aria-label={`查看 ${post.author.username} 的主页`}>
+                            {post.author.avatarUrl && !avatarFailed ? (
+                                <img
+                                    src={post.author.avatarUrl}
+                                    alt={post.author.username}
+                                    crossOrigin={resolveMediaCrossOrigin(post.author.avatarUrl)}
+                                    onError={() => setAvatarFailed(true)}
+                                />
+                            ) : (
+                                <div className="space-post__avatar-placeholder">
+                                    {getInitials(post.author.username)}
+                                </div>
+                            )}
+                        </button>
+                    </AuthorHoverCard>
 
                     <div className="space-post__user-info">
                         <div className="space-post__user-row">
                             {isNewsPost && sourceLabel && (
                                 <span className="space-post__source-badge">{sourceLabel}</span>
                             )}
-                            <button className="space-post__username space-post__author-btn" onClick={handleAuthorClick}>
-                                {post.author.username}
-                            </button>
+                            <AuthorHoverCard
+                                authorId={post.author.id}
+                                authorName={post.author.username}
+                                authorAvatarUrl={post.author.avatarUrl}
+                            >
+                                <button className="space-post__username space-post__author-btn" onClick={handleAuthorClick}>
+                                    {post.author.username}
+                                </button>
+                            </AuthorHoverCard>
                             {post.author.handle && (
                                 <>
                                     <span className="space-post__handle">@{post.author.handle}</span>
@@ -1077,6 +1093,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             <ShareIcon />
                         </span>
                     </button>
+
+                    <SpacePostBookmarkButton post={post} />
+
                     {showPinAction && (
                         <button
                             className={`space-post__action space-post__action--pin ${isPinned ? 'is-active' : ''}`}
@@ -1107,7 +1126,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     return (
         <article
-            className={`space-post ${isNewsPost ? 'space-post--news' : ''} ${showMoreMenu ? 'space-post--menu-open' : ''} ${isRemoving ? 'is-removing' : ''}`}
+            data-space-post-id={post.id}
+            data-keyboard-focused={isKeyboardFocused ? 'true' : undefined}
+            className={`space-post ${isNewsPost ? 'space-post--news' : ''} ${showMoreMenu ? 'space-post--menu-open' : ''} ${isRemoving ? 'is-removing' : ''} ${isKeyboardFocused ? 'is-keyboard-focused' : ''}`}
             onClick={handleClick}
             ref={setArticleRef}
         >
@@ -1123,6 +1144,29 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                 renderPostContent()
             )}
         </article>
+    );
+};
+
+const SpacePostBookmarkButton: React.FC<{ post: PostData }> = ({ post }) => {
+    const isBookmarked = useBookmarkStore((state) => Boolean(state.bookmarkedIds[post.id]));
+    const toggleBookmark = useBookmarkStore((state) => state.toggleBookmark);
+
+    return (
+        <button
+            type="button"
+            className={`space-post__action space-post__action--bookmark ${isBookmarked ? 'is-active' : ''}`}
+            onClick={(e) => {
+                e.stopPropagation();
+                void toggleBookmark(post);
+            }}
+            aria-label={isBookmarked ? '取消收藏' : '收藏动态'}
+            aria-pressed={isBookmarked}
+            title={isBookmarked ? '已收藏（点击移出收藏）' : '加入收藏夹 (B)'}
+        >
+            <span className="space-post__action-icon">
+                <Bookmark size={16} fill={isBookmarked ? 'currentColor' : 'none'} />
+            </span>
+        </button>
     );
 };
 

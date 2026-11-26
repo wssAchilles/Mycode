@@ -10,6 +10,7 @@ import {
     formatCommentTime,
     formatFullCommentTime,
 } from '../components/space/utils/formatCommentTime';
+import { filterAndSortComments, type CommentSortMode } from '../components/space/utils/commentSortFilter';
 import { showToast } from '../components/ui/Toast';
 import { SHARE_BASE_URL } from '../config/share';
 import './SpacePostDetailPage.css';
@@ -29,6 +30,8 @@ const SpacePostDetailPage: React.FC = () => {
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [isComposerFocused, setIsComposerFocused] = useState(false);
+    const [commentSortBy, setCommentSortBy] = useState<CommentSortMode>('latest');
+    const [onlyAuthorComments, setOnlyAuthorComments] = useState(false);
 
     const composerRef = useRef<HTMLTextAreaElement>(null);
     const isComposingRef = useRef(false);
@@ -162,6 +165,16 @@ const SpacePostDetailPage: React.FC = () => {
             }
         });
     }, []);
+
+    const visibleComments = useMemo(
+        () =>
+            filterAndSortComments(comments, {
+                sortBy: commentSortBy,
+                onlyAuthor: onlyAuthorComments,
+                postAuthorId: post?.author?.id,
+            }),
+        [commentSortBy, comments, onlyAuthorComments, post?.author?.id],
+    );
 
     const totalComments = post ? Math.max(post.commentCount, comments.length) : comments.length;
     const isNearLimit = draft.length >= Math.floor(COMMENT_MAX_LENGTH * 0.9);
@@ -353,8 +366,33 @@ const SpacePostDetailPage: React.FC = () => {
 
                 <section className="space-detail__comments" aria-label="回复列表">
                     <div className="space-detail__comments-header">
-                        <h2>全部回复</h2>
-                        <span className="space-detail__count-badge">{totalComments}</span>
+                        <div className="space-detail__comments-title-group">
+                            <h2>全部回复</h2>
+                            <span className="space-detail__count-badge">{totalComments}</span>
+                        </div>
+                        <div className="space-detail__comment-filters" role="group" aria-label="评论排序与筛选">
+                            <button
+                                type="button"
+                                className={`space-detail__filter-pill ${commentSortBy === 'latest' ? 'is-active' : ''}`}
+                                onClick={() => setCommentSortBy('latest')}
+                            >
+                                最新
+                            </button>
+                            <button
+                                type="button"
+                                className={`space-detail__filter-pill ${commentSortBy === 'hot' ? 'is-active' : ''}`}
+                                onClick={() => setCommentSortBy('hot')}
+                            >
+                                最热
+                            </button>
+                            <button
+                                type="button"
+                                className={`space-detail__filter-pill ${onlyAuthorComments ? 'is-active' : ''}`}
+                                onClick={() => setOnlyAuthorComments((prev) => !prev)}
+                            >
+                                仅看作者
+                            </button>
+                        </div>
                     </div>
 
                     {loadingComments && comments.length === 0 && (
@@ -384,7 +422,7 @@ const SpacePostDetailPage: React.FC = () => {
                     )}
 
                     <div className="space-detail__comment-list">
-                        {comments.map((comment) => {
+                        {visibleComments.map((comment) => {
                             const relativeTime = formatCommentTime(comment.createdAt);
                             const fullTime = formatFullCommentTime(comment.createdAt);
                             return (

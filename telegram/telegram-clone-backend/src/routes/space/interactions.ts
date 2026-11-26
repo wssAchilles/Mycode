@@ -4,7 +4,11 @@
  */
 
 import { Router, Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { spaceService } from '../../services/spaceService';
+import Post from '../../models/Post';
+import Like from '../../models/Like';
+import PostBookmark from '../../models/PostBookmark';
 import User from '../../models/User';
 import UserSignal from '../../models/UserSignal';
 import {
@@ -14,6 +18,7 @@ import {
 import {
     log,
     transformPostToResponse,
+    transformPostsToResponse,
     extractPostKeywords,
     logAction,
     logSignal,
@@ -368,6 +373,120 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
     } catch (error) {
         log.error({ err: error }, '发表评论失败');
         return res.status(500).json({ error: '发表评论失败' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// 书签收藏接口：POST / DELETE /posts/:id/bookmark & GET /bookmarks
+// ---------------------------------------------------------------------------
+
+router.post('/posts/:id/bookmark', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+        if (!userId) return res.status(401).json({ error: '未授权' });
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: '无效的动态 ID' });
+        }
+
+        const postObjectId = new mongoose.Types.ObjectId(id);
+        await PostBookmark.findOneAndUpdate(
+            { userId, postId: postObjectId },
+            { $setOnInsert: { userId, postId: postObjectId } },
+            { upsert: true, new: true },
+        );
+
+        return res.json({ success: true, bookmarked: true });
+    } catch (error) {
+        log.error({ err: error }, '收藏动态失败');
+        return res.status(500).json({ error: '收藏动态失败' });
+    }
+});
+
+router.delete('/posts/:id/bookmark', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+        if (!userId) return res.status(401).json({ error: '未授权' });
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: '无效的动态 ID' });
+        }
+
+        await PostBookmark.deleteOne({
+            userId,
+            postId: new mongoose.Types.ObjectId(id),
+        });
+
+        return res.json({ success: true, bookmarked: false });
+    } catch (error) {
+        log.error({ err: error }, '取消收藏失败');
+        return res.status(500).json({ error: '取消收藏失败' });
+    }
+});
+
+router.get('/bookmarks', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        if (!userId) return res.status(401).json({ error: '未授权' });
+
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursorDate = cursorRaw ? new Date(cursorRaw) : undefined;
+        const query: Record<string, unknown> = { userId };
+        if (cursorDate && !Number.isNaN(cursorDate.getTime())) {
+            query.createdAt = { $lt: cursorDate };
+        }
+
+        const records = await PostBookmark.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limit + 1)
+            .lean();
+
+        const hasMore = records.length > limit;
+        const pageRecords = hasMore ? records.slice(0, limit) : records;
+        const nextCursor = hasMore && pageRecords.length > 0
+            ? (pageRecords[pageRecords.length - 1].createdAt instanceof Date
+                ? pageRecords[pageRecords.length - 1].createdAt.toISOString()
+                : String(pageRecords[pageRecords.length - 1].createdAt))
+            : undefined;
+
+        const orderedPostIds = pageRecords.map((r) => String(r.postId));
+        if (orderedPostIds.length === 0) {
+            return res.json({ posts: [], bookmarkIds: [], hasMore: false, nextCursor: undefined });
+        }
+
+        const objectIds = orderedPostIds
+            .filter((pid) => mongoose.Types.ObjectId.isValid(pid))
+            .map((pid) => new mongoose.Types.ObjectId(pid));
+
+        const [posts, likes] = await Promise.all([
+            Post.find({ _id: { $in: objectIds }, deletedAt: null }).lean(),
+            Like.find({ userId, postId: { $in: objectIds } }).select('postId').lean(),
+        ]);
+
+        const likedSet = new Set(likes.map((item: any) => String(item.postId)));
+        const postById = new Map<string, any>();
+        for (const post of posts as any[]) {
+            postById.set(String(post._id), {
+                ...post,
+                isLikedByUser: likedSet.has(String(post._id)),
+            });
+        }
+
+        const orderedPosts = orderedPostIds
+            .map((pid) => postById.get(pid))
+            .filter(Boolean);
+
+        const formattedPosts = await transformPostsToResponse(orderedPosts);
+        return res.json({
+            posts: formattedPosts,
+            bookmarkIds: formattedPosts.map((p: any) => String(p.id || p._id)).filter(Boolean),
+            hasMore,
+            nextCursor,
+        });
+    } catch (error) {
+        log.error({ err: error }, '获取收藏列表失败');
+        return res.status(500).json({ error: '获取收藏列表失败' });
     }
 });
 

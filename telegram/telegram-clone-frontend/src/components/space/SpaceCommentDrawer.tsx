@@ -8,6 +8,7 @@ import {
     formatCommentTime,
     formatFullCommentTime,
 } from './utils/formatCommentTime';
+import { filterAndSortComments, type CommentSortMode } from './utils/commentSortFilter';
 import { showToast } from '../ui/Toast';
 import {
     createTimeline,
@@ -41,6 +42,8 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [isComposerFocused, setIsComposerFocused] = useState(false);
+    const [commentSortBy, setCommentSortBy] = useState<CommentSortMode>('latest');
+    const [onlyAuthorComments, setOnlyAuthorComments] = useState(false);
     const [renderedPost, setRenderedPost] = useState<PostData | null>(post);
     const panelRef = useRef<HTMLElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -355,6 +358,30 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
                     </div>
                 </div>
 
+                <div className="space-comment-drawer__filters" role="group" aria-label="评论排序与筛选">
+                    <button
+                        type="button"
+                        className={`space-comment-drawer__filter-pill ${commentSortBy === 'latest' ? 'is-active' : ''}`}
+                        onClick={() => setCommentSortBy('latest')}
+                    >
+                        最新
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-comment-drawer__filter-pill ${commentSortBy === 'hot' ? 'is-active' : ''}`}
+                        onClick={() => setCommentSortBy('hot')}
+                    >
+                        最热
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-comment-drawer__filter-pill ${onlyAuthorComments ? 'is-active' : ''}`}
+                        onClick={() => setOnlyAuthorComments((prev) => !prev)}
+                    >
+                        仅看作者
+                    </button>
+                </div>
+
                 <div className="space-comment-drawer__list">
                     {loading && comments.length === 0 && (
                         <div className="space-comment-drawer__skeletons" aria-label="加载评论中">
@@ -382,7 +409,11 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
                         </div>
                     )}
 
-                    {comments.map((comment) => {
+                    {filterAndSortComments(comments, {
+                        sortBy: commentSortBy,
+                        onlyAuthor: onlyAuthorComments,
+                        postAuthorId: renderedPost.author.id,
+                    }).map((comment) => {
                         const relativeTime = formatCommentTime(comment.createdAt);
                         const fullTime = formatFullCommentTime(comment.createdAt);
                         return (

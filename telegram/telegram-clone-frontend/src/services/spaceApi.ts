@@ -1294,6 +1294,49 @@ export const spaceAPI = {
         const response = await apiClient.delete<{ post: PostResponse }>(`/api/space/posts/${postId}/pin`);
         return transformPost(response.data.post);
     },
+
+    /**
+     * 收藏 / 取消收藏 / 获取收藏夹分页
+     */
+    bookmarkPost: async (postId: string): Promise<void> => {
+        try {
+            await apiClient.post(`/api/space/posts/${postId}/bookmark`);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '收藏失败'));
+        }
+    },
+
+    unbookmarkPost: async (postId: string): Promise<void> => {
+        try {
+            await apiClient.delete(`/api/space/posts/${postId}/bookmark`);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '取消收藏失败'));
+        }
+    },
+
+    getBookmarks: async (
+        limit: number = 20,
+        cursor?: string,
+    ): Promise<{ posts: PostData[]; bookmarkIds: string[]; hasMore: boolean; nextCursor?: string }> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            if (cursor) params.append('cursor', cursor);
+            const response = await apiClient.get<{
+                posts: PostResponse[];
+                bookmarkIds?: string[];
+                hasMore: boolean;
+                nextCursor?: string;
+            }>(`/api/space/bookmarks?${params.toString()}`);
+            return {
+                posts: (response.data.posts || []).map(transformPost),
+                bookmarkIds: response.data.bookmarkIds || [],
+                hasMore: Boolean(response.data.hasMore),
+                nextCursor: response.data.nextCursor,
+            };
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取收藏夹失败'));
+        }
+    },
 };
 
 export default spaceAPI;

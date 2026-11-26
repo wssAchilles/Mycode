@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Monitor, Moon, Sun } from 'lucide-react';
+import { ArrowUp, Bookmark, Monitor, Moon, Sun } from 'lucide-react';
 import { formatThemeModeLabel, useThemeStore } from '../core/theme/themeStore';
 import {
     SpaceAsideWidgets,
@@ -15,7 +15,10 @@ import {
     ComposePostModal,
     type PostData,
 } from '../components/space';
+import { SpaceBookmarks } from '../components/space/SpaceBookmarks';
 import { useSpaceStore } from '../stores';
+import { useBookmarkStore } from '../stores/useBookmarkStore';
+import { useSpaceKeyboardNav } from '../features/space/useSpaceKeyboardNav';
 import {
     buildSpaceScrollKey,
     readSpaceScrollPosition,
@@ -53,7 +56,7 @@ export const SpacePage: React.FC = () => {
     const analytics = useAnalytics({ source: 'space_page' });
     const themeMode = useThemeStore((state) => state.mode);
     const cycleThemeMode = useThemeStore((state) => state.cycleMode);
-    const [activeSection, setActiveSection] = useState<'home' | 'explore' | 'notifications'>('home');
+    const [activeSection, setActiveSection] = useState<'home' | 'explore' | 'notifications' | 'bookmarks'>('home');
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
@@ -94,7 +97,7 @@ export const SpacePage: React.FC = () => {
     // 同步 URL 查询参数（如通过全局 ⌘K 命令面板跳转到 ?section=explore）
     useEffect(() => {
         const sectionParam = new URLSearchParams(location.search).get('section');
-        if (sectionParam === 'explore' || sectionParam === 'notifications' || sectionParam === 'home') {
+        if (sectionParam === 'explore' || sectionParam === 'notifications' || sectionParam === 'bookmarks' || sectionParam === 'home') {
             setActiveSection(sectionParam);
         }
     }, [location.search]);
@@ -137,6 +140,9 @@ export const SpacePage: React.FC = () => {
     const repostPost = useSpaceStore((state) => state.repostPost);
     const unrepostPost = useSpaceStore((state) => state.unrepostPost);
     const clearUnreadNotifications = useSpaceStore((state) => state.clearUnreadNotifications);
+    const bookmarkCount = useBookmarkStore((state) => Object.keys(state.bookmarkedIds).length);
+    const loadBookmarks = useBookmarkStore((state) => state.loadBookmarks);
+    const toggleBookmark = useBookmarkStore((state) => state.toggleBookmark);
     const loadContacts = useChatStore((state) => state.loadContacts);
     const contacts = useChatStore((state) => state.contacts);
     const chats = useChatStore((state) => state.chats);
@@ -145,6 +151,11 @@ export const SpacePage: React.FC = () => {
         () => chats.reduce((sum, chat) => sum + (chat.unreadCount || 0), 0) + pendingRequestsCount,
         [chats, pendingRequestsCount],
     );
+
+    // 首次进入 Space 时预热书签 ID 集合，供 Feed 卡片直接呈现已收藏状态
+    useEffect(() => {
+        void loadBookmarks(true);
+    }, [loadBookmarks]);
 
     // 停留在通知面板时自动清空未读通知徽章（须在 store selector 声明之后执行以避免 TDZ）
     useEffect(() => {
@@ -273,6 +284,25 @@ export const SpacePage: React.FC = () => {
         return () => el.removeEventListener('scroll', onScroll);
     }, [currentScrollKey]);
 
+    // 桌面端 J/K/L/B/C/N 专业键盘浏览流
+    const { focusedIndex } = useSpaceKeyboardNav({
+        enabled: activeSection === 'home' && !commentPost && !composeModalOpen && !isShareOpen,
+        posts,
+        onLikeToggle: (targetPost) => {
+            if (targetPost.isLiked) {
+                void unlikePost(targetPost.id);
+            } else {
+                void likePost(targetPost.id);
+            }
+        },
+        onBookmarkToggle: (targetPost) => {
+            void toggleBookmark(targetPost);
+        },
+        onCommentOpen: handleComment,
+        onPostOpen: handlePostClick,
+        onComposeOpen: () => setComposeModalOpen(true),
+    });
+
     // 桌面端按 R 刷新首页动态（避开输入框与修饰键）
     useEffect(() => {
         if (typeof window === 'undefined' || activeSection !== 'home') return;
@@ -396,6 +426,8 @@ export const SpacePage: React.FC = () => {
                 setActiveSection('explore');
             } else if (path === 'notifications') {
                 setActiveSection('notifications');
+            } else if (path === 'bookmarks') {
+                setActiveSection('bookmarks');
             } else if (path.startsWith('/')) {
                 navigate(path);
             } else {
@@ -572,6 +604,19 @@ export const SpacePage: React.FC = () => {
                     </button>
                     <button
                         type="button"
+                        className={`space-page__nav-item ${activeSection === 'bookmarks' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('bookmarks', '收藏')}
+                    >
+                        <Bookmark size={20} strokeWidth={activeSection === 'bookmarks' ? 2.4 : 1.9} />
+                        <span>收藏</span>
+                        {bookmarkCount > 0 && (
+                            <span className="space-page__nav-badge" aria-label={`已收藏 ${bookmarkCount}`}>
+                                {bookmarkCount > 99 ? '99+' : bookmarkCount}
+                            </span>
+                        )}
+                    </button>
+                    <button
+                        type="button"
                         className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('/chat', '消息')}
                         onMouseEnter={prefetchChatRoute}
@@ -683,6 +728,7 @@ export const SpacePage: React.FC = () => {
                             onAuthorClick={handleAuthorClick}
                             onHashtagClick={handleTrendClick}
                             scrollElementRef={contentScrollRef}
+                            focusedPostIndex={focusedIndex}
                         />
                     )}
                     {activeSection === 'explore' && (
@@ -703,6 +749,21 @@ export const SpacePage: React.FC = () => {
                         <SpaceNotifications
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}
+                        />
+                    )}
+                    {activeSection === 'bookmarks' && (
+                        <SpaceBookmarks
+                            onLike={likePost}
+                            onUnlike={unlikePost}
+                            onComment={handleComment}
+                            onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
+                            onUnrepost={(id) => { unrepostPost(id); showToast('已取消转发', 'info'); }}
+                            onQuote={handleQuotePost}
+                            onShare={handleShare}
+                            onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
+                            onHashtagClick={handleTrendClick}
+                            onBrowseHome={() => setActiveSection('home')}
                         />
                     )}
                 </div>

@@ -27,6 +27,7 @@ const SHORTCUT_GROUPS: Array<{ title: string; items: ShortcutRow[] }> = [
   {
     title: '聊天与消息会话',
     items: [
+      { keys: ['⌘ / Ctrl', 'F'], label: '在当前聊天上下文中搜索消息' },
       { keys: ['Enter'], label: '发送当前消息或附件' },
       { keys: ['Shift', 'Enter'], label: '在输入框内换行' },
       { keys: ['↑'], label: '输入为空时快速编辑上一条消息' },
@@ -37,9 +38,14 @@ const SHORTCUT_GROUPS: Array<{ title: string; items: ShortcutRow[] }> = [
   {
     title: 'Space 动态与阅读',
     items: [
+      { keys: ['J', 'K'], label: '在首页信息流逐条上下移动聚焦动态' },
+      { keys: ['L'], label: '点赞 / 取消赞当前聚焦动态' },
+      { keys: ['B'], label: '收藏 / 取消收藏当前聚焦动态' },
+      { keys: ['C'], label: '打开当前聚焦动态的评论抽屉' },
+      { keys: ['N'], label: '快速打开独立发布动态窗口' },
+      { keys: ['R'], label: '静默刷新首页动态列表' },
       { keys: ['⌘ / Ctrl', 'Enter'], label: '在动态编辑器直接发布' },
       { keys: ['←', '→'], label: '大图灯箱内切换上一张 / 下一张' },
-      { keys: ['双击大图'], label: '快速切换 1x / 2x 缩放预览' },
     ],
   },
 ];

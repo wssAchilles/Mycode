@@ -41,6 +41,8 @@ export interface SpaceTimelineProps {
     onHashtagClick?: SpacePostProps['onHashtagClick'];
     /** SpacePage scroll container (avoid window scrolling + enables virtualization). */
     scrollElementRef?: React.RefObject<HTMLElement | null>;
+    /** 键盘 J/K 浏览聚焦索引 */
+    focusedPostIndex?: number;
 }
 
 export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
@@ -68,6 +70,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onAuthorClick,
     onHashtagClick,
     scrollElementRef,
+    focusedPostIndex = -1,
 }) => {
     const shouldVirtualize = posts.length >= 80;
     const [showNewPostsHint, setShowNewPostsHint] = useState(false);
@@ -367,6 +370,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                     onClick={onPostClick}
                                     onAuthorClick={onAuthorClick}
                                     onHashtagClick={onHashtagClick}
+                                    isKeyboardFocused={focusedPostIndex === index}
                                 />
                             </div>
                         ))}
@@ -411,6 +415,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                         onAuthorClick={onAuthorClick}
                                         onHashtagClick={onHashtagClick}
                                         onLayoutChanged={scheduleMeasure}
+                                        isKeyboardFocused={focusedPostIndex === virtualRow.index}
                                     />
                                 </div>
                             );

@@ -3,11 +3,18 @@
  * 类 Twitter 发帖体验
  */
 
-import React, { useState, useCallback, useRef, useEffect, type ChangeEvent } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, type ChangeEvent } from 'react';
 import { mlService } from '../../services/mlService';
 import { showToast } from '../ui/Toast';
 import { giphyApi, type GiphyGif } from '../../services/giphyApi';
+import { spaceAPI } from '../../services/spaceApi';
+import { useChatStore } from '../../features/chat/store/chatStore';
+import { useSpaceStore } from '../../stores/useSpaceStore';
 import { resolveSpaceMediaUrl } from '../../utils/spaceMediaUrl';
+import {
+    ComposerSuggestPopover,
+    type ComposerSuggestion,
+} from './composer/ComposerSuggestPopover';
 import './PostComposer.css';
 
 const MAX_CHARS = 280;
@@ -112,6 +119,15 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const [gifLoading, setGifLoading] = useState(false);
     const [isAddingGif, setIsAddingGif] = useState(false);
     const [avatarError, setAvatarError] = useState(false);
+    const [suggestTrigger, setSuggestTrigger] = useState<{
+        kind: 'mention' | 'hashtag';
+        start: number;
+        end: number;
+        keyword: string;
+    } | null>(null);
+    const [suggestActiveIdx, setSuggestActiveIdx] = useState(0);
+    const [cachedTrendTags, setCachedTrendTags] = useState<string[]>([]);
+    const [draggingMediaIdx, setDraggingMediaIdx] = useState<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -149,13 +165,124 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         }
     }, []);
 
+    const updateSuggestTrigger = useCallback((nextValue: string, cursorPos: number | null) => {
+        if (cursorPos === null || cursorPos < 0) {
+            setSuggestTrigger(null);
+            return;
+        }
+        const beforeCursor = nextValue.slice(0, cursorPos);
+        const match = beforeCursor.match(/(?:^|\s)([@#])([a-zA-Z0-9_\u4e00-\u9fa5-]{0,30})$/);
+        if (!match) {
+            setSuggestTrigger(null);
+            return;
+        }
+        const symbol = match[1];
+        const keyword = match[2] || '';
+        const tokenStart = beforeCursor.length - keyword.length - 1;
+        setSuggestTrigger({
+            kind: symbol === '@' ? 'mention' : 'hashtag',
+            start: tokenStart,
+            end: cursorPos,
+            keyword,
+        });
+        setSuggestActiveIdx(0);
+
+        if (symbol === '#' && cachedTrendTags.length === 0) {
+            void spaceAPI.getTrends(8).then((items) => {
+                const tags = items.map((t) => String(t.tag || '').replace(/^#+/, '')).filter(Boolean);
+                if (tags.length > 0) setCachedTrendTags(tags);
+            }).catch(() => undefined);
+        }
+    }, [cachedTrendTags.length]);
+
+    const suggestions = useMemo<ComposerSuggestion[]>(() => {
+        if (!suggestTrigger) return [];
+        const kw = suggestTrigger.keyword.trim().toLowerCase();
+
+        if (suggestTrigger.kind === 'mention') {
+            const seen = new Set<string>();
+            const items: ComposerSuggestion[] = [];
+            const contacts = useChatStore.getState().contacts;
+            for (const c of contacts) {
+                const uname = c.username?.trim();
+                if (!uname || seen.has(uname.toLowerCase())) continue;
+                seen.add(uname.toLowerCase());
+                if (!kw || uname.toLowerCase().includes(kw) || c.alias?.toLowerCase().includes(kw)) {
+                    items.push({
+                        id: `mention-contact-${c.userId}`,
+                        kind: 'mention',
+                        label: uname,
+                        insertText: `@${uname} `,
+                        subtitle: c.alias && c.alias !== uname ? c.alias : '好友',
+                    });
+                }
+                if (items.length >= 6) return items;
+            }
+            const feedPosts = useSpaceStore.getState().posts;
+            for (const p of feedPosts) {
+                const uname = p.author?.username?.trim();
+                if (!uname || uname === currentUser.username || seen.has(uname.toLowerCase())) continue;
+                seen.add(uname.toLowerCase());
+                if (!kw || uname.toLowerCase().includes(kw)) {
+                    items.push({
+                        id: `mention-author-${p.author.id}`,
+                        kind: 'mention',
+                        label: uname,
+                        insertText: `@${uname} `,
+                        subtitle: '动态作者',
+                    });
+                }
+                if (items.length >= 6) break;
+            }
+            return items;
+        }
+
+        const tagPool = Array.from(
+            new Set([
+                ...cachedTrendTags,
+                '日常记录',
+                '技术分享',
+                '前端工程',
+                'AI前沿',
+                '摄影打卡',
+            ]),
+        );
+        return tagPool
+            .filter((tag) => !kw || tag.toLowerCase().includes(kw))
+            .slice(0, 6)
+            .map((tag) => ({
+                id: `hashtag-${tag}`,
+                kind: 'hashtag' as const,
+                label: `#${tag}`,
+                insertText: `#${tag} `,
+                subtitle: cachedTrendTags.includes(tag) ? '热门话题' : '推荐标签',
+            }));
+    }, [cachedTrendTags, currentUser.username, suggestTrigger]);
+
+    const applySuggestion = useCallback((item: ComposerSuggestion) => {
+        if (!suggestTrigger) return;
+        const next = `${content.slice(0, suggestTrigger.start)}${item.insertText}${content.slice(suggestTrigger.end)}`;
+        setContent(next);
+        setSuggestTrigger(null);
+        requestAnimationFrame(() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            textarea.focus();
+            const pos = suggestTrigger.start + item.insertText.length;
+            textarea.setSelectionRange(pos, pos);
+            adjustTextareaHeight();
+        });
+    }, [adjustTextareaHeight, content, suggestTrigger]);
+
     // 处理内容变化
     const handleContentChange = useCallback(
         (e: ChangeEvent<HTMLTextAreaElement>) => {
-            setContent(e.target.value);
+            const val = e.target.value;
+            setContent(val);
             adjustTextareaHeight();
+            updateSuggestTrigger(val, e.target.selectionStart);
         },
-        [adjustTextareaHeight]
+        [adjustTextareaHeight, updateSuggestTrigger]
     );
 
     const appendImageFiles = useCallback((files: File[]) => {
@@ -182,6 +309,25 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         // 清空 input 以允许重复选择
         if (e.target) e.target.value = '';
     }, [appendImageFiles]);
+
+    // 拖拽重排已选图片顺序
+    const reorderMedia = useCallback((fromIndex: number, toIndex: number) => {
+        if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+        setMediaFiles((prev) => {
+            if (fromIndex >= prev.length || toIndex >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return next;
+        });
+        setMediaPreviewUrls((prev) => {
+            if (fromIndex >= prev.length || toIndex >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return next;
+        });
+    }, []);
 
     // 移除媒体
     const removeMedia = useCallback((index: number) => {
@@ -342,13 +488,37 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     }, [appendImageFiles]);
 
     const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (suggestTrigger && suggestions.length > 0 && !event.nativeEvent.isComposing) {
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setSuggestActiveIdx((prev) => (prev + 1) % suggestions.length);
+                return;
+            }
+            if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setSuggestActiveIdx((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+                return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault();
+                const chosen = suggestions[suggestActiveIdx] ?? suggestions[0];
+                if (chosen) applySuggestion(chosen);
+                return;
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setSuggestTrigger(null);
+                return;
+            }
+        }
+
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
             event.preventDefault();
             if (canSubmit) {
                 void handleSubmit();
             }
         }
-    }, [canSubmit, handleSubmit]);
+    }, [applySuggestion, canSubmit, handleSubmit, suggestActiveIdx, suggestTrigger, suggestions]);
 
     // 获取首字母
     const getInitials = (name: string): string => name.charAt(0).toUpperCase();
@@ -415,7 +585,14 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         onChange={handleContentChange}
                         onPaste={handlePaste}
                         onKeyDown={handleKeyDown}
+                        onClick={(e) => updateSuggestTrigger(content, e.currentTarget.selectionStart)}
                         rows={1}
+                    />
+                    <ComposerSuggestPopover
+                        suggestions={suggestions}
+                        activeIndex={suggestActiveIdx}
+                        onSelect={applySuggestion}
+                        onHoverIndex={setSuggestActiveIdx}
                     />
                     {charCount > 0 && (
                         <span className={getCharCountClass()}>
@@ -460,12 +637,31 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                     </div>
                 )}
 
-                {/* 媒体预览 */}
+                {/* 媒体预览（支持拖拽图片重排顺序） */}
                 {mediaPreviewUrls.length > 0 && (
                     <div className="post-composer__media-preview">
                         {mediaPreviewUrls.map((url, index) => (
-                            <div key={index} className="post-composer__media-item">
-                                <img src={url} alt="" />
+                            <div
+                                key={`${url}-${index}`}
+                                className={`post-composer__media-item ${draggingMediaIdx === index ? 'is-dragging' : ''}`}
+                                draggable={mediaPreviewUrls.length > 1}
+                                onDragStart={() => setDraggingMediaIdx(index)}
+                                onDragOver={(e) => {
+                                    if (draggingMediaIdx !== null) e.preventDefault();
+                                }}
+                                onDrop={(e) => {
+                                    if (draggingMediaIdx === null) return;
+                                    e.preventDefault();
+                                    reorderMedia(draggingMediaIdx, index);
+                                    setDraggingMediaIdx(null);
+                                }}
+                                onDragEnd={() => setDraggingMediaIdx(null)}
+                                title={mediaPreviewUrls.length > 1 ? '拖动可调整图片顺序' : undefined}
+                            >
+                                <img src={url} alt={`待发布图片 ${index + 1}`} />
+                                {mediaPreviewUrls.length > 1 && index === 0 && (
+                                    <span className="post-composer__media-cover-badge">首图</span>
+                                )}
                                 <button
                                     type="button"
                                     className="post-composer__media-remove"

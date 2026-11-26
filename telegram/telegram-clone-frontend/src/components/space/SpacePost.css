@@ -666,3 +666,13 @@
         animation: none !important;
     }
 }
+
+.space-post.is-keyboard-focused {
+    outline: 2px solid var(--tg-blue, #1D9BF0);
+    outline-offset: -2px;
+    background: rgba(29, 155, 240, 0.035);
+}
+
+.space-post__action--bookmark.is-active {
+    color: var(--tg-blue, #1D9BF0);
+}
