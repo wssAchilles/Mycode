@@ -6,16 +6,22 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { PostData } from '../components/space';
 import type { SocialNotificationRealtimePayload } from '../features/realtime/contracts';
+import {
+    readFeedSnapshot,
+    resolveCurrentSpaceUserId,
+    type SpaceFeedScope,
+    writeFeedSnapshot,
+} from '../features/space/feedSnapshotCache';
 import { spaceAPI, type CreatePostOptions } from '../services/spaceApi';
-import { authStorage } from '../utils/authStorage';
 
 const FEED_STATE_WINDOW = 200;
 
-export type SpaceFeedScope = 'all' | 'friends';
+export type { SpaceFeedScope };
 
 export interface SpaceFeedScopeState {
     posts: PostData[];
     isLoading: boolean;
+    isRefreshing?: boolean;
     hasMore: boolean;
     nextCursor?: string;
     error: string | null;
@@ -24,11 +30,7 @@ export interface SpaceFeedScopeState {
     servedIds: string[];
 }
 
-const getUserIdForFeedState = (): string => {
-    if (typeof window === 'undefined') return 'anonymous';
-    const user = authStorage.getUser();
-    return user?.id ? String(user.id) : 'anonymous';
-};
+const getUserIdForFeedState = (): string => resolveCurrentSpaceUserId();
 
 const feedStateKey = (name: 'seen' | 'served', scope: SpaceFeedScope): string => {
     const uid = getUserIdForFeedState();
@@ -56,16 +58,20 @@ const saveIdWindow = (name: 'seen' | 'served', ids: string[], scope: SpaceFeedSc
     }
 };
 
-const createInitialScopeState = (scope: SpaceFeedScope): SpaceFeedScopeState => ({
-    posts: [],
-    isLoading: false,
-    hasMore: true,
-    nextCursor: undefined,
-    error: null,
-    hasLoaded: false,
-    seenIds: loadIdWindow('seen', scope),
-    servedIds: loadIdWindow('served', scope),
-});
+const createInitialScopeState = (scope: SpaceFeedScope): SpaceFeedScopeState => {
+    const snapshotPosts = readFeedSnapshot(scope) ?? [];
+    return {
+        posts: snapshotPosts,
+        isLoading: false,
+        isRefreshing: false,
+        hasMore: true,
+        nextCursor: undefined,
+        error: null,
+        hasLoaded: false,
+        seenIds: loadIdWindow('seen', scope),
+        servedIds: loadIdWindow('served', scope),
+    };
+};
 
 const mergeIdWindow = (existing: string[], delta: string[], cap: number): string[] => {
     const all = [...(existing || []), ...(delta || [])].map(String).filter(Boolean);
@@ -126,6 +132,7 @@ interface SpaceState {
     clearUnreadNotifications: () => void;
 
     // Feed 操作
+    hydrateFeedSnapshot: (scope?: SpaceFeedScope) => boolean;
     fetchFeed: (refresh?: boolean) => Promise<void>;
     fetchExploreFeed: (refresh?: boolean) => Promise<void>;
     fetchFeedForScope: (scope: SpaceFeedScope, refresh?: boolean) => Promise<void>;
@@ -223,22 +230,51 @@ export const useSpaceStore = create<SpaceState>()(
         error: null,
 
         // === Feed 操作 ===
-        fetchFeedForScope: async (scope: SpaceFeedScope, refresh = false) => {
+        hydrateFeedSnapshot: (targetScope?: SpaceFeedScope) => {
+            const scope = targetScope ?? getScopeKey(get().inNetworkOnly);
             const currentScopeFeed = getScopeFeed(get(), scope);
-            if (currentScopeFeed.isLoading) return;
+            if (currentScopeFeed.posts.length > 0) return true;
 
-            const cursor = refresh ? undefined : currentScopeFeed.nextCursor;
-            const seenIds = currentScopeFeed.seenIds;
-            const servedIds = currentScopeFeed.servedIds;
+            const snapshotPosts = readFeedSnapshot(scope);
+            if (!snapshotPosts || snapshotPosts.length === 0) return false;
 
             set((s) => {
                 const target = getScopeFeed(s, scope);
-                target.isLoading = true;
+                if (target.posts.length === 0) {
+                    target.posts = snapshotPosts;
+                    target.isLoading = false;
+                }
+                if (getScopeKey(s.inNetworkOnly) === scope) {
+                    syncRootFromActiveScope(s);
+                }
+            });
+            return true;
+        },
+
+        fetchFeedForScope: async (scope: SpaceFeedScope, refresh = false) => {
+            const currentScopeFeed = getScopeFeed(get(), scope);
+            if (currentScopeFeed.isLoading || currentScopeFeed.isRefreshing) return;
+
+            if (refresh && currentScopeFeed.posts.length === 0) {
+                get().hydrateFeedSnapshot(scope);
+            }
+
+            const refreshedScopeFeed = getScopeFeed(get(), scope);
+            const hasExistingPosts = refreshedScopeFeed.posts.length > 0;
+            const cursor = refresh ? undefined : refreshedScopeFeed.nextCursor;
+            const seenIds = refreshedScopeFeed.seenIds;
+            const servedIds = refreshedScopeFeed.servedIds;
+
+            set((s) => {
+                const target = getScopeFeed(s, scope);
                 target.error = null;
-                if (refresh) {
-                    target.posts = [];
-                    target.nextCursor = undefined;
-                    target.hasMore = true;
+                if (refresh && hasExistingPosts) {
+                    // SWR：保留已有快照或列表用于渲染，后台静默刷新，不触发骨架屏闪烁
+                    target.isRefreshing = true;
+                    target.isLoading = false;
+                } else {
+                    target.isLoading = true;
+                    target.isRefreshing = false;
                 }
                 if (getScopeKey(s.inNetworkOnly) === scope) {
                     syncRootFromActiveScope(s);
@@ -270,6 +306,7 @@ export const useSpaceStore = create<SpaceState>()(
                     target.nextCursor = result.nextCursor;
                     target.servedIds = nextServed;
                     target.isLoading = false;
+                    target.isRefreshing = false;
                     target.hasLoaded = true;
                     target.error = null;
                     if (getScopeKey(s.inNetworkOnly) === scope) {
@@ -277,13 +314,17 @@ export const useSpaceStore = create<SpaceState>()(
                     }
                 });
 
-                // 持久化已下发滑窗
+                // 持久化已下发滑窗与首屏本地快照
                 saveIdWindow('served', nextServed, scope);
+                if (refresh) {
+                    writeFeedSnapshot(scope, result.posts);
+                }
             } catch (error: unknown) {
                 set((s) => {
                     const target = getScopeFeed(s, scope);
                     target.error = error instanceof Error ? error.message : '加载动态失败';
                     target.isLoading = false;
+                    target.isRefreshing = false;
                     target.hasLoaded = true;
                     if (getScopeKey(s.inNetworkOnly) === scope) {
                         syncRootFromActiveScope(s);
@@ -534,6 +575,8 @@ export const useSpaceStore = create<SpaceState>()(
                     syncRootFromActiveScope(s);
                     s.isCreatingPost = false;
                 });
+                writeFeedSnapshot('all', get().allFeed.posts);
+                writeFeedSnapshot('friends', get().friendsFeed.posts);
 
                 return newPost;
             } catch (error: unknown) {
@@ -662,13 +705,16 @@ export const useSpaceStore = create<SpaceState>()(
                 });
             }),
 
-        removePost: (postId) =>
+        removePost: (postId) => {
             set((s) => {
                 s.allFeed.posts = s.allFeed.posts.filter((p) => p.id !== postId);
                 s.friendsFeed.posts = s.friendsFeed.posts.filter((p) => p.id !== postId);
                 s.searchResults = s.searchResults.filter((p) => p.id !== postId);
                 syncRootFromActiveScope(s);
-            }),
+            });
+            writeFeedSnapshot('all', get().allFeed.posts);
+            writeFeedSnapshot('friends', get().friendsFeed.posts);
+        },
 
         incrementNewPostsCount: () =>
             set((s) => {

@@ -117,6 +117,9 @@ export const SpacePage: React.FC = () => {
     const hasMore = useSpaceStore((state) => state.hasMore);
     const newPostsCount = useSpaceStore((state) => state.newPostsCount);
     const inNetworkOnly = useSpaceStore((state) => state.inNetworkOnly);
+    const activeScopeHasLoaded = useSpaceStore((state) =>
+        state.inNetworkOnly ? state.friendsFeed.hasLoaded : state.allFeed.hasLoaded,
+    );
     const updatePost = useSpaceStore((state) => state.updatePost);
     const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
     const searchResults = useSpaceStore((state) => state.searchResults);
@@ -153,12 +156,12 @@ export const SpacePage: React.FC = () => {
     // 获取当前用户
     const currentUser = authUtils.getCurrentUser();
 
-    // 初始加载
+    // 初始加载：即使本地快照已秒开渲染，首次进入仍后台静默拉取最新 Feed（SWR）
     useEffect(() => {
-        if (posts.length === 0) {
+        if (!activeScopeHasLoaded) {
             fetchFeed(true);
         }
-    }, [fetchFeed, posts.length]);
+    }, [activeScopeHasLoaded, fetchFeed]);
 
     const loadAside = useCallback(async () => {
         setLoadingAside(true);
