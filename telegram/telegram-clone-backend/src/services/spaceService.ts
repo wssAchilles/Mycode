@@ -845,8 +845,12 @@ class SpaceService {
     /**
      * 推荐关注
      */
-    async getRecommendedUsers(userId: string, limit: number = 4): Promise<RecommendedSpaceUser[]> {
-        return getRecommendedUsers(userId, limit);
+    async getRecommendedUsers(
+        userId: string,
+        limit: number = 4,
+        excludeIds: string[] = [],
+    ): Promise<RecommendedSpaceUser[]> {
+        return getRecommendedUsers(userId, limit, excludeIds);
     }
 
 

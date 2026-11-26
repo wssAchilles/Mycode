@@ -1045,11 +1045,15 @@ export const spaceAPI = {
     },
 
     /**
-     * 推荐关注用户
+     * 推荐关注用户（支持传入 excludeIds 用于「换一批」）
      */
-    getRecommendedUsers: async (limit: number = 4): Promise<RecommendedUser[]> => {
+    getRecommendedUsers: async (limit: number = 4, excludeIds: string[] = []): Promise<RecommendedUser[]> => {
         try {
             const params = new URLSearchParams({ limit: String(limit) });
+            const cleanExclude = excludeIds.map((id) => String(id).trim()).filter(Boolean);
+            if (cleanExclude.length > 0) {
+                params.set('excludeIds', cleanExclude.join(','));
+            }
             const response = await apiClient.get<{ users: RecommendedUser[] }>(`/api/space/recommend/users?${params.toString()}`);
             return (response.data.users || []).map((u) => ({
                 ...u,

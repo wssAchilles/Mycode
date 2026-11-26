@@ -115,12 +115,18 @@ router.get('/recommend/users', async (req: Request, res: Response) => {
     try {
         const userId = (req as Request & { userId?: string }).userId;
         const limit = parseInt(req.query.limit as string) || 4;
+        const excludeRaw = typeof req.query.excludeIds === 'string' ? req.query.excludeIds : '';
+        const excludeIds = excludeRaw
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean)
+            .slice(0, 50);
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const users = await spaceService.getRecommendedUsers(userId, limit);
+        const users = await spaceService.getRecommendedUsers(userId, limit, excludeIds);
         return res.json({ users });
     } catch (error) {
         log.error({ err: error }, '获取推荐关注失败');

@@ -3,6 +3,8 @@ import { getOnlineUsers, getUserStatus, searchUsers } from '../controllers/userC
 import { authenticateToken } from '../middleware/authMiddleware';
 import User from '../models/User';
 import UserMongo from '../models/UserMongo';
+import UserSettings from '../models/UserSettings';
+import UserAction, { ActionType } from '../models/UserAction';
 import { invalidateAuthUserCache } from '../services/chatDelivery/writePathCache';
 import { createChildLogger } from '../utils/logger';
 
@@ -30,7 +32,26 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { birthDate, region, language } = req.body;
+    const { birthDate, region, language, interests } = req.body;
+
+    // 校验 interests（冷启动兴趣标签数组，最多 20 项）
+    let cleanInterests: string[] | undefined;
+    if (interests !== undefined) {
+      if (!Array.isArray(interests)) {
+        res.status(400).json({ error: 'interests 必须为字符串数组' });
+        return;
+      }
+      const dedup = new Set<string>();
+      for (const item of interests) {
+        if (typeof item !== 'string') continue;
+        const normalized = item.trim().slice(0, 32);
+        if (normalized) {
+          dedup.add(normalized);
+        }
+        if (dedup.size >= 20) break;
+      }
+      cleanInterests = Array.from(dedup);
+    }
 
     // 校验 birthDate
     if (birthDate !== undefined && birthDate !== null) {
@@ -90,9 +111,27 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       log.warn({ err: mongoError }, 'MongoDB 更新用户资料失败');
     }
 
-    if (!pgUpdated && !mongoUpdated) {
+    if (!pgUpdated && !mongoUpdated && Object.keys(updateData).length > 0) {
       res.status(404).json({ error: '用户不存在或更新失败' });
       return;
+    }
+
+    if (cleanInterests !== undefined) {
+      await UserSettings.findOneAndUpdate(
+        { userId },
+        { $set: { onboardingInterests: cleanInterests } },
+        { upsert: true }
+      );
+      if (cleanInterests.length > 0) {
+        void UserAction.logActions([{
+          userId,
+          action: ActionType.CLICK,
+          actionText: cleanInterests.join(' '),
+          targetKeywords: cleanInterests,
+          productSurface: 'onboarding',
+          timestamp: new Date(),
+        }]).catch(() => undefined);
+      }
     }
 
     await invalidateAuthUserCache(userId);

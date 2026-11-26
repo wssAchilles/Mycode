@@ -277,14 +277,24 @@ export const authAPI = {
     }
   },
 
-  // 更新用户资料 (demographics)
-  updateProfile: async (data: { birthDate?: string; region?: string; language?: string }): Promise<User> => {
+  // 更新用户资料 (demographics + 冷启动兴趣)
+  updateProfile: async (data: {
+    birthDate?: string;
+    region?: string;
+    language?: string;
+    interests?: string[];
+  }): Promise<User> => {
     try {
-      const response = await apiClient.put<{ success: boolean; data: { user: User } }>('/api/users/profile', data);
-      // 后端返回 { success: true, data: { user } }
-      const normalizedUser = authAPI.normalizeUser(response.data.data.user);
-      authStorage.setUser(normalizedUser);
-      return normalizedUser;
+      const response = await apiClient.put<{ success?: boolean; data?: { user: User }; user?: User }>('/api/users/profile', data);
+      const rawUser = response.data.data?.user || response.data.user;
+      if (rawUser) {
+        const normalizedUser = authAPI.normalizeUser(rawUser);
+        authStorage.setUser(normalizedUser);
+        return normalizedUser;
+      }
+      const existing = authStorage.getUser();
+      if (existing) return existing;
+      throw new Error('更新资料响应缺少用户信息');
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error, '更新资料失败'));
     }

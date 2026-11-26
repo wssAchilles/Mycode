@@ -38,10 +38,14 @@ async function getFastFallbackUsers(excludedIds: string[], limit: number): Promi
     }));
 }
 
-async function getFastRecommendedUsers(userId: string, limit: number): Promise<RecommendedSpaceUser[]> {
+async function getFastRecommendedUsers(
+    userId: string,
+    limit: number,
+    excludeIds: string[] = [],
+): Promise<RecommendedSpaceUser[]> {
     const safeLimit = Math.max(1, Math.min(12, limit));
     const followed = await getFollowedSet(userId);
-    const excluded = new Set<string>([userId, ...followed]);
+    const excluded = new Set<string>([userId, ...followed, ...excludeIds.map(String).filter(Boolean)]);
     const excludedIds = Array.from(excluded);
 
     const recentPosts = await Post.find({
@@ -125,9 +129,37 @@ async function withRecommendedUsersFallback(
     }
 }
 
-export async function getRecommendedUsers(userId: string, limit: number = 4): Promise<RecommendedSpaceUser[]> {
-    return withRecommendedUsersFallback(
-        authorSuggestionService.getRecommendedUsers(userId, limit),
-        () => getFastRecommendedUsers(userId, limit),
+export async function getRecommendedUsers(
+    userId: string,
+    limit: number = 4,
+    excludeIds: string[] = [],
+): Promise<RecommendedSpaceUser[]> {
+    const cleanExcludeIds = Array.from(new Set(excludeIds.map((id) => String(id).trim()).filter(Boolean)));
+    const excludeSet = new Set(cleanExcludeIds);
+    const fetchLimit = excludeSet.size > 0 ? Math.min(12, limit + excludeSet.size) : limit;
+    const raw = await withRecommendedUsersFallback(
+        authorSuggestionService.getRecommendedUsers(userId, fetchLimit),
+        () => getFastRecommendedUsers(userId, fetchLimit, cleanExcludeIds),
     );
+    const filtered = excludeSet.size > 0
+        ? raw.filter((user) => !excludeSet.has(String(user.id)))
+        : raw;
+    if (filtered.length >= limit || excludeSet.size === 0) {
+        return filtered.slice(0, limit);
+    }
+    const extra = await getFastRecommendedUsers(
+        userId,
+        limit,
+        [...cleanExcludeIds, ...filtered.map((user) => String(user.id))],
+    );
+    const seen = new Set(filtered.map((user) => String(user.id)));
+    const merged = [...filtered];
+    for (const item of extra) {
+        if (!seen.has(String(item.id))) {
+            seen.add(String(item.id));
+            merged.push(item);
+        }
+        if (merged.length >= limit) break;
+    }
+    return merged.slice(0, limit);
 }

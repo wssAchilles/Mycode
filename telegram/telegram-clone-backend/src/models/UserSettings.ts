@@ -14,6 +14,8 @@ export interface IUserSettings extends Document {
     // 静音设置
     mutedKeywords: string[];
     mutedUserIds: string[];
+    // 冷启动兴趣偏好标签
+    onboardingInterests: string[];
     
     // 通知偏好
     notificationSettings: {
@@ -59,6 +61,10 @@ const UserSettingsSchema = new Schema<IUserSettings>(
             default: [],
         },
         mutedUserIds: {
+            type: [String],
+            default: [],
+        },
+        onboardingInterests: {
             type: [String],
             default: [],
         },
