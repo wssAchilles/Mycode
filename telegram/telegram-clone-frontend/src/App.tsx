@@ -12,8 +12,9 @@ import { authUtils } from './services/apiClient';
 import { getExperimentAssignments } from './services/experimentService';
 import './App.css';
 
-// 懒加载全局 Spotlight 命令面板，保持独立 Chunk 且不增加 ChatPage 首包体积
+// 懒加载全局 Spotlight 命令面板与快捷键指南，保持独立 Chunk 且不增加首包体积
 const CommandPalette = lazy(() => import('./components/command/CommandPalette'));
+const ShortcutHelpModal = lazy(() => import('./components/command/ShortcutHelpModal'));
 
 function App() {
   // 页面加载时预加载实验分配（仅已认证用户）
@@ -48,6 +49,7 @@ function App() {
           </div>
           <Suspense fallback={null}>
             <CommandPalette />
+            <ShortcutHelpModal />
           </Suspense>
           <SwUpdateBanner />
         </Router>

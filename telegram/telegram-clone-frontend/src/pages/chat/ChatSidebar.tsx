@@ -5,11 +5,12 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, BellOff, Check, UserPlus, Users, X } from 'lucide-react';
+import { Bell, BellOff, Check, Monitor, Moon, Sun, UserPlus, Users, X } from 'lucide-react';
 import { authAPI } from '../../services/apiClient';
 import { formatChatListTimestamp, useChatStore } from '../../features/chat/store/chatStore';
 import { useMessageStore } from '../../features/chat/store/messageStore';
 import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
+import { formatThemeModeLabel, useThemeStore } from '../../core/theme/themeStore';
 import { requestDesktopNotificationPermission } from '../../features/realtime/browserNotifier';
 import { useSpaceStore } from '../../stores';
 import { Sidebar } from '../../components/layout';
@@ -67,6 +68,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const soundNotifyEnabled = useChatUiPrefsStore((state) => state.soundNotifyEnabled);
     const setDesktopNotifyEnabled = useChatUiPrefsStore((state) => state.setDesktopNotifyEnabled);
     const setSoundNotifyEnabled = useChatUiPrefsStore((state) => state.setSoundNotifyEnabled);
+    const themeMode = useThemeStore((state) => state.mode);
+    const cycleThemeMode = useThemeStore((state) => state.cycleMode);
     const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -192,6 +195,25 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     aria-label={isNotificationsOn ? '关闭消息通知' : '开启消息通知'}
                 >
                     {isNotificationsOn ? <Bell size={16} /> : <BellOff size={16} />}
+                </button>
+
+                <button
+                    type="button"
+                    className="sidebar-notify-button"
+                    onClick={() => {
+                        const next = cycleThemeMode();
+                        showToast(`已切换为${formatThemeModeLabel(next)}`, 'info');
+                    }}
+                    title={`切换外观主题（当前：${formatThemeModeLabel(themeMode)}）`}
+                    aria-label={`切换外观主题（当前：${formatThemeModeLabel(themeMode)}）`}
+                >
+                    {themeMode === 'dark' ? (
+                        <Moon size={16} />
+                    ) : themeMode === 'light' ? (
+                        <Sun size={16} />
+                    ) : (
+                        <Monitor size={16} />
+                    )}
                 </button>
 
                 <button

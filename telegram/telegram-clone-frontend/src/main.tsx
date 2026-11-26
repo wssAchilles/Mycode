@@ -2,8 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { initThemeSync } from './core/theme/themeStore'
 import { registerServiceWorker } from './pwa/register'
 import { initPerfMetrics, perfMonitor } from './perf/metrics'
+
+initThemeSync()
 
 function scheduleNonCriticalBootTasks() {
   const run = () => {

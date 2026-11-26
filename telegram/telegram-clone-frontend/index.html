@@ -17,6 +17,23 @@
     <link rel="preconnect" href="https://api.xuziqi.tech" crossorigin />
     <link rel="dns-prefetch" href="https://api.xuziqi.tech" />
 
+    <!-- 首屏防闪烁主题预设脚本 -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('tg:theme-mode') || 'light';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = mode === 'dark' || (mode === 'system' && prefersDark) ? 'dark' : 'light';
+          var root = document.documentElement;
+          root.setAttribute('data-theme', resolved);
+          if (resolved === 'dark') root.classList.add('dark');
+          root.style.colorScheme = resolved;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0B1117' : '#FFFFFF');
+        } catch (e) {}
+      })();
+    </script>
+
     <title>Telegram Clone</title>
   </head>
   <body>

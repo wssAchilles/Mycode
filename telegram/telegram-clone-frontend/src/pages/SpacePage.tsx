@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Monitor, Moon, Sun } from 'lucide-react';
+import { formatThemeModeLabel, useThemeStore } from '../core/theme/themeStore';
 import {
     SpaceAsideWidgets,
     SpaceTimeline,
@@ -44,6 +45,8 @@ export const SpacePage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const analytics = useAnalytics({ source: 'space_page' });
+    const themeMode = useThemeStore((state) => state.mode);
+    const cycleThemeMode = useThemeStore((state) => state.cycleMode);
     const [activeSection, setActiveSection] = useState<'home' | 'explore' | 'notifications'>('home');
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
     const [trends, setTrends] = useState<TrendItem[]>([]);
@@ -536,6 +539,25 @@ export const SpacePage: React.FC = () => {
                 >
                     <PlusIcon />
                     <span>发布动态</span>
+                </button>
+
+                <button
+                    type="button"
+                    className="space-page__theme-toggle"
+                    onClick={() => {
+                        const next = cycleThemeMode();
+                        showToast(`已切换为${formatThemeModeLabel(next)}`, 'info');
+                    }}
+                    aria-label={`切换外观主题（当前：${formatThemeModeLabel(themeMode)}）`}
+                >
+                    {themeMode === 'dark' ? (
+                        <Moon size={16} />
+                    ) : themeMode === 'light' ? (
+                        <Sun size={16} />
+                    ) : (
+                        <Monitor size={16} />
+                    )}
+                    <span>主题：{formatThemeModeLabel(themeMode)}</span>
                 </button>
 
                 {/* 用户信息 */}

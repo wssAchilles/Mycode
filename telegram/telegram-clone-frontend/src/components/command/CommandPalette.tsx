@@ -2,7 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Command } from 'cmdk';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useNavigate } from 'react-router-dom';
+import { Bell, Bot, Keyboard, Monitor, Moon, Sun, Volume2, VolumeX } from 'lucide-react';
 import { authUtils } from '../../services/apiClient';
+import { useChatStore } from '../../features/chat/store/chatStore';
+import { useChatUiPrefsStore } from '../../features/chat/state/chatUiPrefsStore';
+import { formatThemeModeLabel, useThemeStore } from '../../core/theme/themeStore';
+import { showToast } from '../ui/Toast';
+import { openShortcutHelp } from './ShortcutHelpModal';
 import {
   HomeIcon,
   MessageIcon,
@@ -22,6 +28,15 @@ export function openCommandPalette(): void {
 export const CommandPalette: React.FC = () => {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+
+  const chats = useChatStore((state) => state.chats);
+  const contacts = useChatStore((state) => state.contacts);
+  const selectContact = useChatStore((state) => state.selectContact);
+  const loadGroupDetails = useChatStore((state) => state.loadGroupDetails);
+  const soundEnabled = useChatUiPrefsStore((state) => state.soundEnabled);
+  const setSoundEnabled = useChatUiPrefsStore((state) => state.setSoundEnabled);
+  const themeMode = useThemeStore((state) => state.mode);
+  const cycleThemeMode = useThemeStore((state) => state.cycleMode);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -64,10 +79,41 @@ export const CommandPalette: React.FC = () => {
     }
   };
 
+  const handleOpenChatItem = (chatId: string, isGroup: boolean) => {
+    setOpen(false);
+    if (isGroup) {
+      void loadGroupDetails(chatId);
+    } else {
+      const contact = contacts.find((c) => c.userId === chatId) || null;
+      selectContact(contact);
+    }
+    navigate('/chat');
+  };
+
+  const handleCycleTheme = () => {
+    const next = cycleThemeMode();
+    showToast(`已切换为${formatThemeModeLabel(next)}`, 'info');
+    setOpen(false);
+  };
+
+  const handleToggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    showToast(next ? '已开启新消息提示音' : '已关闭新消息提示音', 'info');
+    setOpen(false);
+  };
+
+  const handleOpenShortcutHelp = () => {
+    setOpen(false);
+    openShortcutHelp();
+  };
+
   const handleRefreshPage = () => {
     setOpen(false);
     window.location.reload();
   };
+
+  const visibleChats = chats.slice(0, 8);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -87,14 +133,14 @@ export const CommandPalette: React.FC = () => {
               </span>
               <Command.Input
                 className="tg-command-input"
-                placeholder="搜索页面或快捷指令…"
+                placeholder="搜索会话、页面或快捷指令…"
                 autoFocus
               />
               <kbd className="tg-command-kbd">ESC</kbd>
             </div>
 
             <Command.List className="tg-command-list">
-              <Command.Empty className="tg-command-empty">未找到匹配的页面或指令</Command.Empty>
+              <Command.Empty className="tg-command-empty">未找到匹配的会话、页面或指令</Command.Empty>
 
               <Command.Group heading="页面导航" className="tg-command-group">
                 <Command.Item
@@ -110,7 +156,7 @@ export const CommandPalette: React.FC = () => {
                 </Command.Item>
 
                 <Command.Item
-                  value="探索发现 explore trends"
+                  value="探索发现 explore trends search"
                   onSelect={() => runNavigation('/space?section=explore')}
                   className="tg-command-item"
                 >
@@ -118,7 +164,19 @@ export const CommandPalette: React.FC = () => {
                     <SearchIcon />
                   </span>
                   <span className="tg-command-item-label">探索发现</span>
-                  <span className="tg-command-item-meta">热搜与话题</span>
+                  <span className="tg-command-item-meta">热搜、话题与找人</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="动态通知 notifications"
+                  onSelect={() => runNavigation('/space?section=notifications')}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    <Bell size={16} />
+                  </span>
+                  <span className="tg-command-item-label">动态通知</span>
+                  <span className="tg-command-item-meta">点赞、回复与转发</span>
                 </Command.Item>
 
                 <Command.Item
@@ -131,6 +189,18 @@ export const CommandPalette: React.FC = () => {
                   </span>
                   <span className="tg-command-item-label">消息中心</span>
                   <span className="tg-command-item-meta">私聊与群组</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="AI 智能助手 bot assistant chat"
+                  onSelect={() => runNavigation('/chat?ai=1')}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    <Bot size={16} />
+                  </span>
+                  <span className="tg-command-item-label">AI 智能助手</span>
+                  <span className="tg-command-item-meta">对话与图片解析</span>
                 </Command.Item>
 
                 <Command.Item
@@ -148,9 +218,34 @@ export const CommandPalette: React.FC = () => {
                 </Command.Item>
               </Command.Group>
 
+              {visibleChats.length > 0 && (
+                <>
+                  <Command.Separator className="tg-command-separator" />
+                  <Command.Group heading="直达会话" className="tg-command-group">
+                    {visibleChats.map((chat) => (
+                      <Command.Item
+                        key={chat.id}
+                        value={`${chat.title} ${chat.isGroup ? '群聊 group' : '私聊 dm chat'} ${chat.id}`}
+                        onSelect={() => handleOpenChatItem(chat.id, chat.isGroup)}
+                        className="tg-command-item"
+                      >
+                        <span className="tg-command-item-icon" aria-hidden="true">
+                          <MessageIcon />
+                        </span>
+                        <span className="tg-command-item-label">{chat.title}</span>
+                        <span className="tg-command-item-meta">
+                          {chat.isGroup ? '群聊' : '私聊'}
+                          {chat.unreadCount > 0 ? ` · ${chat.unreadCount} 未读` : ''}
+                        </span>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                </>
+              )}
+
               <Command.Separator className="tg-command-separator" />
 
-              <Command.Group heading="快捷操作" className="tg-command-group">
+              <Command.Group heading="效率与设置" className="tg-command-group">
                 <Command.Item
                   value="发布新动态 compose new post"
                   onSelect={() => runNavigation('/space', true)}
@@ -161,6 +256,50 @@ export const CommandPalette: React.FC = () => {
                   </span>
                   <span className="tg-command-item-label">发布新动态</span>
                   <span className="tg-command-item-meta">聚焦编辑器</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="切换外观主题 浅色 深色 系统 theme dark light system"
+                  onSelect={handleCycleTheme}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    {themeMode === 'dark' ? (
+                      <Moon size={16} />
+                    ) : themeMode === 'light' ? (
+                      <Sun size={16} />
+                    ) : (
+                      <Monitor size={16} />
+                    )}
+                  </span>
+                  <span className="tg-command-item-label">切换外观主题</span>
+                  <span className="tg-command-item-meta">当前：{formatThemeModeLabel(themeMode)}</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="开关消息提示音 静音 sound mute notification"
+                  onSelect={handleToggleSound}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                  </span>
+                  <span className="tg-command-item-label">
+                    {soundEnabled ? '关闭新消息提示音' : '开启新消息提示音'}
+                  </span>
+                  <span className="tg-command-item-meta">{soundEnabled ? '已开启' : '已静音'}</span>
+                </Command.Item>
+
+                <Command.Item
+                  value="键盘快捷键 帮助 shortcut help"
+                  onSelect={handleOpenShortcutHelp}
+                  className="tg-command-item"
+                >
+                  <span className="tg-command-item-icon" aria-hidden="true">
+                    <Keyboard size={16} />
+                  </span>
+                  <span className="tg-command-item-label">键盘快捷键指南</span>
+                  <span className="tg-command-item-meta">按 ? 呼出</span>
                 </Command.Item>
 
                 <Command.Item
