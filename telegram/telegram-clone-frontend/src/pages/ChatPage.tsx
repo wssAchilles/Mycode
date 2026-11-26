@@ -367,7 +367,6 @@ const ChatPage: React.FC = () => {
         if (localUser) {
           setCurrentUser(localUser);
           useChatUiPrefsStore.getState().hydrateForUser(localUser.id);
-          console.log('🎉 ChatPage 成功渲染，当前用户:', localUser.username);
           connectRealtime();
           loadContacts();
           loadPendingRequests();

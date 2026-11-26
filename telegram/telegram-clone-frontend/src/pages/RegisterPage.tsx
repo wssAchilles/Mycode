@@ -128,24 +128,12 @@ const RegisterPage: React.FC = () => {
     setError('');
 
     try {
-      console.log('🔄 开始注册流程...');
-      const response = await authAPI.register(formData);
-      console.log('✅ 注册API响应成功:', {
-        username: response.user.username,
-        userId: response.user.id,
-        hasTokens: !!response.tokens
-      });
+      await authAPI.register(formData);
 
-      // 延迟一小段时间确保token完全存储
+      // 短暂等待 token 持久化完成
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      console.log('📦 验证token存储状态:', {
-        isAuthenticated: authUtils.isAuthenticated(),
-        hasToken: !!authUtils.getAccessToken()
-      });
-
       // 注册成功，跳转到引导页
-      console.log('🚀 准备跳转到引导页面...');
       setTimeout(() => {
         navigate('/onboarding', { replace: true });
       }, 50);
@@ -288,6 +276,28 @@ const RegisterPage: React.FC = () => {
                 {showPassword ? <EyeIcon size={20} /> : <EyeOffIcon size={20} />}
               </button>
             </div>
+            {formData.password.length > 0 && (() => {
+              const pwd = formData.password;
+              const score = [
+                pwd.length >= 6,
+                pwd.length >= 10,
+                /[A-Z]/.test(pwd) && /[a-z]/.test(pwd),
+                /\d/.test(pwd),
+                /[^a-zA-Z0-9]/.test(pwd),
+              ].filter(Boolean).length;
+              const level = score <= 2 ? 'weak' : score <= 3 ? 'medium' : 'strong';
+              const label = level === 'weak' ? '弱（建议包含字母、数字或符号）' : level === 'medium' ? '中等强度' : '强密码';
+              return (
+                <div className={`auth-password-strength is-${level}`} aria-live="polite">
+                  <div className="auth-password-strength__bars" aria-hidden="true">
+                    <span className="auth-password-strength__bar is-filled" />
+                    <span className={`auth-password-strength__bar ${level !== 'weak' ? 'is-filled' : ''}`} />
+                    <span className={`auth-password-strength__bar ${level === 'strong' ? 'is-filled' : ''}`} />
+                  </div>
+                  <span className="auth-password-strength__text">{label}</span>
+                </div>
+              );
+            })()}
             <small className="form-hint">至少6个字符</small>
           </div>
 
@@ -314,6 +324,15 @@ const RegisterPage: React.FC = () => {
                 {showConfirmPassword ? <EyeIcon size={20} /> : <EyeOffIcon size={20} />}
               </button>
             </div>
+            {formData.confirmPassword.length > 0 && (
+              <small
+                className={`auth-confirm-hint ${
+                  formData.confirmPassword === formData.password ? 'is-match' : 'is-mismatch'
+                }`}
+              >
+                {formData.confirmPassword === formData.password ? '两次输入密码一致' : '两次输入的密码不一致'}
+              </small>
+            )}
           </div>
 
           <button

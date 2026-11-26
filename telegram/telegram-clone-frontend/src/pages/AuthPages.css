@@ -955,3 +955,56 @@
     transition: none !important;
   }
 }
+
+/* 注册页密码强度条与确认提示 */
+.auth-password-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.auth-password-strength__bars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 84px;
+}
+
+.auth-password-strength__bar {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.28);
+  transition: background-color 0.2s ease;
+}
+
+.auth-password-strength.is-weak .auth-password-strength__bar.is-filled {
+  background: #ef4444;
+}
+
+.auth-password-strength.is-medium .auth-password-strength__bar.is-filled {
+  background: #f59e0b;
+}
+
+.auth-password-strength.is-strong .auth-password-strength__bar.is-filled {
+  background: #10b981;
+}
+
+.auth-password-strength__text {
+  font-size: 12px;
+  color: var(--color-text-secondary, #536471);
+}
+
+.auth-confirm-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.auth-confirm-hint.is-match {
+  color: #10b981;
+}
+
+.auth-confirm-hint.is-mismatch {
+  color: #ef4444;
+}

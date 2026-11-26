@@ -116,8 +116,7 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      const response = await authAPI.login(formData);
-      console.log('登录成功:', response.user.username);
+      await authAPI.login(formData);
 
       const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/chat';
       navigate(from, { replace: true });

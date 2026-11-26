@@ -41,6 +41,105 @@
 }
 
 /* Feed Toggle（macOS / iOS 原生 Segmented Control 分段胶囊） */
+.space-timeline__header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.space-timeline__refresh-btn {
+    appearance: none;
+    border: 1px solid rgba(15, 20, 25, 0.08);
+    background: rgba(15, 20, 25, 0.04);
+    color: var(--color-text-secondary, #536471);
+    width: 32px;
+    height: 32px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition:
+        background-color 0.18s ease,
+        color 0.18s ease,
+        border-color 0.18s ease,
+        transform 0.14s ease;
+}
+
+.space-timeline__refresh-btn:hover:not(:disabled) {
+    background: rgba(15, 20, 25, 0.09);
+    color: var(--color-text-primary, #0F1419);
+}
+
+.space-timeline__refresh-btn:active:not(:disabled) {
+    transform: scale(0.94);
+}
+
+.space-timeline__refresh-btn:disabled {
+    opacity: 0.72;
+    cursor: default;
+}
+
+.space-timeline__refresh-btn.is-refreshing svg {
+    animation: space-refresh-spin 0.85s linear infinite;
+}
+
+.space-timeline__refresh-btn:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
+.space-timeline__refresh-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    overflow: hidden;
+    background: rgba(51, 144, 236, 0.14);
+}
+
+.space-timeline__refresh-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -35%;
+    width: 35%;
+    height: 100%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, transparent, var(--tg-blue, #3390ec), transparent);
+    animation: space-refresh-shimmer 1.15s ease-in-out infinite;
+}
+
+@keyframes space-refresh-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes space-refresh-shimmer {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(390%);
+    }
+}
+
+:root[data-theme="dark"] .space-timeline__refresh-btn {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-secondary, #9aa6b2);
+}
+
+:root[data-theme="dark"] .space-timeline__refresh-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--color-text-primary, #f1f5f9);
+}
+
 .space-timeline__feed-toggle {
     display: inline-flex;
     align-items: center;

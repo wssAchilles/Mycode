@@ -16,6 +16,11 @@ import {
     type PostData,
 } from '../components/space';
 import { useSpaceStore } from '../stores';
+import {
+    buildSpaceScrollKey,
+    readSpaceScrollPosition,
+    saveSpaceScrollPosition,
+} from '../features/space/scrollMemory';
 import { useChatStore } from '../features/chat/store/chatStore';
 import { messageAPI } from '../services/apiClient';
 import SharePostModal from '../components/space/SharePostModal';
@@ -63,12 +68,6 @@ export const SpacePage: React.FC = () => {
     const [refreshingRecommendedUsers, setRefreshingRecommendedUsers] = useState(false);
     const [showBackToTop, setShowBackToTop] = useState(false);
     const seenRecommendedIdsRef = useRef<Set<string>>(new Set());
-    const scrollPositionsRef = useRef<Record<'home' | 'explore' | 'notifications', number>>({
-        home: 0,
-        explore: 0,
-        notifications: 0,
-    });
-    const prevSectionRef = useRef<'home' | 'explore' | 'notifications'>('home');
     const contentScrollRef = useRef<HTMLDivElement>(null);
     const asideMountedRef = useRef(true);
 
@@ -114,6 +113,7 @@ export const SpacePage: React.FC = () => {
     // 获取状态
     const posts = useSpaceStore((state) => state.posts);
     const isLoading = useSpaceStore((state) => state.isLoadingFeed);
+    const isRefreshingFeed = useSpaceStore((state) => state.isRefreshingFeed);
     const hasMore = useSpaceStore((state) => state.hasMore);
     const newPostsCount = useSpaceStore((state) => state.newPostsCount);
     const inNetworkOnly = useSpaceStore((state) => state.inNetworkOnly);
@@ -236,29 +236,66 @@ export const SpacePage: React.FC = () => {
         }
     }, [refreshingRecommendedUsers, recommendedUsers]);
 
-    // 记忆各视图滚动位置，并在超过 600px 时显示回到顶部悬浮钮
+    // 跨路由及跨 Tab 记忆滚动位置，并在超过 600px 时显示回到顶部悬浮钮
+    const currentScrollKey = buildSpaceScrollKey(activeSection, inNetworkOnly);
+    const prevScrollKeyRef = useRef<string>(currentScrollKey);
+
     useLayoutEffect(() => {
         const el = contentScrollRef.current;
-        const prev = prevSectionRef.current;
-        if (el && prev !== activeSection) {
-            scrollPositionsRef.current[prev] = el.scrollTop;
-            const targetTop = scrollPositionsRef.current[activeSection] ?? 0;
-            el.scrollTo({ top: targetTop, behavior: 'auto' });
-            setShowBackToTop(targetTop > 600);
-            prevSectionRef.current = activeSection;
+        if (!el) return;
+        const prevKey = prevScrollKeyRef.current;
+        if (prevKey !== currentScrollKey) {
+            saveSpaceScrollPosition(prevKey, el.scrollTop);
+            prevScrollKeyRef.current = currentScrollKey;
         }
-    }, [activeSection]);
+        const targetTop = readSpaceScrollPosition(currentScrollKey);
+        el.scrollTo({ top: targetTop, behavior: 'auto' });
+        setShowBackToTop(targetTop > 600);
+
+        // 等待列表项渲染一帧后补正滚动位置，确保从详情页返回时稳定定位
+        const rafId = requestAnimationFrame(() => {
+            if (contentScrollRef.current && targetTop > 0) {
+                contentScrollRef.current.scrollTop = targetTop;
+                setShowBackToTop(contentScrollRef.current.scrollTop > 600);
+            }
+        });
+        return () => cancelAnimationFrame(rafId);
+    }, [currentScrollKey]);
 
     useEffect(() => {
         const el = contentScrollRef.current;
         if (!el) return;
         const onScroll = () => {
-            scrollPositionsRef.current[activeSection] = el.scrollTop;
+            saveSpaceScrollPosition(currentScrollKey, el.scrollTop);
             setShowBackToTop(el.scrollTop > 600);
         };
         el.addEventListener('scroll', onScroll, { passive: true });
         return () => el.removeEventListener('scroll', onScroll);
-    }, [activeSection]);
+    }, [currentScrollKey]);
+
+    // 桌面端按 R 刷新首页动态（避开输入框与修饰键）
+    useEffect(() => {
+        if (typeof window === 'undefined' || activeSection !== 'home') return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+            const target = event.target as HTMLElement | null;
+            if (
+                target &&
+                (target.tagName === 'INPUT' ||
+                    target.tagName === 'TEXTAREA' ||
+                    target.tagName === 'SELECT' ||
+                    target.isContentEditable)
+            ) {
+                return;
+            }
+            if (event.key.toLowerCase() === 'r') {
+                event.preventDefault();
+                void refreshFeed();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [activeSection, refreshFeed]);
 
     // 处理创建帖子
     const handleCreatePost = useCallback(
@@ -288,14 +325,26 @@ export const SpacePage: React.FC = () => {
         [createPost, scrollContentToTop]
     );
 
-    // 处理帖子点击
+    // 处理帖子点击（跳转前显式持久化当前阅读位置）
     const handlePostClick = useCallback((postId: string) => {
+        if (contentScrollRef.current) {
+            saveSpaceScrollPosition(
+                buildSpaceScrollKey(activeSection, inNetworkOnly),
+                contentScrollRef.current.scrollTop,
+            );
+        }
         navigate(`/space/post/${postId}`);
-    }, [navigate]);
+    }, [activeSection, inNetworkOnly, navigate]);
 
     const handleAuthorClick = useCallback((authorId: string) => {
+        if (contentScrollRef.current) {
+            saveSpaceScrollPosition(
+                buildSpaceScrollKey(activeSection, inNetworkOnly),
+                contentScrollRef.current.scrollTop,
+            );
+        }
         navigate(`/space/user/${authorId}`);
-    }, [navigate]);
+    }, [activeSection, inNetworkOnly, navigate]);
 
     // 处理评论
     const handleComment = useCallback((postId: string) => {
@@ -612,6 +661,7 @@ export const SpacePage: React.FC = () => {
                         <SpaceTimeline
                             posts={posts}
                             isLoading={isLoading}
+                            isRefreshing={isRefreshingFeed}
                             error={spaceError}
                             hasMore={hasMore}
                             newPostsCount={newPostsCount}

@@ -6,6 +6,11 @@ import { authStorage } from '../utils/authStorage';
 import { spaceAPI, type NegativeFeedbackItem, type NegativeFeedbackSummary, type UserProfile } from '../services/spaceApi';
 import { COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { SpacePost, SpaceCommentDrawer, FollowListModal, type FollowListMode, type PostData } from '../components/space';
+import {
+    patchProfileFollowCache,
+    readProfileCache,
+    writeProfileCache,
+} from '../features/space/profileMemoryCache';
 import NegativeFeedbackPanel from '../components/space/NegativeFeedbackPanel';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
@@ -141,7 +146,7 @@ const SpaceProfilePage: React.FC = () => {
         if (!id) return;
         let mounted = true;
         const load = async () => {
-            setLoading(true);
+            const cached = readProfileCache(id);
             setError(null);
             setActiveTab('posts');
             setLikes([]);
@@ -154,29 +159,61 @@ const SpaceProfilePage: React.FC = () => {
             setNegativeFeedbackHasMore(false);
             setNegativeFeedbackError(null);
             setCoverPreviewUrl(null);
+
+            if (cached) {
+                setProfile(cached.profile);
+                setPinnedPosts(cached.pinnedPosts);
+                setPosts(cached.posts);
+                setHasMore(cached.hasMore);
+                setCursor(cached.nextCursor);
+                setLoading(false);
+            } else {
+                setLoading(true);
+            }
+
             try {
-                const profileData = await spaceAPI.getUserProfile(id);
+                // 并行拉取用户资料与首屏动态，消除串行请求瀑布
+                const [profileData, postsResult] = await Promise.all([
+                    spaceAPI.getUserProfile(id),
+                    spaceAPI.getUserPosts(id, 20),
+                ]);
                 if (!mounted) return;
-                setProfile(profileData);
                 const resolvedPinned = profileData.pinnedPosts?.length
                     ? profileData.pinnedPosts
                     : profileData.pinnedPost
                         ? [profileData.pinnedPost]
                         : [];
+                const pinnedIdSet = new Set(resolvedPinned.map((post) => post.id));
+                const filteredPosts = pinnedIdSet.size > 0
+                    ? postsResult.posts.filter((post) => !pinnedIdSet.has(post.id))
+                    : postsResult.posts;
+
+                setProfile(profileData);
                 setPinnedPosts(resolvedPinned);
-                await loadPosts(true, resolvedPinned.map((post) => post.id));
+                setPosts(filteredPosts);
+                setHasMore(postsResult.hasMore);
+                setCursor(postsResult.nextCursor);
+
+                writeProfileCache(id, {
+                    profile: profileData,
+                    pinnedPosts: resolvedPinned,
+                    posts: filteredPosts,
+                    hasMore: postsResult.hasMore,
+                    nextCursor: postsResult.nextCursor,
+                });
             } catch (err: unknown) {
                 if (!mounted) return;
-                setError(err instanceof Error ? err.message : '加载失败');
+                if (!cached) {
+                    setError(err instanceof Error ? err.message : '加载失败');
+                }
             } finally {
                 if (mounted) setLoading(false);
             }
         };
-        load();
+        void load();
         return () => {
             mounted = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
     useEffect(() => {
@@ -205,6 +242,7 @@ const SpaceProfilePage: React.FC = () => {
                     isFollowed: false,
                     stats: { ...prev.stats, followers: Math.max(0, prev.stats.followers - 1) }
                 } : prev);
+                patchProfileFollowCache(profile.id, false, -1);
                 showToast(`已取消关注 ${profile.username}`, 'info');
             } else {
                 await spaceAPI.followUser(profile.id);
@@ -213,6 +251,7 @@ const SpaceProfilePage: React.FC = () => {
                     isFollowed: true,
                     stats: { ...prev.stats, followers: prev.stats.followers + 1 }
                 } : prev);
+                patchProfileFollowCache(profile.id, true, 1);
                 showToast(`已关注 ${profile.username}`, 'success');
             }
         } catch (err) {

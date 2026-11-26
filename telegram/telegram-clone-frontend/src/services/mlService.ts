@@ -222,7 +222,6 @@ export const mlService = {
                 topK
             };
 
-            console.log('🔮 [ML] ANN Request:', payload);
             const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload, {
                 timeout: 5000,
                 headers: getAuthHeaders(),
@@ -255,7 +254,6 @@ export const mlService = {
                 userActionSequence: []
             };
 
-            console.log('⚖️ [ML] Phoenix Rank Request:', payload);
             const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload, {
                 timeout: 5000,
                 headers: getAuthHeaders(),
@@ -283,7 +281,6 @@ export const mlService = {
                 items: [{ postId, userId }]
             };
 
-            console.log('🛡️ [ML] VF Check Request:', payload);
             const response = await axios.post<VFResponse>(VF_ENDPOINT, payload, {
                 timeout: 5000,
                 headers: getAuthHeaders(),

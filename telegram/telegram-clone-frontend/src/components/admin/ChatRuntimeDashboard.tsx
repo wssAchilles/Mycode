@@ -335,19 +335,19 @@ const ChatRuntimeDashboard: React.FC = () => {
           <div className="chart-wrap">
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={trendSeries}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EFF3F4" />
-                <XAxis dataKey="slot" stroke="#CFD9DE" tick={{ fill: '#536471', fontSize: 11 }} />
-                <YAxis stroke="#CFD9DE" tick={{ fill: '#536471', fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle, #EFF3F4)" />
+                <XAxis dataKey="slot" stroke="var(--color-border, #CFD9DE)" tick={{ fill: 'var(--color-text-secondary, #536471)', fontSize: 11 }} />
+                <YAxis stroke="var(--color-border, #CFD9DE)" tick={{ fill: 'var(--color-text-secondary, #536471)', fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#FFFFFF',
-                    border: '1px solid #EFF3F4',
+                    backgroundColor: 'var(--color-background, #FFFFFF)',
+                    border: '1px solid var(--color-border-subtle, #EFF3F4)',
                     borderRadius: 10,
-                    color: '#0F1419',
-                    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.08)',
+                    color: 'var(--color-text-primary, #0F1419)',
+                    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.12)',
                   }}
-                  labelStyle={{ color: '#0F1419', fontWeight: 600 }}
-                  itemStyle={{ color: '#0F1419' }}
+                  labelStyle={{ color: 'var(--color-text-primary, #0F1419)', fontWeight: 600 }}
+                  itemStyle={{ color: 'var(--color-text-primary, #0F1419)' }}
                 />
                 <Line type="monotone" dataKey="p95" stroke="#D97706" strokeWidth={2} dot={false} name="P95(ms)" />
                 <Line type="monotone" dataKey="avg" stroke="#1D9BF0" strokeWidth={2} dot={false} name="AVG(ms)" />

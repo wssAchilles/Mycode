@@ -20,23 +20,23 @@ import type { DashboardData, ExperimentMetrics, RecallSourceDistribution } from 
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './Dashboard.css';
 
-// 统一淡色图表浮层与坐标轴令牌，确保白底高对比度可读性
-const CHART_GRID_STROKE = '#EFF3F4';
-const CHART_AXIS_STROKE = '#CFD9DE';
-const CHART_AXIS_TICK = { fill: '#536471', fontSize: 11 };
+// 统一自适应图表浮层与坐标轴令牌，兼顾浅色/暗黑模式高对比可读性
+const CHART_GRID_STROKE = 'var(--color-border-subtle, #EFF3F4)';
+const CHART_AXIS_STROKE = 'var(--color-border, #CFD9DE)';
+const CHART_AXIS_TICK = { fill: 'var(--color-text-secondary, #536471)', fontSize: 11 };
 const CHART_TOOLTIP_CONTENT_STYLE: React.CSSProperties = {
-    backgroundColor: '#FFFFFF',
-    border: '1px solid #EFF3F4',
+    backgroundColor: 'var(--color-background, #FFFFFF)',
+    border: '1px solid var(--color-border-subtle, #EFF3F4)',
     borderRadius: '10px',
-    color: '#0F1419',
-    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.08)',
+    color: 'var(--color-text-primary, #0F1419)',
+    boxShadow: '0 4px 16px rgba(15, 20, 25, 0.12)',
 };
 const CHART_TOOLTIP_LABEL_STYLE: React.CSSProperties = {
-    color: '#0F1419',
+    color: 'var(--color-text-primary, #0F1419)',
     fontWeight: 600,
 };
 const CHART_TOOLTIP_ITEM_STYLE: React.CSSProperties = {
-    color: '#0F1419',
+    color: 'var(--color-text-primary, #0F1419)',
 };
 
 const RECALL_LIGHT_PALETTE = ['#1D9BF0', '#0284C7', '#00BA7C', '#D97706', '#64748B'];
@@ -368,7 +368,7 @@ const SafetyCard: React.FC<SafetyCardProps> = ({ safety }) => {
                             <Legend
                                 iconType="circle"
                                 iconSize={8}
-                                wrapperStyle={{ fontSize: '11px', color: '#536471' }}
+                                wrapperStyle={{ fontSize: '11px', color: 'var(--color-text-secondary, #536471)' }}
                             />
                         </PieChart>
                     </ResponsiveContainer>

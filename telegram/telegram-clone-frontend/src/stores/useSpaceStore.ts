@@ -94,6 +94,7 @@ interface SpaceState {
     // 当前激活 Scope 的 Feed 视图数据（与 allFeed / friendsFeed 保持同步）
     posts: PostData[];
     isLoadingFeed: boolean;
+    isRefreshingFeed: boolean;
     hasMore: boolean;
     nextCursor?: string;
     newPostsCount: number;
@@ -174,6 +175,7 @@ const syncRootFromActiveScope = (s: SpaceState) => {
     const active = getScopeFeed(s, getScopeKey(s.inNetworkOnly));
     s.posts = active.posts;
     s.isLoadingFeed = active.isLoading;
+    s.isRefreshingFeed = Boolean(active.isRefreshing);
     s.hasMore = active.hasMore;
     s.nextCursor = active.nextCursor;
     s.error = active.error;
@@ -208,6 +210,7 @@ export const useSpaceStore = create<SpaceState>()(
         // 初始状态
         posts: initialAllFeed.posts,
         isLoadingFeed: initialAllFeed.isLoading,
+        isRefreshingFeed: Boolean(initialAllFeed.isRefreshing),
         hasMore: initialAllFeed.hasMore,
         nextCursor: initialAllFeed.nextCursor,
         newPostsCount: 0,

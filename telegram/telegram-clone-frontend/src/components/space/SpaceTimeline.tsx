@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { RefreshCw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { StateBlock } from '@/components/design-system';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
@@ -15,6 +16,8 @@ import './SpaceTimeline.css';
 export interface SpaceTimelineProps {
     posts: PostData[];
     isLoading: boolean;
+    /** 后台 SWR 静默刷新状态（展示顶部微流光条与旋转图标，不触发骨架屏） */
+    isRefreshing?: boolean;
     error?: string | null;
     hasMore: boolean;
     newPostsCount?: number;
@@ -43,6 +46,7 @@ export interface SpaceTimelineProps {
 export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     posts,
     isLoading,
+    isRefreshing = false,
     error,
     hasMore,
     newPostsCount = 0,
@@ -265,27 +269,44 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                 {/* 头部 */}
                 <header className="space-timeline__header">
                     <h1 className="space-timeline__title">首页</h1>
-                    {onInNetworkOnlyChange && (
-                        <div className="space-timeline__feed-toggle" role="tablist" aria-label="切换动态范围">
+                    <div className="space-timeline__header-actions">
+                        {onRefresh && (
                             <button
                                 type="button"
-                                role="tab"
-                                aria-selected={!inNetworkOnly}
-                                className={`space-timeline__feed-tab ${!inNetworkOnly ? 'is-active' : ''}`}
-                                onClick={() => onInNetworkOnlyChange(false)}
+                                className={`space-timeline__refresh-btn ${isRefreshing ? 'is-refreshing' : ''}`}
+                                onClick={() => onRefresh()}
+                                disabled={isRefreshing || isLoading}
+                                aria-label={isRefreshing ? '正在刷新动态' : '刷新动态'}
+                                title={isRefreshing ? '正在同步最新动态...' : '刷新动态 (R)'}
                             >
-                                全部
+                                <RefreshCw size={15} strokeWidth={2} aria-hidden="true" />
                             </button>
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={inNetworkOnly}
-                                className={`space-timeline__feed-tab ${inNetworkOnly ? 'is-active' : ''}`}
-                                onClick={() => onInNetworkOnlyChange(true)}
-                            >
-                                好友
-                            </button>
-                        </div>
+                        )}
+                        {onInNetworkOnlyChange && (
+                            <div className="space-timeline__feed-toggle" role="tablist" aria-label="切换动态范围">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={!inNetworkOnly}
+                                    className={`space-timeline__feed-tab ${!inNetworkOnly ? 'is-active' : ''}`}
+                                    onClick={() => onInNetworkOnlyChange(false)}
+                                >
+                                    全部
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={inNetworkOnly}
+                                    className={`space-timeline__feed-tab ${inNetworkOnly ? 'is-active' : ''}`}
+                                    onClick={() => onInNetworkOnlyChange(true)}
+                                >
+                                    好友
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    {isRefreshing && posts.length > 0 && (
+                        <div className="space-timeline__refresh-bar" role="progressbar" aria-label="正在后台更新动态" />
                     )}
                 </header>
 

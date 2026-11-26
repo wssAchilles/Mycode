@@ -4,6 +4,7 @@ import { ArrowLeft, MessageCircle, Reply, SendHorizontal } from 'lucide-react';
 import { spaceAPI, type CommentData } from '../services/spaceApi';
 import { authUtils } from '../services/apiClient';
 import { SpacePost, type PostData } from '../components/space';
+import { findCachedSpacePost } from '../features/space/profileMemoryCache';
 import {
     COMMENT_MAX_LENGTH,
     formatCommentTime,
@@ -16,8 +17,9 @@ import './SpacePostDetailPage.css';
 const SpacePostDetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const [post, setPost] = useState<PostData | null>(null);
-    const [loading, setLoading] = useState(true);
+    const initialCachedPost = useMemo(() => findCachedSpacePost(id), [id]);
+    const [post, setPost] = useState<PostData | null>(initialCachedPost);
+    const [loading, setLoading] = useState(!initialCachedPost);
     const [error, setError] = useState<string | null>(null);
 
     const [comments, setComments] = useState<CommentData[]>([]);
@@ -51,26 +53,50 @@ const SpacePostDetailPage: React.FC = () => {
     useEffect(() => {
         if (!id) return;
         let mounted = true;
-        const load = async () => {
+        const cached = findCachedSpacePost(id);
+        if (cached) {
+            setPost(cached);
+            setLoading(false);
+        } else {
+            setPost(null);
             setLoading(true);
-            setError(null);
+        }
+        setError(null);
+
+        const load = async () => {
+            setLoadingComments(true);
             try {
-                const data = await spaceAPI.getPost(id);
+                const [postResult, commentsResult] = await Promise.allSettled([
+                    spaceAPI.getPost(id),
+                    spaceAPI.getComments(id, 20),
+                ]);
                 if (!mounted) return;
-                setPost(data);
-                await loadComments(true);
-            } catch (err: unknown) {
-                if (!mounted) return;
-                setError(err instanceof Error ? err.message : '加载失败');
+
+                if (postResult.status === 'fulfilled') {
+                    setPost(postResult.value);
+                } else if (!cached) {
+                    const reason = postResult.reason;
+                    setError(reason instanceof Error ? reason.message : '加载失败');
+                }
+
+                if (commentsResult.status === 'fulfilled') {
+                    setComments(commentsResult.value.comments);
+                    setHasMore(commentsResult.value.hasMore);
+                    setCursor(commentsResult.value.nextCursor);
+                } else {
+                    setHasMore(false);
+                }
             } finally {
-                if (mounted) setLoading(false);
+                if (mounted) {
+                    setLoading(false);
+                    setLoadingComments(false);
+                }
             }
         };
-        load();
+        void load();
         return () => {
             mounted = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
     const submitComment = useCallback(async () => {
